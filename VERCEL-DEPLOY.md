@@ -54,6 +54,7 @@ Kendi `.env` dosyandaki (`env.template`'teki) isimlerle birebir aynı isimleri k
 |---|---|
 | `DATABASE_URL` | **Bulutta çalışan** bir MySQL bağlantı string'i olmalı — bkz. aşağıdaki 3. adım. Yerel Laragon MySQL'e Vercel'den erişilemez. |
 | `JWT_SECRET` | Uzun, rastgele bir string. |
+| `ALLOW_LOCAL_AUTH` | **`true` — ZORUNLU.** Gerçek Manus OAuth bu deploy'da yapılandırılmadığı için (aşağıdaki `VITE_APP_ID` satırına bak) uygulamanın tek giriş yolu ad+şifre ekranı; bu olmadan kayıt/giriş sayfası hiç çalışmaz (`Cannot POST /api/dev-login`). Kayıt olan hesaplar yine admin onayı bekler. |
 | `VITE_APP_ID` | Manus OAuth bu projede zaten pasif (yerel dev-login kullanılıyor); boş bırakabilirsin. |
 | `OAUTH_SERVER_URL` | `.env`'deki değerle aynı. |
 | `OWNER_OPEN_ID` | `.env`'deki değerle aynı (boşsa boş kalabilir). |

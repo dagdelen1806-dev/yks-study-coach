@@ -52,10 +52,12 @@ function verifyPassword(password: string, stored: string): boolean {
  * else's name, and logout (spec below) actually sticks instead of the app
  * silently re-entering a shared "test" account.
  *
- * Hard-disabled outside development — never reachable in a real deployment.
+ * Development'ta hep açık; production'da yalnızca `ALLOW_LOCAL_AUTH=true`
+ * bilerek set edilmişse açık (bkz. server/_core/env.ts — bağımsız/Manus dışı
+ * deploy'larda gerçek OAuth olmadığı için bu, o deploy'un tek giriş yolu).
  */
 export function registerDevAuthRoutes(app: Express) {
-  if (ENV.isProduction) return;
+  if (!ENV.allowLocalAuth) return;
 
   app.post("/api/dev-login", async (req: Request, res: Response) => {
     try {
