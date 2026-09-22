@@ -55,7 +55,7 @@ Kendi `.env` dosyandaki (`env.template`'teki) isimlerle birebir aynı isimleri k
 | `DATABASE_URL` | **Bulutta çalışan** bir MySQL bağlantı string'i olmalı — bkz. aşağıdaki 3. adım. Yerel Laragon MySQL'e Vercel'den erişilemez. |
 | `JWT_SECRET` | Uzun, rastgele bir string. |
 | `ALLOW_LOCAL_AUTH` | **`true` — ZORUNLU.** Gerçek Manus OAuth bu deploy'da yapılandırılmadığı için (aşağıdaki `VITE_APP_ID` satırına bak) uygulamanın tek giriş yolu ad+şifre ekranı; bu olmadan kayıt/giriş sayfası hiç çalışmaz (`Cannot POST /api/dev-login`). Kayıt olan hesaplar yine admin onayı bekler. |
-| `VITE_APP_ID` | Manus OAuth bu projede zaten pasif (yerel dev-login kullanılıyor); boş bırakabilirsin. |
+| `VITE_APP_ID` | **Boş bırakma — herhangi bir dolu değer ver** (ör. `yks-study-coach-standalone`). Manus OAuth pasif olsa da, sunucu bu değeri her oturum jetonunun (JWT) `appId` alanına yazıyor ve doğrulama bu alanın dolu olmasını şart koşuyor; boş bırakılırsa kayıt/giriş "başarılı" görünür ama oturum hiçbir zaman gerçekten doğrulanamaz (canlıda böyle çöktüğü doğrulandı — `[Auth] Session payload missing required fields`). Gerçek bir Manus app id olması gerekmiyor, sadece boş olmaması yeterli. |
 | `OAUTH_SERVER_URL` | `.env`'deki değerle aynı. |
 | `OWNER_OPEN_ID` | `.env`'deki değerle aynı (boşsa boş kalabilir). |
 | `BUILT_IN_FORGE_API_URL` / `BUILT_IN_FORGE_API_KEY` | LLM çağrıları (AI Planım, OCR) için gerekli. |
