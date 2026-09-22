@@ -7,6 +7,7 @@ import { registerWebhookRoutes } from "./webhooks";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { runResourceCatalogSyncOnce } from "../resourceCatalog/scheduler";
+import { resourceCatalogConfig } from "../resourceCatalog/config";
 
 /**
  * Builds the Express app with every API route mounted (tRPC, oauth,
@@ -47,6 +48,10 @@ export function createApiApp(): Express {
     const secret = process.env.CRON_SECRET;
     if (secret && req.headers.authorization !== `Bearer ${secret}`) {
       res.status(401).json({ ok: false, error: "unauthorized" });
+      return;
+    }
+    if (!resourceCatalogConfig.scheduler.enabled) {
+      res.json({ ok: true, result: { disabled: true } });
       return;
     }
     try {
