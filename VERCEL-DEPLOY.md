@@ -2,10 +2,22 @@
 
 Bu proje (kalıcı çalışan Express sunucusu + arka planda sürekli çalışan bir
 zamanlayıcı) Vercel'in sunucusuz (serverless) modeline birebir uymuyordu; bu
-yüzden `api/index.ts`, `vercel.json` ve `server/_core/app.ts` eklenerek
-Vercel için uyarlandı. Yerel geliştirme (`npm run dev`) ve geleneksel/kalıcı
-sunucu barındırma (Railway/Render/bir VPS, `npm run build && npm start`)
-hâlâ eskisi gibi çalışıyor — hiçbir şey bozulmadı.
+yüzden `vercel.json`, `server/_core/app.ts` ve `server/_core/vercelHandler.ts`
+eklenerek Vercel için uyarlandı. Yerel geliştirme (`npm run dev`) ve
+geleneksel/kalıcı sunucu barındırma (Railway/Render/bir VPS, `npm run build
+&& npm start`) hâlâ eskisi gibi çalışıyor — hiçbir şey bozulmadı.
+
+**Önemli mimari not**: `api/index.js` (Vercel'in çalıştırdığı gerçek
+fonksiyon) repoda YOK — `npm run build:vercel` (`vercel.json`'daki
+`buildCommand`) `server/_core/vercelHandler.ts`'i esbuild ile TEK bir
+dosyaya paketleyip build sırasında üretir. Bunun nedeni: Vercel'in kendi
+zero-config TypeScript derleyicisi, `/api` klasörü dışındaki (`../server/...`)
+relative import'ları ayrı dosyalar olarak bırakıyor ve Node'un native ESM
+loader'ı bunları çözemeyip `ERR_MODULE_NOT_FOUND` ile çöküyor — canlıda
+tam olarak bu yaşandı ve `Logs` sekmesinden doğrulandı. Kendi bundle'ımız
+(node_modules paketleri hariç her şeyi tek dosyaya gömer) bu sorunu ortadan
+kaldırır. `server/_core/vercelHandler.ts`'i düzenlemen gerekirse orası
+kaynak dosya; `api/index.js`'i asla elle düzenleme, o üretilen bir çıktı.
 
 ## 0) Deployment Protection'ı kapat (beyaz ekran sorununun asıl nedeni)
 
@@ -25,7 +37,7 @@ tekrar aç; artık gerçek uygulamayı görmelisin.
 
 1. [vercel.com](https://vercel.com) → GitHub hesabınla giriş yap.
 2. **Add New → Project** → GitHub'daki `yks-study-coach` deposunu seç → **Import**.
-3. Vercel "Vite" framework'ünü otomatik algılayabilir; sorun değil, `vercel.json` build ayarlarını zaten override ediyor (`buildCommand: vite build`, `outputDirectory: dist/public`). Bu ekranda ekstra bir şey değiştirmene gerek yok.
+3. Vercel "Vite" framework'ünü otomatik algılayabilir; sorun değil, `vercel.json` build ayarlarını zaten override ediyor (`buildCommand: npm run build:vercel`, `outputDirectory: dist/public`). Bu ekranda ekstra bir şey değiştirmene gerek yok.
 4. **Henüz Deploy'a basma** — önce ortam değişkenlerini ekle (aşağıda), yoksa ilk deploy veritabanına bağlanamaz.
 
 ## 2) Ortam değişkenlerini nereye eklersin
