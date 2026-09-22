@@ -7,6 +7,20 @@ Vercel için uyarlandı. Yerel geliştirme (`npm run dev`) ve geleneksel/kalıc�
 sunucu barındırma (Railway/Render/bir VPS, `npm run build && npm start`)
 hâlâ eskisi gibi çalışıyor — hiçbir şey bozulmadı.
 
+## 0) Deployment Protection'ı kapat (beyaz ekran sorununun asıl nedeni)
+
+Vercel, projenin `.vercel.app` alan adına gelen HER isteği (hem `/` hem
+`/api/*`) varsayılan olarak **Vercel Authentication** (Deployment
+Protection / SSO) ile korur — ziyaretçi Vercel hesabına giriş yapmadıysa
+istek `vercel.com/sso-api` üzerinden `vercel.com/login`'e yönlendirilir ve
+uygulamanın kendi HTML/JS'i tarayıcıya hiç ulaşmaz. Bu, "beyaz ekran"
+şikayetinin klasik nedenidir — kod hatası değildir.
+
+Kapatmak için: Vercel Dashboard → proje → **Settings → Deployment
+Protection** → **Vercel Authentication**'ı Production için kapat (ya da
+"Standard Protection"tan "Disabled"a al). Kaydettikten sonra `/` adresini
+tekrar aç; artık gerçek uygulamayı görmelisin.
+
 ## 1) Vercel'de projeyi oluştur
 
 1. [vercel.com](https://vercel.com) → GitHub hesabınla giriş yap.
