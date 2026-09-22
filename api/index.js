@@ -2007,7 +2007,8 @@ async function resetFeatureUsage(userId, featureKey, windowDays, adminId) {
 async function listPendingUsers() {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(users).where(eq3(users.approvalStatus, "pending")).orderBy(desc2(users.createdAt));
+  const rows = await db.select().from(users).where(eq3(users.approvalStatus, "pending")).orderBy(desc2(users.createdAt));
+  return rows.map(({ passwordHash: _passwordHash, ...safeUser }) => safeUser);
 }
 async function approveUser(userId, adminId) {
   const db = await getDb();

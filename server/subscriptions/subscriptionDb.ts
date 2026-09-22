@@ -314,7 +314,12 @@ export async function resetFeatureUsage(userId: number, featureKey: string, wind
 export async function listPendingUsers() {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(users).where(eq(users.approvalStatus, "pending")).orderBy(desc(users.createdAt));
+  const rows = await db.select().from(users).where(eq(users.approvalStatus, "pending")).orderBy(desc(users.createdAt));
+  // passwordHash bilerek hariç — admin.users.get (getUserDetailForAdmin) bunu
+  // zaten filtreliyordu, bu liste uç noktası filtrelemiyordu (canlıda
+  // doğrulandı: scrypt hash'i client'a gidiyordu). Aynı desen: bkz.
+  // server/admin/adminUserDb.ts getUserDetailForAdmin.
+  return rows.map(({ passwordHash: _passwordHash, ...safeUser }) => safeUser);
 }
 
 export async function approveUser(userId: number, adminId: number): Promise<void> {
