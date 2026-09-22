@@ -66,7 +66,7 @@ export default function AdminUsersPage() {
                 <tbody className="divide-y divide-[#1f2333]/[0.06]">
                   {list.data.rows.map((row) => (
                     <tr key={row.id} onClick={() => setSelectedUserId(row.id)} className="cursor-pointer hover:bg-[#fafaff]">
-                      <td className="px-4 py-2.5 font-medium text-[#343643]">{row.name || row.email || `#${row.id}`}{row.role === "admin" && <span className="ml-1.5 rounded-full bg-[#1f2333] px-1.5 py-0.5 text-[9px] font-bold text-white">admin</span>}</td>
+                      <td className="px-4 py-2.5 font-medium text-[#343643]"><span className="mr-1.5 rounded-md bg-[#f7f5ef] px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[#8b8c95]">#{row.id}</span>{row.name || row.email || `#${row.id}`}{row.role === "admin" && <span className="ml-1.5 rounded-full bg-[#1f2333] px-1.5 py-0.5 text-[9px] font-bold text-white">admin</span>}</td>
                       <td className="px-4 py-2.5"><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${approvalTone[row.approvalStatus]}`}>{approvalLabel[row.approvalStatus]}</span></td>
                       <td className="px-4 py-2.5"><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${accountStatusTone[row.accountStatus]}`}>{accountStatusLabel[row.accountStatus]}</span></td>
                       <td className="px-4 py-2.5 text-[#8b8c95]">{row.planCode}</td>

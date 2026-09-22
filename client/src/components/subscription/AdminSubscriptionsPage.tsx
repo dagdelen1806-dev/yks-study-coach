@@ -58,10 +58,11 @@ export default function AdminSubscriptionsPage() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[860px] text-left text-[12px]">
-              <thead className="border-b border-[#1f2333]/[0.06] bg-[#fafafa] text-[10px] uppercase tracking-[.1em] text-[#9a9ba3]"><tr><th className="px-4 py-2.5">Kullanıcı</th><th className="px-4 py-2.5">Plan</th><th className="px-4 py-2.5">Durum</th><th className="px-4 py-2.5">Trial bitiş</th><th className="px-4 py-2.5">Dönem bitiş</th><th className="px-4 py-2.5">Manuel mi</th><th className="px-4 py-2.5" /></tr></thead>
+              <thead className="border-b border-[#1f2333]/[0.06] bg-[#fafafa] text-[10px] uppercase tracking-[.1em] text-[#9a9ba3]"><tr><th className="px-4 py-2.5">ID</th><th className="px-4 py-2.5">Kullanıcı</th><th className="px-4 py-2.5">Plan</th><th className="px-4 py-2.5">Durum</th><th className="px-4 py-2.5">Trial bitiş</th><th className="px-4 py-2.5">Dönem bitiş</th><th className="px-4 py-2.5">Manuel mi</th><th className="px-4 py-2.5" /></tr></thead>
               <tbody className="divide-y divide-[#1f2333]/[0.06]">
                 {list.data.map((row) => (
                   <tr key={row.userId}>
+                    <td className="px-4 py-2.5"><button onClick={() => { setGrantUserId(String(row.userId)); toast("Kullanıcı ID formda dolduruldu."); }} title="Elle Premium ver formuna doldur" className="rounded-md bg-[#f7f5ef] px-2 py-1 font-mono text-[11px] font-semibold text-[#3b5ccc] hover:bg-[#edf1ff]">#{row.userId}</button></td>
                     <td className="px-4 py-2.5 font-medium text-[#343643]">{row.userName || row.userEmail || `#${row.userId}`}</td>
                     <td className="px-4 py-2.5">{row.planName}</td>
                     <td className="px-4 py-2.5 text-[#8b8c95]">{subscriptionStatusLabel[row.status] ?? row.status}</td>
