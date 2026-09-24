@@ -6,6 +6,7 @@
 export const FEATURE_KEYS = [
   "AI_STUDY_PLAN",
   "OCR_EXAM_IMPORT",
+  "OCR_BOOK_IMPORT",
   "ADVANCED_ANALYTICS",
   "PLAN_ADHERENCE",
   "RESOURCE_RECOMMENDATIONS",
@@ -21,8 +22,8 @@ export type PlanTier = "free" | "premium" | "premium_plus";
 /** tier -> bu tier'ın erişebildiği özellik anahtarları. Üst tier'lar alt tier'ların tüm özelliklerini kapsar (aşağıda otomatik birleştirilir). */
 const TIER_FEATURES: Record<PlanTier, FeatureKey[]> = {
   free: [],
-  premium: ["AI_STUDY_PLAN", "OCR_EXAM_IMPORT", "ADVANCED_ANALYTICS", "PLAN_ADHERENCE", "RESOURCE_RECOMMENDATIONS", "ADVANCED_REPORTS", "FOCUS_AURA_PREMIUM", "MOCK_EXAM_ANALYTICS"],
-  premium_plus: ["AI_STUDY_PLAN", "OCR_EXAM_IMPORT", "ADVANCED_ANALYTICS", "PLAN_ADHERENCE", "RESOURCE_RECOMMENDATIONS", "ADVANCED_REPORTS", "FOCUS_AURA_PREMIUM", "MOCK_EXAM_ANALYTICS"],
+  premium: ["AI_STUDY_PLAN", "OCR_EXAM_IMPORT", "OCR_BOOK_IMPORT", "ADVANCED_ANALYTICS", "PLAN_ADHERENCE", "RESOURCE_RECOMMENDATIONS", "ADVANCED_REPORTS", "FOCUS_AURA_PREMIUM", "MOCK_EXAM_ANALYTICS"],
+  premium_plus: ["AI_STUDY_PLAN", "OCR_EXAM_IMPORT", "OCR_BOOK_IMPORT", "ADVANCED_ANALYTICS", "PLAN_ADHERENCE", "RESOURCE_RECOMMENDATIONS", "ADVANCED_REPORTS", "FOCUS_AURA_PREMIUM", "MOCK_EXAM_ANALYTICS"],
 };
 
 export function featuresForTier(tier: PlanTier): FeatureKey[] {
@@ -42,10 +43,12 @@ export function tierHasFeature(tier: PlanTier, feature: FeatureKey): boolean {
 export const FEATURE_USAGE_LIMITS: Partial<Record<FeatureKey, { windowDays: number; maxUses: number }>> = {
   AI_STUDY_PLAN: { windowDays: 30, maxUses: 60 },
   OCR_EXAM_IMPORT: { windowDays: 30, maxUses: 40 },
+  OCR_BOOK_IMPORT: { windowDays: 30, maxUses: 40 },
 };
 
 /** FREE kullanıcıların kısıtlı biçimde erişebildiği (ama tam premium olmayan) uçlar için ayrı, daha düşük bir günlük/aylık limit — spec §10: "sınırlı study sessions, sınırlı exam entry". */
 export const FREE_TIER_LIMITS: Partial<Record<FeatureKey, { windowDays: number; maxUses: number }>> = {
   AI_STUDY_PLAN: { windowDays: 30, maxUses: 3 },
   OCR_EXAM_IMPORT: { windowDays: 30, maxUses: 2 },
+  OCR_BOOK_IMPORT: { windowDays: 30, maxUses: 3 },
 };

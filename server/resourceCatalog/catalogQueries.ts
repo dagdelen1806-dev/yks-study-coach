@@ -136,6 +136,66 @@ export async function listCatalogBooks(filters: CatalogListFilters, page: Catalo
   return { items, total: Number(count) };
 }
 
+export type AdminCatalogListItem = {
+  id: number;
+  name: string;
+  slug: string;
+  publisher: string | null;
+  examScope: ExamScope;
+  subject: string | null;
+  bookType: BookType;
+  difficultyLabel: DifficultyLabel;
+  active: boolean;
+  needsReview: boolean;
+  classificationMethod: string;
+  createdAt: Date;
+};
+
+/** Admin "Kaynak Kataloğu Yönetimi" listesi — `listCatalogBooks`'un aksine
+ * pasif (active=0) kitapları da gösterir ve fiyat/teklif join'i yapmaz
+ * (admin için gereksiz); yönetim amaçlı ekstra alanlar (needsReview,
+ * classificationMethod, active) döner. */
+export async function listCatalogBooksForAdmin(filters: { search?: string; subject?: string; active?: boolean }, page: CatalogListPage): Promise<{ items: AdminCatalogListItem[]; total: number }> {
+  const db = await getDb();
+  if (!db) return { items: [], total: 0 };
+
+  const pageSize = Math.max(1, Math.min(page.pageSize || DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE));
+  const offset = Math.max(0, (page.page - 1) * pageSize);
+
+  const conditions = [];
+  if (filters.active !== undefined) conditions.push(eq(catalogBooks.active, filters.active ? 1 : 0));
+  if (filters.subject) conditions.push(eq(catalogBooks.subject, filters.subject));
+  if (filters.search) conditions.push(like(catalogBooks.name, `%${filters.search}%`));
+  const where = conditions.length ? and(...conditions) : undefined;
+
+  const countQuery = db.select({ count: sql<number>`count(*)` }).from(catalogBooks);
+  const [{ count }] = await (where ? countQuery.where(where) : countQuery);
+
+  const rowsQuery = db.select().from(catalogBooks).orderBy(desc(catalogBooks.createdAt)).limit(pageSize).offset(offset);
+  const rows = await (where ? rowsQuery.where(where) : rowsQuery);
+
+  const publisherIds = Array.from(new Set(rows.map((r) => r.publisherId).filter((id): id is number => id !== null)));
+  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray(publishers.id, publisherIds)) : [];
+  const publisherNameById = new Map(publisherRows.map((p) => [p.id, p.name]));
+
+  const items: AdminCatalogListItem[] = rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    publisher: row.publisherId ? (publisherNameById.get(row.publisherId) ?? null) : null,
+    examScope: row.examScope,
+    subject: row.subject,
+    bookType: row.bookType,
+    difficultyLabel: row.difficultyLabel,
+    active: row.active === 1,
+    needsReview: row.needsReview === 1,
+    classificationMethod: row.classificationMethod,
+    createdAt: row.createdAt,
+  }));
+
+  return { items, total: Number(count) };
+}
+
 export async function getCatalogBookBySlug(slug: string) {
   const db = await getDb();
   if (!db) return null;

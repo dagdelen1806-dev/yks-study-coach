@@ -65,6 +65,24 @@ const documentExtractionInput = z.object({
   fileName: z.string().max(180).optional(),
 });
 
+const bookPhotoInput = z.object({
+  dataUrl: z.string().min(20).max(12_000_000),
+  mimeType: z.enum(["image/png", "image/jpeg", "image/webp"]),
+});
+
+const bookPhotoSchema = {
+  type: "object",
+  properties: {
+    title: { type: "string" },
+    publisher: { type: "string" },
+    subject: { type: "string" },
+    exam: { type: "string", enum: ["TYT", "AYT", "GENEL"] },
+    confident: { type: "boolean" },
+  },
+  required: ["title", "publisher", "subject", "exam", "confident"],
+  additionalProperties: false,
+} as const;
+
 const userExamInput = z.object({
   title: z.string().min(1).max(180),
   exam: z.enum(["TYT", "AYT"]),
@@ -157,6 +175,31 @@ export const appRouter = router({
     upsertMapping: protectedProcedure.input(z.object({ bookId: z.string().max(120), topic: z.string().max(180), subject: z.string().max(80), pageStart: z.number().int().min(0).optional(), pageEnd: z.number().int().min(0).optional(), testStart: z.number().int().min(0).optional(), testEnd: z.number().int().min(0).optional() })).mutation(({ ctx, input }) => upsertBookTopicMapping(ctx.user.id, input)),
     addSwitch: protectedProcedure.input(z.object({ fromBookId: z.string().max(120).optional(), toBookId: z.string().max(120), reason: z.string().max(300) })).mutation(({ ctx, input }) => addSourceSwitch(ctx.user.id, { ...input, switchedAt: new Date() })),
     importBooks: protectedProcedure.input(z.object({ books: z.array(z.object({ id: z.string().max(120), title: z.string().min(1).max(180), publisher: z.string().max(120), subject: z.string().max(80), exam: z.enum(["TYT", "AYT"]), level: z.enum(["Kolay", "Orta", "Zor"]), format: z.string().max(120), reason: z.string().max(1000), sourceUrl: z.string().max(500).optional(), pageCount: z.number().int().min(0).optional(), tone: z.string().max(20) })).min(1).max(500) })).mutation(({ ctx, input }) => addUserResourceBooks(ctx.user.id, input.books)),
+    // Öğrenci elindeki fiziksel kitabın kapak fotoğrafını çeker (telefon
+    // kamerası); LLM görselden kitap adı/yayınevi/ders tahmini çıkarır.
+    // Sadece TAHMİN döner — hiçbir şeyi otomatik kütüphaneye eklemez, öğrenci
+    // formda düzeltip onaylamadan `importBooks`/`addBook` çağrılmaz (spec:
+    // uydurma veri asıl kütüphaneye sessizce yazılmasın).
+    extractBookFromPhoto: metredFeatureProcedure("OCR_BOOK_IMPORT").input(bookPhotoInput).mutation(async ({ input }) => {
+      const fileCheck = validateDataUrl(input.dataUrl, input.mimeType);
+      if (!fileCheck.valid) throw new Error(fileCheck.reason);
+      try {
+        const response = await invokeLLM({
+          messages: [
+            { role: "system", content: "Sen bir kitap kapağı tanıma asistanısın. Türkçe bir YKS kaynak kitabının kapak fotoğrafını okuyup kitap adını, yayınevini, dersini (Türkçe, Matematik, Fizik, Kimya, Biyoloji, Tarih, Coğrafya, Felsefe, Din Kültürü, Genel) ve sınav kapsamını (TYT/AYT/GENEL) tahmin et. Görselde net okuyamadığın bir alanı boş string bırak, uydurma. `confident` alanını yalnızca kapaktaki yazıları gerçekten net okuyabildiysen true yap." },
+            { role: "user", content: [{ type: "text" as const, text: "Bu kitap kapağını oku." }, { type: "image_url" as const, image_url: { url: input.dataUrl, detail: "high" as const } }] },
+          ],
+          response_format: { type: "json_schema", json_schema: { name: "yks_book_cover", strict: true, schema: bookPhotoSchema } },
+        });
+        const raw = response.choices[0]?.message?.content;
+        const jsonText = typeof raw === "string" ? raw : raw?.map((part) => part.type === "text" ? part.text : "").join("");
+        if (!jsonText) throw new Error("Fotoğraftan yapılandırılmış veri alınamadı");
+        return JSON.parse(jsonText) as { title: string; publisher: string; subject: string; exam: "TYT" | "AYT" | "GENEL"; confident: boolean };
+      } catch (error) {
+        console.warn("[Book Photo] Extraction failed:", error);
+        throw new Error("Fotoğraf okunamadı. Daha net, ışıklı bir kapak fotoğrafı dener misin?");
+      }
+    }),
   }),
 
   exams: router({

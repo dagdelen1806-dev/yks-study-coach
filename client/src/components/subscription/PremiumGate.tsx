@@ -6,6 +6,7 @@ import type { FeatureKey } from "@shared/entitlements";
 const FEATURE_LABELS: Record<FeatureKey, string> = {
   AI_STUDY_PLAN: "AI Çalışma Planı",
   OCR_EXAM_IMPORT: "Belgeden Deneme Aktarımı",
+  OCR_BOOK_IMPORT: "Fotoğraftan Kitap Ekleme",
   ADVANCED_ANALYTICS: "Gelişmiş Analizler",
   PLAN_ADHERENCE: "Plan Uyum Merkezi",
   RESOURCE_RECOMMENDATIONS: "Kaynak Önerileri",

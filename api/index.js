@@ -1,3 +1,88 @@
+var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+
+// server/resourceCatalog/normalizers/turkishText.ts
+var turkishLowerCase, DIACRITIC_MAP, foldTurkishDiacritics, normalizeForComparison, ALLOWED_LETTER_CLASS, normalizeKeepingTurkish, slugify2, tokenize;
+var init_turkishText = __esm({
+  "server/resourceCatalog/normalizers/turkishText.ts"() {
+    "use strict";
+    turkishLowerCase = (value) => value.replace(/İ/g, "i").replace(/I/g, "\u0131").toLowerCase();
+    DIACRITIC_MAP = {
+      \u00E7: "c",
+      \u011F: "g",
+      \u0131: "i",
+      \u00F6: "o",
+      \u015F: "s",
+      \u00FC: "u"
+    };
+    foldTurkishDiacritics = (value) => value.replace(/[çğıöşü]/g, (char) => DIACRITIC_MAP[char] ?? char);
+    normalizeForComparison = (value) => foldTurkishDiacritics(turkishLowerCase(value)).replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+    ALLOWED_LETTER_CLASS = "a-z\xE7\u011F\u0131\xF6\u015F\xFC\xE2\xEE\xFB";
+    normalizeKeepingTurkish = (value) => turkishLowerCase(value).replace(/['’‘"“”]/g, "").replace(new RegExp(`[^${ALLOWED_LETTER_CLASS}0-9\\s]`, "g"), " ").replace(/\s+/g, " ").trim();
+    slugify2 = (value) => {
+      const folded = normalizeForComparison(value);
+      return folded.replace(/\s+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+    };
+    tokenize = (value) => normalizeKeepingTurkish(value).split(" ").filter(Boolean);
+  }
+});
+
+// server/resourceCatalog/normalizers/publisherNormalizer.ts
+var publisherNormalizer_exports = {};
+__export(publisherNormalizer_exports, {
+  normalizePublisherName: () => normalizePublisherName
+});
+function normalizePublisherName(rawName) {
+  const trimmed = rawName.trim();
+  const comparisonKey = normalizeForComparison(trimmed);
+  const canonicalName = PUBLISHER_ALIASES[comparisonKey] ?? suffixTitleCase(trimmed);
+  const normalizedName = normalizeForComparison(canonicalName);
+  return {
+    canonicalName,
+    slug: slugify2(canonicalName),
+    normalizedName
+  };
+}
+var PUBLISHER_ALIASES, suffixTitleCase;
+var init_publisherNormalizer = __esm({
+  "server/resourceCatalog/normalizers/publisherNormalizer.ts"() {
+    "use strict";
+    init_turkishText();
+    PUBLISHER_ALIASES = {
+      "3d": "3D Yay\u0131nlar\u0131",
+      "3d yayinlari": "3D Yay\u0131nlar\u0131",
+      "ucdortbes": "\xDC\xE7D\xF6rtBe\u015F",
+      "345": "\xDC\xE7D\xF6rtBe\u015F",
+      "uc dort bes": "\xDC\xE7D\xF6rtBe\u015F",
+      "bilgi sarmal": "Bilgi Sarmal",
+      "bilgi sarmal yayincilik": "Bilgi Sarmal",
+      "pegem": "Pegem Akademi",
+      "pegem akademi": "Pegem Akademi",
+      "pegem yayincilik": "Pegem Akademi",
+      "karekok": "Karek\xF6k",
+      "karekok yayincilik": "Karek\xF6k",
+      "paraf": "Paraf Yay\u0131nlar\u0131",
+      "paraf yayinlari": "Paraf Yay\u0131nlar\u0131",
+      "rasyonel": "Rasyonel Yay\u0131nlar\u0131",
+      "rasyonel yayinlari": "Rasyonel Yay\u0131nlar\u0131",
+      "aydin": "Ayd\u0131n Yay\u0131nlar\u0131",
+      "aydin yayinlari": "Ayd\u0131n Yay\u0131nlar\u0131",
+      "orijinal": "Orijinal Yay\u0131nlar\u0131",
+      "orijinal yayinlari": "Orijinal Yay\u0131nlar\u0131",
+      "hiz ve renk": "H\u0131z ve Renk Yay\u0131nlar\u0131",
+      "hiz ve renk yayinlari": "H\u0131z ve Renk Yay\u0131nlar\u0131"
+    };
+    suffixTitleCase = (value) => value.split(" ").filter(Boolean).map((word) => word.charAt(0).toLocaleUpperCase("tr-TR") + word.slice(1).toLocaleLowerCase("tr-TR")).join(" ");
+  }
+});
+
 // server/_core/vercelHandler.ts
 import "dotenv/config";
 
@@ -2319,6 +2404,7 @@ function checkRateLimit(key, maxRequests, windowMs) {
 var FEATURE_KEYS = [
   "AI_STUDY_PLAN",
   "OCR_EXAM_IMPORT",
+  "OCR_BOOK_IMPORT",
   "ADVANCED_ANALYTICS",
   "PLAN_ADHERENCE",
   "RESOURCE_RECOMMENDATIONS",
@@ -2328,19 +2414,21 @@ var FEATURE_KEYS = [
 ];
 var TIER_FEATURES = {
   free: [],
-  premium: ["AI_STUDY_PLAN", "OCR_EXAM_IMPORT", "ADVANCED_ANALYTICS", "PLAN_ADHERENCE", "RESOURCE_RECOMMENDATIONS", "ADVANCED_REPORTS", "FOCUS_AURA_PREMIUM", "MOCK_EXAM_ANALYTICS"],
-  premium_plus: ["AI_STUDY_PLAN", "OCR_EXAM_IMPORT", "ADVANCED_ANALYTICS", "PLAN_ADHERENCE", "RESOURCE_RECOMMENDATIONS", "ADVANCED_REPORTS", "FOCUS_AURA_PREMIUM", "MOCK_EXAM_ANALYTICS"]
+  premium: ["AI_STUDY_PLAN", "OCR_EXAM_IMPORT", "OCR_BOOK_IMPORT", "ADVANCED_ANALYTICS", "PLAN_ADHERENCE", "RESOURCE_RECOMMENDATIONS", "ADVANCED_REPORTS", "FOCUS_AURA_PREMIUM", "MOCK_EXAM_ANALYTICS"],
+  premium_plus: ["AI_STUDY_PLAN", "OCR_EXAM_IMPORT", "OCR_BOOK_IMPORT", "ADVANCED_ANALYTICS", "PLAN_ADHERENCE", "RESOURCE_RECOMMENDATIONS", "ADVANCED_REPORTS", "FOCUS_AURA_PREMIUM", "MOCK_EXAM_ANALYTICS"]
 };
 function featuresForTier(tier) {
   return TIER_FEATURES[tier] ?? [];
 }
 var FEATURE_USAGE_LIMITS = {
   AI_STUDY_PLAN: { windowDays: 30, maxUses: 60 },
-  OCR_EXAM_IMPORT: { windowDays: 30, maxUses: 40 }
+  OCR_EXAM_IMPORT: { windowDays: 30, maxUses: 40 },
+  OCR_BOOK_IMPORT: { windowDays: 30, maxUses: 40 }
 };
 var FREE_TIER_LIMITS = {
   AI_STUDY_PLAN: { windowDays: 30, maxUses: 3 },
-  OCR_EXAM_IMPORT: { windowDays: 30, maxUses: 2 }
+  OCR_EXAM_IMPORT: { windowDays: 30, maxUses: 2 },
+  OCR_BOOK_IMPORT: { windowDays: 30, maxUses: 3 }
 };
 
 // server/subscriptions/entitlementService.ts
@@ -2792,7 +2880,7 @@ var topicsRouter = router({
 });
 
 // server/routers/resourceCatalog.ts
-import { TRPCError as TRPCError3 } from "@trpc/server";
+import { TRPCError as TRPCError4 } from "@trpc/server";
 import { z as z4 } from "zod";
 
 // server/resourceCatalog/catalogQueries.ts
@@ -2875,6 +2963,39 @@ async function listCatalogBooks(filters, page) {
     difficultyConfidence: Number(row.difficultyConfidence),
     price: offerByBook.get(row.id)?.price ?? null,
     productUrl: offerByBook.get(row.id)?.productUrl ?? null
+  }));
+  return { items, total: Number(count3) };
+}
+async function listCatalogBooksForAdmin(filters, page) {
+  const db = await getDb2();
+  if (!db) return { items: [], total: 0 };
+  const pageSize = Math.max(1, Math.min(page.pageSize || DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE));
+  const offset = Math.max(0, (page.page - 1) * pageSize);
+  const conditions = [];
+  if (filters.active !== void 0) conditions.push(eq4(catalogBooks.active, filters.active ? 1 : 0));
+  if (filters.subject) conditions.push(eq4(catalogBooks.subject, filters.subject));
+  if (filters.search) conditions.push(like(catalogBooks.name, `%${filters.search}%`));
+  const where = conditions.length ? and3(...conditions) : void 0;
+  const countQuery = db.select({ count: sql3`count(*)` }).from(catalogBooks);
+  const [{ count: count3 }] = await (where ? countQuery.where(where) : countQuery);
+  const rowsQuery = db.select().from(catalogBooks).orderBy(desc3(catalogBooks.createdAt)).limit(pageSize).offset(offset);
+  const rows = await (where ? rowsQuery.where(where) : rowsQuery);
+  const publisherIds = Array.from(new Set(rows.map((r) => r.publisherId).filter((id) => id !== null)));
+  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray(publishers.id, publisherIds)) : [];
+  const publisherNameById = new Map(publisherRows.map((p) => [p.id, p.name]));
+  const items = rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    publisher: row.publisherId ? publisherNameById.get(row.publisherId) ?? null : null,
+    examScope: row.examScope,
+    subject: row.subject,
+    bookType: row.bookType,
+    difficultyLabel: row.difficultyLabel,
+    active: row.active === 1,
+    needsReview: row.needsReview === 1,
+    classificationMethod: row.classificationMethod,
+    createdAt: row.createdAt
   }));
   return { items, total: Number(count3) };
 }
@@ -3029,27 +3150,8 @@ var resourceCatalogConfig = {
   }
 };
 
-// server/resourceCatalog/normalizers/turkishText.ts
-var turkishLowerCase = (value) => value.replace(/İ/g, "i").replace(/I/g, "\u0131").toLowerCase();
-var DIACRITIC_MAP = {
-  \u00E7: "c",
-  \u011F: "g",
-  \u0131: "i",
-  \u00F6: "o",
-  \u015F: "s",
-  \u00FC: "u"
-};
-var foldTurkishDiacritics = (value) => value.replace(/[çğıöşü]/g, (char) => DIACRITIC_MAP[char] ?? char);
-var normalizeForComparison = (value) => foldTurkishDiacritics(turkishLowerCase(value)).replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
-var ALLOWED_LETTER_CLASS = "a-z\xE7\u011F\u0131\xF6\u015F\xFC\xE2\xEE\xFB";
-var normalizeKeepingTurkish = (value) => turkishLowerCase(value).replace(/['’‘"“”]/g, "").replace(new RegExp(`[^${ALLOWED_LETTER_CLASS}0-9\\s]`, "g"), " ").replace(/\s+/g, " ").trim();
-var slugify2 = (value) => {
-  const folded = normalizeForComparison(value);
-  return folded.replace(/\s+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
-};
-var tokenize = (value) => normalizeKeepingTurkish(value).split(" ").filter(Boolean);
-
 // server/resourceCatalog/recommendationService.ts
+init_turkishText();
 var DIFFICULTY_RANK = { easy: 0, medium: 1, hard: 2 };
 var DIFFICULTY_FIT_BY_STATUS = {
   "Zay\u0131f": [1, 0.6, 0.15],
@@ -3120,6 +3222,7 @@ function recommendForStudent(topics, books, options = {}, config = resourceCatal
 }
 
 // server/routers/resourceCatalogAdmin.ts
+import { TRPCError as TRPCError3 } from "@trpc/server";
 import { z as z3 } from "zod";
 
 // server/resourceCatalog/catalogDb.ts
@@ -3355,27 +3458,184 @@ async function markCatalogBookNeedsReview(bookId, needsReview) {
   if (!db) throw new Error("Database not available");
   await db.update(catalogBooks).set({ needsReview: needsReview ? 1 : 0 }).where(eq5(catalogBooks.id, bookId));
 }
+async function setCatalogBookActive(bookId, active) {
+  const db = await getDb3();
+  if (!db) throw new Error("Database not available");
+  await db.update(catalogBooks).set({ active: active ? 1 : 0 }).where(eq5(catalogBooks.id, bookId));
+}
+async function resolveOrCreatePublisherByName(rawName) {
+  const trimmed = rawName.trim();
+  if (!trimmed) return null;
+  const { normalizePublisherName: normalizePublisherName2 } = await Promise.resolve().then(() => (init_publisherNormalizer(), publisherNormalizer_exports));
+  const normalized = normalizePublisherName2(trimmed);
+  const existing = await catalogDb.findPublisherByNormalizedName(normalized.normalizedName);
+  if (existing) return existing.id;
+  const created = await catalogDb.createPublisher({ name: normalized.canonicalName, slug: normalized.slug, normalizedName: normalized.normalizedName });
+  return created.id;
+}
+
+// server/resourceCatalog/normalizers/bookTypeNormalizer.ts
+init_turkishText();
+var RAW_RULES = [
+  { type: "topic_explanation_question_bank", anyOf: ["konu anlat\u0131ml\u0131 soru bankas\u0131", "konu anlat\u0131ml\u0131 ve soru bankas\u0131"] },
+  { type: "mock_exam", anyOf: ["deneme", "deneme s\u0131nav\u0131", "bran\u015F denemesi", "sim\xFClasyon"] },
+  { type: "past_questions", anyOf: ["\xE7\u0131km\u0131\u015F sorular", "\xE7\u0131km\u0131\u015F soru", "\xF6sym \xE7\u0131km\u0131\u015F"] },
+  { type: "camp", anyOf: ["kamp kitab\u0131", "yaz kamp\u0131", "kamp"] },
+  { type: "fasikul", anyOf: ["fasik\xFCl", "fasik\xFCller"] },
+  { type: "test_book", anyOf: ["yaprak test", "test kitab\u0131", "test kitaplar\u0131"] },
+  { type: "topic_explanation", anyOf: ["konu anlat\u0131m\u0131", "konu anlat\u0131ml\u0131", "ders i\u015Fleme f\xF6y\xFC", "\xF6zet konu"] },
+  { type: "question_bank", anyOf: ["soru bankas\u0131", "soru bankalar\u0131"] },
+  { type: "reference", anyOf: ["ba\u015Fvuru kayna\u011F\u0131", "s\xF6zl\xFCk", "form\xFCler"] }
+];
+var RULES = RAW_RULES.map((rule) => ({ type: rule.type, anyOf: rule.anyOf.map(normalizeKeepingTurkish) }));
+function normalizeBookType(rawCategory) {
+  if (!rawCategory) return "other";
+  const normalized = normalizeKeepingTurkish(rawCategory);
+  for (const rule of RULES) {
+    if (rule.anyOf.some((phrase) => normalized.includes(phrase))) return rule.type;
+  }
+  return "other";
+}
+function normalizeExamScope(rawExam) {
+  if (!rawExam) return "GENEL";
+  const normalized = normalizeKeepingTurkish(rawExam);
+  const hasTyt = /\btyt\b/.test(normalized);
+  const hasAyt = /\bayt\b/.test(normalized);
+  if (hasTyt && hasAyt) return "TYT_AYT";
+  if (hasTyt) return "TYT";
+  if (hasAyt) return "AYT";
+  if (normalized.includes("yks")) return "YKS";
+  return "GENEL";
+}
+
+// server/resourceCatalog/pipeline/normalize.ts
+init_publisherNormalizer();
+init_turkishText();
+function normalizeProduct(product) {
+  const publisher = product.rawPublisher ? normalizePublisherName(product.rawPublisher) : null;
+  const metadata = product.rawMetadata ?? {};
+  const subject = typeof metadata.subjectLabel === "string" ? metadata.subjectLabel : null;
+  const examLabelSource = typeof metadata.examLabel === "string" ? metadata.examLabel : product.rawCategory;
+  return {
+    raw: product,
+    name: product.rawName.trim().replace(/\s+/g, " "),
+    publisherName: publisher?.canonicalName ?? null,
+    publisherSlug: publisher?.slug ?? null,
+    publisherNormalizedName: publisher?.normalizedName ?? null,
+    isbn: product.rawIsbn ? product.rawIsbn.replace(/[^0-9Xx]/g, "").toUpperCase() || null : null,
+    editionYear: typeof metadata.editionYear === "number" ? metadata.editionYear : null,
+    description: product.rawDescription?.trim() || null,
+    imageUrl: product.rawImageUrl ?? null,
+    bookType: normalizeBookType(product.rawCategory),
+    examScope: normalizeExamScope(examLabelSource ?? null),
+    subject,
+    price: typeof product.rawPrice === "number" ? product.rawPrice : null,
+    currency: product.rawCurrency ?? "TRY"
+  };
+}
+function slugForBook(name, publisherName) {
+  const base = publisherName ? `${name} ${publisherName}` : name;
+  return slugify2(base);
+}
 
 // server/routers/resourceCatalogAdmin.ts
+var bookTypeEnum = z3.enum(["question_bank", "topic_explanation", "topic_explanation_question_bank", "mock_exam", "fasikul", "past_questions", "camp", "test_book", "reference", "other"]);
+var examScopeEnum = z3.enum(["TYT", "AYT", "TYT_AYT", "YKS", "GENEL"]);
+var catalogBookInput = z3.object({
+  name: z3.string().trim().min(1).max(300),
+  publisherName: z3.string().trim().max(120).optional(),
+  isbn: z3.string().trim().max(32).optional(),
+  editionYear: z3.number().int().min(1990).max(2100).optional(),
+  description: z3.string().trim().max(2e3).optional(),
+  imageUrl: z3.string().trim().max(500).optional(),
+  bookType: bookTypeEnum,
+  examScope: examScopeEnum,
+  subject: z3.string().trim().max(80).optional()
+});
 var resourceCatalogAdminRouter = router({
   needsReview: adminProcedure.query(() => listNeedsReviewBooks()),
   syncLogs: adminProcedure.input(z3.object({ limit: z3.number().int().min(1).max(100).default(20) }).optional()).query(({ input }) => listResourceCatalogSyncLogs(input?.limit ?? 20)),
   approve: adminProcedure.input(z3.object({ bookId: z3.number().int() })).mutation(({ input }) => approveCatalogBookClassification(input.bookId)),
   setDifficulty: adminProcedure.input(z3.object({ bookId: z3.number().int(), label: z3.enum(["easy", "medium", "hard"]), score: z3.number().int().min(0).max(100) })).mutation(({ input }) => setManualDifficulty(input.bookId, { label: input.label, score: input.score })),
-  markNeedsReview: adminProcedure.input(z3.object({ bookId: z3.number().int(), needsReview: z3.boolean() })).mutation(({ input }) => markCatalogBookNeedsReview(input.bookId, input.needsReview))
+  markNeedsReview: adminProcedure.input(z3.object({ bookId: z3.number().int(), needsReview: z3.boolean() })).mutation(({ input }) => markCatalogBookNeedsReview(input.bookId, input.needsReview)),
+  list: adminProcedure.input(z3.object({ page: z3.number().int().min(1).default(1), pageSize: z3.number().int().min(1).max(100).default(30), search: z3.string().max(120).optional(), subject: z3.string().max(80).optional(), active: z3.boolean().optional() })).query(async ({ input }) => {
+    const { page, pageSize, ...filters } = input;
+    const { items, total } = await listCatalogBooksForAdmin(filters, { page, pageSize });
+    return { items, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
+  }),
+  create: adminProcedure.input(catalogBookInput).mutation(async ({ input }) => {
+    const publisherId = input.publisherName ? await resolveOrCreatePublisherByName(input.publisherName) : null;
+    const baseSlug = slugForBook(input.name, input.publisherName ?? null);
+    try {
+      return await catalogDb.createCatalogBook({
+        publisherId,
+        name: input.name,
+        slug: baseSlug,
+        isbn: input.isbn || null,
+        editionYear: input.editionYear ?? null,
+        description: input.description || null,
+        imageUrl: input.imageUrl || null,
+        bookType: input.bookType,
+        examScope: input.examScope,
+        subject: input.subject || null,
+        metadata: { source: "admin_manual" }
+      });
+    } catch (error) {
+      const retrySlug = `${baseSlug}-${Math.random().toString(36).slice(2, 6)}`;
+      try {
+        return await catalogDb.createCatalogBook({
+          publisherId,
+          name: input.name,
+          slug: retrySlug,
+          isbn: input.isbn || null,
+          editionYear: input.editionYear ?? null,
+          description: input.description || null,
+          imageUrl: input.imageUrl || null,
+          bookType: input.bookType,
+          examScope: input.examScope,
+          subject: input.subject || null,
+          metadata: { source: "admin_manual" }
+        });
+      } catch {
+        throw new TRPCError3({ code: "CONFLICT", message: "Bu isim ve yay\u0131nevi ile bir kaynak zaten kay\u0131tl\u0131 olabilir. Farkl\u0131 bir isim dener misin?" });
+      }
+    }
+  }),
+  update: adminProcedure.input(
+    z3.object({
+      bookId: z3.number().int(),
+      name: z3.string().trim().min(1).max(300).optional(),
+      publisherName: z3.string().trim().max(120).optional(),
+      isbn: z3.string().trim().max(32).optional(),
+      editionYear: z3.number().int().min(1990).max(2100).optional(),
+      description: z3.string().trim().max(2e3).optional(),
+      imageUrl: z3.string().trim().max(500).optional(),
+      bookType: bookTypeEnum.optional(),
+      examScope: examScopeEnum.optional(),
+      subject: z3.string().trim().max(80).optional()
+    })
+  ).mutation(async ({ input }) => {
+    const { bookId, publisherName, ...rest } = input;
+    const publisherId = publisherName !== void 0 ? await resolveOrCreatePublisherByName(publisherName) : void 0;
+    return catalogDb.updateCatalogBook(bookId, {
+      ...rest,
+      ...publisherId !== void 0 ? { publisherId } : {}
+    });
+  }),
+  setActive: adminProcedure.input(z3.object({ bookId: z3.number().int(), active: z3.boolean() })).mutation(({ input }) => setCatalogBookActive(input.bookId, input.active))
 });
 
 // server/routers/resourceCatalog.ts
-var bookTypeEnum = z4.enum(["question_bank", "topic_explanation", "topic_explanation_question_bank", "mock_exam", "fasikul", "past_questions", "camp", "test_book", "reference", "other"]);
-var examScopeEnum = z4.enum(["TYT", "AYT", "TYT_AYT", "YKS", "GENEL"]);
+var bookTypeEnum2 = z4.enum(["question_bank", "topic_explanation", "topic_explanation_question_bank", "mock_exam", "fasikul", "past_questions", "camp", "test_book", "reference", "other"]);
+var examScopeEnum2 = z4.enum(["TYT", "AYT", "TYT_AYT", "YKS", "GENEL"]);
 var difficultyEnum = z4.enum(["easy", "medium", "hard"]);
 var listInput = z4.object({
   page: z4.number().int().min(1).default(1),
   pageSize: z4.number().int().min(1).max(60).default(24),
-  exam: examScopeEnum.optional(),
+  exam: examScopeEnum2.optional(),
   subject: z4.string().max(80).optional(),
   publisherId: z4.number().int().optional(),
-  bookType: bookTypeEnum.optional(),
+  bookType: bookTypeEnum2.optional(),
   difficulty: difficultyEnum.optional(),
   minPrice: z4.number().min(0).optional(),
   maxPrice: z4.number().min(0).optional(),
@@ -3390,7 +3650,7 @@ var resourceCatalogRouter = router({
   }),
   get: publicProcedure.input(z4.object({ slug: z4.string().min(1).max(320) })).query(async ({ input }) => {
     const book = await getCatalogBookBySlug(input.slug);
-    if (!book) throw new TRPCError3({ code: "NOT_FOUND", message: "Kaynak bulunamad\u0131" });
+    if (!book) throw new TRPCError4({ code: "NOT_FOUND", message: "Kaynak bulunamad\u0131" });
     return book;
   }),
   publishers: publicProcedure.query(() => listPublishersForFilter()),
@@ -3413,7 +3673,7 @@ var resourceCatalogRouter = router({
 });
 
 // server/routers/onboarding.ts
-import { TRPCError as TRPCError4 } from "@trpc/server";
+import { TRPCError as TRPCError5 } from "@trpc/server";
 import { z as z5 } from "zod";
 
 // shared/onboarding.ts
@@ -3568,7 +3828,7 @@ var onboardingRouter = router({
     const draftForValidation = { ...emptyOnboardingDraft(), ...input.data };
     const errors = validateOnboardingStep(input.step, draftForValidation);
     if (Object.keys(errors).length > 0) {
-      throw new TRPCError4({ code: "BAD_REQUEST", message: Object.values(errors)[0] });
+      throw new TRPCError5({ code: "BAD_REQUEST", message: Object.values(errors)[0] });
     }
     await upsertStudentProfileStep(ctx.user.id, input.step, draftToPatch(input.data));
     if (input.complete) await completeOnboarding(ctx.user.id);
@@ -4116,6 +4376,22 @@ var documentExtractionInput = z13.object({
   mimeType: z13.enum(["application/pdf", "image/png", "image/jpeg", "image/webp"]),
   fileName: z13.string().max(180).optional()
 });
+var bookPhotoInput = z13.object({
+  dataUrl: z13.string().min(20).max(12e6),
+  mimeType: z13.enum(["image/png", "image/jpeg", "image/webp"])
+});
+var bookPhotoSchema = {
+  type: "object",
+  properties: {
+    title: { type: "string" },
+    publisher: { type: "string" },
+    subject: { type: "string" },
+    exam: { type: "string", enum: ["TYT", "AYT", "GENEL"] },
+    confident: { type: "boolean" }
+  },
+  required: ["title", "publisher", "subject", "exam", "confident"],
+  additionalProperties: false
+};
 var userExamInput = z13.object({
   title: z13.string().min(1).max(180),
   exam: z13.enum(["TYT", "AYT"]),
@@ -4208,7 +4484,32 @@ var appRouter = router({
     addLog: protectedProcedure.input(z13.object({ bookId: z13.string().max(120), topic: z13.string().max(180).optional(), sessionDate: z13.string(), minutes: z13.number().int().min(0).max(1440), questions: z13.number().int().min(0).max(2e3), correct: z13.number().int().min(0).max(2e3), wrong: z13.number().int().min(0).max(2e3), blank: z13.number().int().min(0).max(2e3), pageStart: z13.number().int().min(0).optional(), pageEnd: z13.number().int().min(0).optional(), testStart: z13.number().int().min(0).optional(), testEnd: z13.number().int().min(0).optional() })).mutation(({ ctx, input }) => addBookStudyLog(ctx.user.id, { ...input, sessionDate: new Date(input.sessionDate) })),
     upsertMapping: protectedProcedure.input(z13.object({ bookId: z13.string().max(120), topic: z13.string().max(180), subject: z13.string().max(80), pageStart: z13.number().int().min(0).optional(), pageEnd: z13.number().int().min(0).optional(), testStart: z13.number().int().min(0).optional(), testEnd: z13.number().int().min(0).optional() })).mutation(({ ctx, input }) => upsertBookTopicMapping(ctx.user.id, input)),
     addSwitch: protectedProcedure.input(z13.object({ fromBookId: z13.string().max(120).optional(), toBookId: z13.string().max(120), reason: z13.string().max(300) })).mutation(({ ctx, input }) => addSourceSwitch(ctx.user.id, { ...input, switchedAt: /* @__PURE__ */ new Date() })),
-    importBooks: protectedProcedure.input(z13.object({ books: z13.array(z13.object({ id: z13.string().max(120), title: z13.string().min(1).max(180), publisher: z13.string().max(120), subject: z13.string().max(80), exam: z13.enum(["TYT", "AYT"]), level: z13.enum(["Kolay", "Orta", "Zor"]), format: z13.string().max(120), reason: z13.string().max(1e3), sourceUrl: z13.string().max(500).optional(), pageCount: z13.number().int().min(0).optional(), tone: z13.string().max(20) })).min(1).max(500) })).mutation(({ ctx, input }) => addUserResourceBooks(ctx.user.id, input.books))
+    importBooks: protectedProcedure.input(z13.object({ books: z13.array(z13.object({ id: z13.string().max(120), title: z13.string().min(1).max(180), publisher: z13.string().max(120), subject: z13.string().max(80), exam: z13.enum(["TYT", "AYT"]), level: z13.enum(["Kolay", "Orta", "Zor"]), format: z13.string().max(120), reason: z13.string().max(1e3), sourceUrl: z13.string().max(500).optional(), pageCount: z13.number().int().min(0).optional(), tone: z13.string().max(20) })).min(1).max(500) })).mutation(({ ctx, input }) => addUserResourceBooks(ctx.user.id, input.books)),
+    // Öğrenci elindeki fiziksel kitabın kapak fotoğrafını çeker (telefon
+    // kamerası); LLM görselden kitap adı/yayınevi/ders tahmini çıkarır.
+    // Sadece TAHMİN döner — hiçbir şeyi otomatik kütüphaneye eklemez, öğrenci
+    // formda düzeltip onaylamadan `importBooks`/`addBook` çağrılmaz (spec:
+    // uydurma veri asıl kütüphaneye sessizce yazılmasın).
+    extractBookFromPhoto: metredFeatureProcedure("OCR_BOOK_IMPORT").input(bookPhotoInput).mutation(async ({ input }) => {
+      const fileCheck = validateDataUrl(input.dataUrl, input.mimeType);
+      if (!fileCheck.valid) throw new Error(fileCheck.reason);
+      try {
+        const response = await invokeLLM({
+          messages: [
+            { role: "system", content: "Sen bir kitap kapa\u011F\u0131 tan\u0131ma asistan\u0131s\u0131n. T\xFCrk\xE7e bir YKS kaynak kitab\u0131n\u0131n kapak foto\u011Fraf\u0131n\u0131 okuyup kitap ad\u0131n\u0131, yay\u0131nevini, dersini (T\xFCrk\xE7e, Matematik, Fizik, Kimya, Biyoloji, Tarih, Co\u011Frafya, Felsefe, Din K\xFClt\xFCr\xFC, Genel) ve s\u0131nav kapsam\u0131n\u0131 (TYT/AYT/GENEL) tahmin et. G\xF6rselde net okuyamad\u0131\u011F\u0131n bir alan\u0131 bo\u015F string b\u0131rak, uydurma. `confident` alan\u0131n\u0131 yaln\u0131zca kapaktaki yaz\u0131lar\u0131 ger\xE7ekten net okuyabildiysen true yap." },
+            { role: "user", content: [{ type: "text", text: "Bu kitap kapa\u011F\u0131n\u0131 oku." }, { type: "image_url", image_url: { url: input.dataUrl, detail: "high" } }] }
+          ],
+          response_format: { type: "json_schema", json_schema: { name: "yks_book_cover", strict: true, schema: bookPhotoSchema } }
+        });
+        const raw = response.choices[0]?.message?.content;
+        const jsonText = typeof raw === "string" ? raw : raw?.map((part) => part.type === "text" ? part.text : "").join("");
+        if (!jsonText) throw new Error("Foto\u011Fraftan yap\u0131land\u0131r\u0131lm\u0131\u015F veri al\u0131namad\u0131");
+        return JSON.parse(jsonText);
+      } catch (error) {
+        console.warn("[Book Photo] Extraction failed:", error);
+        throw new Error("Foto\u011Fraf okunamad\u0131. Daha net, \u0131\u015F\u0131kl\u0131 bir kapak foto\u011Fraf\u0131 dener misin?");
+      }
+    })
   }),
   exams: router({
     snapshot: protectedProcedure.query(({ ctx }) => getUserMockExams(ctx.user.id)),
@@ -4462,6 +4763,7 @@ var HybridDifficultyClassifier = class {
 };
 
 // server/resourceCatalog/difficulty/ruleBasedClassifier.ts
+init_turkishText();
 var EASY_PHRASES = ["s\u0131f\u0131r", "s\u0131f\u0131rdan", "temel", "ba\u015Flang\u0131\xE7", "ilk ad\u0131m", "kolay", "temelden", "0dan", "0 dan", "ba\u015Flang\u0131\xE7 seviyesi"];
 var HARD_PHRASES = ["ileri", "zor", "extreme", "advanced", "master", "pro", "ileri d\xFCzey", "\xFCst d\xFCzey", "se\xE7ici"];
 var normalizedPhrases = (phrases) => phrases.map((phrase) => normalizeKeepingTurkish(phrase));
@@ -4518,6 +4820,7 @@ var RuleBasedDifficultyClassifier = class {
 };
 
 // server/resourceCatalog/curriculumMapper.ts
+init_turkishText();
 var STOPWORDS = /* @__PURE__ */ new Set(["ve", "ile", "soru", "bankasi", "konu", "anlatimi", "anlatimli", "deneme", "kitap", "kitabi", "tyt", "ayt", "fasikul"]);
 var examScopeAllows = (examScope, topicExam) => {
   if (examScope === "TYT_AYT" || examScope === "YKS" || examScope === "GENEL") return true;
@@ -4542,6 +4845,7 @@ function mapBookToCurriculumTopics(book, topics, options = {}) {
 }
 
 // server/resourceCatalog/duplicateDetector.ts
+init_turkishText();
 var normalizeIsbn = (isbn) => isbn.replace(/[^0-9Xx]/g, "").toUpperCase();
 function levenshteinDistance(a, b) {
   if (a === b) return 0;
@@ -4624,105 +4928,6 @@ function detectDuplicate(candidate, existingBooks) {
     }
   }
   return null;
-}
-
-// server/resourceCatalog/normalizers/bookTypeNormalizer.ts
-var RAW_RULES = [
-  { type: "topic_explanation_question_bank", anyOf: ["konu anlat\u0131ml\u0131 soru bankas\u0131", "konu anlat\u0131ml\u0131 ve soru bankas\u0131"] },
-  { type: "mock_exam", anyOf: ["deneme", "deneme s\u0131nav\u0131", "bran\u015F denemesi", "sim\xFClasyon"] },
-  { type: "past_questions", anyOf: ["\xE7\u0131km\u0131\u015F sorular", "\xE7\u0131km\u0131\u015F soru", "\xF6sym \xE7\u0131km\u0131\u015F"] },
-  { type: "camp", anyOf: ["kamp kitab\u0131", "yaz kamp\u0131", "kamp"] },
-  { type: "fasikul", anyOf: ["fasik\xFCl", "fasik\xFCller"] },
-  { type: "test_book", anyOf: ["yaprak test", "test kitab\u0131", "test kitaplar\u0131"] },
-  { type: "topic_explanation", anyOf: ["konu anlat\u0131m\u0131", "konu anlat\u0131ml\u0131", "ders i\u015Fleme f\xF6y\xFC", "\xF6zet konu"] },
-  { type: "question_bank", anyOf: ["soru bankas\u0131", "soru bankalar\u0131"] },
-  { type: "reference", anyOf: ["ba\u015Fvuru kayna\u011F\u0131", "s\xF6zl\xFCk", "form\xFCler"] }
-];
-var RULES = RAW_RULES.map((rule) => ({ type: rule.type, anyOf: rule.anyOf.map(normalizeKeepingTurkish) }));
-function normalizeBookType(rawCategory) {
-  if (!rawCategory) return "other";
-  const normalized = normalizeKeepingTurkish(rawCategory);
-  for (const rule of RULES) {
-    if (rule.anyOf.some((phrase) => normalized.includes(phrase))) return rule.type;
-  }
-  return "other";
-}
-function normalizeExamScope(rawExam) {
-  if (!rawExam) return "GENEL";
-  const normalized = normalizeKeepingTurkish(rawExam);
-  const hasTyt = /\btyt\b/.test(normalized);
-  const hasAyt = /\bayt\b/.test(normalized);
-  if (hasTyt && hasAyt) return "TYT_AYT";
-  if (hasTyt) return "TYT";
-  if (hasAyt) return "AYT";
-  if (normalized.includes("yks")) return "YKS";
-  return "GENEL";
-}
-
-// server/resourceCatalog/normalizers/publisherNormalizer.ts
-var PUBLISHER_ALIASES = {
-  "3d": "3D Yay\u0131nlar\u0131",
-  "3d yayinlari": "3D Yay\u0131nlar\u0131",
-  "ucdortbes": "\xDC\xE7D\xF6rtBe\u015F",
-  "345": "\xDC\xE7D\xF6rtBe\u015F",
-  "uc dort bes": "\xDC\xE7D\xF6rtBe\u015F",
-  "bilgi sarmal": "Bilgi Sarmal",
-  "bilgi sarmal yayincilik": "Bilgi Sarmal",
-  "pegem": "Pegem Akademi",
-  "pegem akademi": "Pegem Akademi",
-  "pegem yayincilik": "Pegem Akademi",
-  "karekok": "Karek\xF6k",
-  "karekok yayincilik": "Karek\xF6k",
-  "paraf": "Paraf Yay\u0131nlar\u0131",
-  "paraf yayinlari": "Paraf Yay\u0131nlar\u0131",
-  "rasyonel": "Rasyonel Yay\u0131nlar\u0131",
-  "rasyonel yayinlari": "Rasyonel Yay\u0131nlar\u0131",
-  "aydin": "Ayd\u0131n Yay\u0131nlar\u0131",
-  "aydin yayinlari": "Ayd\u0131n Yay\u0131nlar\u0131",
-  "orijinal": "Orijinal Yay\u0131nlar\u0131",
-  "orijinal yayinlari": "Orijinal Yay\u0131nlar\u0131",
-  "hiz ve renk": "H\u0131z ve Renk Yay\u0131nlar\u0131",
-  "hiz ve renk yayinlari": "H\u0131z ve Renk Yay\u0131nlar\u0131"
-};
-var suffixTitleCase = (value) => value.split(" ").filter(Boolean).map((word) => word.charAt(0).toLocaleUpperCase("tr-TR") + word.slice(1).toLocaleLowerCase("tr-TR")).join(" ");
-function normalizePublisherName(rawName) {
-  const trimmed = rawName.trim();
-  const comparisonKey = normalizeForComparison(trimmed);
-  const canonicalName = PUBLISHER_ALIASES[comparisonKey] ?? suffixTitleCase(trimmed);
-  const normalizedName = normalizeForComparison(canonicalName);
-  return {
-    canonicalName,
-    slug: slugify2(canonicalName),
-    normalizedName
-  };
-}
-
-// server/resourceCatalog/pipeline/normalize.ts
-function normalizeProduct(product) {
-  const publisher = product.rawPublisher ? normalizePublisherName(product.rawPublisher) : null;
-  const metadata = product.rawMetadata ?? {};
-  const subject = typeof metadata.subjectLabel === "string" ? metadata.subjectLabel : null;
-  const examLabelSource = typeof metadata.examLabel === "string" ? metadata.examLabel : product.rawCategory;
-  return {
-    raw: product,
-    name: product.rawName.trim().replace(/\s+/g, " "),
-    publisherName: publisher?.canonicalName ?? null,
-    publisherSlug: publisher?.slug ?? null,
-    publisherNormalizedName: publisher?.normalizedName ?? null,
-    isbn: product.rawIsbn ? product.rawIsbn.replace(/[^0-9Xx]/g, "").toUpperCase() || null : null,
-    editionYear: typeof metadata.editionYear === "number" ? metadata.editionYear : null,
-    description: product.rawDescription?.trim() || null,
-    imageUrl: product.rawImageUrl ?? null,
-    bookType: normalizeBookType(product.rawCategory),
-    examScope: normalizeExamScope(examLabelSource ?? null),
-    subject,
-    price: typeof product.rawPrice === "number" ? product.rawPrice : null,
-    currency: product.rawCurrency ?? "TRY"
-  };
-}
-function slugForBook(name, publisherName) {
-  const base = publisherName ? `${name} ${publisherName}` : name;
-  return slugify2(base);
 }
 
 // server/resourceCatalog/pipeline/validate.ts

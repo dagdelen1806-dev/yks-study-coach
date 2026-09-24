@@ -288,3 +288,26 @@ export async function markCatalogBookNeedsReview(bookId: number, needsReview: bo
   if (!db) throw new Error("Database not available");
   await db.update(catalogBooks).set({ needsReview: needsReview ? 1 : 0 }).where(eq(catalogBooks.id, bookId));
 }
+
+/** Admin "Kaldır / Geri getir" — yumuşak silme (spec: mevcut sistemde hard delete yok,
+ * `listCatalogBooks` zaten yalnızca active=1 gösteriyor, geçmiş referanslar bozulmaz). */
+export async function setCatalogBookActive(bookId: number, active: boolean) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(catalogBooks).set({ active: active ? 1 : 0 }).where(eq(catalogBooks.id, bookId));
+}
+
+/** Admin'in elle kitap eklerken kullandığı yayınevi çözümlemesi — scraper
+ * pipeline'ıyla (bkz. pipeline/orchestrator.ts) AYNI normalizePublisherName
+ * eşlemesini kullanır, böylece "Palme" hem admin'den hem kitapisler.com'dan
+ * eklense aynı publisher satırına düşer, çift kayıt oluşmaz. */
+export async function resolveOrCreatePublisherByName(rawName: string): Promise<number | null> {
+  const trimmed = rawName.trim();
+  if (!trimmed) return null;
+  const { normalizePublisherName } = await import("./normalizers/publisherNormalizer");
+  const normalized = normalizePublisherName(trimmed);
+  const existing = await catalogDb.findPublisherByNormalizedName(normalized.normalizedName);
+  if (existing) return existing.id;
+  const created = await catalogDb.createPublisher({ name: normalized.canonicalName, slug: normalized.slug, normalizedName: normalized.normalizedName });
+  return created.id;
+}

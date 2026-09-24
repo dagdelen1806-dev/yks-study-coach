@@ -7,6 +7,7 @@ import AdminPendingPage from "./AdminPendingPage";
 import AdminSubscriptionsPage from "./AdminSubscriptionsPage";
 import AdminPaymentsPage from "./AdminPaymentsPage";
 import AdminAuditPage from "./AdminAuditPage";
+import AdminCatalogPage from "./AdminCatalogPage";
 
 const TABS = [
   { key: "dashboard", label: "Panel" },
@@ -14,6 +15,7 @@ const TABS = [
   { key: "pending", label: "Onay Bekleyenler" },
   { key: "subscriptions", label: "Abonelikler" },
   { key: "payments", label: "Ödemeler" },
+  { key: "catalog", label: "Kaynak Kataloğu" },
   { key: "audit", label: "Denetim Kayıtları" },
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
@@ -42,6 +44,7 @@ export default function AdminPanel() {
       {tab === "pending" && <AdminPendingPage />}
       {tab === "subscriptions" && <AdminSubscriptionsPage />}
       {tab === "payments" && <AdminPaymentsPage />}
+      {tab === "catalog" && <AdminCatalogPage />}
       {tab === "audit" && <AdminAuditPage />}
     </div>
   );
