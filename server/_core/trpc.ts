@@ -1,4 +1,4 @@
-import { APPROVAL_PENDING_ERR_MSG, APPROVAL_REJECTED_ERR_MSG, NOT_ADMIN_ERR_MSG, PREMIUM_REQUIRED_ERR_MSG, RATE_LIMITED_ERR_MSG, UNAUTHED_ERR_MSG } from '@shared/const';
+import { APPROVAL_PENDING_ERR_MSG, APPROVAL_REJECTED_ERR_MSG, EMAIL_UNVERIFIED_ERR_MSG, NOT_ADMIN_ERR_MSG, PREMIUM_REQUIRED_ERR_MSG, RATE_LIMITED_ERR_MSG, UNAUTHED_ERR_MSG, needsEmailVerification } from '@shared/const';
 import type { FeatureKey } from '@shared/entitlements';
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
@@ -16,13 +16,21 @@ export const publicProcedure = t.procedure;
 // Onay bekleyen/reddedilmiş bir hesabın yine de çağırabilmesi gereken minimum
 // yüzey — aksi halde "kaydınız onay bekliyor" ekranını göstermek için gereken
 // `auth.me`/`auth.logout` bile bloklanır. Bkz. client/src/App.tsx AppGate.
-const APPROVAL_GATE_ALLOWLIST = new Set(["auth.me", "auth.logout"]);
+// E-posta doğrulama ekranının ("E-postanı doğrula") ihtiyaç duyduğu uçlar da
+// aynı şekilde kapıdan muaf; bkz. server/_core/emailVerification.ts.
+const APPROVAL_GATE_ALLOWLIST = new Set(["auth.me", "auth.logout", "auth.resendVerificationEmail"]);
 
 const requireUser = t.middleware(async opts => {
   const { ctx, next, path } = opts;
 
   if (!ctx.user) {
     throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
+  }
+
+  // Sıra bilinçli: önce e-posta doğrulaması, sonra admin onayı — doğrulanmamış
+  // (belki sahte) bir adresin admin onay kuyruğunda beklemesinin anlamı yok.
+  if (!APPROVAL_GATE_ALLOWLIST.has(path) && needsEmailVerification(ctx.user)) {
+    throw new TRPCError({ code: "FORBIDDEN", message: EMAIL_UNVERIFIED_ERR_MSG });
   }
 
   if (!APPROVAL_GATE_ALLOWLIST.has(path) && ctx.user.approvalStatus !== "approved") {
@@ -44,7 +52,9 @@ export const adminProcedure = t.procedure.use(
   t.middleware(async opts => {
     const { ctx, next } = opts;
 
-    if (!ctx.user || ctx.user.role !== 'admin') {
+    // Doğrulanmamış e-posta hesabı hiçbir koşulda admin uçlarına erişemez
+    // (admin rolü zaten doğrulamadan önce verilmiyor; bu ikinci bir emniyet).
+    if (!ctx.user || ctx.user.role !== 'admin' || needsEmailVerification(ctx.user)) {
       throw new TRPCError({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
     }
 

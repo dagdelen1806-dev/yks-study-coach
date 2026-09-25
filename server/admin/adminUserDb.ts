@@ -1,5 +1,6 @@
-import { and, count, desc, eq, gte, inArray, like, lt, or, sql } from "drizzle-orm";
-import { getDb } from "../db";
+import { and, count, desc, eq, gte, inArray, isNull, like, lt, or, sql } from "drizzle-orm";
+import { phoneFromOpenId } from "../_core/loginIdentifier";
+import { getDb, getStudentProfile } from "../db";
 import { subscriptionPlans, subscriptions, topicProgress, topicStudyLogs, userMockExams, users } from "../../drizzle/schema";
 import { getEntitlements, getUsageSummaryForUser } from "../subscriptions/entitlementService";
 import { getPlanById, listAuditLogsForUser, listPaymentsForUser, writeAuditLog } from "../subscriptions/subscriptionDb";
@@ -20,9 +21,12 @@ export type AdminUserListRow = {
   id: number;
   name: string | null;
   email: string | null;
+  phone: string | null;
   role: "user" | "admin";
   approvalStatus: "pending" | "approved" | "rejected";
   accountStatus: "active" | "suspended" | "deleted";
+  loginMethod: string | null;
+  emailVerifiedAt: Date | null;
   createdAt: Date;
   lastSignedIn: Date;
   planCode: string;
@@ -54,7 +58,9 @@ export async function listUsersForAdminPaginated(filters: AdminUserListFilters):
   const conditions = [];
   if (filters.search?.trim()) {
     const term = `%${filters.search.trim().replace(/[%_]/g, (char) => `\\${char}`)}%`;
-    conditions.push(or(like(users.name, term), like(users.email, term)));
+    // Telefon `openId`'de tutulduğu için (bkz. phoneFromOpenId) oradan da aranır; 0555… → 555… gibi baştaki 0 atılır.
+    const digits = filters.search.replace(/\D/g, "").replace(/^0/, "");
+    conditions.push(or(like(users.name, term), like(users.email, term), ...(digits.length >= 4 ? [like(users.openId, `dev_phone_%${digits}%`)] : [])));
   }
   if (filters.approvalStatus) conditions.push(eq(users.approvalStatus, filters.approvalStatus));
   if (filters.accountStatus) conditions.push(eq(users.accountStatus, filters.accountStatus));
@@ -71,7 +77,7 @@ export async function listUsersForAdminPaginated(filters: AdminUserListFilters):
 
   const pageQuery = db
     .select({
-      id: users.id, name: users.name, email: users.email, role: users.role, approvalStatus: users.approvalStatus, accountStatus: users.accountStatus, createdAt: users.createdAt, lastSignedIn: users.lastSignedIn,
+      id: users.id, openId: users.openId, name: users.name, email: users.email, role: users.role, approvalStatus: users.approvalStatus, accountStatus: users.accountStatus, loginMethod: users.loginMethod, emailVerifiedAt: users.emailVerifiedAt, createdAt: users.createdAt, lastSignedIn: users.lastSignedIn,
       planCode: subscriptionPlans.code, planName: subscriptionPlans.name, subscriptionStatus: subscriptions.status, trialEndsAt: subscriptions.trialEndsAt, currentPeriodEnd: subscriptions.currentPeriodEnd,
     })
     .from(users)
@@ -100,8 +106,10 @@ export async function listUsersForAdminPaginated(filters: AdminUserListFilters):
     const topic = topicMap.get(row.id);
     const exam = examMap.get(row.id);
     const study = studyMap.get(row.id);
+    const { openId, ...rest } = row;
     return {
-      ...row,
+      ...rest,
+      phone: phoneFromOpenId(openId),
       planCode: row.planCode ?? "FREE",
       planName: row.planName ?? "Ücretsiz",
       subscriptionStatus: row.subscriptionStatus ?? "active",
@@ -133,6 +141,16 @@ export async function reactivateUser(userId: number, adminId: number): Promise<v
   await writeAuditLog({ userId, adminId, action: "user_reactivated", newState: { accountStatus: "active" } });
 }
 
+/** Admin'in manuel e-posta doğrulaması (ör. mail hiç ulaşmıyorsa). Denetim
+ * kaydına düşer. Bilerek `ADMIN_LOGINS` admin yetkisi VERMEZ — o yalnızca
+ * kullanıcının kendi linkiyle, adres sahipliği kanıtlanınca gelir. */
+export async function verifyUserEmailManually(userId: number, adminId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(users).set({ emailVerifiedAt: new Date() }).where(and(eq(users.id, userId), isNull(users.emailVerifiedAt)));
+  await writeAuditLog({ userId, adminId, action: "email_verified_by_admin", newState: { emailVerified: true } });
+}
+
 /** Provider ID'lerini tam göstermez (spec §11) — yalnızca ilk/son birkaç karakter, aradaki kısım maskelenir. */
 function maskId(value: string | null): string | null {
   if (!value) return value;
@@ -152,7 +170,7 @@ export async function getUserDetailForAdmin(userId: number) {
   const [userRow] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
   if (!userRow) return null;
 
-  const [entitlements, usage, progressScore, payments, recentExams, topicRows, recentStudyLogs, auditLogs] = await Promise.all([
+  const [entitlements, usage, progressScore, payments, recentExams, topicRows, recentStudyLogs, auditLogs, profile] = await Promise.all([
     getEntitlements(userId),
     getUsageSummaryForUser(userId),
     getStudyProgressScore(userId),
@@ -161,6 +179,7 @@ export async function getUserDetailForAdmin(userId: number) {
     db.select().from(topicProgress).where(eq(topicProgress.userId, userId)),
     db.select().from(topicStudyLogs).where(eq(topicStudyLogs.userId, userId)).orderBy(desc(topicStudyLogs.studyDate)).limit(20),
     listAuditLogsForUser(userId),
+    getStudentProfile(userId),
   ]);
 
   const [subscriptionRow] = await db.select().from(subscriptions).where(eq(subscriptions.userId, userId)).limit(1);
@@ -169,7 +188,8 @@ export async function getUserDetailForAdmin(userId: number) {
   const { passwordHash: _passwordHash, ...safeUser } = userRow;
 
   return {
-    user: safeUser,
+    user: { ...safeUser, phone: phoneFromOpenId(safeUser.openId) },
+    profile,
     subscription: subscriptionRow
       ? { ...subscriptionRow, providerSubscriptionId: maskId(subscriptionRow.providerSubscriptionId), providerCustomerId: maskId(subscriptionRow.providerCustomerId), planCode: plan?.code ?? "FREE", planName: plan?.name ?? "Ücretsiz", planTier: plan?.tier ?? "free" }
       : null,

@@ -8,7 +8,10 @@ import OnboardingFlow from "@/components/onboarding/OnboardingFlow";
 import { DashboardLayoutSkeleton } from "@/components/DashboardLayoutSkeleton";
 import { trpc } from "@/lib/trpc";
 import { LOCAL_SIGNIN_REQUEST_EVENT, performLocalSignIn } from "@/const";
+import VerifyEmailScreen from "@/components/auth/VerifyEmailScreen";
+import { needsEmailVerification } from "@shared/const";
 import { ensureLocalCacheMatchesAccount, postOnboardingNudgeKey } from "@shared/yksData";
+import { toast } from "sonner";
 import { useEffect, useState } from "react";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
@@ -22,6 +25,7 @@ import Home from "./pages/Home";
 function LocalSignInDialog() {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<"login" | "register">("login");
+  const [identifier, setIdentifier] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -34,11 +38,12 @@ function LocalSignInDialog() {
   }, []);
 
   const submit = async () => {
-    if (!name.trim()) { setError("Adını yazmalısın."); return; }
+    if (tab === "register" && !name.trim()) { setError("Adını yazmalısın."); return; }
+    if (!identifier.trim()) { setError("E-posta adresini veya telefon numaranı yazmalısın."); return; }
     if (password.length < 4) { setError("Şifre en az 4 karakter olmalı."); return; }
     setSubmitting(true);
     setError("");
-    const result = await performLocalSignIn(name.trim(), password, tab);
+    const result = await performLocalSignIn({ identifier: identifier.trim(), password, name: tab === "register" ? name.trim() : undefined, mode: tab });
     if (result.error) { setError(result.error); setSubmitting(false); }
     // Başarılıysa `performLocalSignIn` sayfayı zaten yeniden yüklüyor.
   };
@@ -49,23 +54,40 @@ function LocalSignInDialog() {
         <DialogTitle>{tab === "login" ? "Giriş yap" : "Kayıt ol"}</DialogTitle>
         <DialogDescription>
           {tab === "login"
-            ? "Bu, uygulamanın yerel test ortamındaki girişidir. Daha önce oluşturduğun ad + şifreyle giriş yap."
-            : "Yeni bir hesap oluştur. Kayıt sonrası hesabın bir yönetici tarafından onaylanana kadar panele erişemezsin."}
+            ? "Kayıt olurken kullandığın e-posta adresi veya telefon numarası ve şifrenle giriş yap."
+            : "Yeni bir hesap oluştur. E-postayla kayıt olursan önce adresini doğrulaman gerekir; ardından hesabın bir yönetici tarafından onaylanınca panele erişebilirsin."}
         </DialogDescription>
         <div className="mt-1 flex rounded-xl bg-[#f7f5ef] p-1">
           <button type="button" onClick={() => { setTab("login"); setError(""); }} className={`h-9 flex-1 rounded-lg text-[12px] font-semibold transition ${tab === "login" ? "bg-white text-[#1f2333] shadow-sm" : "text-[#8b8c95]"}`}>Giriş yap</button>
           <button type="button" onClick={() => { setTab("register"); setError(""); }} className={`h-9 flex-1 rounded-lg text-[12px] font-semibold transition ${tab === "register" ? "bg-white text-[#1f2333] shadow-sm" : "text-[#8b8c95]"}`}>Kayıt ol</button>
         </div>
         <div className="mt-3 space-y-3">
+          {tab === "register" && (
+            <div className="space-y-1.5">
+              <label htmlFor="local-signin-name" className="text-[12px] font-semibold text-[#1f2333]">Adın</label>
+              <Input
+                id="local-signin-name"
+                value={name}
+                onChange={(event) => { setName(event.target.value); setError(""); }}
+                onKeyDown={(event) => { if (event.key === "Enter") submit(); }}
+                placeholder="Örn. Ece Yılmaz"
+                autoComplete="name"
+                maxLength={120}
+                aria-invalid={Boolean(error)}
+              />
+            </div>
+          )}
           <div className="space-y-1.5">
-            <label htmlFor="local-signin-name" className="text-[12px] font-semibold text-[#1f2333]">Adın</label>
+            <label htmlFor="local-signin-identifier" className="text-[12px] font-semibold text-[#1f2333]">E-posta veya telefon</label>
             <Input
-              id="local-signin-name"
-              value={name}
-              onChange={(event) => { setName(event.target.value); setError(""); }}
+              id="local-signin-identifier"
+              value={identifier}
+              onChange={(event) => { setIdentifier(event.target.value); setError(""); }}
               onKeyDown={(event) => { if (event.key === "Enter") submit(); }}
-              placeholder="Örn. Ece Yılmaz"
-              maxLength={120}
+              placeholder="ece@ornek.com veya 0555 123 45 67"
+              autoComplete="username"
+              inputMode="email"
+              maxLength={320}
               autoFocus
               aria-invalid={Boolean(error)}
             />
@@ -122,10 +144,41 @@ function PendingApprovalScreen({ status, onLogout }: { status: "pending" | "reje
 // it yet. Anonymous visitors go straight to `Home` (which already renders a
 // demo experience + login prompt) — onboarding only ever applies once a
 // real account exists to attach the profile to.
+const EMAIL_VERIFICATION_RESULTS: Record<string, { tone: "success" | "info" | "error"; text: string }> = {
+  success: { tone: "success", text: "E-postan doğrulandı ✓" },
+  already: { tone: "info", text: "E-postan zaten doğrulanmış." },
+  expired: { tone: "error", text: "Doğrulama bağlantısının süresi dolmuş. Giriş yapıp yeni bir bağlantı isteyebilirsin." },
+  invalid: { tone: "error", text: "Doğrulama bağlantısı geçersiz. Mailindeki en son bağlantıyı kullandığından emin ol." },
+  error: { tone: "error", text: "Doğrulama sırasında bir sunucu hatası oluştu. Birkaç dakika sonra tekrar dener misin?" },
+};
+
+/** Maildeki link `/api/email/verify` → `/?emailVerification=<sonuç>` ile
+ * uygulamaya döner (bkz. server/_core/emailVerification.ts). Sonucu bir kez
+ * gösterir, parametreyi adresten siler; giriş yapılmamış bir cihazda başarılı
+ * doğrulamadan sonra giriş penceresini açar. */
+function useEmailVerificationResult(authLoading: boolean, signedIn: boolean) {
+  useEffect(() => {
+    if (authLoading) return;
+    const params = new URLSearchParams(window.location.search);
+    const outcome = params.get("emailVerification");
+    if (!outcome) return;
+    params.delete("emailVerification");
+    const query = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`);
+
+    const result = EMAIL_VERIFICATION_RESULTS[outcome] ?? EMAIL_VERIFICATION_RESULTS.invalid;
+    const showToast = result.tone === "success" ? toast.success : result.tone === "error" ? toast.error : toast;
+    showToast(signedIn || result.tone === "error" ? result.text : `${result.text} Giriş yaparak devam edebilirsin.`, { duration: 8000 });
+    if (!signedIn && (outcome === "success" || outcome === "already")) window.dispatchEvent(new Event(LOCAL_SIGNIN_REQUEST_EVENT));
+  }, [authLoading]);
+}
+
 function AppGate() {
-  const { user, loading: authLoading, logout } = useAuth();
-  const onboarding = trpc.onboarding.get.useQuery(undefined, { enabled: Boolean(user) && user?.approvalStatus === "approved", retry: false });
+  const { user, loading: authLoading, logout, refresh } = useAuth();
+  const emailPending = Boolean(user) && needsEmailVerification(user!);
+  const onboarding = trpc.onboarding.get.useQuery(undefined, { enabled: Boolean(user) && !emailPending && user?.approvalStatus === "approved", retry: false });
   const [cacheReady, setCacheReady] = useState(false);
+  useEmailVerificationResult(authLoading, Boolean(user));
 
   // Home/OnboardingFlow mount olmadan ÖNCE, aynı tarayıcıda önceki bir
   // hesaptan kalmış olabilecek yerel önbelleği (kitap rafı, konular,
@@ -138,6 +191,11 @@ function AppGate() {
   }, [authLoading, user?.id]);
 
   if (authLoading || !cacheReady) return <DashboardLayoutSkeleton />;
+
+  // Sıra backend'le aynı (trpc.ts requireUser): önce e-posta, sonra admin onayı.
+  if (user && emailPending) {
+    return <VerifyEmailScreen email={user.email ?? ""} name={user.name} sentAt={user.emailVerificationSentAt} onVerifiedCheck={refresh} onLogout={() => void logout()} />;
+  }
 
   if (user && (user.approvalStatus === "pending" || user.approvalStatus === "rejected")) {
     return <PendingApprovalScreen status={user.approvalStatus} onLogout={() => void logout()} />;

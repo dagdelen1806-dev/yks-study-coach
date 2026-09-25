@@ -126,6 +126,37 @@ describe("APPROVAL GATE — onay bekleyen hesap", () => {
   });
 });
 
+describe("EMAIL VERIFICATION GATE", () => {
+  const unverified = { loginMethod: "dev_email", email: "ece@ornek.com", emailVerifiedAt: null } as Partial<User>;
+
+  it("doğrulanmamış e-posta hesabı korumalı uçlara erişemez (onaylı olsa bile)", async () => {
+    const caller = callerFor(makeUser({ ...unverified, approvalStatus: "approved" }));
+    await expect(caller.resources.snapshot()).rejects.toThrow(/verification/i);
+  });
+
+  it("doğrulanmış e-posta hesabı erişebilir", async () => {
+    const caller = callerFor(makeUser({ ...unverified, emailVerifiedAt: new Date() }));
+    await expect(caller.resources.snapshot()).resolves.toBeDefined();
+  });
+
+  it("doğrulanmamış hesap auth.me ve tekrar gönder uçlarına erişebilir", async () => {
+    const caller = callerFor(makeUser(unverified));
+    expect((await caller.auth.me())?.emailVerifiedAt).toBeNull();
+    // Kapıdan geçer; testte DB olmadığı için gönderim aşamasında düşer — FORBIDDEN değil.
+    await expect(caller.auth.resendVerificationEmail()).rejects.toThrow(/gönderilemedi/);
+  });
+
+  it("telefon ve eski hesaplar e-posta doğrulamasına takılmaz", async () => {
+    await expect(callerFor(makeUser({ loginMethod: "dev_phone" })).resources.snapshot()).resolves.toBeDefined();
+    await expect(callerFor(makeUser({ loginMethod: "dev" })).resources.snapshot()).resolves.toBeDefined();
+  });
+
+  it("admin rolü olsa bile doğrulanmamış e-posta hesabı admin uçlarına erişemez", async () => {
+    const caller = callerFor(makeUser({ ...unverified, role: "admin" }));
+    await expect(caller.admin.subscriptions.list()).rejects.toThrow(/permission/i);
+  });
+});
+
 describe("SECURITY — admin-only uçlar", () => {
   it("normal kullanıcı admin.subscriptions.list çağıramaz", async () => {
     const caller = callerFor(makeUser({ role: "user" }));

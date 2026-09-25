@@ -3,7 +3,8 @@ import { Loader2, Search } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { Card } from "@/components/ui/card";
 import AdminUserDetail from "./AdminUserDetail";
-import { accountStatusLabel, accountStatusTone, approvalLabel, approvalTone, formatDate, subscriptionStatusLabel } from "./adminFormat";
+import EmailVerifiedBadge from "./EmailVerifiedBadge";
+import { accountStatusLabel, accountStatusTone, approvalLabel, approvalTone, formatDate, formatDateTime, subscriptionStatusLabel } from "./adminFormat";
 
 /**
  * /admin/users karşılığı (spec §7/§35) — server-side arama/filtre/pagination.
@@ -43,7 +44,7 @@ export default function AdminUsersPage() {
     <div className="space-y-4">
       <Card className="soft-card p-4">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="relative flex-1 min-w-[200px]"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#a2a3aa]" size={15} /><input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} placeholder="İsim veya e-posta ara..." className="form-input h-9 w-full pl-9 text-[12px]" /></div>
+          <div className="relative flex-1 min-w-[200px]"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#a2a3aa]" size={15} /><input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} placeholder="İsim, e-posta veya telefon ara..." className="form-input h-9 w-full pl-9 text-[12px]" /></div>
           <select value={approvalStatus} onChange={(event) => { setApprovalStatus(event.target.value); setPage(1); }} className="form-input h-9 w-auto text-[11px]"><option value="">Tüm onay durumları</option><option value="pending">Onay bekliyor</option><option value="approved">Onaylı</option><option value="rejected">Reddedildi</option></select>
           <select value={accountStatus} onChange={(event) => { setAccountStatus(event.target.value); setPage(1); }} className="form-input h-9 w-auto text-[11px]"><option value="">Tüm hesap durumları</option><option value="active">Aktif</option><option value="suspended">Askıda</option></select>
           <select value={planCode} onChange={(event) => { setPlanCode(event.target.value); setPage(1); }} className="form-input h-9 w-auto text-[11px]"><option value="">Tüm planlar</option><option value="FREE">Free</option><option value="PREMIUM_MONTHLY">Premium Aylık</option><option value="PREMIUM_YEARLY">Premium Yıllık</option></select>
@@ -61,19 +62,22 @@ export default function AdminUsersPage() {
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[900px] text-left text-[12px]">
-                <thead className="border-b border-[#1f2333]/[0.06] bg-[#fafafa] text-[10px] uppercase tracking-[.1em] text-[#9a9ba3]"><tr><th className="px-4 py-2.5">Kullanıcı</th><th className="px-4 py-2.5">Onay</th><th className="px-4 py-2.5">Hesap</th><th className="px-4 py-2.5">Plan</th><th className="px-4 py-2.5">Abonelik</th><th className="px-4 py-2.5">Konu %</th><th className="px-4 py-2.5">Deneme</th><th className="px-4 py-2.5">Katıldı</th></tr></thead>
+              <table className="w-full min-w-[1100px] text-left text-[12px]">
+                <thead className="border-b border-[#1f2333]/[0.06] bg-[#fafafa] text-[10px] uppercase tracking-[.1em] text-[#9a9ba3]"><tr><th className="px-4 py-2.5">Kullanıcı</th><th className="px-4 py-2.5">E-posta</th><th className="px-4 py-2.5">Onay</th><th className="px-4 py-2.5">Hesap</th><th className="px-4 py-2.5">Plan</th><th className="px-4 py-2.5">Abonelik</th><th className="px-4 py-2.5">Bitiş</th><th className="px-4 py-2.5">Konu %</th><th className="px-4 py-2.5">Deneme</th><th className="px-4 py-2.5">Katıldı</th><th className="px-4 py-2.5">Son giriş</th></tr></thead>
                 <tbody className="divide-y divide-[#1f2333]/[0.06]">
                   {list.data.rows.map((row) => (
                     <tr key={row.id} onClick={() => setSelectedUserId(row.id)} className="cursor-pointer hover:bg-[#fafaff]">
-                      <td className="px-4 py-2.5 font-medium text-[#343643]"><span className="mr-1.5 rounded-md bg-[#f7f5ef] px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[#8b8c95]">#{row.id}</span>{row.name || row.email || `#${row.id}`}{row.role === "admin" && <span className="ml-1.5 rounded-full bg-[#1f2333] px-1.5 py-0.5 text-[9px] font-bold text-white">admin</span>}</td>
+                      <td className="px-4 py-2.5 font-medium text-[#343643]"><span className="mr-1.5 rounded-md bg-[#f7f5ef] px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[#8b8c95]">#{row.id}</span>{row.name || row.email || `#${row.id}`}{row.role === "admin" && <span className="ml-1.5 rounded-full bg-[#1f2333] px-1.5 py-0.5 text-[9px] font-bold text-white">admin</span>}{(row.email || row.phone) && <div className="mt-0.5 text-[10px] font-normal text-[#9a9ba3]">{row.email || row.phone}</div>}</td>
+                      <td className="px-4 py-2.5"><EmailVerifiedBadge loginMethod={row.loginMethod} verifiedAt={row.emailVerifiedAt} /></td>
                       <td className="px-4 py-2.5"><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${approvalTone[row.approvalStatus]}`}>{approvalLabel[row.approvalStatus]}</span></td>
                       <td className="px-4 py-2.5"><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${accountStatusTone[row.accountStatus]}`}>{accountStatusLabel[row.accountStatus]}</span></td>
                       <td className="px-4 py-2.5 text-[#8b8c95]">{row.planCode}</td>
                       <td className="px-4 py-2.5 text-[#8b8c95]">{subscriptionStatusLabel[row.subscriptionStatus] ?? row.subscriptionStatus}</td>
+                      <td className="px-4 py-2.5 text-[#8b8c95]">{row.currentPeriodEnd || row.trialEndsAt ? formatDate(row.currentPeriodEnd ?? row.trialEndsAt) : "—"}</td>
                       <td className="px-4 py-2.5 text-[#8b8c95]">%{row.topicCoveragePercent}</td>
                       <td className="px-4 py-2.5 text-[#8b8c95]">{row.examCount}{row.latestExamNet != null ? ` · ${row.latestExamNet.toFixed(2)}` : ""}</td>
                       <td className="px-4 py-2.5 text-[#8b8c95]">{formatDate(row.createdAt)}</td>
+                      <td className="px-4 py-2.5 text-[#8b8c95]">{formatDateTime(row.lastSignedIn)}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -1,5 +1,7 @@
 import { COOKIE_NAME } from "@shared/const";
+import { TRPCError } from "@trpc/server";
 import { getSessionCookieOptions } from "./_core/cookies";
+import { sendVerificationEmail } from "./_core/emailVerification";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
 import { protectedProcedure, metredFeatureProcedure } from "./_core/trpc";
@@ -155,6 +157,16 @@ export const appRouter = router({
       return {
         success: true,
       } as const;
+    }),
+    // "E-postanı doğrula" ekranının "Tekrar gönder" butonu. requireUser'ın
+    // doğrulama/onay kapısından muaf (bkz. _core/trpc.ts APPROVAL_GATE_ALLOWLIST).
+    resendVerificationEmail: protectedProcedure.mutation(async ({ ctx }) => {
+      try {
+        return await sendVerificationEmail(ctx.user, ctx.req);
+      } catch (error) {
+        console.error("[EmailVerification] resend failed:", error instanceof Error ? error.message : error);
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Doğrulama maili şu an gönderilemedi. Birkaç dakika sonra tekrar dener misin?" });
+      }
     }),
   }),
 

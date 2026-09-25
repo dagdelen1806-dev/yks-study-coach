@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { adminProcedure, router } from "../../_core/trpc";
-import { getUserDetailForAdmin, listUsersForAdminPaginated, reactivateUser, suspendUser } from "../../admin/adminUserDb";
+import { getUserDetailForAdmin, listUsersForAdminPaginated, reactivateUser, suspendUser, verifyUserEmailManually } from "../../admin/adminUserDb";
 import { approveUser, listPendingUsers, rejectUser } from "../../subscriptions/subscriptionDb";
 
 /**
@@ -34,4 +34,5 @@ export const adminUsersRouter = router({
   // Hesap yaşam döngüsü — subscription iptaliyle KARIŞTIRILMAZ (spec §5/§23): bir kullanıcı aboneliğini iptal edince hesabı askıya alınmaz.
   suspend: adminProcedure.input(z.object({ userId: z.number().int(), reason: z.string().max(300).optional() })).mutation(({ ctx, input }) => suspendUser(input.userId, ctx.user.id, input.reason)),
   reactivate: adminProcedure.input(z.object({ userId: z.number().int() })).mutation(({ ctx, input }) => reactivateUser(input.userId, ctx.user.id)),
+  verifyEmail: adminProcedure.input(z.object({ userId: z.number().int() })).mutation(({ ctx, input }) => verifyUserEmailManually(input.userId, ctx.user.id)),
 });

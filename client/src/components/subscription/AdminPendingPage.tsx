@@ -30,7 +30,7 @@ export default function AdminPendingPage() {
           {pendingUsers.data.map((pendingUser) => (
             <div key={pendingUser.id} className="rounded-2xl border border-[#1f2333]/[0.07] p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div><div className="text-[13px] font-semibold text-[#303342]">{pendingUser.name || "İsimsiz"}</div><div className="mt-0.5 text-[10px] text-[#999aa2]">{pendingUser.email || pendingUser.openId} · {formatDate(pendingUser.createdAt)}</div></div>
+                <div><div className="text-[13px] font-semibold text-[#303342]">{pendingUser.name || "İsimsiz"}</div><div className="mt-0.5 text-[10px] text-[#999aa2]">{pendingUser.email || pendingUser.phone || pendingUser.openId} ·{formatDate(pendingUser.createdAt)}</div></div>
                 <div className="flex gap-2">
                   <Button onClick={() => approve.mutate({ userId: pendingUser.id })} disabled={approve.isPending} className="h-9 rounded-xl bg-[#55a98b] px-3 text-[11px] font-semibold text-white hover:bg-[#469278]"><Check size={13} className="mr-1" /> Onayla</Button>
                   <Button onClick={() => setRejectingId(rejectingId === pendingUser.id ? null : pendingUser.id)} variant="outline" className="h-9 rounded-xl border-[#d95d4d]/25 px-3 text-[11px] font-semibold text-[#d95d4d]"><X size={13} className="mr-1" /> Reddet</Button>

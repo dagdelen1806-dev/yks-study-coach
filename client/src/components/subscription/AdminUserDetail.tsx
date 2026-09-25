@@ -3,10 +3,15 @@ import { toast } from "sonner";
 import { Loader2, X } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
+import { COACHING_EXPECTATION_LABELS, COACHING_STYLE_LABELS, GRADE_LEVEL_LABELS, MOCK_EXAM_FREQUENCY_LABELS, NOTIFICATION_PREFERENCE_LABELS, STUDY_METHOD_LABELS, STUDY_TIME_LABELS, TARGET_SCORE_TYPE_LABELS } from "@shared/onboarding";
+import EmailVerifiedBadge from "./EmailVerifiedBadge";
 import { accountStatusLabel, accountStatusTone, approvalLabel, approvalTone, formatDate, formatDateTime, paymentStatusLabel, subscriptionStatusLabel, subscriptionStatusTone } from "./adminFormat";
 
 const FEATURE_LABELS: Record<string, string> = { AI_STUDY_PLAN: "AI Çalışma Planı", OCR_EXAM_IMPORT: "Belgeden Deneme Aktarımı", ADVANCED_ANALYTICS: "Gelişmiş Analizler", PLAN_ADHERENCE: "Plan Uyumu", RESOURCE_RECOMMENDATIONS: "Kaynak Önerileri", ADVANCED_REPORTS: "Gelişmiş Raporlar", FOCUS_AURA_PREMIUM: "Premium Pusula Odak", MOCK_EXAM_ANALYTICS: "Deneme Analitiği" };
-const TAB_LABELS = ["Genel Bakış", "Abonelik", "Kullanım", "İlerleme", "Denemeler", "Konular", "Ödemeler", "Denetim"] as const;
+const LOGIN_METHOD_LABELS: Record<string, string> = { dev_email: "E-posta + şifre", dev_phone: "Telefon + şifre", dev: "İsim + şifre (eski)" };
+const labelOf = (labels: Record<string, string>, value: string | null) => (value ? labels[value] ?? value : "—");
+const listOf = (values: string[], labels?: Record<string, string>) => (values.length ? values.map((value) => labels?.[value] ?? value).join(", ") : "—");
+const TAB_LABELS =["Genel Bakış", "Profil", "Abonelik", "Kullanım", "İlerleme", "Denemeler", "Konular", "Ödemeler", "Denetim"] as const;
 type Tab = (typeof TAB_LABELS)[number];
 
 /**
@@ -27,6 +32,7 @@ export default function AdminUserDetail({ userId, onClose }: { userId: number; o
   const reactivate = trpc.admin.users.reactivate.useMutation({ onSuccess: () => { toast.success("Yeniden aktifleştirildi."); refetch(); }, onError: (error) => toast.error(error.message) });
   const reject = trpc.admin.users.reject.useMutation({ onSuccess: () => { toast.success("Reddedildi."); refetch(); }, onError: (error) => toast.error(error.message) });
   const resetUsage = trpc.admin.usage.reset.useMutation({ onSuccess: () => { toast.success("Kullanım sıfırlandı."); refetch(); }, onError: (error) => toast.error(error.message) });
+  const verifyEmail = trpc.admin.users.verifyEmail.useMutation({ onSuccess: () => { toast.success("E-posta doğrulandı olarak işaretlendi."); refetch(); }, onError: (error) => toast.error(error.message) });
   const revoke = trpc.admin.subscriptions.revoke.useMutation({ onSuccess: () => { toast.success("Erişim geri alındı."); refetch(); }, onError: (error) => toast.error(error.message) });
 
   return (
@@ -42,12 +48,13 @@ export default function AdminUserDetail({ userId, onClose }: { userId: number; o
                   <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[#1f2333] text-[13px] font-bold text-white">{(detail.data.user.name || "?").slice(0, 2).toUpperCase()}</div>
                   <div>
                     <div className="text-[15px] font-semibold text-[#1f2333]">{detail.data.user.name || "İsimsiz"}{detail.data.user.role === "admin" && <span className="ml-1.5 rounded-full bg-[#1f2333] px-1.5 py-0.5 text-[9px] font-bold text-white">admin</span>}</div>
-                    <div className="text-[11px] text-[#8b8c95]">{detail.data.user.email || detail.data.user.openId}</div>
+                    <div className="text-[11px] text-[#8b8c95]">{detail.data.user.email || detail.data.user.phone || detail.data.user.openId}</div>
                   </div>
                 </div>
                 <button onClick={onClose} className="rounded-lg p-2 text-[#8b8c95] hover:bg-[#f7f5ef]"><X size={16} /></button>
               </div>
               <div className="mt-3 flex flex-wrap gap-1.5">
+                {detail.data.user.loginMethod === "dev_email" && <EmailVerifiedBadge loginMethod={detail.data.user.loginMethod} verifiedAt={detail.data.user.emailVerifiedAt} />}
                 <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${approvalTone[detail.data.user.approvalStatus]}`}>{approvalLabel[detail.data.user.approvalStatus]}</span>
                 <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${accountStatusTone[detail.data.user.accountStatus]}`}>{accountStatusLabel[detail.data.user.accountStatus]}</span>
                 <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${subscriptionStatusTone[detail.data.entitlements.status] ?? "bg-[#f7f5ef] text-[#858690]"}`}>{detail.data.entitlements.planCode} · {subscriptionStatusLabel[detail.data.entitlements.status] ?? detail.data.entitlements.status}</span>
@@ -55,6 +62,9 @@ export default function AdminUserDetail({ userId, onClose }: { userId: number; o
                 <span className="rounded-full bg-[#f7f5ef] px-2 py-0.5 text-[10px] text-[#8b8c95]">Son giriş: {formatDateTime(detail.data.user.lastSignedIn)}</span>
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
+                {detail.data.user.loginMethod === "dev_email" && !detail.data.user.emailVerifiedAt && (
+                  <Button onClick={() => { if (window.confirm("Bu kullanıcının e-postası, kullanıcı linke tıklamadan doğrulanmış sayılacak. Emin misin?")) verifyEmail.mutate({ userId }); }} disabled={verifyEmail.isPending} variant="outline" className="h-8 rounded-lg border-[#3b5ccc]/25 px-3 text-[11px] font-semibold text-[#3b5ccc]">E-postayı manuel doğrula</Button>
+                )}
                 {detail.data.user.approvalStatus === "pending" && <>
                   <Button onClick={() => approve.mutate({ userId })} disabled={approve.isPending} className="h-8 rounded-lg bg-[#55a98b] px-3 text-[11px] font-semibold text-white">Onayla</Button>
                   <Button onClick={() => reject.mutate({ userId })} disabled={reject.isPending} variant="outline" className="h-8 rounded-lg border-[#d95d4d]/25 px-3 text-[11px] font-semibold text-[#d95d4d]">Reddet</Button>
@@ -82,6 +92,65 @@ export default function AdminUserDetail({ userId, onClose }: { userId: number; o
                     <StatBox label="Son 20 kayıt" value={String(detail.data.recentStudyLogs.length)} />
                   </div>
                   {detail.data.user.rejectionReason && <div className="rounded-xl bg-[#fff0ed] p-3 text-[11px] text-[#d95d4d]">Red nedeni: {detail.data.user.rejectionReason}</div>}
+                </div>
+              )}
+
+              {tab === "Profil" && (
+                <div className="space-y-4 text-[12px]">
+                  <Section title="Hesap">
+                    <Row label="Kullanıcı ID" value={`#${detail.data.user.id}`} />
+                    <Row label="Ad" value={detail.data.user.name || "—"} />
+                    <Row label="E-posta" value={detail.data.user.email || "—"} />
+                    {detail.data.user.loginMethod === "dev_email" && <Row label="E-posta doğrulandı" value={detail.data.user.emailVerifiedAt ? formatDateTime(detail.data.user.emailVerifiedAt) : "Hayır"} />}
+                    <Row label="Telefon" value={detail.data.user.phone || "—"} />
+                    <Row label="Giriş yöntemi" value={LOGIN_METHOD_LABELS[detail.data.user.loginMethod ?? ""] ?? detail.data.user.loginMethod ?? "—"} />
+                    <Row label="Rol" value={detail.data.user.role === "admin" ? "Admin" : "Öğrenci"} />
+                    <Row label="Kayıt tarihi" value={formatDateTime(detail.data.user.createdAt)} />
+                    <Row label="Onay tarihi" value={formatDateTime(detail.data.user.approvedAt)} />
+                    <Row label="Son giriş" value={formatDateTime(detail.data.user.lastSignedIn)} />
+                  </Section>
+                  {detail.data.profile.onboardingStep === 0 && !detail.data.profile.onboardingCompleted ? (
+                    <EmptyState text="Öğrenci henüz tanışma (onboarding) formunu doldurmadı." />
+                  ) : (
+                    <>
+                      <Section title={`Öğrenci bilgileri${detail.data.profile.onboardingCompleted ? "" : " (form yarım kaldı)"}`}>
+                        <Row label="Hitap adı" value={detail.data.profile.preferredName || "—"} />
+                        <Row label="Sınıf" value={detail.data.profile.gradeLevel ? GRADE_LEVEL_LABELS[detail.data.profile.gradeLevel] : "—"} />
+                        <Row label="Sınav yılı" value={detail.data.profile.examYear ? String(detail.data.profile.examYear) : "—"} />
+                        <Row label="Puan türü" value={detail.data.profile.targetScoreType ? TARGET_SCORE_TYPE_LABELS[detail.data.profile.targetScoreType] : "—"} />
+                      </Section>
+                      <Section title="Akademik durum">
+                        <Row label="TYT net" value={detail.data.profile.currentTytNet || "—"} />
+                        <Row label="AYT net" value={detail.data.profile.currentAytNet || "—"} />
+                        <Row label="Deneme sıklığı" value={labelOf(MOCK_EXAM_FREQUENCY_LABELS, detail.data.profile.mockExamFrequency)} />
+                        <Row label="Güçlü dersler" value={listOf(detail.data.profile.strongSubjects)} />
+                        <Row label="Zayıf dersler" value={listOf(detail.data.profile.weakSubjects)} />
+                        <Row label="Önceden planı var mıydı" value={detail.data.profile.hasPriorStudyPlan === null ? "—" : detail.data.profile.hasPriorStudyPlan ? "Evet" : "Hayır"} />
+                      </Section>
+                      <Section title="Hedefler">
+                        <Row label="Hedef üniversite" value={detail.data.profile.targetUniversity || "—"} />
+                        <Row label="Hedef bölüm" value={detail.data.profile.targetDepartment || "—"} />
+                        <Row label="Hedef sıralama" value={detail.data.profile.targetRanking || "—"} />
+                        <TextRow label="Ana hedef" value={detail.data.profile.mainGoal} />
+                        <TextRow label="Kısa vadeli hedef" value={detail.data.profile.shortTermGoal} />
+                        <TextRow label="Uzun vadeli hedef" value={detail.data.profile.longTermGoal} />
+                      </Section>
+                      <Section title="Çalışma düzeni">
+                        <Row label="Günlük çalışma" value={detail.data.profile.dailyStudyDuration ? `${detail.data.profile.dailyStudyDuration} dk` : "—"} />
+                        <Row label="Başlangıç saati" value={detail.data.profile.preferredStudyStartTime || "—"} />
+                        <Row label="Çalışma günleri" value={listOf(detail.data.profile.availableStudyDays)} />
+                        <Row label="Tercih edilen saatler" value={listOf(detail.data.profile.preferredStudyTimes, STUDY_TIME_LABELS)} />
+                        <Row label="Çalışma yöntemleri" value={listOf(detail.data.profile.preferredStudyMethods, STUDY_METHOD_LABELS)} />
+                        <TextRow label="Engeller" value={detail.data.profile.studyObstacles} />
+                      </Section>
+                      <Section title="Koçluk tercihleri">
+                        <Row label="Beklentiler" value={listOf(detail.data.profile.coachingExpectations, COACHING_EXPECTATION_LABELS)} />
+                        <Row label="Bildirim tercihi" value={labelOf(NOTIFICATION_PREFERENCE_LABELS, detail.data.profile.notificationPreference)} />
+                        <Row label="Koçluk tarzı" value={labelOf(COACHING_STYLE_LABELS, detail.data.profile.coachingStyle)} />
+                        <TextRow label="Ek notlar" value={detail.data.profile.additionalNotes} />
+                      </Section>
+                    </>
+                  )}
                 </div>
               )}
 
@@ -176,6 +245,12 @@ function StatBox({ label, value }: { label: string; value: string }) {
 }
 function Row({ label, value }: { label: string; value: string }) {
   return <div className="flex items-center justify-between border-b border-[#1f2333]/[0.05] py-2"><span className="text-[#8b8c95]">{label}</span><span className="font-medium text-[#343643]">{value}</span></div>;
+}
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return <div><div className="mb-1 text-[10px] font-bold uppercase tracking-[.1em] text-[#9a9ba3]">{title}</div>{children}</div>;
+}
+function TextRow({ label, value }: { label: string; value: string | null }) {
+  return <div className="border-b border-[#1f2333]/[0.05] py-2"><div className="text-[#8b8c95]">{label}</div><div className="mt-0.5 whitespace-pre-wrap font-medium text-[#343643]">{value || "—"}</div></div>;
 }
 function EmptyState({ text }: { text: string }) {
   return <div className="rounded-2xl bg-[#f7f5ef] p-6 text-center text-[12px] text-[#858690]">{text}</div>;

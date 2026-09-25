@@ -54,7 +54,11 @@ Kendi `.env` dosyandaki (`env.template`'teki) isimlerle birebir aynı isimleri k
 |---|---|
 | `DATABASE_URL` | **Bulutta çalışan** bir MySQL bağlantı string'i olmalı — bkz. aşağıdaki 3. adım. Yerel Laragon MySQL'e Vercel'den erişilemez. |
 | `JWT_SECRET` | Uzun, rastgele bir string. |
-| `ALLOW_LOCAL_AUTH` | **`true` — ZORUNLU.** Gerçek Manus OAuth bu deploy'da yapılandırılmadığı için (aşağıdaki `VITE_APP_ID` satırına bak) uygulamanın tek giriş yolu ad+şifre ekranı; bu olmadan kayıt/giriş sayfası hiç çalışmaz (`Cannot POST /api/dev-login`). Kayıt olan hesaplar yine admin onayı bekler. |
+| `ALLOW_LOCAL_AUTH` | **`true` — ZORUNLU.** Gerçek Manus OAuth bu deploy'da yapılandırılmadığı için (aşağıdaki `VITE_APP_ID` satırına bak) uygulamanın tek giriş yolu e-posta/telefon + şifre ekranı; bu olmadan kayıt/giriş sayfası hiç çalışmaz (`Cannot POST /api/dev-login`). Kayıt olan hesaplar yine admin onayı bekler. |
+| `ADMIN_LOGINS` | Admin olacak e-posta/telefon (virgülle birden fazla yazılabilir, ör. `ben@ornek.com`). E-posta hesabı, adresini **doğruladığı anda** admin + onaylı olur (doğrulanmadan asla). Telefon için doğrulama yok — telefonla admin tanımlarsan deploy'dan hemen sonra o numarayla kayıt ol. |
+| `APP_URL` | **Zorunlu.** Doğrulama linklerinin kök adresi, `https://` ile: ör. `https://yks-study-coach.vercel.app` (kendi alan adın varsa o). Sona `/` koyma. |
+| `RESEND_API_KEY` | **Zorunlu.** [resend.com](https://resend.com) → API Keys → yeni anahtar. Yoksa production'da doğrulama maili gönderilemez (kayıt olur ama kullanıcı "E-postanı doğrula" ekranında kalır). |
+| `MAIL_FROM` | Gönderen adres, ör. `Pusula YKS <noreply@alanadin.com>`. Alan adı Resend'de doğrulanmış olmalı (Resend → Domains → DNS kayıtları). Doğrulanmamış alan adıyla mail gitmez. |
 | `VITE_APP_ID` | **Boş bırakma — herhangi bir dolu değer ver** (ör. `yks-study-coach-standalone`). Manus OAuth pasif olsa da, sunucu bu değeri her oturum jetonunun (JWT) `appId` alanına yazıyor ve doğrulama bu alanın dolu olmasını şart koşuyor; boş bırakılırsa kayıt/giriş "başarılı" görünür ama oturum hiçbir zaman gerçekten doğrulanamaz (canlıda böyle çöktüğü doğrulandı — `[Auth] Session payload missing required fields`). Gerçek bir Manus app id olması gerekmiyor, sadece boş olmaması yeterli. |
 | `OAUTH_SERVER_URL` | `.env`'deki değerle aynı. |
 | `OWNER_OPEN_ID` | `.env`'deki değerle aynı (boşsa boş kalabilir). |
@@ -82,6 +86,11 @@ Bağlantı string'ini aldıktan sonra:
    ```bash
    DATABASE_URL="<bulut-mysql-baglanti-stringi>" npx drizzle-kit migrate
    ```
+
+> **E-posta doğrulaması eklendiğinde (migration `0014_email_verification`):**
+> yeni kodu deploy etmeden ÖNCE bu migration'ı bulut veritabanına uygula
+> (yukarıdaki `drizzle-kit migrate` komutu, yalnızca iki nullable sütun ekler,
+> mevcut veriye dokunmaz). Sütunlar yokken yeni kod `users` sorgularında hata verir.
 
 ## 4) Deploy et
 

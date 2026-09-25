@@ -99,6 +99,13 @@
       "when": 1790087411036,
       "tag": "0013_busy_microchip",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "5",
+      "when": 1790356792615,
+      "tag": "0014_email_verification",
+      "breakpoints": true
     }
   ]
 }

@@ -13,6 +13,16 @@ export const ENV = {
   // açabilirsin; kayıt olan her hesap yine de admin onayı bekler (bkz.
   // approvalStatus), yani rastgele biri kayıt olsa bile panele giremez.
   allowLocalAuth: process.env.ALLOW_LOCAL_AUTH === "true" || process.env.NODE_ENV !== "production",
+  // Virgülle ayrılmış e-posta/telefon listesi (ör. "ben@ornek.com,05551234567").
+  // Bu tanımlayıcılarla yerel girişte kayıt olan/giriş yapan hesap otomatik
+  // admin + onaylı olur (bkz. server/_core/devAuth.ts).
+  adminLogins: (process.env.ADMIN_LOGINS ?? "").split(",").map((value) => value.trim()).filter(Boolean),
+  // E-posta doğrulaması (bkz. server/_core/mailer.ts, emailVerification.ts).
+  // APP_URL: doğrulama linklerinin kök adresi (ör. https://yks-study-coach.vercel.app).
+  // Production'da set edilmeli — yoksa istekteki Host başlığına düşülür.
+  appUrl: (process.env.APP_URL ?? "").replace(/\/+$/, ""),
+  resendApiKey: process.env.RESEND_API_KEY ?? "",
+  mailFrom: process.env.MAIL_FROM ?? "Pusula YKS <onboarding@resend.dev>",
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
 

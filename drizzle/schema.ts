@@ -6,10 +6,16 @@ export const users = mysqlTable("users", {
   name: text("name"),
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
-  // Yalnızca yerel test girişi (`loginMethod = "dev"`, bkz. server/_core/devAuth.ts)
+  // Yalnızca yerel giriş (`loginMethod` "dev" / "dev_email" / "dev_phone", bkz. server/_core/devAuth.ts)
   // kullanan hesaplarda dolu olur — gerçek Manus OAuth hesapları hiç şifre
   // tutmaz, kimlik doğrulaması tamamen OAuth sağlayıcısındadır.
   passwordHash: varchar("passwordHash", { length: 255 }),
+  // E-posta doğrulaması (bkz. server/_core/emailVerification.ts). Yalnızca
+  // `loginMethod = "dev_email"` hesaplar için zorunlu; NULL = doğrulanmadı.
+  // `emailVerificationSentAt` tekrar gönderme bekleme süresini sunucusuz
+  // ortamda da (her instance ayrı bellek) güvenilir kılmak için DB'de tutulur.
+  emailVerifiedAt: timestamp("emailVerifiedAt"),
+  emailVerificationSentAt: timestamp("emailVerificationSentAt"),
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
   // Manuel üyelik onayı (PHASE 2 spec §admin-approval). Sütun varsayılanı
   // "approved" — bu, migration uygulandığında MEVCUT tüm hesapların

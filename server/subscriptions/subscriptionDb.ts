@@ -1,4 +1,5 @@
 import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { phoneFromOpenId } from "../_core/loginIdentifier";
 import { getDb } from "../db";
 import {
   featureUsageLogs,
@@ -319,7 +320,7 @@ export async function listPendingUsers() {
   // zaten filtreliyordu, bu liste uç noktası filtrelemiyordu (canlıda
   // doğrulandı: scrypt hash'i client'a gidiyordu). Aynı desen: bkz.
   // server/admin/adminUserDb.ts getUserDetailForAdmin.
-  return rows.map(({ passwordHash: _passwordHash, ...safeUser }) => safeUser);
+  return rows.map(({ passwordHash: _passwordHash, ...safeUser }) => ({ ...safeUser, phone: phoneFromOpenId(safeUser.openId) }));
 }
 
 export async function approveUser(userId: number, adminId: number): Promise<void> {
