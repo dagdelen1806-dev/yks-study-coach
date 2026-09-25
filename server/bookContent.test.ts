@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { CURRICULUM } from "../shared/curriculum";
-import { buildBookRecommendations, minutesForWeakness, pickStudyDay, weaknessFromAccuracy, type ContentRow } from "./bookContent/bookStudyAllocation";
+import { buildBookRecommendations, computeBookCompletion, minutesForWeakness, pickStudyDay, weaknessFromAccuracy, type ContentRow } from "./bookContent/bookStudyAllocation";
 import { matchTopic, type MatchableTopic } from "./bookContent/curriculumMatcher";
 import { parseTableOfContents, type TocRawPage } from "./bookContent/tocParser";
 
@@ -152,5 +152,50 @@ describe("book study allocation — weak topic → book task", () => {
     expect(pickStudyDay({ today: "2026-09-25", minutes: 45, load, dailyCapacity: 120 })).toBe("2026-09-27");
     expect(pickStudyDay({ today: "2026-09-25", minutes: 30, load, dailyCapacity: 120 })).toBe("2026-09-26");
     expect(pickStudyDay({ today: "2026-09-25", minutes: 200, load: [], dailyCapacity: 120 })).toBeNull();
+  });
+});
+
+describe("book completion score", () => {
+  const { entries } = parseTableOfContents(fixture.pages);
+  const contents = entries.map((entry) => ({ unitNumber: entry.unitNumber, unitTitle: entry.unitTitle, pageStart: entry.pageStart }));
+
+  it("is 0% for a freshly scanned book and counts content rows as the total", () => {
+    const result = computeBookCompletion({ contents, logs: [] });
+    expect(result).toMatchObject({ percent: 0, basis: "contents", done: 0, total: 65, accuracy: null });
+    expect(result.units.map((unit) => unit.total)).toEqual([5, 6, 9, 8, 17, 20]);
+  });
+
+  it("marks tests whose start page falls inside a solved page range, per unit", () => {
+    const logs = [{ pageStart: 9, pageEnd: 26, questions: 60, correct: 45 }, { pageStart: 27, pageEnd: 32, questions: 24, correct: 12 }];
+    const result = computeBookCompletion({ contents, logs });
+    expect(result.units[0]).toMatchObject({ done: 5, total: 5 });
+    expect(result.units[1]).toMatchObject({ done: 2, total: 6 });
+    expect(result).toMatchObject({ done: 7, total: 65, percent: 11, accuracy: 68, questions: 84 });
+  });
+
+  it("falls back to solved pages over page count when the book has no scanned contents", () => {
+    expect(computeBookCompletion({ contents: [], logs: [{ pageStart: 1, pageEnd: 50, questions: 0, correct: 0 }, { pageStart: 40, pageEnd: 60, questions: 0, correct: 0 }], pageCount: 240 }))
+      .toMatchObject({ basis: "pages", done: 60, total: 240, percent: 25 });
+    expect(computeBookCompletion({ contents: [], logs: [] })).toMatchObject({ percent: null, basis: "none" });
+  });
+});
+
+describe("review recommendations for medium topics", () => {
+  const { entries } = parseTableOfContents(fixture.pages);
+  const contents: ContentRow[] = entries.map((entry, index) => {
+    const match = entry.matchText ? matchTopic(entry.matchText, topics, { subject: "Türkçe" }).best : null;
+    return { id: index + 1, bookId: "b1", sortOrder: entry.order, unitNumber: entry.unitNumber, unitTitle: entry.unitTitle, contentType: entry.contentType, label: entry.label, testNumber: entry.testNumber, pageStart: entry.pageStart, pageEnd: entry.pageEnd, topicId: match?.topicId ?? null, mappingConfidence: match?.confidence ?? 0 };
+  });
+
+  it("a medium (60%) topic gets a 20-minute review starting with the ÖSYM-type test", () => {
+    const helper = { topicId: idOf("Paragrafta Yardımcı Düşünce"), topic: "Paragrafta Yardımcı Düşünce", subject: "Türkçe", exam: "TYT" as const, accuracy: 60 };
+    const [rec] = buildBookRecommendations({ weakTopics: [helper], contents, donePages: {}, scheduledPages: {} });
+    expect(rec).toMatchObject({ purpose: "review", minutes: 20, labels: ["ÖSYM Tipi"], testRange: null, pageStart: 73 });
+  });
+
+  it("a weak topic is practice with plain topic tests", () => {
+    const helper = { topicId: idOf("Paragrafta Yardımcı Düşünce"), topic: "Paragrafta Yardımcı Düşünce", subject: "Türkçe", exam: "TYT" as const, accuracy: 40 };
+    const [rec] = buildBookRecommendations({ weakTopics: [helper], contents, donePages: {}, scheduledPages: {} });
+    expect(rec).toMatchObject({ purpose: "practice", minutes: 30, testRange: "1-2", pageStart: 49 });
   });
 });

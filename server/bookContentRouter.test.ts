@@ -27,6 +27,16 @@ vi.mock("./bookContent/ocrProvider", () => ({
   getOcrProvider: () => ({ name: "fixture", extractTableOfContentsPage: vi.fn(async (dataUrl: string) => { ocrCalls.push(dataUrl); return fixture.pages[ocrCalls.length - 1] ?? { items: [] }; }) }),
 }));
 
+// Belirsiz başlıklar için AI danışmanı: gerçek LLM yerine, çağrıldığı başlıkları kaydeden sahte.
+const aiCalls: string[][] = [];
+vi.mock("./bookContent/aiMapper", () => ({
+  suggestTopicsWithAi: vi.fn(async (titles: { key: number; text: string }[], candidates: { id: number; topic: string }[]) => {
+    aiCalls.push(titles.map((title) => title.text));
+    const target = candidates.find((topic) => topic.topic === "Paragrafta Anlam ve Yorum")!;
+    return titles.filter((title) => title.text === "Metnin Bütününden Çıkarım").map((title) => ({ key: title.key, topicId: target.id, confidence: 0.8, reason: "Çıkarım soruları." }));
+  }),
+}));
+
 // Kota/abonelik bu dosyanın konusu değil: premium gibi davran.
 vi.mock("./subscriptions/entitlementService", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./subscriptions/entitlementService")>()),
@@ -82,5 +92,26 @@ describe("bookContent.readTableOfContents — fixture book end to end", () => {
     expect(unit2.every((entry) => entry.suggestion?.topic === "Paragrafta Konu ve Ana Düşünce" && entry.tier === "auto")).toBe(true);
     expect(preview.entries.filter((entry) => entry.contentType === "simulation").every((entry) => entry.tier === "not_applicable")).toBe(true);
     expect(savedCalls).toHaveLength(0);
+    // Fikstürdeki her başlık kurallarla çözüldü: AI'ya hiç sorulmadı.
+    expect(aiCalls).toHaveLength(0);
+  });
+
+  it("asks AI only for headings the rules could not map, and keeps its answer at 'confirm'", async () => {
+    aiCalls.length = 0;
+    ocrCalls.length = 0;
+    fixture.pages.push({ items: [
+      { type: "unit", unitNumber: 6, title: "YORUM", label: null, page: null },
+      { type: "entry", unitNumber: 6, title: "Metnin Bütününden Çıkarım", label: "Test 1", page: 300 },
+      { type: "entry", unitNumber: 6, title: "Zzz Qqq", label: "Test 2", page: 303 },
+    ] });
+    try {
+      const preview = await callerFor(makeUser(1)).bookContent.readTableOfContents({ bookId: "book-a", subject: "Türkçe", images: [image, image, image] });
+      expect(aiCalls).toEqual([["Metnin Bütününden Çıkarım", "Zzz Qqq"]]);
+      const [inferred, unknown] = preview.entries.filter((entry) => entry.unitNumber === 6);
+      expect(inferred).toMatchObject({ tier: "confirm", suggestion: { topic: "Paragrafta Anlam ve Yorum", method: "ai", reason: "Çıkarım soruları." } });
+      expect(unknown).toMatchObject({ tier: "manual", suggestion: null });
+    } finally {
+      fixture.pages.pop();
+    }
   });
 });

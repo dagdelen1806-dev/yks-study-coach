@@ -1,6 +1,7 @@
 import { COOKIE_NAME } from "@shared/const";
 import { TRPCError } from "@trpc/server";
 import { getSessionCookieOptions } from "./_core/cookies";
+import { normalizeIsbn } from "../shared/bookIdentity";
 import { sendVerificationEmail } from "./_core/emailVerification";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
@@ -80,11 +81,35 @@ const bookPhotoSchema = {
     publisher: { type: "string" },
     subject: { type: "string" },
     exam: { type: "string", enum: ["TYT", "AYT", "GENEL"] },
+    authors: { type: "array", items: { type: "string" } },
+    isbn: { type: "string" },
+    edition: { type: "string" },
     confident: { type: "boolean" },
+    // Alan bazında 0-1 güven: arayüz düşük güvenli alanı "kontrol et" diye işaretler.
+    fieldConfidence: {
+      type: "object",
+      properties: { title: { type: "number" }, publisher: { type: "number" }, subject: { type: "number" }, exam: { type: "number" }, isbn: { type: "number" } },
+      required: ["title", "publisher", "subject", "exam", "isbn"],
+      additionalProperties: false,
+    },
   },
-  required: ["title", "publisher", "subject", "exam", "confident"],
+  required: ["title", "publisher", "subject", "exam", "authors", "isbn", "edition", "confident", "fieldConfidence"],
   additionalProperties: false,
 } as const;
+
+type BookPhotoResult = {
+  title: string;
+  publisher: string;
+  subject: string;
+  exam: "TYT" | "AYT" | "GENEL";
+  authors: string[];
+  isbn: string;
+  edition: string;
+  confident: boolean;
+  fieldConfidence: { title: number; publisher: number; subject: number; exam: number; isbn: number };
+};
+
+const clamp01 = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0);
 
 const userExamInput = z.object({
   title: z.string().min(1).max(180),
@@ -187,7 +212,7 @@ export const appRouter = router({
     addLog: protectedProcedure.input(z.object({ bookId: z.string().max(120), topic: z.string().max(180).optional(), sessionDate: z.string(), minutes: z.number().int().min(0).max(1440), questions: z.number().int().min(0).max(2000), correct: z.number().int().min(0).max(2000), wrong: z.number().int().min(0).max(2000), blank: z.number().int().min(0).max(2000), pageStart: z.number().int().min(0).optional(), pageEnd: z.number().int().min(0).optional(), testStart: z.number().int().min(0).optional(), testEnd: z.number().int().min(0).optional() })).mutation(({ ctx, input }) => addBookStudyLog(ctx.user.id, { ...input, sessionDate: new Date(input.sessionDate) })),
     upsertMapping: protectedProcedure.input(z.object({ bookId: z.string().max(120), topic: z.string().max(180), subject: z.string().max(80), pageStart: z.number().int().min(0).optional(), pageEnd: z.number().int().min(0).optional(), testStart: z.number().int().min(0).optional(), testEnd: z.number().int().min(0).optional() })).mutation(({ ctx, input }) => upsertBookTopicMapping(ctx.user.id, input)),
     addSwitch: protectedProcedure.input(z.object({ fromBookId: z.string().max(120).optional(), toBookId: z.string().max(120), reason: z.string().max(300) })).mutation(({ ctx, input }) => addSourceSwitch(ctx.user.id, { ...input, switchedAt: new Date() })),
-    importBooks: protectedProcedure.input(z.object({ books: z.array(z.object({ id: z.string().max(120), title: z.string().min(1).max(180), publisher: z.string().max(120), subject: z.string().max(80), exam: z.enum(["TYT", "AYT"]), level: z.enum(["Kolay", "Orta", "Zor"]), format: z.string().max(120), reason: z.string().max(1000), sourceUrl: z.string().max(500).optional(), pageCount: z.number().int().min(0).optional(), tone: z.string().max(20) })).min(1).max(500) })).mutation(({ ctx, input }) => addUserResourceBooks(ctx.user.id, input.books)),
+    importBooks: protectedProcedure.input(z.object({ books: z.array(z.object({ id: z.string().max(120), title: z.string().min(1).max(180), publisher: z.string().max(120), subject: z.string().max(80), exam: z.enum(["TYT", "AYT"]), level: z.enum(["Kolay", "Orta", "Zor"]), format: z.string().max(120), reason: z.string().max(1000), sourceUrl: z.string().max(500).optional(), pageCount: z.number().int().min(0).optional(), tone: z.string().max(20), authors: z.string().max(300).optional(), isbn: z.string().max(32).optional() })).min(1).max(500) })).mutation(({ ctx, input }) => addUserResourceBooks(ctx.user.id, input.books)),
     // Öğrenci elindeki fiziksel kitabın kapak fotoğrafını çeker (telefon
     // kamerası); LLM görselden kitap adı/yayınevi/ders tahmini çıkarır.
     // Sadece TAHMİN döner — hiçbir şeyi otomatik kütüphaneye eklemez, öğrenci
@@ -199,7 +224,7 @@ export const appRouter = router({
       try {
         const response = await invokeLLM({
           messages: [
-            { role: "system", content: "Sen bir kitap kapağı tanıma asistanısın. Türkçe bir YKS kaynak kitabının kapak fotoğrafını okuyup kitap adını, yayınevini, dersini (Türkçe, Matematik, Fizik, Kimya, Biyoloji, Tarih, Coğrafya, Felsefe, Din Kültürü, Genel) ve sınav kapsamını (TYT/AYT/GENEL) tahmin et. Görselde net okuyamadığın bir alanı boş string bırak, uydurma. `confident` alanını yalnızca kapaktaki yazıları gerçekten net okuyabildiysen true yap." },
+            { role: "system", content: "Sen bir kitap kapağı tanıma asistanısın. Türkçe bir YKS kaynak kitabının kapak fotoğrafını okuyup kitap adını, yayınevini, dersini (Türkçe, Matematik, Fizik, Kimya, Biyoloji, Tarih, Coğrafya, Felsefe, Din Kültürü, Genel) ve sınav kapsamını (TYT/AYT/GENEL) tahmin et. Kapakta yazıyorsa yazar adlarını (authors), ISBN numarasını (isbn, yalnızca kapakta/arkada gerçekten görünüyorsa) ve baskı bilgisini (edition, ör. 'Güncellenmiş Yeni Baskı', '2025-2026') da çıkar. Görselde net okuyamadığın bir alanı boş string / boş dizi bırak, uydurma. fieldConfidence her alan için 0-1 arası okuma güvenin; alan boşsa 0. `confident` alanını yalnızca kapaktaki yazıları gerçekten net okuyabildiysen true yap." },
             { role: "user", content: [{ type: "text" as const, text: "Bu kitap kapağını oku." }, { type: "image_url" as const, image_url: { url: input.dataUrl, detail: "high" as const } }] },
           ],
           response_format: { type: "json_schema", json_schema: { name: "yks_book_cover", strict: true, schema: bookPhotoSchema } },
@@ -207,7 +232,21 @@ export const appRouter = router({
         const raw = response.choices[0]?.message?.content;
         const jsonText = typeof raw === "string" ? raw : raw?.map((part) => part.type === "text" ? part.text : "").join("");
         if (!jsonText) throw new Error("Fotoğraftan yapılandırılmış veri alınamadı");
-        return JSON.parse(jsonText) as { title: string; publisher: string; subject: string; exam: "TYT" | "AYT" | "GENEL"; confident: boolean };
+        const parsed = JSON.parse(jsonText) as BookPhotoResult;
+        // OCR çıktısı olduğu gibi kabul edilmez: ISBN sağlama toplamıyla doğrulanır
+        // (geçersizse boş + güven 0), güvenler 0-1'e sıkıştırılır.
+        const isbn = normalizeIsbn(parsed.isbn);
+        return {
+          title: String(parsed.title ?? "").slice(0, 180),
+          publisher: String(parsed.publisher ?? "").slice(0, 120),
+          subject: String(parsed.subject ?? "").slice(0, 80),
+          exam: parsed.exam,
+          authors: (Array.isArray(parsed.authors) ? parsed.authors : []).map((author) => String(author).trim()).filter(Boolean).slice(0, 8),
+          isbn: isbn ?? "",
+          edition: String(parsed.edition ?? "").slice(0, 120),
+          confident: Boolean(parsed.confident),
+          fieldConfidence: { title: clamp01(parsed.fieldConfidence?.title), publisher: clamp01(parsed.fieldConfidence?.publisher), subject: clamp01(parsed.fieldConfidence?.subject), exam: clamp01(parsed.fieldConfidence?.exam), isbn: isbn ? clamp01(parsed.fieldConfidence?.isbn) : 0 },
+        };
       } catch (error) {
         console.warn("[Book Photo] Extraction failed:", error);
         throw new Error("Fotoğraf okunamadı. Daha net, ışıklı bir kapak fotoğrafı dener misin?");

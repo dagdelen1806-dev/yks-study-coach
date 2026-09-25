@@ -4,6 +4,7 @@ import { bookInventory, bookStudyLogs, bookTopicMappings, coachAlerts, InsertUse
 import type { CoachingStyle, GradeLevel, TargetScoreType } from "../shared/onboarding";
 import { calculatePlanAdherence, dedupeAlerts, type AdherenceSession } from "../shared/planAdherence";
 import { rescheduleOverdueSessions, buildSessionCompletion } from "../shared/calendarLogic";
+import { normalizeIsbn } from "../shared/bookIdentity";
 import { CURRICULUM, isCurriculumOnlySlug } from "../shared/curriculum";
 import { deriveTopicStatus } from "../shared/topicStatus";
 import { topicSeeds, type ExamType, type TopicStatus } from "../shared/yksData";
@@ -437,19 +438,21 @@ type UserResourceBookInput = {
   sourceUrl?: string;
   pageCount?: number;
   tone: string;
+  authors?: string;
+  isbn?: string;
 };
 
 export async function getUserResourceBooks(userId: number) {
   const db = await getDb();
   if (!db) return [];
   const rows = await db.select().from(userResourceBooks).where(eq(userResourceBooks.userId, userId)).orderBy(desc(userResourceBooks.createdAt));
-  return rows.map((row) => ({ id: row.bookId, title: row.title, publisher: row.publisher, subject: row.subject, exam: row.exam, level: row.level, format: row.format, reason: row.reason, sourceUrl: row.sourceUrl || "", pageCount: row.pageCount ?? undefined, tone: row.tone as "blue" | "coral" | "lilac" | "mint" | "yellow" }));
+  return rows.map((row) => ({ id: row.bookId, title: row.title, publisher: row.publisher, subject: row.subject, exam: row.exam, level: row.level, format: row.format, reason: row.reason, sourceUrl: row.sourceUrl || "", pageCount: row.pageCount ?? undefined, tone: row.tone as "blue" | "coral" | "lilac" | "mint" | "yellow", authors: row.authors ?? undefined, isbn: row.isbn ?? undefined }));
 }
 
 export async function addUserResourceBooks(userId: number, inputs: UserResourceBookInput[]) {
   const db = await getDb();
   if (!db || inputs.length === 0) return [];
-  await db.insert(userResourceBooks).values(inputs.map((book) => ({ userId, bookId: book.id, title: book.title, publisher: book.publisher, subject: book.subject, exam: book.exam, level: book.level, format: book.format, reason: book.reason, sourceUrl: book.sourceUrl ?? null, pageCount: book.pageCount ?? null, tone: book.tone })));
+  await db.insert(userResourceBooks).values(inputs.map((book) => ({ userId, bookId: book.id, title: book.title, publisher: book.publisher, subject: book.subject, exam: book.exam, level: book.level, format: book.format, reason: book.reason, sourceUrl: book.sourceUrl ?? null, pageCount: book.pageCount ?? null, tone: book.tone, authors: book.authors?.trim() || null, isbn: normalizeIsbn(book.isbn) })));
   return getUserResourceBooks(userId);
 }
 
@@ -644,7 +647,8 @@ async function ensureCurriculumSeeded(db: NonNullable<Awaited<ReturnType<typeof 
 }
 
 async function findOrCreateTopic(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, exam: ExamType, subject: string, topic: string) {
-  const existing = await db.select().from(yksTopics).where(and(eq(yksTopics.subject, subject), eq(yksTopics.topic, topic))).limit(1);
+  // Aynı ad iki sınavda olabilir (müfredatta TYT ve AYT "Olasılık"): önce aynı sınavın kaydı.
+  const existing = await db.select().from(yksTopics).where(and(eq(yksTopics.subject, subject), eq(yksTopics.topic, topic))).orderBy(sql`${yksTopics.exam} = ${exam} DESC`, yksTopics.id).limit(1);
   if (existing[0]) return existing[0];
   const slug = `${exam}-${slugify(subject)}-${slugify(topic)}` || `topic-${Date.now()}`;
   const result = await db.insert(yksTopics).values({ slug, exam, subject, topic, unit: subject }).onDuplicateKeyUpdate({ set: { subject } });

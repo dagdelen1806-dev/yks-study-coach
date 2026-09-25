@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "40b684c0-f905-4a13-b430-669a99e53d4e",
+  "id": "161c511c-9ab4-4df0-adc9-8f2e930df793",
   "prevId": "ce16bfc8-e1f5-4fa5-9003-391cfc1ef8be",
   "tables": {
     "book_curriculum_topics": {
@@ -2200,6 +2200,14 @@
           "notNull": false,
           "autoincrement": false
         },
+        "autoScheduleBookTasks": {
+          "name": "autoScheduleBookTasks",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
         "createdAt": {
           "name": "createdAt",
           "type": "timestamp",
@@ -3276,7 +3284,7 @@
         },
         "mappingMethod": {
           "name": "mappingMethod",
-          "type": "enum('exact_topic','exact_alias','contains_topic','contains_alias','fuzzy','manual','none')",
+          "type": "enum('exact_topic','exact_alias','contains_topic','contains_alias','fuzzy','ai','manual','none')",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
@@ -3549,6 +3557,20 @@
           "notNull": true,
           "autoincrement": false,
           "default": "'blue'"
+        },
+        "authors": {
+          "name": "authors",
+          "type": "varchar(300)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "isbn": {
+          "name": "isbn",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         },
         "createdAt": {
           "name": "createdAt",

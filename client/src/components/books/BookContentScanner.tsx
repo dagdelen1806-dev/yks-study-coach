@@ -1,16 +1,16 @@
 import { trpc } from "@/lib/trpc";
 import type { inferRouterOutputs } from "@trpc/server";
-import { ArrowDown, ArrowUp, Camera, Check, ImagePlus, Loader2, Plus, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Camera, Check, Crop, ImagePlus, Loader2, Plus, RotateCw, Trash2, X } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { AppRouter } from "../../../../server/routers";
-import { compressImage } from "./imageCompression";
+import { NO_CROP, compressImage, type CropInsets } from "./imageCompression";
 
 export type ScannerBook = { id: string; title: string; publisher: string; subject: string; exam: string };
 
 type Preview = inferRouterOutputs<AppRouter>["bookContent"]["readTableOfContents"];
 type ContentType = Preview["entries"][number]["contentType"];
-type Method = "exact_topic" | "exact_alias" | "contains_topic" | "contains_alias" | "fuzzy" | "manual" | "none";
+type Method = "exact_topic" | "exact_alias" | "contains_topic" | "contains_alias" | "fuzzy" | "ai" | "manual" | "none";
 
 type Row = {
   key: string;
@@ -28,9 +28,15 @@ type Row = {
   /** auto: yüksek güven · confirm: öğrenci onayı bekliyor · manual: elle seçilmeli · not_applicable: karma içerik */
   tier: "auto" | "confirm" | "manual" | "not_applicable";
   confirmed: boolean;
+  /** AI önerisinin kısa gerekçesi (yalnızca method === "ai"). */
+  reason?: string;
 };
 
-type Page = { key: string; file: File; previewUrl: string };
+type Rotation = 0 | 90 | 180 | 270;
+type Page = { key: string; file: File; previewUrl: string; rotate: Rotation; crop: CropInsets };
+
+/** Önizlemede kırpma + döndürme (CSS); asıl işlem gönderimden önce canvas'ta yapılır. */
+const previewStyle = (page: Page) => ({ transform: `rotate(${page.rotate}deg)`, clipPath: `inset(${page.crop.top * 100}% ${page.crop.right * 100}% ${page.crop.bottom * 100}% ${page.crop.left * 100}%)` });
 type Step = "pages" | "reading" | "review" | "saved";
 
 const CONTENT_TYPE_LABELS: Record<ContentType, string> = { topic_test: "Konu testi", topic: "Konu", osym_type: "ÖSYM tipi", review: "Sarmal / karma", simulation: "Deneme / simülasyon" };
@@ -53,6 +59,7 @@ export default function BookContentScanner({ book, onClose, onSaved }: { book: S
   const [source, setSource] = useState<"ocr" | "manual">("ocr");
   const [error, setError] = useState("");
   const [showAllSubjects, setShowAllSubjects] = useState(false);
+  const [editingKey, setEditingKey] = useState<string | null>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
   const utils = trpc.useUtils();
@@ -65,7 +72,7 @@ export default function BookContentScanner({ book, onClose, onSaved }: { book: S
     if (!files?.length) return;
     const images = Array.from(files).filter((file) => file.type.startsWith("image/"));
     if (images.length < files.length) toast.error("Yalnızca fotoğraf ekleyebilirsin.");
-    setPages((current) => [...current, ...images.map((file) => ({ key: nextKey(), file, previewUrl: URL.createObjectURL(file) }))].slice(0, MAX_PAGES));
+    setPages((current) => [...current, ...images.map((file) => ({ key: nextKey(), file, previewUrl: URL.createObjectURL(file), rotate: 0 as Rotation, crop: NO_CROP }))].slice(0, MAX_PAGES));
     if (pages.length + images.length > MAX_PAGES) toast.error(`En fazla ${MAX_PAGES} sayfa ekleyebilirsin.`);
     setError("");
   };
@@ -76,14 +83,17 @@ export default function BookContentScanner({ book, onClose, onSaved }: { book: S
     [next[index], next[target]] = [next[target], next[index]];
     return next;
   });
-  const removePage = (key: string) => setPages((current) => current.filter((page) => page.key !== key));
+  const removePage = (key: string) => { setPages((current) => current.filter((page) => page.key !== key)); if (editingKey === key) setEditingKey(null); };
+  const updatePage = (key: string, patch: Partial<Page>) => setPages((current) => current.map((page) => (page.key === key ? { ...page, ...patch } : page)));
+  const rotatePage = (page: Page) => updatePage(page.key, { rotate: (((page.rotate + 90) % 360) as Rotation) });
+  const editingPage = pages.find((page) => page.key === editingKey) ?? null;
 
   const analyze = async () => {
     if (pages.length === 0 || readToc.isPending) return;
     setStep("reading");
     setError("");
     try {
-      const images = await Promise.all(pages.map((page) => compressImage(page.file)));
+      const images = await Promise.all(pages.map((page) => compressImage(page.file, { rotate: page.rotate, crop: page.crop })));
       const preview = await readToc.mutateAsync({ bookId: book.id, subject: book.subject || null, images: images.map(({ dataUrl, mimeType }) => ({ dataUrl, mimeType })) });
       setWarnings(preview.warnings);
       setRows(preview.entries.map((entry) => ({
@@ -101,6 +111,7 @@ export default function BookContentScanner({ book, onClose, onSaved }: { book: S
         confidence: entry.suggestion?.confidence ?? 0,
         tier: entry.tier,
         confirmed: entry.tier === "auto",
+        reason: entry.suggestion?.reason,
       })));
       setSource("ocr");
       setStep("review");
@@ -200,11 +211,13 @@ export default function BookContentScanner({ book, onClose, onSaved }: { book: S
             <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-4">
               {pages.map((page, index) => (
                 <div key={page.key} className="relative overflow-hidden rounded-xl border border-[#1f2333]/10">
-                  <img src={page.previewUrl} alt={`${index + 1}. sayfa`} className="h-32 w-full object-cover" />
+                  <img src={page.previewUrl} alt={`${index + 1}. sayfa`} className="h-32 w-full object-contain bg-[#f7f5ef]" style={previewStyle(page)} />
                   <div className="absolute left-1.5 top-1.5 rounded-md bg-[#1f2333]/80 px-1.5 py-0.5 text-[10px] font-bold text-white">{index + 1}</div>
                   <div className="absolute inset-x-0 bottom-0 flex justify-between bg-white/90 p-1">
                     <button onClick={() => movePage(index, -1)} disabled={index === 0} className="rounded p-1 disabled:opacity-30" aria-label="Öne al"><ArrowUp size={13} /></button>
                     <button onClick={() => movePage(index, 1)} disabled={index === pages.length - 1} className="rounded p-1 disabled:opacity-30" aria-label="Sona al"><ArrowDown size={13} /></button>
+                    <button onClick={() => rotatePage(page)} className="rounded p-1" aria-label="Döndür"><RotateCw size={13} /></button>
+                    <button onClick={() => setEditingKey(editingKey === page.key ? null : page.key)} className={`rounded p-1 ${editingKey === page.key ? "text-[#3b5ccc]" : ""}`} aria-label="Kırp"><Crop size={13} /></button>
                     <button onClick={() => removePage(page.key)} className="rounded p-1 text-[#d95d4d]" aria-label="Sayfayı çıkar"><Trash2 size={13} /></button>
                   </div>
                 </div>
@@ -215,6 +228,7 @@ export default function BookContentScanner({ book, onClose, onSaved }: { book: S
                 </button>
               )}
             </div>
+            {editingPage && <CropEditor page={editingPage} onChange={(crop) => updatePage(editingPage.key, { crop })} onClose={() => setEditingKey(null)} />}
             <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(event) => { addFiles(event.target.files); event.target.value = ""; }} />
             <input ref={galleryRef} type="file" accept="image/*" multiple className="hidden" onChange={(event) => { addFiles(event.target.files); event.target.value = ""; }} />
             <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
@@ -346,10 +360,33 @@ export default function BookContentScanner({ book, onClose, onSaved }: { book: S
   );
 }
 
+/** Kenar kaydırıcılarıyla kırpma (mobilde sürüklemeden daha güvenilir). */
+function CropEditor({ page, onChange, onClose }: { page: Page; onChange: (crop: CropInsets) => void; onClose: () => void }) {
+  const sides: Array<[keyof CropInsets, string]> = [["top", "Üst"], ["bottom", "Alt"], ["left", "Sol"], ["right", "Sağ"]];
+  return (
+    <div className="mt-3 rounded-2xl border border-[#3b5ccc]/15 bg-[#f7f9ff] p-3">
+      <div className="flex items-center justify-between"><span className="text-[12px] font-semibold text-[#1f2333]">Sayfayı kırp</span><button onClick={onClose} className="text-[11px] font-semibold text-[#3b5ccc]">Tamam</button></div>
+      <div className="mt-2 grid gap-3 sm:grid-cols-[180px_1fr]">
+        <div className="flex h-52 items-center justify-center overflow-hidden rounded-xl bg-white"><img src={page.previewUrl} alt="Kırpma önizlemesi" className="max-h-full max-w-full object-contain" style={previewStyle(page)} /></div>
+        <div className="space-y-2">
+          {sides.map(([side, label]) => (
+            <label key={side} className="block text-[11px] text-[#545661]">
+              <span className="flex justify-between"><span>{label}</span><span>%{Math.round(page.crop[side] * 100)}</span></span>
+              <input type="range" min={0} max={45} value={Math.round(page.crop[side] * 100)} onChange={(event) => onChange({ ...page.crop, [side]: Number(event.target.value) / 100 })} className="w-full accent-[#3b5ccc]" />
+            </label>
+          ))}
+          <button onClick={() => onChange(NO_CROP)} className="text-[11px] font-semibold text-[#8b8c95]">Sıfırla</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MatchBadge({ row }: { row: Row }) {
   if (row.topicId === null) return <span className="shrink-0 rounded-full bg-[#fff0ed] px-1.5 py-0.5 text-[9px] font-bold text-[#d95d4d]">Eşleşme yok</span>;
   if (row.method === "manual") return <span className="shrink-0 rounded-full bg-[#edf1ff] px-1.5 py-0.5 text-[9px] font-bold text-[#3b5ccc]">Elle seçildi</span>;
   const percent = `%${Math.round(row.confidence * 100)}`;
+  if (row.method === "ai" && !row.confirmed) return <span title={row.reason} className="shrink-0 rounded-full bg-[#f3edff] px-1.5 py-0.5 text-[9px] font-bold text-[#7a55c9]">AI önerisi · onay gerekli {percent}</span>;
   if (row.confirmed) return <span className="shrink-0 rounded-full bg-[#eaf6f0] px-1.5 py-0.5 text-[9px] font-bold text-[#3c8a6d]">✓ {percent}</span>;
   return <span className="shrink-0 rounded-full bg-[#fff8df] px-1.5 py-0.5 text-[9px] font-bold text-[#a1711d]">Onay gerekli {percent}</span>;
 }

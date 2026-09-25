@@ -1,3 +1,4 @@
+import { TOPIC_STATUS_THRESHOLDS } from "../../shared/topicStatus";
 import { bookContentConfig } from "./config";
 
 // Zayıf konu × kitap içeriği → kitap bazlı çalışma önerisi. Zayıflığı KENDİSİ
@@ -26,6 +27,8 @@ export type ContentRow = {
 export type PageRange = { pageStart: number; pageEnd: number };
 
 export type BookRecommendation = {
+  /** practice: zayıf konu, yeni konu testleri · review: "Orta" konu, önce ÖSYM tipi/karma testlerle tekrar. */
+  purpose: "practice" | "review";
   topicId: number;
   topic: string;
   subject: string;
@@ -84,16 +87,20 @@ export function buildBookRecommendations(input: {
       byBook.set(row.bookId, [...(byBook.get(row.bookId) ?? []), row]);
     }
 
+    const purpose = weak.accuracy < TOPIC_STATUS_THRESHOLDS.weak ? "practice" : "review";
     for (const [bookId, rows] of Array.from(byBook)) {
       const skip = [...(input.donePages[bookId] ?? []), ...(input.scheduledPages[bookId] ?? [])];
       const open = rows.sort((a, b) => a.sortOrder - b.sortOrder).filter((row) => !overlaps(row, skip));
       if (open.length === 0) continue;
+      // Tekrarda önce sınav tipi (ÖSYM tipi / eğitim kontrol) testler: konuyu karışık, sınav formatında yoklar.
+      if (purpose === "review") open.sort((a, b) => Number(b.contentType === "osym_type") - Number(a.contentType === "osym_type") || a.sortOrder - b.sortOrder);
       const first = open[0];
       const count = Math.max(1, Math.floor(minutes / minutesPerTest));
       const picked = open.filter((row) => row.unitNumber === first.unitNumber && row.unitTitle === first.unitTitle).slice(0, count);
       const numbers = picked.map((row) => row.testNumber).filter((value): value is number => value !== null);
       const allTopicTests = picked.every((row) => row.contentType === "topic_test");
       recommendations.push({
+        purpose,
         topicId: weak.topicId,
         topic: weak.topic,
         subject: weak.subject,
@@ -115,6 +122,59 @@ export function buildBookRecommendations(input: {
   }
 
   return recommendations.sort((a, b) => b.weakness - a.weakness || a.bookId.localeCompare(b.bookId));
+}
+
+export type BookLog = { pageStart: number | null; pageEnd: number | null; questions: number; correct: number };
+
+export type BookCompletion = {
+  /** 0-100; hesaplanamıyorsa (içerik de sayfa sayısı da yok) null. */
+  percent: number | null;
+  basis: "contents" | "pages" | "none";
+  done: number;
+  total: number;
+  /** Kitaptaki tüm çözümlerin doğruluğu (%); hiç soru yoksa null. */
+  accuracy: number | null;
+  questions: number;
+  units: Array<{ unitNumber: number | null; unitTitle: string; done: number; total: number }>;
+};
+
+/**
+ * Kitabın tamamlanma oranı. İçindekiler kayıtlıysa: içerik satırlarından
+ * (test/ÖSYM tipi/sarmal/simülasyon) başlangıç sayfası bir çözüm kaydının
+ * sayfa aralığına düşenlerin oranı. Değilse ve sayfa sayısı biliniyorsa:
+ * çözüm kayıtlarının kapsadığı farklı sayfaların oranı. Kitap görevleri
+ * tamamlanınca çözüm kaydı düştüğü için oran kendiliğinden ilerler.
+ */
+export function computeBookCompletion(input: { contents: Pick<ContentRow, "unitNumber" | "unitTitle" | "pageStart">[]; logs: BookLog[]; pageCount?: number | null }): BookCompletion {
+  const ranges: PageRange[] = input.logs.filter((log) => log.pageStart !== null).map((log) => ({ pageStart: log.pageStart!, pageEnd: Math.max(log.pageStart!, log.pageEnd ?? log.pageStart!) }));
+  const questions = input.logs.reduce((sum, log) => sum + log.questions, 0);
+  const correct = input.logs.reduce((sum, log) => sum + log.correct, 0);
+  const accuracy = questions > 0 ? Math.round((correct / questions) * 100) : null;
+  const isDone = (row: { pageStart: number | null }) => row.pageStart !== null && ranges.some((range) => row.pageStart! >= range.pageStart && row.pageStart! <= range.pageEnd);
+
+  if (input.contents.length > 0) {
+    const units: BookCompletion["units"] = [];
+    for (const row of input.contents) {
+      let unit = units[units.length - 1];
+      if (!unit || unit.unitNumber !== row.unitNumber || unit.unitTitle !== row.unitTitle) {
+        unit = { unitNumber: row.unitNumber, unitTitle: row.unitTitle, done: 0, total: 0 };
+        units.push(unit);
+      }
+      unit.total += 1;
+      if (isDone(row)) unit.done += 1;
+    }
+    const total = input.contents.length;
+    const done = units.reduce((sum, unit) => sum + unit.done, 0);
+    return { percent: Math.round((done / total) * 100), basis: "contents", done, total, accuracy, questions, units };
+  }
+
+  if (input.pageCount && input.pageCount > 0) {
+    const covered = new Set<number>();
+    for (const range of ranges) for (let page = range.pageStart; page <= Math.min(range.pageEnd, input.pageCount); page++) covered.add(page);
+    return { percent: Math.min(100, Math.round((covered.size / input.pageCount) * 100)), basis: "pages", done: covered.size, total: input.pageCount, accuracy, questions, units: [] };
+  }
+
+  return { percent: null, basis: "none", done: 0, total: 0, accuracy, questions, units: [] };
 }
 
 export type PlannedLoad = { date: string; minutes: number; isBook: boolean };

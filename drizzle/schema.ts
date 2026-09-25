@@ -121,6 +121,10 @@ export const userResourceBooks = mysqlTable("user_resource_books", {
   sourceUrl: varchar("sourceUrl", { length: 500 }),
   pageCount: int("pageCount"),
   tone: varchar("tone", { length: 20 }).default("blue").notNull(),
+  // Kapak OCR'ından (öğrenci onayladıktan sonra). ISBN varsa mükerrer kitap
+  // tespitinde en güçlü kimliktir; yoksa yayınevi + normalize ad + yazar.
+  authors: varchar("authors", { length: 300 }),
+  isbn: varchar("isbn", { length: 32 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -187,7 +191,7 @@ export const userBookContents = mysqlTable("user_book_contents", {
   pageEnd: int("pageEnd"),
   topicId: int("topicId"),
   mappingStatus: mysqlEnum("mappingStatus", ["confirmed", "unmatched", "not_applicable"]).notNull(),
-  mappingMethod: mysqlEnum("mappingMethod", ["exact_topic", "exact_alias", "contains_topic", "contains_alias", "fuzzy", "manual", "none"]).default("none").notNull(),
+  mappingMethod: mysqlEnum("mappingMethod", ["exact_topic", "exact_alias", "contains_topic", "contains_alias", "fuzzy", "ai", "manual", "none"]).default("none").notNull(),
   mappingConfidence: decimal("mappingConfidence", { precision: 4, scale: 3 }).default("0").notNull(),
   source: mysqlEnum("source", ["ocr", "manual"]).default("ocr").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -346,6 +350,9 @@ export const studentProfiles = mysqlTable("student_profiles", {
   notificationPreference: varchar("notificationPreference", { length: 60 }),
   coachingStyle: mysqlEnum("coachingStyle", ["destekleyici", "disiplinli", "kisa_net", "detayli", "dengeli"]),
   additionalNotes: text("additionalNotes"),
+  // "Zayıf konular için kitapları otomatik planla" — varsayılan KAPALI: kitap
+  // görevleri yalnızca önerilir, öğrenci açıkça seçmeden plana girmez.
+  autoScheduleBookTasks: int("autoScheduleBookTasks").default(0).notNull(),
 
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),

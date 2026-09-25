@@ -13,13 +13,16 @@ CREATE TABLE `user_book_contents` (
 	`pageEnd` int,
 	`topicId` int,
 	`mappingStatus` enum('confirmed','unmatched','not_applicable') NOT NULL,
-	`mappingMethod` enum('exact_topic','exact_alias','contains_topic','contains_alias','fuzzy','manual','none') NOT NULL DEFAULT 'none',
+	`mappingMethod` enum('exact_topic','exact_alias','contains_topic','contains_alias','fuzzy','ai','manual','none') NOT NULL DEFAULT 'none',
 	`mappingConfidence` decimal(4,3) NOT NULL DEFAULT '0',
 	`source` enum('ocr','manual') NOT NULL DEFAULT 'ocr',
 	`createdAt` timestamp NOT NULL DEFAULT (now()),
 	CONSTRAINT `user_book_contents_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
+ALTER TABLE `student_profiles` ADD `autoScheduleBookTasks` int DEFAULT 0 NOT NULL;--> statement-breakpoint
 ALTER TABLE `study_plan_sessions` ADD `sourceBookId` varchar(120);--> statement-breakpoint
+ALTER TABLE `user_resource_books` ADD `authors` varchar(300);--> statement-breakpoint
+ALTER TABLE `user_resource_books` ADD `isbn` varchar(32);--> statement-breakpoint
 CREATE INDEX `user_book_contents_user_book_idx` ON `user_book_contents` (`userId`,`bookId`);--> statement-breakpoint
 CREATE INDEX `user_book_contents_user_topic_idx` ON `user_book_contents` (`userId`,`topicId`);

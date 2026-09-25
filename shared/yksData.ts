@@ -41,6 +41,9 @@ export type ResourceBook = {
   sourceUrl: string;
   pageCount?: number;
   tone: "blue" | "coral" | "lilac" | "mint" | "yellow";
+  /** Kapak OCR'ından (öğrencinin kendi eklediği kitaplarda); mükerrer tespitinde kullanılır. */
+  authors?: string;
+  isbn?: string;
 };
 
 export type BookStudyLog = {

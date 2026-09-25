@@ -2,8 +2,8 @@ import { and, eq, inArray, isNull, lte, gte } from "drizzle-orm";
 import { bookInventory, bookStudyLogs, catalogBooks, studentProfiles, studyPlanSessions, studyPlans, userBookContents, userResourceBooks, yksTopics } from "../../drizzle/schema";
 import { CURRICULUM } from "../../shared/curriculum";
 import { getDb, getTopicCatalog, getUserTopicProgress, upsertBookTopicMapping } from "../db";
-import { buildBookRecommendations, pickStudyDay, type BookRecommendation, type ContentRow, type PageRange } from "./bookStudyAllocation";
-import type { MatchableTopic } from "./curriculumMatcher";
+import { buildBookRecommendations, computeBookCompletion, pickStudyDay, type BookRecommendation, type ContentRow, type PageRange } from "./bookStudyAllocation";
+import { deriveCurriculumWeakTopics, type ResolvableTopic } from "./examTopicResolver";
 import type { ContentType } from "./tocParser";
 
 type Db = NonNullable<Awaited<ReturnType<typeof getDb>>>;
@@ -16,10 +16,10 @@ async function requireDb(): Promise<Db> {
 
 /** Eşleştirmeye aday konular: `yks_topics`'in tamamı (müfredat + eski konular),
  * müfredattaki alias'larla zenginleştirilmiş. Yeni konu buradan asla doğmaz. */
-export async function getMatchableTopics(): Promise<MatchableTopic[]> {
+export async function getMatchableTopics(): Promise<ResolvableTopic[]> {
   const catalog = await getTopicCatalog();
   const aliasesBySlug = new Map(CURRICULUM.map((def) => [def.slug, def.aliases]));
-  return catalog.map((row) => ({ id: row.id, exam: row.exam, subject: row.subject, unit: row.unit, topic: row.topic, aliases: aliasesBySlug.get(row.slug) ?? [] }));
+  return catalog.map((row) => ({ id: row.id, slug: row.slug, exam: row.exam, subject: row.subject, unit: row.unit, topic: row.topic, aliases: aliasesBySlug.get(row.slug) ?? [] }));
 }
 
 /** Öğrencinin rafında (aktif) olan kitap mı? İçerik yalnızca kendi kitabına yazılır/okunur. */
@@ -39,7 +39,7 @@ export type SaveContentInput = {
   pageStart: number | null;
   pageEnd: number | null;
   topicId: number | null;
-  mappingMethod: "exact_topic" | "exact_alias" | "contains_topic" | "contains_alias" | "fuzzy" | "manual" | "none";
+  mappingMethod: "exact_topic" | "exact_alias" | "contains_topic" | "contains_alias" | "fuzzy" | "ai" | "manual" | "none";
   mappingConfidence: number;
 };
 
@@ -112,18 +112,29 @@ export async function getBookContents(userId: number, bookId: string) {
   return rows.map((row) => ({ ...row, mappingConfidence: Number(row.mappingConfidence), topic: row.topicId !== null ? topicById.get(row.topicId) ?? null : null }));
 }
 
-/** Rafındaki kitaplardan içeriği taranmış olanların id + özet sayıları (kütüphane kartları için). */
+/**
+ * Rafındaki her kitap için kütüphane kartı özeti: içerik/konu sayısı ve
+ * tamamlanma puanı (% tamamlandı, ünite bazında ilerleme, doğruluk).
+ */
 export async function getBookContentSummaries(userId: number) {
   const db = await requireDb();
-  const rows = await db.select({ bookId: userBookContents.bookId, topicId: userBookContents.topicId, contentType: userBookContents.contentType }).from(userBookContents).where(eq(userBookContents.userId, userId));
-  const summary = new Map<string, { bookId: string; entries: number; topicIds: Set<number> }>();
-  for (const row of rows) {
-    const item = summary.get(row.bookId) ?? { bookId: row.bookId, entries: 0, topicIds: new Set<number>() };
-    item.entries += 1;
-    if (row.topicId !== null) item.topicIds.add(row.topicId);
-    summary.set(row.bookId, item);
-  }
-  return Array.from(summary.values()).map((item) => ({ bookId: item.bookId, entries: item.entries, topicIds: Array.from(item.topicIds) }));
+  const activeBooks = (await db.select({ bookId: bookInventory.bookId }).from(bookInventory).where(and(eq(bookInventory.userId, userId), isNull(bookInventory.removedAt)))).map((row) => row.bookId);
+  if (activeBooks.length === 0) return [];
+  const [contentRows, logs, customBooks] = await Promise.all([
+    db.select({ bookId: userBookContents.bookId, topicId: userBookContents.topicId, unitNumber: userBookContents.unitNumber, unitTitle: userBookContents.unitTitle, pageStart: userBookContents.pageStart }).from(userBookContents).where(and(eq(userBookContents.userId, userId), inArray(userBookContents.bookId, activeBooks))).orderBy(userBookContents.sortOrder),
+    db.select({ bookId: bookStudyLogs.bookId, pageStart: bookStudyLogs.pageStart, pageEnd: bookStudyLogs.pageEnd, questions: bookStudyLogs.questions, correct: bookStudyLogs.correct }).from(bookStudyLogs).where(and(eq(bookStudyLogs.userId, userId), inArray(bookStudyLogs.bookId, activeBooks))),
+    db.select({ bookId: userResourceBooks.bookId, pageCount: userResourceBooks.pageCount }).from(userResourceBooks).where(and(eq(userResourceBooks.userId, userId), inArray(userResourceBooks.bookId, activeBooks))),
+  ]);
+  const pageCountByBook = new Map(customBooks.map((row) => [row.bookId, row.pageCount]));
+  return activeBooks.map((bookId) => {
+    const contents = contentRows.filter((row) => row.bookId === bookId);
+    return {
+      bookId,
+      entries: contents.length,
+      topicIds: Array.from(new Set(contents.map((row) => row.topicId).filter((id): id is number => id !== null))),
+      completion: computeBookCompletion({ contents, logs: logs.filter((log) => log.bookId === bookId), pageCount: pageCountByBook.get(bookId) ?? null }),
+    };
+  });
 }
 
 const parseRange = (value: string | null): PageRange | null => {
@@ -134,19 +145,17 @@ const parseRange = (value: string | null): PageRange | null => {
 };
 
 /**
- * Zayıf konular (mevcut sistemin `topic_progress` sonucu: "Zayıf" ve verisi
- * yeterli) × rafındaki kitapların onaylı içeriği → öneriler. Çözülmüş
- * sayfalar `book_study_logs`'tan, zaten planlanmış olanlar bekleyen kitap
+ * Zayıf konular × rafındaki kitapların onaylı içeriği → öneriler.
+ * Zayıflık mevcut sistemin `topic_progress` kayıtlarından (deneme sonuçları,
+ * Konu Haritası, tamamlanan görevler) gelir; deneme konuları müfredat
+ * konusuna examTopicResolver ile bağlanır. Çözülmüş sayfalar
+ * `book_study_logs`'tan, zaten planlanmış olanlar bekleyen kitap
  * görevlerinden okunur; aynı test iki kez önerilmez.
  */
 export async function getWeakTopicBookRecommendations(userId: number): Promise<BookRecommendation[]> {
   const db = await requireDb();
-  const progress = await getUserTopicProgress(userId);
-  const catalog = await getTopicCatalog();
-  const idBySlug = new Map(catalog.map((row) => [row.slug, row.id]));
-  const weakTopics = progress
-    .filter((row) => row.status === "Zayıf" && !row.insufficientData && idBySlug.has(row.slug))
-    .map((row) => ({ topicId: idBySlug.get(row.slug)!, topic: row.topic, subject: row.subject, exam: row.exam, accuracy: row.progress }));
+  const [progress, topics] = await Promise.all([getUserTopicProgress(userId), getMatchableTopics()]);
+  const weakTopics = deriveCurriculumWeakTopics(progress, topics);
   if (weakTopics.length === 0) return [];
 
   const activeBooks = (await db.select({ bookId: bookInventory.bookId }).from(bookInventory).where(and(eq(bookInventory.userId, userId), isNull(bookInventory.removedAt)))).map((row) => row.bookId);
@@ -165,6 +174,41 @@ export async function getWeakTopicBookRecommendations(userId: number): Promise<B
 
   const contents: ContentRow[] = contentRows.map((row) => ({ id: row.id, bookId: row.bookId, sortOrder: row.sortOrder, unitNumber: row.unitNumber, unitTitle: row.unitTitle, contentType: row.contentType, label: row.label, testNumber: row.testNumber, pageStart: row.pageStart, pageEnd: row.pageEnd, topicId: row.topicId, mappingConfidence: Number(row.mappingConfidence) }));
   return buildBookRecommendations({ weakTopics, contents, donePages, scheduledPages });
+}
+
+/** "Zayıf konular için kitapları otomatik planla" tercihi (varsayılan kapalı). */
+export async function getAutoSchedule(userId: number): Promise<boolean> {
+  const db = await requireDb();
+  const [row] = await db.select({ value: studentProfiles.autoScheduleBookTasks }).from(studentProfiles).where(eq(studentProfiles.userId, userId)).limit(1);
+  return row?.value === 1;
+}
+
+export async function setAutoSchedule(userId: number, enabled: boolean): Promise<boolean> {
+  const db = await requireDb();
+  // Profil satırı henüz yoksa (onboarding öncesi) yalnızca bu tercihle açılır; diğer alanlar varsayılanda kalır.
+  await db.insert(studentProfiles).values({ userId, autoScheduleBookTasks: enabled ? 1 : 0 }).onDuplicateKeyUpdate({ set: { autoScheduleBookTasks: enabled ? 1 : 0 } });
+  return enabled;
+}
+
+/**
+ * Tercih açıksa, geçerli önerileri (zayıflık sırasıyla) kapasitesi olan ilk
+ * günlere ekler; plan dolunca durur. Aynı sayfalar zaten planlıysa öneri
+ * listesinde bulunmadığından tekrar çalıştırmak güvenlidir (idempotent).
+ */
+export async function runAutoSchedule(userId: number, bookTitles: Record<string, string>, maxTasks = 3): Promise<{ added: number }> {
+  if (!(await getAutoSchedule(userId))) return { added: 0 };
+  let added = 0;
+  for (let index = 0; index < maxTasks; index++) {
+    const [next] = await getWeakTopicBookRecommendations(userId);
+    if (!next) break;
+    try {
+      await addRecommendationToPlan(userId, { topicId: next.topicId, bookId: next.bookId, bookTitle: bookTitles[next.bookId] ?? "", when: "auto" });
+      added += 1;
+    } catch {
+      break; // Önümüzdeki günlerde yer yok: planı ezmemek için dur.
+    }
+  }
+  return { added };
 }
 
 /** Sunucunun bildiği kitap adı (öğrencinin eklediği ya da katalog kitabı); statik vitrin kitaplarında istemcinin gönderdiği ad kullanılır. */
@@ -231,7 +275,7 @@ export async function addRecommendationToPlan(userId: number, input: { topicId: 
     // Tam müfredat adı: tamamlanınca completeStudySession → upsertTopicProgress
     // aynı yks_topics satırını günceller, zayıflık mevcut sistemce yeniden hesaplanır.
     topic: recommendation.topic,
-    kind: "Soru",
+    kind: recommendation.purpose === "review" ? "Tekrar" : "Soru",
     plannedMinutes: recommendation.minutes,
     targetPages,
     targetTests: recommendation.testRange,

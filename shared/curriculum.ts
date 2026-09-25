@@ -109,7 +109,10 @@ const TYT: Record<string, SubjectTree> = {
     ],
   },
   Felsefe: {
-    "Felsefe": ["Felsefeye Giriş", "Bilgi Felsefesi", "Varlık Felsefesi", "Ahlak Felsefesi", "Sanat Felsefesi", "Din Felsefesi", "Siyaset Felsefesi", "Bilim Felsefesi"],
+    "Felsefe": [
+      "Felsefeye Giriş", "Bilgi Felsefesi", "Varlık Felsefesi", "Ahlak Felsefesi", "Sanat Felsefesi", "Din Felsefesi", "Siyaset Felsefesi", "Bilim Felsefesi",
+      { topic: "Felsefe Tarihi", aliases: ["mö 6 yüzyıl ms 2 yüzyıl felsefesi", "ms 2 yüzyıl ms 15 yüzyıl felsefesi", "15 17 yüzyıl felsefesi", "18 19 yüzyıl felsefesi", "20 yüzyıl felsefesi"] },
+    ],
   },
   "Din Kültürü": {
     "Din Kültürü": ["Bilgi ve İnanç", "Din ve İslam", "İslam ve İbadet", "Gençlik ve Değerler", "Allah İnsan İlişkisi", "Hz. Muhammed", "Vahiy ve Akıl", "İslam Düşüncesinde Yorumlar"],

@@ -1,7 +1,7 @@
 import { and, count, desc, eq, gte, inArray, isNull, like, lt, or, sql } from "drizzle-orm";
 import { phoneFromOpenId } from "../_core/loginIdentifier";
 import { getDb, getStudentProfile } from "../db";
-import { subscriptionPlans, subscriptions, topicProgress, topicStudyLogs, userBookContents, userMockExams, users } from "../../drizzle/schema";
+import { catalogBooks, subscriptionPlans, subscriptions, topicProgress, topicStudyLogs, userBookContents, userMockExams, userResourceBooks, users } from "../../drizzle/schema";
 import { getEntitlements, getUsageSummaryForUser } from "../subscriptions/entitlementService";
 import { getPlanById, listAuditLogsForUser, listPaymentsForUser, writeAuditLog } from "../subscriptions/subscriptionDb";
 import { getStudyProgressScore } from "./progressService";
@@ -195,6 +195,17 @@ export async function getUserDetailForAdmin(userId: number) {
     map.set(row.bookId, item);
     return map;
   }, new Map<string, { bookId: string; source: string; entries: number; confirmed: number; unmatched: number; lowConfidence: number; manual: number; scannedAt: Date }>()).values());
+  // Kitap adı: öğrencinin eklediği kitap ya da katalog kitabı (statik vitrin kitaplarında id kalır).
+  const bookIds = bookContents.map((book) => book.bookId);
+  const numericIds = bookIds.filter((id) => /^\d+$/.test(id)).map(Number);
+  const [customTitles, catalogTitles] = bookIds.length
+    ? await Promise.all([
+        db.select({ bookId: userResourceBooks.bookId, title: userResourceBooks.title }).from(userResourceBooks).where(and(eq(userResourceBooks.userId, userId), inArray(userResourceBooks.bookId, bookIds))),
+        numericIds.length ? db.select({ id: catalogBooks.id, name: catalogBooks.name }).from(catalogBooks).where(inArray(catalogBooks.id, numericIds)) : Promise.resolve([]),
+      ])
+    : [[], []];
+  const titleById = new Map<string, string>([...customTitles.map((row) => [row.bookId, row.title] as [string, string]), ...catalogTitles.map((row) => [String(row.id), row.name] as [string, string])]);
+  const bookContentsWithTitles = bookContents.map((book) => ({ ...book, title: titleById.get(book.bookId) ?? null }));
 
   const [subscriptionRow] = await db.select().from(subscriptions).where(eq(subscriptions.userId, userId)).limit(1);
   const plan = subscriptionRow ? await getPlanById(subscriptionRow.planId) : null;
@@ -204,7 +215,7 @@ export async function getUserDetailForAdmin(userId: number) {
   return {
     user: { ...safeUser, phone: phoneFromOpenId(safeUser.openId) },
     profile,
-    bookContents,
+    bookContents: bookContentsWithTitles,
     subscription: subscriptionRow
       ? { ...subscriptionRow, providerSubscriptionId: maskId(subscriptionRow.providerSubscriptionId), providerCustomerId: maskId(subscriptionRow.providerCustomerId), planCode: plan?.code ?? "FREE", planName: plan?.name ?? "Ücretsiz", planTier: plan?.tier ?? "free" }
       : null,

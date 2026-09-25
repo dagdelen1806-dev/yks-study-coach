@@ -15,6 +15,16 @@ export const bookContentConfig = {
     stemLength: 5,
     maxAlternatives: 3,
   },
+  aiMapping: {
+    /** Deterministik eşleştirme belirsiz kaldığında (onay/manuel) AI'ya aday listesinden seçtirilsin mi. */
+    enabled: true,
+    /** AI'ya gösterilecek en fazla aday konu (ilgili dersin konuları). */
+    maxCandidates: 60,
+    /** AI önerisinin güveni bu değeri AŞAMAZ: otomatik öneri eşiğinin altında kalır, öğrenci her zaman onaylar. */
+    maxConfidence: 0.85,
+    /** Bu güvenin altındaki AI önerisi hiç gösterilmez (manuel eşleştirme kalır). */
+    minConfidence: 0.6,
+  },
   ocr: {
     /** Tek istekte gönderilebilecek en büyük görsel (Vercel istek gövdesi sınırı ~4.5 MB). */
     maxImageBytes: 3.5 * 1024 * 1024,
@@ -29,6 +39,8 @@ export const bookContentConfig = {
       { min: 0.5, minutes: 30 },
       { min: 0.3, minutes: 20 },
     ],
+    /** Bu doğruluğun (%) altındaki "Orta" konular için de TEKRAR önerisi yapılır (Zayıf eşiği shared/topicStatus.ts'te). */
+    reviewMaxAccuracy: 70,
     /** Bir kitap testinin ortalama çözüm süresi (dk) — öneride kaç test verileceğini belirler. */
     minutesPerTest: 15,
     /** Bir günde kitap görevlerine ayrılabilecek en fazla süre (dk). */

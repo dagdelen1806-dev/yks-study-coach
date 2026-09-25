@@ -21,9 +21,15 @@ async function loadImage(file: File): Promise<HTMLImageElement> {
   }
 }
 
-export async function compressImage(file: File, options: { maxDimension?: number; maxBytes?: number } = {}): Promise<CompressedImage> {
+/** Görselin kenarlarından kırpılacak oranlar (0–0.45). */
+export type CropInsets = { top: number; right: number; bottom: number; left: number };
+export const NO_CROP: CropInsets = { top: 0, right: 0, bottom: 0, left: 0 };
+
+export async function compressImage(file: File, options: { maxDimension?: number; maxBytes?: number; rotate?: 0 | 90 | 180 | 270; crop?: CropInsets } = {}): Promise<CompressedImage> {
   const maxBytes = options.maxBytes ?? 1.5 * 1024 * 1024;
   let maxDimension = options.maxDimension ?? 2000;
+  const rotate = options.rotate ?? 0;
+  const crop = options.crop ?? NO_CROP;
   let image: HTMLImageElement;
   try {
     image = await loadImage(file);
@@ -35,13 +41,25 @@ export async function compressImage(file: File, options: { maxDimension?: number
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Tarayıcın fotoğraf işlemeyi desteklemiyor.");
 
+  // Kaynakta kırpılacak dikdörtgen (piksel).
+  const sx = Math.round(image.naturalWidth * crop.left);
+  const sy = Math.round(image.naturalHeight * crop.top);
+  const sw = Math.max(1, Math.round(image.naturalWidth * (1 - crop.left - crop.right)));
+  const sh = Math.max(1, Math.round(image.naturalHeight * (1 - crop.top - crop.bottom)));
+  const quarterTurn = rotate === 90 || rotate === 270;
+
   for (let attempt = 0; attempt < 6; attempt++) {
-    const scale = Math.min(1, maxDimension / Math.max(image.naturalWidth, image.naturalHeight));
-    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    const scale = Math.min(1, maxDimension / Math.max(sw, sh));
+    const width = Math.max(1, Math.round(sw * scale));
+    const height = Math.max(1, Math.round(sh * scale));
+    canvas.width = quarterTurn ? height : width;
+    canvas.height = quarterTurn ? width : height;
+    context.setTransform(1, 0, 0, 1, 0, 0);
     context.fillStyle = "#ffffff";
     context.fillRect(0, 0, canvas.width, canvas.height);
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    context.translate(canvas.width / 2, canvas.height / 2);
+    context.rotate((rotate * Math.PI) / 180);
+    context.drawImage(image, sx, sy, sw, sh, -width / 2, -height / 2, width, height);
     for (const quality of [0.85, 0.75, 0.65]) {
       const dataUrl = canvas.toDataURL("image/jpeg", quality);
       const bytes = dataUrlBytes(dataUrl);

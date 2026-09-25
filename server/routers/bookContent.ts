@@ -2,11 +2,12 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { validateDataUrl } from "../_core/fileValidation";
 import { metredFeatureProcedure, protectedProcedure, router } from "../_core/trpc";
-import { addRecommendationToPlan, getBookContents, getBookContentSummaries, getMatchableTopics, getWeakTopicBookRecommendations, replaceBookContents, userOwnsBook } from "../bookContent/bookContentDb";
+import { addRecommendationToPlan, getAutoSchedule, getBookContents, getBookContentSummaries, getMatchableTopics, getWeakTopicBookRecommendations, replaceBookContents, runAutoSchedule, setAutoSchedule, userOwnsBook } from "../bookContent/bookContentDb";
 import { bookContentConfig } from "../bookContent/config";
-import { matchTopic } from "../bookContent/curriculumMatcher";
+import { suggestTopicsWithAi } from "../bookContent/aiMapper";
+import { matchTopic, type MatchMethod, type MatchTier } from "../bookContent/curriculumMatcher";
 import { getOcrProvider } from "../bookContent/ocrProvider";
-import { parseTableOfContents } from "../bookContent/tocParser";
+import { parseTableOfContents, type TocEntry } from "../bookContent/tocParser";
 
 const bookIdInput = z.string().min(1).max(120);
 const examInput = z.enum(["TYT", "AYT"]).nullable().optional();
@@ -17,6 +18,44 @@ const imageInput = z.object({
 });
 
 const contentTypeInput = z.enum(["topic_test", "osym_type", "review", "simulation", "topic"]);
+
+type Suggestion = { topicId: number; confidence: number; method: MatchMethod | "ai"; matchedText: string; topic: string; subject: string; unit: string; reason?: string };
+
+/**
+ * İçindekiler satırlarını müfredata eşler: önce deterministik eşleştirici;
+ * onun "manuel" bıraktığı başlıklar için (açıksa) tek bir AI isteğiyle aday
+ * listesinden öneri. AI önerisi her zaman "onay gerekli" kademesinde kalır.
+ */
+async function matchEntries(entries: TocEntry[], subject: string | null) {
+  const topics = await getMatchableTopics();
+  const topicById = new Map(topics.map((topic) => [topic.id, topic]));
+  const describe = (match: { topicId: number; confidence: number; method: MatchMethod | "ai"; matchedText: string }, reason?: string): Suggestion => {
+    const topic = topicById.get(match.topicId)!;
+    return { ...match, topic: topic.topic, subject: topic.subject, unit: topic.unit, ...(reason ? { reason } : {}) };
+  };
+
+  const matched = entries.map((entry) => {
+    if (!entry.matchText) return { ...entry, suggestion: null as Suggestion | null, alternatives: [] as Suggestion[], tier: "not_applicable" as MatchTier | "not_applicable" };
+    let result = matchTopic(entry.matchText, topics, { subject });
+    // Ders yanlış seçilmiş olabilir: kendi dersinde hiç aday yoksa tüm müfredatta dene (onay yine öğrencide).
+    if (!result.best && subject) result = matchTopic(entry.matchText, topics, {});
+    return { ...entry, suggestion: result.best && result.tier !== "manual" ? describe(result.best) : null, alternatives: [result.best, ...result.alternatives].filter((item): item is NonNullable<typeof item> => Boolean(item)).map((item) => describe(item)), tier: result.tier as MatchTier | "not_applicable" };
+  });
+
+  const unresolvedTexts = Array.from(new Set(matched.filter((entry) => entry.tier === "manual" && entry.matchText).map((entry) => entry.matchText!)));
+  if (unresolvedTexts.length > 0) {
+    const candidates = topics.filter((topic) => !subject || topic.subject === subject);
+    const ai = await suggestTopicsWithAi(unresolvedTexts.map((text, key) => ({ key, text, unitTitle: matched.find((entry) => entry.matchText === text)?.unitTitle ?? "" })), candidates);
+    const byText = new Map(ai.map((answer) => [unresolvedTexts[answer.key], answer]));
+    for (const entry of matched) {
+      const answer = entry.tier === "manual" && entry.matchText ? byText.get(entry.matchText) : undefined;
+      if (!answer) continue;
+      entry.suggestion = describe({ topicId: answer.topicId, confidence: answer.confidence, method: "ai", matchedText: entry.matchText! }, answer.reason);
+      entry.tier = "confirm";
+    }
+  }
+  return matched;
+}
 
 async function assertOwnsBook(userId: number, bookId: string) {
   if (!(await userOwnsBook(userId, bookId))) throw new TRPCError({ code: "FORBIDDEN", message: "Bu kitap kütüphanende bulunmuyor. Önce kitabı rafına ekle." });
@@ -46,31 +85,20 @@ export const bookContentRouter = router({
 
       const provider = getOcrProvider();
       const pages = await Promise.all(input.images.map(async (image, index) => {
-        try {
-          return await provider.extractTableOfContentsPage(image.dataUrl);
-        } catch (error) {
-          console.warn(`[BookContent] OCR failed on page ${index + 1}:`, error instanceof Error ? error.message : error);
-          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `${index + 1}. sayfa okunamadı. Daha net, düz ve ışıklı bir fotoğrafla tekrar dener misin?` });
+        // Sağlayıcıdaki geçici hatalara karşı bir kez yeniden dene.
+        for (let attempt = 1; ; attempt++) {
+          try {
+            return await provider.extractTableOfContentsPage(image.dataUrl);
+          } catch (error) {
+            console.warn(`[BookContent] OCR failed on page ${index + 1} (attempt ${attempt}):`, error instanceof Error ? error.message : error);
+            if (attempt >= 2) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `${index + 1}. sayfa okunamadı. Daha net, düz ve ışıklı bir fotoğrafla tekrar dener misin?` });
+          }
         }
       }));
 
       const { entries, warnings } = parseTableOfContents(pages);
       if (entries.length === 0) throw new TRPCError({ code: "UNPROCESSABLE_CONTENT", message: "Fotoğraflarda içindekiler satırı bulunamadı. İçindekiler sayfasının tamamı görünecek şekilde tekrar çeker misin?" });
-
-      const topics = await getMatchableTopics();
-      const topicName = new Map(topics.map((topic) => [topic.id, topic]));
-      const filter = { subject: input.subject || null };
-      return {
-        warnings,
-        entries: entries.map((entry) => {
-          if (!entry.matchText) return { ...entry, suggestion: null, alternatives: [], tier: "not_applicable" as const };
-          let result = matchTopic(entry.matchText, topics, filter);
-          // Ders yanlış seçilmiş olabilir: kendi dersinde hiç aday yoksa tüm müfredatta dene (onay yine öğrencide).
-          if (!result.best && filter.subject) result = matchTopic(entry.matchText, topics, {});
-          const describe = (match: NonNullable<typeof result.best>) => ({ ...match, topic: topicName.get(match.topicId)!.topic, subject: topicName.get(match.topicId)!.subject, unit: topicName.get(match.topicId)!.unit });
-          return { ...entry, suggestion: result.best ? describe(result.best) : null, alternatives: result.alternatives.map(describe), tier: result.tier };
-        }),
-      };
+      return { warnings, entries: await matchEntries(entries, input.subject || null) };
     }),
 
   // Elle eşleştirme listesi (öğrenci "Değiştir" dediğinde).
@@ -99,7 +127,7 @@ export const bookContentRouter = router({
         pageStart: z.number().int().min(1).max(5000).nullable(),
         pageEnd: z.number().int().min(1).max(5000).nullable(),
         topicId: z.number().int().positive().nullable(),
-        mappingMethod: z.enum(["exact_topic", "exact_alias", "contains_topic", "contains_alias", "fuzzy", "manual", "none"]),
+        mappingMethod: z.enum(["exact_topic", "exact_alias", "contains_topic", "contains_alias", "fuzzy", "ai", "manual", "none"]),
         mappingConfidence: z.number().min(0).max(1),
       })).max(400),
     }))
@@ -123,6 +151,13 @@ export const bookContentRouter = router({
   summaries: protectedProcedure.query(({ ctx }) => getBookContentSummaries(ctx.user.id)),
 
   recommendations: protectedProcedure.query(({ ctx }) => getWeakTopicBookRecommendations(ctx.user.id)),
+
+  autoSchedule: protectedProcedure.query(({ ctx }) => getAutoSchedule(ctx.user.id)),
+  setAutoSchedule: protectedProcedure.input(z.object({ enabled: z.boolean() })).mutation(({ ctx, input }) => setAutoSchedule(ctx.user.id, input.enabled)),
+  // İstemci günde bir kez çağırır (tercih kapalıysa hiçbir şey yapmaz).
+  runAutoSchedule: protectedProcedure
+    .input(z.object({ bookTitles: z.record(z.string().max(120), z.string().max(180)) }))
+    .mutation(({ ctx, input }) => runAutoSchedule(ctx.user.id, input.bookTitles)),
 
   addToPlan: protectedProcedure
     .input(z.object({ topicId: z.number().int().positive(), bookId: bookIdInput, bookTitle: z.string().max(180), when: z.enum(["today", "auto"]) }))
