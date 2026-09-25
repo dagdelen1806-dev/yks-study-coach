@@ -11,6 +11,7 @@ import { z } from "zod";
 import { addBookStudyLog, addBookToInventory, addSourceSwitch, addTopicStudyLog, addUserMockExams, addUserResourceBooks, completeStudySession, getBookInventory, getBookStudyLogs, getBookTopicMappings, getCoachAlerts, getPlanAdherenceInputs, getSourceSwitches, getStudyCalendar, getUserMockExams, getUserResourceBooks, logCompletedRoutineSession, markCoachAlertRead, removeBookFromInventory, savePlanAdherence, saveStudyPlan, upsertBookTopicMapping } from "./db";
 import { calculatePlanAdherence } from "../shared/planAdherence";
 import { topicsRouter } from "./routers/topics";
+import { bookContentRouter } from "./routers/bookContent";
 import { resourceCatalogRouter } from "./routers/resourceCatalog";
 import { onboardingRouter } from "./routers/onboarding";
 import { subscriptionRouter } from "./routers/subscription";
@@ -317,6 +318,7 @@ export const appRouter = router({
   }),
 
   topics: topicsRouter,
+  bookContent: bookContentRouter,
   catalog: resourceCatalogRouter,
   onboarding: onboardingRouter,
   subscription: subscriptionRouter,

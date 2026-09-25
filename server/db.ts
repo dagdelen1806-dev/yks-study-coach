@@ -4,6 +4,7 @@ import { bookInventory, bookStudyLogs, bookTopicMappings, coachAlerts, InsertUse
 import type { CoachingStyle, GradeLevel, TargetScoreType } from "../shared/onboarding";
 import { calculatePlanAdherence, dedupeAlerts, type AdherenceSession } from "../shared/planAdherence";
 import { rescheduleOverdueSessions, buildSessionCompletion } from "../shared/calendarLogic";
+import { CURRICULUM, isCurriculumOnlySlug } from "../shared/curriculum";
 import { deriveTopicStatus } from "../shared/topicStatus";
 import { topicSeeds, type ExamType, type TopicStatus } from "../shared/yksData";
 import { ENV } from './_core/env';
@@ -500,6 +501,28 @@ export async function completeStudySession(userId: number, input: { sessionId: n
   // gelişimi için var) — actualPages'i buraya taşımıyoruz.
   const { actualPages: _actualPages, ...topicLogInput } = plan.topicLog;
   await db.insert(topicStudyLogs).values({ userId, ...topicLogInput, note: topicLogInput.note ?? null });
+  // Kitaptan üretilmiş görev: aynı performans kitabın çözüm kaydına da düşer
+  // (kitap istatistikleri + "bu testler çözüldü" bilgisi). Konu takibi
+  // yukarıdaki topic_study_logs / aşağıdaki upsertTopicProgress'te kalır.
+  if (existing[0].sourceBookId) {
+    const pages = existing[0].targetPages?.match(/(\d+)\s*[-–]\s*(\d+)/);
+    const tests = existing[0].targetTests?.match(/(\d+)(?:\s*[-–]\s*(\d+))?/);
+    await db.insert(bookStudyLogs).values({
+      userId,
+      bookId: existing[0].sourceBookId,
+      topic: existing[0].topic,
+      sessionDate: completedAt,
+      minutes: actualMinutes,
+      questions: actualQuestions,
+      correct,
+      wrong,
+      blank,
+      pageStart: pages ? Number(pages[1]) : null,
+      pageEnd: pages ? Number(pages[2]) : null,
+      testStart: tests ? Number(tests[1]) : null,
+      testEnd: tests ? Number(tests[2] ?? tests[1]) : null,
+    });
+  }
   // Takvim/Pusula Odak oturumundan gelen gerçek performans, konu haritasındaki
   // durumu (Zayıf/Orta/İyi) da günceller — bu sayede AI Planım, yalnızca Konu
   // Haritası'na elle girilen verileri değil, fiilen çalışılan oturumları da görür.
@@ -600,7 +623,24 @@ export async function ensureTopicCatalogSeeded() {
   if (existing.length === 0 && topicSeeds.length > 0) {
     await db.insert(yksTopics).values(topicSeeds.map((seed) => ({ slug: seed.id, exam: seed.exam, subject: seed.subject, topic: seed.topic, unit: seed.unit }))).onDuplicateKeyUpdate({ set: { subject: sql`subject` } });
   }
+  await ensureCurriculumSeeded(db);
   topicCatalogSeeded = true;
+}
+
+/**
+ * Müfredatı (shared/curriculum.ts) `yks_topics`'e ekler — yalnızca EKSİK
+ * slug'lar yazılır, var olan satırlar (eski konular, `legacySlug` ile yeniden
+ * kullanılanlar, kullanıcı verisinden oluşmuş konular) hiç değişmez; bu yüzden
+ * her soğuk başlangıçta çalışması güvenli. Tek sorguda eksikler bulunur.
+ */
+async function ensureCurriculumSeeded(db: NonNullable<Awaited<ReturnType<typeof getDb>>>) {
+  const present = new Set((await db.select({ slug: yksTopics.slug }).from(yksTopics)).map((row) => row.slug));
+  const missing = CURRICULUM.filter((def) => !present.has(def.slug));
+  if (missing.length === 0) return;
+  await db
+    .insert(yksTopics)
+    .values(missing.map((def) => ({ slug: def.slug, exam: def.exam, subject: def.subject, topic: def.topic, unit: def.unit })))
+    .onDuplicateKeyUpdate({ set: { slug: sql`slug` } });
 }
 
 async function findOrCreateTopic(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, exam: ExamType, subject: string, topic: string) {
@@ -638,7 +678,12 @@ export async function getUserTopicProgress(userId: number): Promise<UserTopicPro
   if (!db) return catalog.map((topic) => ({ ...topic, progress: 0, status: "Zayıf" as TopicStatus, insufficientData: true, lastReviewedAt: null }));
   const rows = await db.select().from(topicProgress).where(eq(topicProgress.userId, userId));
   const byTopicId = new Map(rows.map((row) => [row.topicId, row]));
-  return catalog.map((topic) => {
+  // Müfredattan gelen ~250 konu, öğrenci onlarda hiç veri üretmeden listeye
+  // girerse hepsi "Zayıf / veri yetersiz" görünür (aşağıdaki varsayılan) —
+  // Konu Haritası, zayıf konu listeleri ve AI planı bununla dolardı. Bu yüzden
+  // yalnızca öğrencinin gerçekten verisi olan müfredat konuları dahil edilir;
+  // eski davranış (eski tohum konular + kullanıcı verisinden doğan konular) aynen korunur.
+  return catalog.filter((topic) => !isCurriculumOnlySlug(topic.slug) || byTopicId.has(topic.id)).map((topic) => {
     const row = byTopicId.get(topic.id);
     if (!row) return { ...topic, progress: 0, status: "Zayıf" as TopicStatus, insufficientData: true, lastReviewedAt: null };
     return { ...topic, progress: row.progress, status: statusFromDb[row.status], insufficientData: false, lastReviewedAt: row.lastReviewedAt };

@@ -11,7 +11,7 @@ const FEATURE_LABELS: Record<string, string> = { AI_STUDY_PLAN: "AI Çalışma P
 const LOGIN_METHOD_LABELS: Record<string, string> = { dev_email: "E-posta + şifre", dev_phone: "Telefon + şifre", dev: "İsim + şifre (eski)" };
 const labelOf = (labels: Record<string, string>, value: string | null) => (value ? labels[value] ?? value : "—");
 const listOf = (values: string[], labels?: Record<string, string>) => (values.length ? values.map((value) => labels?.[value] ?? value).join(", ") : "—");
-const TAB_LABELS =["Genel Bakış", "Profil", "Abonelik", "Kullanım", "İlerleme", "Denemeler", "Konular", "Ödemeler", "Denetim"] as const;
+const TAB_LABELS = ["Genel Bakış", "Profil", "Abonelik", "Kullanım", "İlerleme", "Denemeler", "Konular", "Kitaplar", "Ödemeler", "Denetim"] as const;
 type Tab = (typeof TAB_LABELS)[number];
 
 /**
@@ -218,6 +218,12 @@ export default function AdminUserDetail({ userId, onClose }: { userId: number; o
               {tab === "Konular" && (
                 detail.data.topicProgress.length === 0 ? <EmptyState text="Henüz çalışılmış konu yok." /> : (
                   <div className="space-y-2">{detail.data.topicProgress.map((topic) => <div key={topic.id} className="flex items-center justify-between rounded-xl border border-[#1f2333]/[0.07] p-2.5 text-[11px]"><span className="text-[#343643]">Konu #{topic.topicId}</span><span className="font-semibold text-[#3b5ccc]">%{topic.progress} · {topic.status}</span></div>)}</div>
+                )
+              )}
+
+              {tab === "Kitaplar" && (
+                detail.data.bookContents.length === 0 ? <EmptyState text="Bu öğrenci henüz bir kitabın içindekilerini taramadı." /> : (
+                  <table className="w-full text-left text-[12px]"><thead className="text-[10px] uppercase text-[#9a9ba3]"><tr><th className="py-1.5">Kitap</th><th className="py-1.5">Kaynak</th><th className="py-1.5">Satır</th><th className="py-1.5">Eşleşti</th><th className="py-1.5">Eşleşmedi</th><th className="py-1.5">Düşük güven</th><th className="py-1.5">Tarih</th></tr></thead><tbody className="divide-y divide-[#1f2333]/[0.06]">{detail.data.bookContents.map((book) => <tr key={book.bookId}><td className="max-w-[160px] truncate py-1.5 pr-2 font-mono text-[10px]">{book.bookId}</td><td className="py-1.5 pr-2">{book.source === "ocr" ? "OCR" : "Elle"}</td><td className="py-1.5 pr-2">{book.entries}</td><td className="py-1.5 pr-2 text-[#3c8a6d]">{book.confirmed}{book.manual ? ` (${book.manual} elle)` : ""}</td><td className={`py-1.5 pr-2 ${book.unmatched ? "font-semibold text-[#d95d4d]" : ""}`}>{book.unmatched}</td><td className={`py-1.5 pr-2 ${book.lowConfidence ? "font-semibold text-[#a1711d]" : ""}`}>{book.lowConfidence}</td><td className="py-1.5">{formatDate(book.scannedAt)}</td></tr>)}</tbody></table>
                 )
               )}
 

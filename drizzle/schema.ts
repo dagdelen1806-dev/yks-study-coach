@@ -163,6 +163,39 @@ export const bookTopicMappings = mysqlTable("book_topic_mappings", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+// Öğrencinin kendi kitabının içindekileri (OCR ya da elle), satır satır: her
+// test/ÖSYM tipi/simülasyon ayrı satır, müfredat konusuna (`yks_topics.id`)
+// bağlı. `book_topic_mappings` konu başına ÖZET tutar (mevcut AI planı onu
+// okur) — bu tablo ayrıntıdır; kaydederken özet de buradan yeniden üretilir
+// (bkz. server/bookContent/bookContentDb.ts). Yalnızca öğrencinin ONAYLADIĞI
+// içerik yazılır. Proje genelindeki desenle aynı şekilde FK yok; `userId`
+// kapsamı uygulama katmanında zorunlu. Kitap raftan kaldırılınca satırlar
+// silinmez (raf `removedAt` ile yumuşak silinir, geri eklenince içerik döner);
+// aynı kitap yeniden taranınca o kitabın satırları tümüyle değiştirilir.
+export const userBookContents = mysqlTable("user_book_contents", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  bookId: varchar("bookId", { length: 120 }).notNull(),
+  sortOrder: int("sortOrder").notNull(),
+  unitNumber: int("unitNumber"),
+  unitTitle: varchar("unitTitle", { length: 300 }).notNull(),
+  contentType: mysqlEnum("contentType", ["topic_test", "osym_type", "review", "simulation", "topic"]).notNull(),
+  label: varchar("label", { length: 120 }).notNull(),
+  testNumber: int("testNumber"),
+  title: varchar("title", { length: 300 }).notNull(),
+  pageStart: int("pageStart"),
+  pageEnd: int("pageEnd"),
+  topicId: int("topicId"),
+  mappingStatus: mysqlEnum("mappingStatus", ["confirmed", "unmatched", "not_applicable"]).notNull(),
+  mappingMethod: mysqlEnum("mappingMethod", ["exact_topic", "exact_alias", "contains_topic", "contains_alias", "fuzzy", "manual", "none"]).default("none").notNull(),
+  mappingConfidence: decimal("mappingConfidence", { precision: 4, scale: 3 }).default("0").notNull(),
+  source: mysqlEnum("source", ["ocr", "manual"]).default("ocr").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  userBookIdx: index("user_book_contents_user_book_idx").on(table.userId, table.bookId),
+  userTopicIdx: index("user_book_contents_user_topic_idx").on(table.userId, table.topicId),
+}));
+
 export const sourceSwitches = mysqlTable("source_switches", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),
@@ -196,6 +229,10 @@ export const studyPlanSessions = mysqlTable("study_plan_sessions", {
   targetQuestions: int("targetQuestions"),
   targetPages: varchar("targetPages", { length: 80 }),
   targetTests: varchar("targetTests", { length: 80 }),
+  // Kitaptan üretilmiş görevde öğrencinin kitabı (bkz. userBookContents).
+  // Tamamlanınca performans ayrıca bookStudyLogs'a da yazılır: kitap çözümü
+  // ile konu/soru takibi ayrı veri olarak kalır ama bu alanla ilişkilenir.
+  sourceBookId: varchar("sourceBookId", { length: 120 }),
   status: mysqlEnum("status", ["planned", "completed", "skipped"]).default("planned").notNull(),
   rescheduledFrom: timestamp("rescheduledFrom"),
   rescheduledAt: timestamp("rescheduledAt"),

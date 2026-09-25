@@ -1,7 +1,7 @@
 import { and, count, desc, eq, gte, inArray, isNull, like, lt, or, sql } from "drizzle-orm";
 import { phoneFromOpenId } from "../_core/loginIdentifier";
 import { getDb, getStudentProfile } from "../db";
-import { subscriptionPlans, subscriptions, topicProgress, topicStudyLogs, userMockExams, users } from "../../drizzle/schema";
+import { subscriptionPlans, subscriptions, topicProgress, topicStudyLogs, userBookContents, userMockExams, users } from "../../drizzle/schema";
 import { getEntitlements, getUsageSummaryForUser } from "../subscriptions/entitlementService";
 import { getPlanById, listAuditLogsForUser, listPaymentsForUser, writeAuditLog } from "../subscriptions/subscriptionDb";
 import { getStudyProgressScore } from "./progressService";
@@ -170,7 +170,7 @@ export async function getUserDetailForAdmin(userId: number) {
   const [userRow] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
   if (!userRow) return null;
 
-  const [entitlements, usage, progressScore, payments, recentExams, topicRows, recentStudyLogs, auditLogs, profile] = await Promise.all([
+  const [entitlements, usage, progressScore, payments, recentExams, topicRows, recentStudyLogs, auditLogs, profile, bookContentRows] = await Promise.all([
     getEntitlements(userId),
     getUsageSummaryForUser(userId),
     getStudyProgressScore(userId),
@@ -180,7 +180,21 @@ export async function getUserDetailForAdmin(userId: number) {
     db.select().from(topicStudyLogs).where(eq(topicStudyLogs.userId, userId)).orderBy(desc(topicStudyLogs.studyDate)).limit(20),
     listAuditLogsForUser(userId),
     getStudentProfile(userId),
+    db.select({ bookId: userBookContents.bookId, mappingStatus: userBookContents.mappingStatus, mappingMethod: userBookContents.mappingMethod, mappingConfidence: userBookContents.mappingConfidence, source: userBookContents.source, createdAt: userBookContents.createdAt }).from(userBookContents).where(eq(userBookContents.userId, userId)),
   ]);
+
+  // Kitap içeriği özeti (OCR/eşleştirme kalitesi): kitap başına satır, eşleşen,
+  // eşleşmeyen ve düşük güvenli (<0.9, otomatik öneri eşiği altı) eşleşme sayısı.
+  const bookContents = Array.from(bookContentRows.reduce((map, row) => {
+    const item = map.get(row.bookId) ?? { bookId: row.bookId, source: row.source, entries: 0, confirmed: 0, unmatched: 0, lowConfidence: 0, manual: 0, scannedAt: row.createdAt };
+    item.entries += 1;
+    if (row.mappingStatus === "confirmed") item.confirmed += 1;
+    if (row.mappingStatus === "unmatched") item.unmatched += 1;
+    if (row.mappingMethod === "manual") item.manual += 1;
+    else if (row.mappingStatus === "confirmed" && Number(row.mappingConfidence) < 0.9) item.lowConfidence += 1;
+    map.set(row.bookId, item);
+    return map;
+  }, new Map<string, { bookId: string; source: string; entries: number; confirmed: number; unmatched: number; lowConfidence: number; manual: number; scannedAt: Date }>()).values());
 
   const [subscriptionRow] = await db.select().from(subscriptions).where(eq(subscriptions.userId, userId)).limit(1);
   const plan = subscriptionRow ? await getPlanById(subscriptionRow.planId) : null;
@@ -190,6 +204,7 @@ export async function getUserDetailForAdmin(userId: number) {
   return {
     user: { ...safeUser, phone: phoneFromOpenId(safeUser.openId) },
     profile,
+    bookContents,
     subscription: subscriptionRow
       ? { ...subscriptionRow, providerSubscriptionId: maskId(subscriptionRow.providerSubscriptionId), providerCustomerId: maskId(subscriptionRow.providerCustomerId), planCode: plan?.code ?? "FREE", planName: plan?.name ?? "Ücretsiz", planTier: plan?.tier ?? "free" }
       : null,

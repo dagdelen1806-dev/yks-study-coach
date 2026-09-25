@@ -1,0 +1,136 @@
+import { TRPCError } from "@trpc/server";
+import { z } from "zod";
+import { validateDataUrl } from "../_core/fileValidation";
+import { metredFeatureProcedure, protectedProcedure, router } from "../_core/trpc";
+import { addRecommendationToPlan, getBookContents, getBookContentSummaries, getMatchableTopics, getWeakTopicBookRecommendations, replaceBookContents, userOwnsBook } from "../bookContent/bookContentDb";
+import { bookContentConfig } from "../bookContent/config";
+import { matchTopic } from "../bookContent/curriculumMatcher";
+import { getOcrProvider } from "../bookContent/ocrProvider";
+import { parseTableOfContents } from "../bookContent/tocParser";
+
+const bookIdInput = z.string().min(1).max(120);
+const examInput = z.enum(["TYT", "AYT"]).nullable().optional();
+
+const imageInput = z.object({
+  dataUrl: z.string().min(20).max(Math.ceil(bookContentConfig.ocr.maxImageBytes * 1.4)),
+  mimeType: z.enum(["image/png", "image/jpeg", "image/webp"]),
+});
+
+const contentTypeInput = z.enum(["topic_test", "osym_type", "review", "simulation", "topic"]);
+
+async function assertOwnsBook(userId: number, bookId: string) {
+  if (!(await userOwnsBook(userId, bookId))) throw new TRPCError({ code: "FORBIDDEN", message: "Bu kitap kütüphanende bulunmuyor. Önce kitabı rafına ekle." });
+}
+
+/**
+ * Kitap içeriği: içindekiler OCR'ı → yapı → müfredat eşleştirme önerisi →
+ * öğrenci onayı → kayıt → zayıf konu önerileri → plana ekleme.
+ * Her uç `ctx.user.id` ile kapsamlı; bir öğrenci başkasının kitabına ya da
+ * içeriğine hiçbir uçtan erişemez (kitap sahipliği sunucuda kontrol edilir).
+ */
+export const bookContentRouter = router({
+  // Fotoğrafları okur ve bir ÖNİZLEME döner — hiçbir şey kaydetmez.
+  // Kota: bir kitap taraması (en fazla 8 sayfa) = 1 kullanım.
+  readTableOfContents: metredFeatureProcedure("OCR_BOOK_IMPORT")
+    .input(z.object({ bookId: bookIdInput, subject: z.string().max(80).nullable().optional(), exam: examInput, images: z.array(imageInput).min(1).max(bookContentConfig.ocr.maxTocPages) }))
+    .mutation(async ({ ctx, input }) => {
+      // metredFeatureProcedure oturumu zaten doğruladı; tip daraltması için.
+      if (!ctx.user) throw new TRPCError({ code: "UNAUTHORIZED" });
+      await assertOwnsBook(ctx.user.id, input.bookId);
+      for (let index = 0; index < input.images.length; index++) {
+        const image = input.images[index];
+        const check = validateDataUrl(image.dataUrl, image.mimeType);
+        if (!check.valid) throw new TRPCError({ code: "BAD_REQUEST", message: `${index + 1}. fotoğraf: ${check.reason}` });
+        if (check.buffer.byteLength > bookContentConfig.ocr.maxImageBytes) throw new TRPCError({ code: "BAD_REQUEST", message: `${index + 1}. fotoğraf çok büyük. Daha düşük çözünürlükle tekrar dener misin?` });
+      }
+
+      const provider = getOcrProvider();
+      const pages = await Promise.all(input.images.map(async (image, index) => {
+        try {
+          return await provider.extractTableOfContentsPage(image.dataUrl);
+        } catch (error) {
+          console.warn(`[BookContent] OCR failed on page ${index + 1}:`, error instanceof Error ? error.message : error);
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `${index + 1}. sayfa okunamadı. Daha net, düz ve ışıklı bir fotoğrafla tekrar dener misin?` });
+        }
+      }));
+
+      const { entries, warnings } = parseTableOfContents(pages);
+      if (entries.length === 0) throw new TRPCError({ code: "UNPROCESSABLE_CONTENT", message: "Fotoğraflarda içindekiler satırı bulunamadı. İçindekiler sayfasının tamamı görünecek şekilde tekrar çeker misin?" });
+
+      const topics = await getMatchableTopics();
+      const topicName = new Map(topics.map((topic) => [topic.id, topic]));
+      const filter = { subject: input.subject || null };
+      return {
+        warnings,
+        entries: entries.map((entry) => {
+          if (!entry.matchText) return { ...entry, suggestion: null, alternatives: [], tier: "not_applicable" as const };
+          let result = matchTopic(entry.matchText, topics, filter);
+          // Ders yanlış seçilmiş olabilir: kendi dersinde hiç aday yoksa tüm müfredatta dene (onay yine öğrencide).
+          if (!result.best && filter.subject) result = matchTopic(entry.matchText, topics, {});
+          const describe = (match: NonNullable<typeof result.best>) => ({ ...match, topic: topicName.get(match.topicId)!.topic, subject: topicName.get(match.topicId)!.subject, unit: topicName.get(match.topicId)!.unit });
+          return { ...entry, suggestion: result.best ? describe(result.best) : null, alternatives: result.alternatives.map(describe), tier: result.tier };
+        }),
+      };
+    }),
+
+  // Elle eşleştirme listesi (öğrenci "Değiştir" dediğinde).
+  topicOptions: protectedProcedure.input(z.object({ subject: z.string().max(80).nullable().optional() }).optional()).query(async ({ input }) => {
+    const topics = await getMatchableTopics();
+    const subject = input?.subject?.trim();
+    return topics
+      .filter((topic) => !subject || topic.subject === subject)
+      .map(({ id, exam, subject: topicSubject, unit, topic }) => ({ id, exam, subject: topicSubject, unit, topic }))
+      .sort((a, b) => a.exam.localeCompare(b.exam) || a.subject.localeCompare(b.subject, "tr") || a.unit.localeCompare(b.unit, "tr") || a.topic.localeCompare(b.topic, "tr"));
+  }),
+
+  // Öğrencinin onayladığı içerik (OCR'dan ya da tamamen elle).
+  save: protectedProcedure
+    .input(z.object({
+      bookId: bookIdInput,
+      subject: z.string().max(80),
+      source: z.enum(["ocr", "manual"]),
+      items: z.array(z.object({
+        unitNumber: z.number().int().min(0).max(200).nullable(),
+        unitTitle: z.string().max(300),
+        contentType: contentTypeInput,
+        label: z.string().min(1).max(120),
+        testNumber: z.number().int().min(0).max(1000).nullable(),
+        title: z.string().max(300),
+        pageStart: z.number().int().min(1).max(5000).nullable(),
+        pageEnd: z.number().int().min(1).max(5000).nullable(),
+        topicId: z.number().int().positive().nullable(),
+        mappingMethod: z.enum(["exact_topic", "exact_alias", "contains_topic", "contains_alias", "fuzzy", "manual", "none"]),
+        mappingConfidence: z.number().min(0).max(1),
+      })).max(400),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      await assertOwnsBook(ctx.user.id, input.bookId);
+      for (const item of input.items) {
+        if (item.pageStart !== null && item.pageEnd !== null && item.pageEnd < item.pageStart) throw new TRPCError({ code: "BAD_REQUEST", message: `"${item.label}" satırında bitiş sayfası başlangıçtan küçük.` });
+      }
+      try {
+        return await replaceBookContents(ctx.user.id, input.bookId, input.subject, input.items, input.source);
+      } catch (error) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "İçerik kaydedilemedi." });
+      }
+    }),
+
+  contents: protectedProcedure.input(z.object({ bookId: bookIdInput })).query(async ({ ctx, input }) => {
+    await assertOwnsBook(ctx.user.id, input.bookId);
+    return getBookContents(ctx.user.id, input.bookId);
+  }),
+
+  summaries: protectedProcedure.query(({ ctx }) => getBookContentSummaries(ctx.user.id)),
+
+  recommendations: protectedProcedure.query(({ ctx }) => getWeakTopicBookRecommendations(ctx.user.id)),
+
+  addToPlan: protectedProcedure
+    .input(z.object({ topicId: z.number().int().positive(), bookId: bookIdInput, bookTitle: z.string().max(180), when: z.enum(["today", "auto"]) }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await addRecommendationToPlan(ctx.user.id, input);
+      } catch (error) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Görev plana eklenemedi." });
+      }
+    }),
+});
