@@ -21,8 +21,10 @@ export const ENV = {
   // APP_URL: doğrulama linklerinin kök adresi (ör. https://yks-study-coach.vercel.app).
   // Production'da set edilmeli — yoksa istekteki Host başlığına düşülür.
   appUrl: (process.env.APP_URL ?? "").replace(/\/+$/, ""),
+  // Mail sağlayıcısı: hangi anahtar tanımlıysa o kullanılır (ikisi birden varsa Brevo).
+  brevoApiKey: process.env.BREVO_API_KEY ?? "",
   resendApiKey: process.env.RESEND_API_KEY ?? "",
-  mailFrom: process.env.MAIL_FROM ?? "Pusula YKS <onboarding@resend.dev>",
+  mailFrom: process.env.MAIL_FROM ?? "",
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
 
