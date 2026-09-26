@@ -67,7 +67,7 @@ RESOURCE_CATALOG_IMPORT_MAX_PRODUCTS=5000
 ```
 
 No API keys live in this module's config — AI classification reuses
-`BUILT_IN_FORGE_API_KEY` (already in `.env`, `server/_core/env.ts`).
+`LLM_API_KEY` (OpenAI-compatible provider; see `server/_core/env.ts`).
 
 ## Admin review
 

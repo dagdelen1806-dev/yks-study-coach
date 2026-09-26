@@ -116,3 +116,6 @@ temp/
 .webdev/
 
 .project-config.json
+
+# OCR hata ayıklama / benchmark ara görüntüleri (yerel)
+.ocr-debug/

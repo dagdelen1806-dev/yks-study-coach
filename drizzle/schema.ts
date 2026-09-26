@@ -274,6 +274,20 @@ export const noteAttachments = mysqlTable("note_attachments", {
   userNoteIdx: index("note_attachments_user_note_idx").on(table.userId, table.noteId),
 }));
 
+// Kitap içindekiler OCR sonucu önbelleği: aynı öğrencinin aynı fotoğrafı (SHA-256)
+// aynı işlem hattı sürümüyle tekrar okunmaz. Görselin kendisi SAKLANMAZ; yalnızca
+// okuma sonucu (JSON). Öğrenciye özeldir (userId), başka öğrenciyle paylaşılmaz.
+export const ocrPageCache = mysqlTable("ocr_page_cache", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  imageHash: varchar("imageHash", { length: 64 }).notNull(),
+  pipelineVersion: varchar("pipelineVersion", { length: 16 }).notNull(),
+  resultJson: mediumtext("resultJson").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  userHashUnique: uniqueIndex("ocr_page_cache_user_hash_unique").on(table.userId, table.imageHash, table.pipelineVersion),
+}));
+
 export const sourceSwitches = mysqlTable("source_switches", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),

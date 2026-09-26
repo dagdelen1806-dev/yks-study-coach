@@ -92,6 +92,25 @@ Bağlantı string'ini aldıktan sonra:
 > (yukarıdaki `drizzle-kit migrate` komutu, yalnızca iki nullable sütun ekler,
 > mevcut veriye dokunmaz). Sütunlar yokken yeni kod `users` sorgularında hata verir.
 
+> **OCR önbelleği (migration `0017_ocr_page_cache`):** yalnızca yeni bir
+> `ocr_page_cache` tablosu oluşturur, mevcut tablolara dokunmaz. Aynı
+> fotoğrafın tekrar okunmasını (LLM maliyeti + süre) önler. Uygulanmadan deploy
+> edilirse uygulama ÇALIŞIR, yalnızca önbellek devre dışı kalır (logda bir kez
+> `[OCR cache] disabled` yazar). Uygulamak için, önce hangi migration'ların
+> uygulandığını kontrol edip:
+> ```bash
+> DATABASE_URL="<railway MYSQL_PUBLIC_URL>" npx drizzle-kit migrate
+> ```
+
+### OCR doğruluk ölçümü ve hata ayıklama
+
+- `pnpm ocr:benchmark` — gerçek kitap fotoğraflarında (server/fixtures/books)
+  kalite analizi, ön işleme varyantları, yön/eğim doğruluğu. LLM gerekmez.
+- `LLM_API_KEY=... pnpm ocr:benchmark -- --ocr` — ek olarak gerçek OCR
+  doğruluğu (CER, WER, ünite/test/sayfa/konu doğruluğu). Ücretli LLM çağrısı yapar.
+- Yerelde `OCR_DEBUG=1` ile her okumada üretilen ön işleme varyantları
+  `.ocr-debug/` altına yazılır (production'da hiçbir zaman yazılmaz).
+
 ## 4) Deploy et
 
 Env değişkenlerini ekledikten sonra Vercel Dashboard'dan **Deploy**'a bas

@@ -30,6 +30,17 @@ export const bookContentConfig = {
     maxImageBytes: 3.5 * 1024 * 1024,
     /** Bir kitap için en fazla içindekiler sayfası. */
     maxTocPages: 8,
+    /** İsteğin tamamı için süre bütçesi (Vercel fonksiyonu 60 sn; yanıt + eşleştirme payı bırakılır). */
+    requestBudgetMs: 50_000,
+    /** Aynı anda okunan sayfa sayısı bunu aşarsa sayfa başına geçiş sayısı kısılır (hız sınırı + süre). */
+    manyPagesThreshold: 3,
+    maxPassesWhenManyPages: 2,
+  },
+  confidence: {
+    /** Nihai güven = ağırlıklı ortalama (görüntü, okuma, yapı, eşleştirme). */
+    weights: { image: 0.15, ocr: 0.35, structure: 0.25, mapping: 0.25 },
+    /** Bunun altındaki satır / sayfa "kontrol et" olarak işaretlenir. */
+    needsReviewBelow: 0.7,
   },
   allocation: {
     /** Zayıflık (0-1) → önerilen çalışma süresi (dk). Aralık alt sınırı dahil; ilk eşleşen kullanılır. */

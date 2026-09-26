@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { enhanceDocument, enhancePhoto } from "../client/src/components/books/imageCompression";
+import { enhancePhoto } from "../client/src/components/books/imageCompression";
+import { flattenIllumination, stretchContrast } from "../shared/imaging/enhance";
+import { grayToRgba, toGray } from "../shared/imaging/image";
+
+// İçindekiler sayfası iyileştirmesi (sunucuda, shared/imaging): aydınlatma düzleştirme + kontrast.
+const enhanceDocument = (pixels: Uint8ClampedArray, width: number, height: number) => pixels.set(grayToRgba(stretchContrast(flattenIllumination(toGray({ width, height, data: pixels })))));
 import { ENV } from "./_core/env";
 import { invokeLLM, LlmUnavailableError, llmUnavailableMessage } from "./_core/llm";
 
@@ -36,6 +41,14 @@ describe("LLM availability errors", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(error.reason).toBe("auth");
     expect(llmUnavailableMessage(new Error("json parse"))).toBeNull();
+  });
+
+  it("never carries a key fragment from the provider's error text", async () => {
+    Object.assign(ENV, { llmApiKey: "bad", llmApiUrl: "https://example.test/v1" });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response('{"error":{"message":"Incorrect API key provided: sk-proj-****************abcd"}}', { status: 401 })));
+    const error = await invokeLLM({ messages: [{ role: "user", content: "x" }] }).catch((caught) => caught);
+    expect(error.message).not.toMatch(/sk-proj/);
+    expect(error.message).toContain("[redacted]");
   });
 });
 

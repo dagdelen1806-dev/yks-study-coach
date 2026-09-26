@@ -259,7 +259,9 @@ export function llmUnavailableMessage(error: unknown): string | null {
 
 const errorForStatus =(status: number, detail: string) => {
   const reason = status === 401 || status === 403 ? "auth" : status === 402 || status === 429 ? "quota" : status === 413 ? "too_large" : "provider";
-  return new LlmUnavailableError(reason, `LLM invoke failed: ${status} – ${detail.slice(0, 500)}`);
+  // Sağlayıcı hata metni (ör. 401'de maskelenmiş anahtar "sk-...abcd") loglara/yanıtlara anahtar parçası taşımasın.
+  const safeDetail = detail.replace(/\b(sk-[A-Za-z0-9_*.\-]{4,}|AIza[0-9A-Za-z_\-]{10,}|Bearer\s+\S+)/g, "[redacted]");
+  return new LlmUnavailableError(reason, `LLM invoke failed: ${status} – ${safeDetail.slice(0, 500)}`);
 };
 
 const normalizeResponseFormat = ({

@@ -9,7 +9,21 @@ import { normalizeForComparison } from "../resourceCatalog/normalizers/turkishTe
  *             ünite numarasının altındaki ayrı satırdaki ünite adı
  *  - entry:   sayfa numaralı bir satır ("Test 1  Paragrafta Anlatım ..... 9")
  */
-export type TocRawItem = { type: "unit" | "section" | "entry"; unitNumber: number | null; title: string; label: string | null; page: number | null };
+export type TocRawItem = {
+  type: "unit" | "section" | "entry";
+  unitNumber: number | null;
+  title: string;
+  label: string | null;
+  page: number | null;
+  /** Sağlayıcının gördüğü ham sayfa numarası metni ("12", "I2"); `page` bundan deterministik olarak çıkarılır. */
+  pageText?: string | null;
+  /** 0–1 okuma güveni (sağlayıcı öz değerlendirmesi × çoklu okuma uzlaşısı). */
+  confidence?: number;
+  /** Kaç okuma geçişi bu satırı doğruladı / toplam geçiş. */
+  support?: number;
+  /** Kullanıcının kontrol etmesi gereken alanlar. */
+  review?: { title?: boolean; page?: boolean };
+};
 /** `pageKind`: sağlayıcının görsel hakkındaki kararı — kapak ya da alakasız bir sayfa yanlışlıkla eklendiyse ayıklanır. */
 export type TocRawPage = { items: TocRawItem[]; pageKind?: "table_of_contents" | "cover" | "other" };
 
@@ -51,6 +65,10 @@ export type TocEntry = {
   pageEnd: number | null;
   /** Müfredat eşleştirmesinde kullanılacak metin; karma içerikte (sarmal/simülasyon) null. */
   matchText: string | null;
+  /** 0–1 okuma güveni (çoklu okuma uzlaşısı); ölçülmediyse null. */
+  readConfidence: number | null;
+  /** Öğrencinin doğrulaması gereken alanlar (düşük güven / düzeltilmiş sayfa numarası). */
+  review: { title: boolean; page: boolean };
 };
 
 export type TocParseResult = { entries: TocEntry[]; warnings: string[] };
@@ -128,6 +146,8 @@ export function parseTableOfContents(pages: TocRawPage[]): TocParseResult {
         // Konu testi kendi başlığıyla, ÖSYM tipi/başlıksız satır ünite adıyla eşlenir.
         // Konu listesi satırı da kendi başlığıyla eşlenir ("KİTAP BİTİRME PLANI" gibi bir sayfa başlığıyla değil).
         matchText: isMixed ? null : ((contentType === "topic_test" || contentType === "topic") && title ? title : unitTitle || title || null),
+        readConfidence: typeof item.confidence === "number" ? item.confidence : null,
+        review: { title: Boolean(item.review?.title), page: Boolean(item.review?.page) },
       });
     }
   }

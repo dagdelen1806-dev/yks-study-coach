@@ -7,8 +7,11 @@ import { bookContentConfig } from "../bookContent/config";
 import { suggestTopicsWithAi } from "../bookContent/aiMapper";
 import { matchTopic, type MatchMethod, type MatchTier } from "../bookContent/curriculumMatcher";
 import { getOcrProvider } from "../bookContent/ocrProvider";
-import { LlmUnavailableError, llmUnavailableMessage } from "../_core/llm";
-import { looksLikeTopicList,pageIssues, parseTableOfContents, type TocEntry } from "../bookContent/tocParser";
+import { llmUnavailableMessage } from "../_core/llm";
+import { imageHash, readOcrCache, writeOcrCache } from "../bookContent/ocrCache";
+import { readTocImage, type TocReadReport } from "../bookContent/ocrOrchestrator";
+import { filterTocNoise } from "../bookContent/tocPostprocess";
+import { looksLikeTopicList, parseTableOfContents, type TocEntry } from "../bookContent/tocParser";
 
 const bookIdInput = z.string().min(1).max(120);
 const examInput = z.enum(["TYT", "AYT"]).nullable().optional();
@@ -58,6 +61,25 @@ async function matchEntries(entries: TocEntry[], subject: string | null) {
   return matched;
 }
 
+/**
+ * Güven sistemi: görüntü (kalite analizi), okuma (en iyi geçişin puanı), yapı
+ * (ünite/test sırası + sayfa numarası tutarlılığı), eşleştirme (müfredat) →
+ * ağırlıklı nihai güven. Eşiğin altındaysa öğrenciden doğrulama istenir.
+ */
+function summarizeConfidence(entries: { matchText: string | null; suggestion: { confidence: number } | null; review: { title: boolean; page: boolean } }[], reports: TocReadReport[]) {
+  const average = (values: number[], fallback: number) => (values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : fallback);
+  const round = (value: number) => Math.round(value * 100) / 100;
+  const matchable = entries.filter((entry) => entry.matchText);
+  const imageConfidence = round(average(reports.map((report) => report.confidence.image), 0.75));
+  const ocrConfidence = round(average(reports.map((report) => report.confidence.ocr), 0));
+  const structureConfidence = round(average(reports.map((report) => report.confidence.structure), 0));
+  const mappingConfidence = round(average(matchable.map((entry) => entry.suggestion?.confidence ?? 0), 1));
+  const weights = bookContentConfig.confidence.weights;
+  const finalConfidence = round(weights.image * imageConfidence + weights.ocr * ocrConfidence + weights.structure * structureConfidence + weights.mapping * mappingConfidence);
+  const flagged = entries.filter((entry) => entry.review.title || entry.review.page).length;
+  return { imageConfidence, ocrConfidence, structureConfidence, mappingConfidence, finalConfidence, flaggedEntries: flagged, needsReview: finalConfidence < bookContentConfig.confidence.needsReviewBelow || flagged > entries.length * 0.25 };
+}
+
 async function assertOwnsBook(userId: number, bookId: string) {
   if (!(await userOwnsBook(userId, bookId))) throw new TRPCError({ code: "FORBIDDEN", message: "Bu kitap kütüphanende bulunmuyor. Önce kitabı rafına ekle." });
 }
@@ -72,11 +94,19 @@ export const bookContentRouter = router({
   // Fotoğrafları okur ve bir ÖNİZLEME döner — hiçbir şey kaydetmez.
   // Kota: bir kitap taraması (en fazla 8 sayfa) = 1 kullanım.
   readTableOfContents: metredFeatureProcedure("OCR_BOOK_IMPORT")
-    .input(z.object({ bookId: bookIdInput, subject: z.string().max(80).nullable().optional(), exam: examInput, images: z.array(imageInput).min(1).max(bookContentConfig.ocr.maxTocPages) }))
+    .input(z.object({
+      bookId: bookIdInput,
+      subject: z.string().max(80).nullable().optional(),
+      exam: examInput,
+      images: z.array(imageInput).min(1).max(bookContentConfig.ocr.maxTocPages),
+      /** Gürültü filtresi için (kitap adı/yayınevi satırı içerik sayılmaz). */
+      book: z.object({ title: z.string().max(180).optional(), publisher: z.string().max(120).optional() }).optional(),
+    }))
     .mutation(async ({ ctx, input }) => {
       // metredFeatureProcedure oturumu zaten doğruladı; tip daraltması için.
       if (!ctx.user) throw new TRPCError({ code: "UNAUTHORIZED" });
-      await assertOwnsBook(ctx.user.id, input.bookId);
+      const userId = ctx.user.id;
+      await assertOwnsBook(userId, input.bookId);
       for (let index = 0; index < input.images.length; index++) {
         const image = input.images[index];
         const check = validateDataUrl(image.dataUrl, image.mimeType);
@@ -84,59 +114,79 @@ export const bookContentRouter = router({
         if (check.buffer.byteLength > bookContentConfig.ocr.maxImageBytes) throw new TRPCError({ code: "BAD_REQUEST", message: `${index + 1}. fotoğraf çok büyük. Daha düşük çözünürlükle tekrar dener misin?` });
       }
 
+      // 1) Her sayfa: önbellek → yoksa kalite analizi + uyarlamalı ön işleme + çoklu okuma + uzlaşı (ocrOrchestrator).
       const provider = getOcrProvider();
-      const pages = await Promise.all(input.images.map(async (image, index) => {
-        // Sağlayıcıdaki geçici hatalara karşı bir kez yeniden dene.
-        for (let attempt = 1; ; attempt++) {
-          try {
-            return await provider.extractTableOfContentsPage(image.dataUrl);
-          } catch (error) {
-            console.warn(`[BookContent] OCR failed on page ${index + 1} (attempt ${attempt}):`, error instanceof Error ? error.message : error);
-            // Servis kapalı/anahtar hatalıysa tekrar denemek ve "daha net çek" demek anlamsız.
-            const serviceMessage = llmUnavailableMessage(error);
-            const permanent = error instanceof LlmUnavailableError && error.reason !== "provider";
-            if (permanent || attempt >= 2) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: serviceMessage ?? `${index + 1}. sayfa okunamadı. Daha net, düz ve ışıklı bir fotoğrafla tekrar dener misin?` });
-          }
+      const deadline = Date.now() + bookContentConfig.ocr.requestBudgetMs;
+      const maxPasses = input.images.length > bookContentConfig.ocr.manyPagesThreshold ? bookContentConfig.ocr.maxPassesWhenManyPages : undefined;
+      const reports = await Promise.all(input.images.map(async (image, index) => {
+        const hash = imageHash(image.dataUrl);
+        const cached = await readOcrCache<TocReadReport>(userId, hash);
+        if (cached) return { ...cached, cached: true };
+        try {
+          const report = await readTocImage(image.dataUrl, { provider, deadline, maxPasses });
+          if (report.page.items.length) void writeOcrCache(userId, hash, report);
+          return { ...report, cached: false };
+        } catch (error) {
+          console.warn(`[BookContent] OCR failed on page ${index + 1}:`, error instanceof Error ? error.message : error);
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: llmUnavailableMessage(error) ?? `${index + 1}. sayfa okunamadı. Daha net, düz ve ışıklı bir fotoğrafla tekrar dener misin?` });
         }
       }));
 
-      // 1) Yanlış fotoğrafı ayıkla (kapak ya da alakasız sayfa).
+      // 2) Yanlış fotoğrafı ayıkla (kapak ya da alakasız sayfa).
       const notes: string[] = [];
-      const tocPages = pages.map((page, index) => ({ page, index })).filter(({ page, index }) => {
+      const tocReports = reports.map((report, index) => ({ report, index })).filter(({ report, index }) => {
         // Sağlayıcı alışılmadık bir düzeni ("Kitap Bitirme Planı" gibi) 'other' sayabilir; sayfa numaralı
         // birkaç satır okuduysa içerik gerçektir — atma.
-        if (looksLikeTopicList(page)) return true;
-        if (page.pageKind && page.pageKind !== "table_of_contents") {
-          notes.push(`${index + 1}. fotoğraf ${page.pageKind === "cover" ? "kitap kapağı" : "içindekiler sayfası değil"} gibi görünüyor; atlandı.`);
+        if (looksLikeTopicList(report.page)) return true;
+        if (report.page.pageKind && report.page.pageKind !== "table_of_contents") {
+          notes.push(`${index + 1}. fotoğraf ${report.page.pageKind === "cover" ? "kitap kapağı" : "içindekiler sayfası değil"} gibi görünüyor; atlandı.`);
           return false;
         }
         return true;
       });
-      if (tocPages.length === 0) {
-        const allCovers = pages.every((page) => page.pageKind === "cover");
+      if (tocReports.length === 0) {
+        const allCovers = reports.every((report) => report.page.pageKind === "cover");
         throw new TRPCError({ code: "UNPROCESSABLE_CONTENT", message: allCovers ? "Bu fotoğraf kitabın kapağı. Burada kitabın İÇİNDEKİLER sayfasını çekmelisin." : "Eklediğin fotoğraflar içindekiler sayfası gibi görünmüyor. Ünite ve test listesinin olduğu sayfayı çeker misin?" });
       }
+      tocReports.forEach(({ report, index }) => report.notes.forEach((note) => notes.push(`${index + 1}. sayfa: ${note}`)));
 
-      // 2) Tutarsız okunan sayfayı (azalan/eksik sayfa numarası) bir kez, sorunları ipucu vererek yeniden oku;
-      //    daha az sorunlu okumayı kullan.
-      const finalPages = await Promise.all(tocPages.map(async ({ page, index }) => {
-        const issues = pageIssues(page);
-        if (issues.length === 0) return page;
-        try {
-          const reread = await provider.extractTableOfContentsPage(input.images[index].dataUrl, { previous: page, issues });
-          if (reread.items.length > 0 && pageIssues(reread).length < issues.length) {
-            notes.push(`${index + 1}. sayfadaki sayfa numarası tutarsızlığı yeniden okunarak düzeltildi.`);
-            return reread;
-          }
-        } catch (error) {
-          console.warn(`[BookContent] Corrective re-read failed on page ${index + 1}:`, error instanceof Error ? error.message : error);
-        }
-        return page;
-      }));
+      // 3) ISBN / logo / telif / tekrar eden üst-alt bilgi yapıya girmez (ham metinde kalır).
+      const { pages: cleanPages, removed } = filterTocNoise(tocReports.map(({ report }) => report.page), input.book ?? {});
 
-      const { entries, warnings } = parseTableOfContents(finalPages);
+      // 4) Yapı: ünite → konu → test → sayfa aralığı.
+      const { entries, warnings } = parseTableOfContents(cleanPages);
       if (entries.length === 0) throw new TRPCError({ code: "UNPROCESSABLE_CONTENT", message: "Fotoğraflarda içindekiler satırı bulunamadı. İçindekiler sayfasının tamamı görünecek şekilde tekrar çeker misin?" });
-      return { warnings: [...notes, ...warnings], entries: await matchEntries(entries, input.subject || null) };
+
+      // 5) Müfredat eşleştirme + güven.
+      const matched = await matchEntries(entries, input.subject || null);
+      const confidence = summarizeConfidence(matched, tocReports.map(({ report }) => report));
+      const withReview = matched.map((entry) => {
+        const mapping = entry.matchText ? (entry.suggestion?.confidence ?? 0) : 1;
+        const finalConfidence = Math.round((entry.readConfidence ?? 0.75) * (entry.matchText ? 0.5 + 0.5 * mapping : 1) * 100) / 100;
+        return { ...entry, finalConfidence, needsReview: entry.review.title || entry.review.page || finalConfidence < bookContentConfig.confidence.needsReviewBelow };
+      });
+      if (confidence.needsReview) notes.unshift("Bu sayfanın bazı bölümlerini net okuyamadık. İşaretli satırları kontrol et ya da fotoğrafı tekrar çek.");
+      return {
+        warnings: [...notes, ...warnings],
+        entries: withReview,
+        confidence,
+        report: {
+          pages: reports.map((report, index) => ({
+            index,
+            cached: report.cached,
+            quality: report.quality ? { level: report.quality.level, score: report.quality.score, issues: report.quality.issues, orientation: report.quality.orientation, skew: report.quality.skew, blur: report.quality.blur, glare: report.quality.glare, shadow: report.quality.shadow } : null,
+            plan: report.plan,
+            passes: report.passes.map(({ variantId, applied, status, score, entries: passEntries, elapsedMs }) => ({ variantId, applied, status, score: score ?? null, entries: passEntries ?? null, elapsedMs })),
+            chosenVariant: report.chosenVariant,
+            agreement: report.agreement,
+            waves: report.waves,
+            elapsedMs: report.elapsedMs,
+            rawText: report.rawText,
+          })),
+          removed,
+        },
+      };
+
     }),
 
   // Elle eşleştirme listesi (öğrenci "Değiştir" dediğinde).
