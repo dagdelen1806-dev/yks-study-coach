@@ -10,7 +10,27 @@ import { normalizeForComparison } from "../resourceCatalog/normalizers/turkishTe
  *  - entry:   sayfa numaralı bir satır ("Test 1  Paragrafta Anlatım ..... 9")
  */
 export type TocRawItem = { type: "unit" | "section" | "entry"; unitNumber: number | null; title: string; label: string | null; page: number | null };
-export type TocRawPage = { items: TocRawItem[] };
+/** `pageKind`: sağlayıcının görsel hakkındaki kararı — kapak ya da alakasız bir sayfa yanlışlıkla eklendiyse ayıklanır. */
+export type TocRawPage = { items: TocRawItem[]; pageKind?: "table_of_contents" | "cover" | "other" };
+
+/**
+ * Tek bir sayfanın okunuşundaki tutarsızlıklar (ör. eğik fotoğrafta sayfa
+ * numaralarının bir satır kayması → azalan ya da eksik numara). Boş dönmezse
+ * o sayfa, bu sorunlar ipucu olarak verilip bir kez yeniden okunur.
+ */
+export function pageIssues(page: TocRawPage): string[] {
+  const issues: string[] = [];
+  const entries = page.items.filter((item) => item.type === "entry");
+  const missing = entries.filter((item) => item.page === null).map((item) => `${item.label ?? ""} ${item.title}`.trim());
+  if (missing.length) issues.push(`Şu satırların sayfa numarası okunamadı: ${missing.slice(0, 6).join("; ")}`);
+  let previous: TocRawItem | null = null;
+  for (const item of entries) {
+    if (item.page === null) continue;
+    if (previous && previous.page !== null && item.page < previous.page) issues.push(`"${previous.label ?? previous.title}" (${previous.page}) satırından sonra "${item.label ?? item.title}" (${item.page}) geliyor; sayfa numaraları artmalı.`);
+    previous = item;
+  }
+  return issues;
+}
 
 export type ContentType = "topic_test" | "osym_type" | "review" | "simulation" | "topic";
 

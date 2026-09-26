@@ -1,7 +1,7 @@
 import { trpc } from "@/lib/trpc";
 import type { inferRouterOutputs } from "@trpc/server";
 import { ArrowDown, ArrowUp, Camera, Check, Crop, ImagePlus, Loader2, Plus, RotateCw, Trash2, X } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { AppRouter } from "../../../../server/routers";
 import { NO_CROP, compressImage, type CropInsets } from "./imageCompression";
@@ -45,13 +45,40 @@ const MAX_PAGES = 8;
 let keySeq = 0;
 const nextKey = () => `k${++keySeq}`;
 
+// Onay ekranındaki okuma cihazda saklanır: sayfa kapanır/yenilenirse OCR (kota)
+// boşa gitmesin. Yalnızca bu tarayıcıya özel bir kolaylık; kaydedince silinir.
+type Draft = { rows: Row[]; warnings: string[]; source: "ocr" | "manual"; savedAt: number };
+const DRAFT_TTL_MS = 7 * 86_400_000;
+const draftKey = (bookId: string) => `pusula:toc-draft:${bookId}`;
+function readDraft(bookId: string): Draft | null {
+  try {
+    const draft = JSON.parse(localStorage.getItem(draftKey(bookId)) ?? "null") as Draft | null;
+    return draft && Array.isArray(draft.rows) && draft.rows.length > 0 && Date.now() - draft.savedAt < DRAFT_TTL_MS ? draft : null;
+  } catch {
+    return null;
+  }
+}
+function writeDraft(bookId: string, draft: Draft | null) {
+  try { if (draft) localStorage.setItem(draftKey(bookId), JSON.stringify(draft)); else localStorage.removeItem(draftKey(bookId)); } catch {}
+}
+
 /**
  * İçindekiler tarama akışı: sayfaları çek/sırala → analiz → eşleşmeleri onayla
  * → kaydet. OCR yalnızca öneri üretir; kütüphaneye yazılan her şey öğrencinin
  * bu ekranda gördüğü ve onayladığı içeriktir. OCR başarısız olursa ya da
  * öğrenci isterse içerik tamamen elle girilebilir.
  */
-export default function BookContentScanner({ book, onClose, onSaved }: { book: ScannerBook; onClose: () => void; onSaved?: () => void }) {
+export default function BookContentScanner({ book, onClose, onSaved, onAddAnother, intro, withCoverStep = false }: {
+  book: ScannerBook;
+  onClose: () => void;
+  onSaved?: () => void;
+  /** Sihirbazdan açıldıysa: kaydettikten sonra "Başka kitap ekle". */
+  onAddAnother?: () => void;
+  /** Sayfalar adımının üstünde gösterilen yönlendirme ("Şimdi içindekiler sayfasını ekle"). */
+  intro?: string;
+  /** Adım göstergesinde tamamlanmış "Kapak" adımını da göster (sihirbaz akışı). */
+  withCoverStep?: boolean;
+}) {
   const [step, setStep] = useState<Step>("pages");
   const [pages, setPages] = useState<Page[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
@@ -60,6 +87,22 @@ export default function BookContentScanner({ book, onClose, onSaved }: { book: S
   const [error, setError] = useState("");
   const [showAllSubjects, setShowAllSubjects] = useState(false);
   const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(() => readDraft(book.id));
+  const [savedSummary, setSavedSummary] = useState<{ units: number; topics: number; entries: number } | null>(null);
+
+  // Onay ekranındayken her değişiklikte taslağı güncelle.
+  useEffect(() => {
+    if (step === "review" && rows.length > 0) writeDraft(book.id, { rows, warnings, source, savedAt: Date.now() });
+  }, [step, rows, warnings, source, book.id]);
+
+  const resumeDraft = () => {
+    if (!draft) return;
+    setRows(draft.rows);
+    setWarnings(draft.warnings);
+    setSource(draft.source);
+    setStep("review");
+  };
+  const discardDraft = () => { writeDraft(book.id, null); setDraft(null); };
   const cameraRef = useRef<HTMLInputElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
   const utils = trpc.useUtils();
@@ -172,6 +215,9 @@ export default function BookContentScanner({ book, onClose, onSaved }: { book: S
         }),
       });
       await Promise.all([utils.bookContent.contents.invalidate({ bookId: book.id }), utils.bookContent.summaries.invalidate(), utils.bookContent.recommendations.invalidate(), utils.resources.snapshot.invalidate()]);
+      writeDraft(book.id, null);
+      setDraft(null);
+      setSavedSummary({ units: new Set(rows.map((row) => unitKey(row))).size, topics: new Set(rows.map((row) => row.topicId).filter((id) => id !== null)).size, entries: rows.length });
       setStep("saved");
       onSaved?.();
     } catch (caught) {
@@ -179,7 +225,8 @@ export default function BookContentScanner({ book, onClose, onSaved }: { book: S
     }
   };
 
-  const stepIndex = { pages: 0, reading: 1, review: 2, saved: 3 }[step];
+  const stepLabels = withCoverStep ? ["Kapak", "İçindekiler", "Analiz", "Onay", "Tamam"] : ["Sayfalar", "Analiz", "Onay", "Tamam"];
+  const stepIndex = { pages: 0, reading: 1, review: 2, saved: 3 }[step] + (withCoverStep ? 1 : 0);
   const topicLabel = (topicId: number | null) => topicOptions.data?.find((topic) => topic.id === topicId)?.topic;
 
   return (
@@ -196,7 +243,7 @@ export default function BookContentScanner({ book, onClose, onSaved }: { book: S
         </div>
 
         <div className="mt-4 flex gap-1.5" aria-hidden>
-          {["Sayfalar", "Analiz", "Onay", "Tamam"].map((label, index) => (
+          {stepLabels.map((label, index) => (
             <div key={label} className="flex-1">
               <div className={`h-1.5 rounded-full ${index <= stepIndex ? "bg-[#3b5ccc]" : "bg-[#eceae3]"}`} />
               <div className={`mt-1 text-[9px] font-semibold ${index <= stepIndex ? "text-[#3b5ccc]" : "text-[#b0b1b8]"}`}>{label}</div>
@@ -206,6 +253,13 @@ export default function BookContentScanner({ book, onClose, onSaved }: { book: S
 
         {step === "pages" && (
           <div className="mt-5">
+            {intro && <div className="mb-3 rounded-xl bg-[#eaf6f0] p-3 text-[12px] font-medium leading-5 text-[#2e7a5d]">{intro}</div>}
+            {draft && (
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#3b5ccc]/20 bg-[#f4f6ff] p-3 text-[12px] text-[#3b5ccc]">
+                <span>Bu kitap için yarım kalmış bir okuma var ({draft.rows.length} satır, {new Date(draft.savedAt).toLocaleDateString("tr-TR")}).</span>
+                <span className="flex gap-2"><button onClick={resumeDraft} className="rounded-lg bg-[#3b5ccc] px-2.5 py-1 text-[11px] font-semibold text-white">Kaldığın yerden devam et</button><button onClick={discardDraft} className="px-1 text-[11px] font-semibold text-[#8b8c95]">Sil</button></span>
+              </div>
+            )}
             <p className="text-[12px] leading-5 text-[#6d7390]">İçindekiler sayfalarını sırayla, düz ve ışıklı çek. Sayfa numaralarının okunaklı olduğundan emin ol. Birden fazla sayfa varsa hepsini ekle; oklarla sıralayabilirsin.</p>
             {error && <div role="alert" className="mt-3 rounded-xl bg-[#fff0ed] p-3 text-[12px] font-medium text-[#d95d4d]">{error}</div>}
             <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-4">
@@ -351,8 +405,13 @@ export default function BookContentScanner({ book, onClose, onSaved }: { book: S
         {step === "saved" && (
           <div className="mt-6 text-center">
             <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-[#eaf6f0] text-[22px]">📚</div>
-            <p className="mt-3 text-[13px] text-[#545661]">{rows.length} içerik satırı kaydedildi. Zayıf olduğun konular bu kitaptaki testlerle eşleşirse sana kitap bazlı çalışma önerisi göstereceğiz.</p>
-            <button onClick={onClose} className="mt-5 h-10 rounded-xl bg-[#3b5ccc] px-5 text-[12px] font-semibold text-white">Tamam</button>
+            <p className="mt-3 text-[13px] font-semibold text-[#1f2333]">{book.title} konuları kaydedildi.</p>
+            {savedSummary && <p className="mt-1 text-[12px] text-[#545661]">{savedSummary.units} ünite · {savedSummary.entries} içerik · {savedSummary.topics} YKS konusu</p>}
+            <p className="mx-auto mt-2 max-w-sm text-[12px] leading-5 text-[#6d7390]">Deneme sonuçlarında zayıf çıkan konular bu kitaptaki testlerle eşleşince "🎯 Bugünkü öneri" kartında sana kitaptan çalışma görevi önereceğiz; çözdükçe kitabın tamamlanma yüzdesi ilerleyecek.</p>
+            <div className="mt-5 flex flex-wrap justify-center gap-2">
+              {onAddAnother && <button onClick={onAddAnother} className="h-10 rounded-xl border border-[#3b5ccc]/25 px-4 text-[12px] font-semibold text-[#3b5ccc]">+ Başka kitap ekle</button>}
+              <button onClick={onClose} className="h-10 rounded-xl bg-[#3b5ccc] px-5 text-[12px] font-semibold text-white">Tamam</button>
+            </div>
           </div>
         )}
       </div>

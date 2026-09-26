@@ -7,7 +7,7 @@ import { bookContentConfig } from "../bookContent/config";
 import { suggestTopicsWithAi } from "../bookContent/aiMapper";
 import { matchTopic, type MatchMethod, type MatchTier } from "../bookContent/curriculumMatcher";
 import { getOcrProvider } from "../bookContent/ocrProvider";
-import { parseTableOfContents, type TocEntry } from "../bookContent/tocParser";
+import { pageIssues, parseTableOfContents, type TocEntry } from "../bookContent/tocParser";
 
 const bookIdInput = z.string().min(1).max(120);
 const examInput = z.enum(["TYT", "AYT"]).nullable().optional();
@@ -96,9 +96,40 @@ export const bookContentRouter = router({
         }
       }));
 
-      const { entries, warnings } = parseTableOfContents(pages);
+      // 1) Yanlış fotoğrafı ayıkla (kapak ya da alakasız sayfa).
+      const notes: string[] = [];
+      const tocPages = pages.map((page, index) => ({ page, index })).filter(({ page, index }) => {
+        if (page.pageKind && page.pageKind !== "table_of_contents") {
+          notes.push(`${index + 1}. fotoğraf ${page.pageKind === "cover" ? "kitap kapağı" : "içindekiler sayfası değil"} gibi görünüyor; atlandı.`);
+          return false;
+        }
+        return true;
+      });
+      if (tocPages.length === 0) {
+        const allCovers = pages.every((page) => page.pageKind === "cover");
+        throw new TRPCError({ code: "UNPROCESSABLE_CONTENT", message: allCovers ? "Bu fotoğraf kitabın kapağı. Burada kitabın İÇİNDEKİLER sayfasını çekmelisin." : "Eklediğin fotoğraflar içindekiler sayfası gibi görünmüyor. Ünite ve test listesinin olduğu sayfayı çeker misin?" });
+      }
+
+      // 2) Tutarsız okunan sayfayı (azalan/eksik sayfa numarası) bir kez, sorunları ipucu vererek yeniden oku;
+      //    daha az sorunlu okumayı kullan.
+      const finalPages = await Promise.all(tocPages.map(async ({ page, index }) => {
+        const issues = pageIssues(page);
+        if (issues.length === 0) return page;
+        try {
+          const reread = await provider.extractTableOfContentsPage(input.images[index].dataUrl, { previous: page, issues });
+          if (reread.items.length > 0 && pageIssues(reread).length < issues.length) {
+            notes.push(`${index + 1}. sayfadaki sayfa numarası tutarsızlığı yeniden okunarak düzeltildi.`);
+            return reread;
+          }
+        } catch (error) {
+          console.warn(`[BookContent] Corrective re-read failed on page ${index + 1}:`, error instanceof Error ? error.message : error);
+        }
+        return page;
+      }));
+
+      const { entries, warnings } = parseTableOfContents(finalPages);
       if (entries.length === 0) throw new TRPCError({ code: "UNPROCESSABLE_CONTENT", message: "Fotoğraflarda içindekiler satırı bulunamadı. İçindekiler sayfasının tamamı görünecek şekilde tekrar çeker misin?" });
-      return { warnings, entries: await matchEntries(entries, input.subject || null) };
+      return { warnings: [...notes, ...warnings], entries: await matchEntries(entries, input.subject || null) };
     }),
 
   // Elle eşleştirme listesi (öğrenci "Değiştir" dediğinde).

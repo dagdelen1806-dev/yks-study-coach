@@ -87,6 +87,7 @@ const bookPhotoSchema = {
     isbn: { type: "string" },
     edition: { type: "string" },
     confident: { type: "boolean" },
+    imageKind: { type: "string", enum: ["cover", "table_of_contents", "other"] },
     // Alan bazında 0-1 güven: arayüz düşük güvenli alanı "kontrol et" diye işaretler.
     fieldConfidence: {
       type: "object",
@@ -95,7 +96,7 @@ const bookPhotoSchema = {
       additionalProperties: false,
     },
   },
-  required: ["title", "publisher", "subject", "exam", "authors", "isbn", "edition", "confident", "fieldConfidence"],
+  required: ["title", "publisher", "subject", "exam", "authors", "isbn", "edition", "confident", "imageKind", "fieldConfidence"],
   additionalProperties: false,
 } as const;
 
@@ -108,6 +109,7 @@ type BookPhotoResult = {
   isbn: string;
   edition: string;
   confident: boolean;
+  imageKind: "cover" | "table_of_contents" | "other";
   fieldConfidence: { title: number; publisher: number; subject: number; exam: number; isbn: number };
 };
 
@@ -244,7 +246,7 @@ export const appRouter = router({
       try {
         const response = await invokeLLM({
           messages: [
-            { role: "system", content: "Sen bir kitap kapağı tanıma asistanısın. Türkçe bir YKS kaynak kitabının kapak fotoğrafını okuyup kitap adını, yayınevini, dersini (Türkçe, Matematik, Fizik, Kimya, Biyoloji, Tarih, Coğrafya, Felsefe, Din Kültürü, Genel) ve sınav kapsamını (TYT/AYT/GENEL) tahmin et. Kapakta yazıyorsa yazar adlarını (authors), ISBN numarasını (isbn, yalnızca kapakta/arkada gerçekten görünüyorsa) ve baskı bilgisini (edition, ör. 'Güncellenmiş Yeni Baskı', '2025-2026') da çıkar. Görselde net okuyamadığın bir alanı boş string / boş dizi bırak, uydurma. fieldConfidence her alan için 0-1 arası okuma güvenin; alan boşsa 0. `confident` alanını yalnızca kapaktaki yazıları gerçekten net okuyabildiysen true yap." },
+            { role: "system", content: "Sen bir kitap kapağı tanıma asistanısın. Türkçe bir YKS kaynak kitabının kapak fotoğrafını okuyup kitap adını, yayınevini, dersini (Türkçe, Matematik, Fizik, Kimya, Biyoloji, Tarih, Coğrafya, Felsefe, Din Kültürü, Genel) ve sınav kapsamını (TYT/AYT/GENEL) tahmin et. Kapakta yazıyorsa yazar adlarını (authors), ISBN numarasını (isbn, yalnızca kapakta/arkada gerçekten görünüyorsa) ve baskı bilgisini (edition, ör. 'Güncellenmiş Yeni Baskı', '2025-2026') da çıkar. Görselde net okuyamadığın bir alanı boş string / boş dizi bırak, uydurma. fieldConfidence her alan için 0-1 arası okuma güvenin; alan boşsa 0. Kitap adı kapakta birden çok satıra/puntoya bölünmüş olabilir (ör. büyük 'Paragraf' + altında 'SORU BANKASI'): bunları tek başlıkta, kelimelerin ilk harfi büyük birleştir ('Paragraf Soru Bankası'); 'Video çözümlü', 'Yeni nesil', '20 deneme ilaveli' gibi slogan/özellik satırlarını başlığa katma. Ders kapakta açıkça yazmıyorsa kitap adından çıkar (Paragraf, Dil Bilgisi, Sözcükte Anlam → Türkçe; Problemler, Temel Matematik → Matematik); o durumda subject güvenini en fazla 0.7 ver. 'TYT-AYT' ya da 'YKS' yazıyorsa ve tek bir sınava ait değilse exam 'GENEL' olsun. imageKind: görsel bir kitap KAPAĞIYSA 'cover'; kitabın içindekiler sayfasıysa 'table_of_contents'; başka bir şeyse 'other'. `confident` alanını yalnızca kapaktaki yazıları gerçekten net okuyabildiysen true yap." },
             { role: "user", content: [{ type: "text" as const, text: "Bu kitap kapağını oku." }, { type: "image_url" as const, image_url: { url: input.dataUrl, detail: "high" as const } }] },
           ],
           response_format: { type: "json_schema", json_schema: { name: "yks_book_cover", strict: true, schema: bookPhotoSchema } },
@@ -264,7 +266,8 @@ export const appRouter = router({
           authors: (Array.isArray(parsed.authors) ? parsed.authors : []).map((author) => String(author).trim()).filter(Boolean).slice(0, 8),
           isbn: isbn ?? "",
           edition: String(parsed.edition ?? "").slice(0, 120),
-          confident: Boolean(parsed.confident),
+          confident: Boolean(parsed.confident) && parsed.imageKind === "cover",
+          imageKind: parsed.imageKind === "table_of_contents" || parsed.imageKind === "other" ? parsed.imageKind : ("cover" as const),
           fieldConfidence: { title: clamp01(parsed.fieldConfidence?.title), publisher: clamp01(parsed.fieldConfidence?.publisher), subject: clamp01(parsed.fieldConfidence?.subject), exam: clamp01(parsed.fieldConfidence?.exam), isbn: isbn ? clamp01(parsed.fieldConfidence?.isbn) : 0 },
         };
       } catch (error) {
