@@ -8,7 +8,7 @@ import { getSessionCookieOptions } from "./cookies";
 import { sendVerificationEmail } from "./emailVerification";
 import { ENV } from "./env";
 import { isAdminLogin, parseIdentifier } from "./loginIdentifier";
-import { sdk } from "./sdk";
+import { createSessionToken } from "./session";
 
 const SCRYPT_KEY_LENGTH = 64;
 
@@ -51,24 +51,15 @@ export async function changeLocalPassword(userId: number, currentPassword: strin
 }
 
 /**
- * Local-only sign-in (e-mail or phone + password), used instead of real
- * Manus OAuth when this project runs standalone (no `VITE_APP_ID`/OAuth
- * portal available — see `client/src/const.ts`'s `startLogin` fallback).
+ * Uygulamanın giriş sistemi: e-posta ya da telefon + şifre.
  *
- * "Kayıt ol" registers a new account for that e-mail/phone (plus a display
- * name) and sets its password; every later sign-in must give the matching
- * password. Accounts created before this change were keyed by name only —
- * typing that name on the "Giriş yap" tab still opens them (see
- * `parseIdentifier`).
- *
- * Development'ta hep açık; production'da yalnızca `ALLOW_LOCAL_AUTH=true`
- * bilerek set edilmişse açık (bkz. server/_core/env.ts — bağımsız/Manus dışı
- * deploy'larda gerçek OAuth olmadığı için bu, o deploy'un tek giriş yolu).
+ * "Kayıt ol" o e-posta/telefon için yeni hesap açar (görünen ad + şifre);
+ * sonraki her giriş aynı şifreyi ister. Bu sistemden önce yalnızca adla açılmış
+ * eski hesaplar "Giriş yap" sekmesinde o ad yazılarak hâlâ açılabilir (bkz.
+ * `parseIdentifier`). Yeni hesaplar e-posta doğrulaması + yönetici onayı bekler.
  */
-export function registerDevAuthRoutes(app: Express) {
-  if (!ENV.allowLocalAuth) return;
-
-  app.post("/api/dev-login", async (req: Request, res: Response) => {
+export function registerLocalAuthRoutes(app: Express) {
+  app.post("/api/auth/login", async (req: Request, res: Response) => {
     try {
       const rawIdentifier = typeof req.body?.identifier === "string" ? req.body.identifier : "";
       const rawName = typeof req.body?.name === "string" ? req.body.name.trim().slice(0, 120) : "";
@@ -134,7 +125,7 @@ export function registerDevAuthRoutes(app: Express) {
         });
       }
 
-      const sessionToken = await sdk.createSessionToken(openId, { name: displayName, expiresInMs: ONE_YEAR_MS });
+      const sessionToken = await createSessionToken(openId, { name: displayName, expiresInMs: ONE_YEAR_MS });
       const cookieOptions = getSessionCookieOptions(req);
       res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
 
@@ -147,14 +138,14 @@ export function registerDevAuthRoutes(app: Express) {
           verificationMailSent = await sendVerificationEmail(created, req)
             .then((outcome) => outcome.status === "sent")
             .catch((error) => {
-              console.error("[DevAuth] Verification mail failed:", error instanceof Error ? error.message : error);
+              console.error("[Auth] Verification mail failed:", error instanceof Error ? error.message : error);
               return false;
             });
         }
       }
       res.json({ success: true, name: displayName, isNewAccount: !existing[0], verificationMailSent });
     } catch (error) {
-      console.error("[DevAuth] Local sign-in failed:", error);
+      console.error("[Auth] Sign-in failed:", error);
       res.status(500).json({ error: "Giriş yapılamadı, tekrar dener misin?" });
     }
   });

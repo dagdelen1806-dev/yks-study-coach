@@ -27,7 +27,7 @@ const unavailableResult = (reason: string): DifficultyClassificationResult => ({
 
 /**
  * Real AI classification layer (spec §16/§17), built on the project's
- * existing `invokeLLM` (same built-in Forge client the AI weekly plan and
+ * existing `invokeLLM` (same LLM client the AI weekly plan and
  * exam-document extraction routers already use — no new provider dependency).
  *
  * Never throws: any failure (no API key, network error, malformed JSON,

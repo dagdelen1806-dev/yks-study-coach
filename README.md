@@ -7,7 +7,7 @@ YKS öğrencilerinin konu ilerlemesini, deneme sonuçlarını, kaynak kullanım�
 - Node.js 20 veya üzeri
 - pnpm 9 veya üzeri
 - MySQL/TiDB veritabanı (kalıcı hesap, deneme, kaynak ve takvim verileri için)
-- AI özellikleri kullanılacaksa Manus built-in LLM ortam değişkenleri
+- Yapay zekâ özellikleri (fotoğraf okuma, AI plan, not AI, ses → metin) için OpenAI uyumlu bir sağlayıcı anahtarı (`LLM_API_KEY`)
 
 ## VS Code ile açma
 
@@ -58,11 +58,11 @@ pnpm resource-catalog --source=fixture --dry-run   # Kaynak kataloğu senkroniza
 
 - `DATABASE_URL`: MySQL/TiDB bağlantı adresi.
 - `JWT_SECRET`: Oturum çerezlerini imzalamak için rastgele uzun gizli değer.
-- `VITE_APP_ID`: OAuth uygulama kimliği.
-- `OAUTH_SERVER_URL`: OAuth sunucu adresi.
-- `OWNER_OPEN_ID`: Geliştirme sahibi kimliği.
-- `BUILT_IN_FORGE_API_URL`: AI ve Manus built-in API adresi.
-- `BUILT_IN_FORGE_API_KEY`: Sunucu tarafı built-in API anahtarı.
+- `ADMIN_LOGINS`: Admin olacak e-posta/telefon listesi.
+- `APP_URL`, `BREVO_API_KEY` / `RESEND_API_KEY`, `MAIL_FROM`: E-posta doğrulaması.
+- `LLM_API_KEY` (+ isteğe bağlı `LLM_API_URL`, `LLM_MODEL`, `TRANSCRIBE_MODEL`): Yapay zekâ sağlayıcısı.
+
+Giriş, uygulamanın kendi e-posta/telefon + şifre sistemiyle yapılır; dış bir kimlik sağlayıcısı gerekmez.
 
 ## Özellikler
 
@@ -81,5 +81,5 @@ pnpm resource-catalog --source=fixture --dry-run   # Kaynak kataloğu senkroniza
 ## Notlar
 
 - Uçak modu tarayıcı güvenlik kısıtları nedeniyle otomatik açılamaz; uygulama yalnızca hatırlatma gösterir.
-- Manus OAuth ve built-in API değişkenleri olmadan uygulama demo/localStorage akışıyla açılabilir, ancak kalıcı hesap ve AI özellikleri çalışmaz.
-- `node_modules`, `dist`, `.env`, Manus günlükleri ve Git geçmişi paylaşım ZIP’ine dahil edilmemiştir.
+- `LLM_API_KEY` olmadan uygulama çalışır; yalnızca yapay zekâ özellikleri "servis açılmamış" der.
+- `node_modules`, `dist`, `.env` ve Git geçmişi paylaşım ZIP’ine dahil edilmemiştir.

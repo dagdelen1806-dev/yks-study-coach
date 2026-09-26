@@ -212,11 +212,6 @@ const normalizeToolChoice = (
   return toolChoice;
 };
 
-const resolveApiUrl = () =>
-  ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0
-    ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`
-    : "https://forge.manus.im/v1/chat/completions";
-
 /**
  * Yapay zekâ servisine ulaşılamadığında atılır. `reason` kullanıcıya doğru mesajı
  * göstermek için: "fotoğraf net değil" demek yalnızca görsel gerçekten
@@ -229,25 +224,24 @@ export class LlmUnavailableError extends Error {
   }
 }
 
-type LlmTarget = { chatUrl: string; modelsUrl: string; key: string; model: string | undefined };
+/** OpenAI uyumlu sağlayıcı: `baseUrl` + /chat/completions, /models, /audio/transcriptions. */
+export type LlmTarget = { baseUrl: string; chatUrl: string; modelsUrl: string; key: string; model: string };
 
-/** Öncelik: LLM_API_KEY/OPENAI_API_KEY (OpenAI uyumlu) → Forge. İkisi de yoksa null. */
-const resolveTarget = (): LlmTarget | null => {
-  if (ENV.llmApiKey) {
-    const base = ENV.llmApiUrl || "https://api.openai.com/v1";
-    return { chatUrl: `${base}/chat/completions`, modelsUrl: `${base}/models`, key: ENV.llmApiKey, model: ENV.llmModel || "gpt-4o-mini" };
-  }
-  if (ENV.forgeApiKey) {
-    return { chatUrl: resolveApiUrl(), modelsUrl: resolveApiUrl().replace(/chat\/completions$/, "models"), key: ENV.forgeApiKey, model: ENV.llmModel || undefined };
-  }
-  return null;
+export const DEFAULT_LLM_API_URL = "https://api.openai.com/v1";
+export const DEFAULT_LLM_MODEL = "gpt-4o-mini";
+
+/** LLM_API_KEY / OPENAI_API_KEY tanımlı değilse null (yapay zekâ özellikleri kapalı). */
+export const resolveLlmTarget = (): LlmTarget | null => {
+  if (!ENV.llmApiKey) return null;
+  const baseUrl = ENV.llmApiUrl || DEFAULT_LLM_API_URL;
+  return { baseUrl, chatUrl: `${baseUrl}/chat/completions`, modelsUrl: `${baseUrl}/models`, key: ENV.llmApiKey, model: ENV.llmModel || DEFAULT_LLM_MODEL };
 };
 
-export const isLlmConfigured = () => resolveTarget() !== null;
+export const isLlmConfigured = () => resolveLlmTarget() !== null;
 
 const requireTarget = (): LlmTarget => {
-  const target = resolveTarget();
-  if (!target) throw new LlmUnavailableError("not_configured", "LLM is not configured (set LLM_API_KEY / OPENAI_API_KEY or BUILT_IN_FORGE_API_KEY)");
+  const target = resolveLlmTarget();
+  if (!target) throw new LlmUnavailableError("not_configured", "LLM is not configured (set LLM_API_KEY or OPENAI_API_KEY)");
   return target;
 };
 
@@ -410,9 +404,7 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     messages: messages.map(normalizeMessage),
   };
 
-  if (model || target.model) {
-    payload.model = model || target.model;
-  }
+  payload.model = model || target.model;
 
   if (tools && tools.length > 0) {
     payload.tools = tools;

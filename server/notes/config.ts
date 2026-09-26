@@ -1,5 +1,5 @@
 // Akıllı Defter ayarları. Gizli anahtar içermez: ses → metin ve AI/OCR,
-// mevcut Forge altyapısının ortam değişkenlerini kullanır (BUILT_IN_FORGE_*).
+// uygulamanın yapay zekâ sağlayıcısını kullanır (LLM_* ortam değişkenleri, bkz. server/_core/env.ts).
 
 export const notesConfig = {
   content: {
@@ -21,7 +21,7 @@ export const notesConfig = {
     audioMimeTypes: ["audio/webm", "audio/ogg", "audio/mp4", "audio/mpeg", "audio/wav"] as const,
   },
   speech: {
-    /** "whisper": sunucudaki Forge Whisper servisi. İstemci, sunucu kullanılamazsa tarayıcının kendi dikte özelliğine düşebilir. */
+    /** "whisper": sağlayıcının /audio/transcriptions uç noktası. İstemci, sunucu kullanılamazsa tarayıcının kendi dikte özelliğine düşebilir. */
     provider: "whisper" as "whisper" | "none",
     language: "tr",
     prompt: "Türkçe bir YKS öğrencisinin ders notu. Noktalama işaretlerini doğru kullan.",

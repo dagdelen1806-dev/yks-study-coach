@@ -6,9 +6,8 @@ export const users = mysqlTable("users", {
   name: text("name"),
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
-  // Yalnızca yerel giriş (`loginMethod` "dev" / "dev_email" / "dev_phone", bkz. server/_core/devAuth.ts)
-  // kullanan hesaplarda dolu olur — gerçek Manus OAuth hesapları hiç şifre
-  // tutmaz, kimlik doğrulaması tamamen OAuth sağlayıcısındadır.
+  // Yalnızca yerel giriş (`loginMethod` "dev" / "dev_email" / "dev_phone", bkz. server/_core/localAuth.ts)
+  // kullanan hesaplarda dolu olur (scrypt `salt:hash`).
   passwordHash: varchar("passwordHash", { length: 255 }),
   // E-posta doğrulaması (bkz. server/_core/emailVerification.ts). Yalnızca
   // `loginMethod = "dev_email"` hesaplar için zorunlu; NULL = doğrulanmadı.

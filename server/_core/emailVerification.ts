@@ -10,7 +10,7 @@ import { ENV } from "./env";
 import { isAdminLogin, parseIdentifier } from "./loginIdentifier";
 import { sendMail } from "./mailer";
 import { RateLimitExceededError, checkRateLimit } from "./rateLimit";
-import { sdk } from "./sdk";
+import { authenticateRequest, createSessionToken } from "./session";
 
 /**
  * E-posta doğrulaması — Laravel'in "signed + expiring URL" modelinin bu
@@ -21,7 +21,7 @@ import { sdk } from "./sdk";
  *    adresine bağlıdır: başka bir hesabı doğrulayamaz, adres değişirse eski
  *    link geçersizleşir.
  *  - `audience` + `purpose` alanları sayesinde oturum jetonu doğrulama jetonu
- *    yerine (ya da tersi) kullanılamaz — oturum doğrulaması (sdk.verifySession)
+ *    yerine (ya da tersi) kullanılamaz — oturum doğrulaması (session.ts verifySession)
  *    zaten openId/appId/name ister, bu jetonda hiçbiri yok.
  *  - Link oturum GEREKTİRMEZ: öğrenci maili telefonda açıp bilgisayarda giriş
  *    yapmış olabilir. Güvenliği jetonun imzası sağlar, oturum değil.
@@ -151,7 +151,7 @@ export function registerEmailVerificationRoutes(app: Express) {
     try {
       let user: User;
       try {
-        user = await sdk.authenticateRequest(req);
+        user = await authenticateRequest(req);
       } catch {
         res.status(401).json({ error: "Oturumun sona ermiş. Lütfen tekrar giriş yap." });
         return;
@@ -187,7 +187,7 @@ export function registerEmailVerificationRoutes(app: Express) {
       await db.update(users).set({ openId: identifier.openId, email: identifier.value, emailVerificationSentAt: null }).where(eq(users.id, user.id));
       const updated: User = { ...user, openId: identifier.openId, email: identifier.value, emailVerificationSentAt: null };
 
-      const sessionToken = await sdk.createSessionToken(updated.openId, { name: updated.name ?? identifier.value, expiresInMs: ONE_YEAR_MS });
+      const sessionToken = await createSessionToken(updated.openId, { name: updated.name ?? identifier.value, expiresInMs: ONE_YEAR_MS });
       res.cookie(COOKIE_NAME, sessionToken, { ...getSessionCookieOptions(req), maxAge: ONE_YEAR_MS });
 
       const sent = await sendVerificationEmail(updated, req).catch((error) => {

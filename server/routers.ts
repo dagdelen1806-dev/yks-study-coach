@@ -2,7 +2,7 @@ import { COOKIE_NAME } from "@shared/const";
 import { TRPCError } from "@trpc/server";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { normalizeIsbn } from "../shared/bookIdentity";
-import { changeLocalPassword, PasswordChangeError } from "./_core/devAuth";
+import { changeLocalPassword, PasswordChangeError } from "./_core/localAuth";
 import { sendVerificationEmail } from "./_core/emailVerification";
 import { checkRateLimit } from "./_core/rateLimit";
 import { systemRouter } from "./_core/systemRouter";
@@ -175,7 +175,7 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({
     // `passwordHash` (only ever set on local dev accounts, see
-    // server/_core/devAuth.ts) must never reach the client — strip it here
+    // server/_core/localAuth.ts) must never reach the client — strip it here
     // rather than relying on every future caller of ctx.user to remember to.
     me: publicProcedure.query(opts => {
       if (!opts.ctx.user) return null;

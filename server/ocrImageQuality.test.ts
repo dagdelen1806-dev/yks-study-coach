@@ -6,11 +6,11 @@ import { invokeLLM, LlmUnavailableError, llmUnavailableMessage } from "./_core/l
 // Yapay zekâ servisi hatası ≠ kötü fotoğraf. Öğrenciye "daha net çek" yalnızca
 // görsel gerçekten okunamadığında denmeli.
 describe("LLM availability errors", () => {
-  const saved = { llmApiKey: ENV.llmApiKey, forgeApiKey: ENV.forgeApiKey, llmApiUrl: ENV.llmApiUrl, llmModel: ENV.llmModel };
+  const saved = { llmApiKey: ENV.llmApiKey, llmApiUrl: ENV.llmApiUrl, llmModel: ENV.llmModel };
   afterEach(() => { Object.assign(ENV, saved); vi.unstubAllGlobals(); });
 
   it("reports a missing key as a configuration problem, not a photo problem", async () => {
-    Object.assign(ENV, { llmApiKey: "", forgeApiKey: "" });
+    Object.assign(ENV, { llmApiKey: "" });
     const error = await invokeLLM({ messages: [{ role: "user", content: "x" }] }).catch((caught) => caught);
     expect(error).toBeInstanceOf(LlmUnavailableError);
     expect(error.reason).toBe("not_configured");
@@ -18,7 +18,7 @@ describe("LLM availability errors", () => {
   });
 
   it("uses an OpenAI-compatible provider with a default vision model when LLM_API_KEY is set", async () => {
-    Object.assign(ENV, { llmApiKey: "test-key", forgeApiKey: "", llmApiUrl: "https://example.test/v1", llmModel: "" });
+    Object.assign(ENV, { llmApiKey: "test-key", llmApiUrl: "https://example.test/v1", llmModel: "" });
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: "1", created: 0, model: "m", choices: [{ index: 0, message: { role: "assistant", content: "{}" }, finish_reason: "stop" }] }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     await invokeLLM({ messages: [{ role: "user", content: "x" }] });

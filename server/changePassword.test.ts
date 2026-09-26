@@ -9,7 +9,7 @@ const fakeDb = {
 };
 vi.mock("./db", () => ({ getDb: vi.fn(async () => fakeDb) }));
 
-const { changeLocalPassword, PasswordChangeError } = await import("./_core/devAuth");
+const { changeLocalPassword, PasswordChangeError } = await import("./_core/localAuth");
 
 // Girişteki hashPassword ile aynı "salt:hash" biçimi.
 const hash = (password: string) => { const salt = randomBytes(16).toString("hex"); return `${salt}:${scryptSync(password, salt, 64).toString("hex")}`; };
@@ -35,7 +35,7 @@ describe("changeLocalPassword", () => {
     await expect(changeLocalPassword(1, "YeniSifre123", "BaskaSifre456")).resolves.toBeUndefined();
   });
 
-  it("refuses accounts that do not sign in with a password (e.g. OAuth)", async () => {
+  it("refuses accounts that do not sign in with a password (e.g. legacy name-only accounts)", async () => {
     storedHash = null;
     await expect(changeLocalPassword(1, "x", "YeniSifre123")).rejects.toThrow("şifreyle giriş yapmıyor");
   });

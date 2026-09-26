@@ -1,10 +1,8 @@
 import express, { type Express } from "express";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
-import { registerOAuthRoutes } from "./oauth";
-import { registerDevAuthRoutes } from "./devAuth";
+import { registerLocalAuthRoutes } from "./localAuth";
 import { registerEmailVerificationRoutes } from "./emailVerification";
 import { registerNoteAttachmentRoutes } from "../notes/attachmentRoutes";
-import { registerStorageProxy } from "./storageProxy";
 import { registerWebhookRoutes } from "./webhooks";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
@@ -12,8 +10,8 @@ import { runResourceCatalogSyncOnce } from "../resourceCatalog/scheduler";
 import { resourceCatalogConfig } from "../resourceCatalog/config";
 
 /**
- * Builds the Express app with every API route mounted (tRPC, oauth,
- * dev-login, storage proxy, webhooks, cron) but never calls `.listen()` and
+ * Builds the Express app with every API route mounted (tRPC, login,
+ * email verification, note attachments, webhooks, cron) but never calls `.listen()` and
  * never wires the frontend (Vite dev middleware / static file serving).
  * Two very different entry points share this single builder so route
  * registration can never drift between them:
@@ -29,9 +27,7 @@ export function createApiApp(): Express {
   registerWebhookRoutes(app);
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
-  registerStorageProxy(app);
-  registerOAuthRoutes(app);
-  registerDevAuthRoutes(app);
+  registerLocalAuthRoutes(app);
   registerEmailVerificationRoutes(app);
   registerNoteAttachmentRoutes(app);
   app.use(

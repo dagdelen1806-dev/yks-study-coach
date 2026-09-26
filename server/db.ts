@@ -8,7 +8,6 @@ import { normalizeIsbn } from "../shared/bookIdentity";
 import { CURRICULUM, isCurriculumOnlySlug } from "../shared/curriculum";
 import { deriveTopicStatus } from "../shared/topicStatus";
 import { topicSeeds, type ExamType, type TopicStatus } from "../shared/yksData";
-import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -69,9 +68,6 @@ export async function upsertUser(user: InsertUser): Promise<void> {
     if (user.role !== undefined) {
       values.role = user.role;
       updateSet.role = user.role;
-    } else if (user.openId === ENV.ownerOpenId) {
-      values.role = 'admin';
-      updateSet.role = 'admin';
     }
 
     if (!values.lastSignedIn) {

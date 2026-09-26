@@ -1,5 +1,5 @@
 import type { Express } from "express";
-import { sdk } from "../_core/sdk";
+import { authenticateRequest } from "../_core/session";
 import { getAttachmentStorage } from "./attachmentStorage";
 
 /**
@@ -13,7 +13,7 @@ export function registerNoteAttachmentRoutes(app: Express) {
     if (!Number.isInteger(id) || id <= 0) { res.status(400).end(); return; }
     let userId: number;
     try {
-      userId = (await sdk.authenticateRequest(req)).id;
+      userId = (await authenticateRequest(req)).id;
     } catch {
       res.status(401).end();
       return;

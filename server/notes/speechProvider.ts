@@ -25,7 +25,7 @@ export const whisperSpeechProvider: SpeechToTextProvider = {
       if (result.code === "SERVICE_ERROR" && /not configured|not set/i.test(`${result.error} ${result.details ?? ""}`)) throw new SpeechToTextError("Ses → metin servisi şu an yapılandırılmamış.", false);
       throw new SpeechToTextError("Ses metne çevrilemedi. Tekrar dener misin?", true);
     }
-    return { text: result.text.trim(), durationSec: Number.isFinite(result.duration) ? Math.round(result.duration) : null };
+    return { text: result.text.trim(), durationSec: typeof result.duration === "number" && Number.isFinite(result.duration) ? Math.round(result.duration) : null };
   },
 };
 

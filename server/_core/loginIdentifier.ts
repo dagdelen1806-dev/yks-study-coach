@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { ENV } from "./env";
 
-// Yerel girişin (server/_core/devAuth.ts) e-posta/telefon → openId eşlemesi.
+// Yerel girişin (server/_core/localAuth.ts) e-posta/telefon → openId eşlemesi.
 // Ayrı modülde: hem giriş hem e-posta doğrulaması hem admin sorguları
-// kullanıyor, devAuth ↔ emailVerification döngüsel import'u olmasın diye.
+// kullanıyor, localAuth ↔ emailVerification döngüsel import'u olmasın diye.
 
 const DEV_OPEN_ID_PREFIX = "dev_local_";
 const DEV_EMAIL_OPEN_ID_PREFIX = "dev_email_";

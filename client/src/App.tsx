@@ -17,11 +17,8 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 
-// This deployment runs standalone (no real Manus OAuth app id/portal
-// available here), so `startLogin()` can't do a real OAuth redirect. It
-// dispatches `LOCAL_SIGNIN_REQUEST_EVENT` instead, which this dialog listens
-// for — collecting the student's actual name rather than silently signing
-// everyone in as the same placeholder test account.
+// The app's sign-in / sign-up dialog (e-mail or phone + password). `startLogin()`
+// dispatches `LOCAL_SIGNIN_REQUEST_EVENT`, which this dialog listens for.
 function LocalSignInDialog() {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<"login" | "register">("login");
@@ -116,7 +113,7 @@ function LocalSignInDialog() {
 }
 
 // Yeni kayıt olan her kullanıcı admin onayı bekler (approvalStatus başlangıçta
-// "pending" — bkz. server/db.ts upsertUser / server/_core/devAuth.ts). Onay
+// "pending" — bkz. server/db.ts upsertUser / server/_core/localAuth.ts). Onay
 // gelmeden gerçek dashboard verisine hiç erişilemez: backend zaten
 // `requireUser` middleware'inde (server/_core/trpc.ts) TÜM protectedProcedure
 // çağrılarını reddediyor — bu ekran yalnızca kullanıcıya NEDEN göremediğini

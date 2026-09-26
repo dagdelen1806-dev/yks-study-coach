@@ -54,19 +54,15 @@ Kendi `.env` dosyandaki (`env.template`'teki) isimlerle birebir aynı isimleri k
 |---|---|
 | `DATABASE_URL` | **Bulutta çalışan** bir MySQL bağlantı string'i olmalı — bkz. aşağıdaki 3. adım. Yerel Laragon MySQL'e Vercel'den erişilemez. |
 | `JWT_SECRET` | Uzun, rastgele bir string. |
-| `ALLOW_LOCAL_AUTH` | **`true` — ZORUNLU.** Gerçek Manus OAuth bu deploy'da yapılandırılmadığı için (aşağıdaki `VITE_APP_ID` satırına bak) uygulamanın tek giriş yolu e-posta/telefon + şifre ekranı; bu olmadan kayıt/giriş sayfası hiç çalışmaz (`Cannot POST /api/dev-login`). Kayıt olan hesaplar yine admin onayı bekler. |
 | `ADMIN_LOGINS` | Admin olacak e-posta/telefon (virgülle birden fazla yazılabilir, ör. `ben@ornek.com`). E-posta hesabı, adresini **doğruladığı anda** admin + onaylı olur (doğrulanmadan asla). Telefon için doğrulama yok — telefonla admin tanımlarsan deploy'dan hemen sonra o numarayla kayıt ol. |
 | `APP_URL` | **Zorunlu.** Doğrulama linklerinin kök adresi, `https://` ile: ör. `https://yks-study-coach.vercel.app` (kendi alan adın varsa o). Sona `/` koyma. |
 | `BREVO_API_KEY` | **Mail için bu ya da `RESEND_API_KEY` zorunlu** (ikisi birden varsa Brevo kullanılır). Kendi alan adın yoksa Brevo: [brevo.com](https://www.brevo.com) → SMTP & API → API Keys. Ayrıca **Senders** bölümünde `MAIL_FROM` adresini doğrula. Hiçbir sağlayıcı yoksa kayıt olur ama kullanıcı "E-postanı doğrula" ekranında kalır. |
 | `RESEND_API_KEY` | Resend kullanacaksan. Dikkat: alan adı doğrulamadan (`onboarding@resend.dev`) **yalnızca Resend hesabının kendi adresine** gönderir, öğrencilere gitmez. |
 | `MAIL_FROM` | Gönderen, `Ad <adres>` biçiminde, ör. `Pusula YKS <ben@gmail.com>`. Brevo'da doğrulanmış gönderen adresi; Resend'de doğrulanmış alan adından bir adres olmalı. |
-| `VITE_APP_ID` | **Boş bırakma — herhangi bir dolu değer ver** (ör. `yks-study-coach-standalone`). Manus OAuth pasif olsa da, sunucu bu değeri her oturum jetonunun (JWT) `appId` alanına yazıyor ve doğrulama bu alanın dolu olmasını şart koşuyor; boş bırakılırsa kayıt/giriş "başarılı" görünür ama oturum hiçbir zaman gerçekten doğrulanamaz (canlıda böyle çöktüğü doğrulandı — `[Auth] Session payload missing required fields`). Gerçek bir Manus app id olması gerekmiyor, sadece boş olmaması yeterli. |
-| `OAUTH_SERVER_URL` | `.env`'deki değerle aynı. |
-| `OWNER_OPEN_ID` | `.env`'deki değerle aynı (boşsa boş kalabilir). |
-| `BUILT_IN_FORGE_API_URL` / `BUILT_IN_FORGE_API_KEY` | Manus Forge (yalnızca Manus platformunda). Manus dışı deploy'da bunun yerine aşağıdaki `LLM_*` değişkenlerini kullan. |
-| `LLM_API_KEY` (veya `OPENAI_API_KEY`) | **Kitap/deneme fotoğrafı okuma (OCR), AI Planım ve not AI için gerekli.** OpenAI uyumlu herhangi bir sağlayıcının anahtarı; tanımlıysa Forge yerine kullanılır. Yoksa fotoğraf okuma "servis açılmamış" hatası verir. |
+| `LLM_API_KEY` (veya `OPENAI_API_KEY`) | **Fotoğraf okuma (OCR), AI Planım, not AI ve ses → metin için gerekli.** OpenAI uyumlu herhangi bir sağlayıcının anahtarı. Yoksa bu özellikler "servis açılmamış" der, uygulamanın geri kalanı çalışır. |
 | `LLM_API_URL` | İsteğe bağlı. Varsayılan `https://api.openai.com/v1`. Gemini için `https://generativelanguage.googleapis.com/v1beta/openai`. |
 | `LLM_MODEL` | İsteğe bağlı; görsel okuyabilen bir model. Varsayılan `gpt-4o-mini` (Gemini için ör. `gemini-2.5-flash`). |
+| `TRANSCRIBE_MODEL` | İsteğe bağlı; ses → metin modeli, varsayılan `whisper-1` (OpenAI). Gemini'de bu uç nokta yok — sesli notta tarayıcı diktesine düşülür. |
 | `PAYMENT_PROVIDER` | `mock` bırakabilirsin (sandbox); gerçek bir sağlayıcı bağlamadıysan `apple`/`google` değişkenlerini boş bırak. |
 | `CRON_SECRET` | Yeni: rastgele bir string üret (ör. `openssl rand -hex 32` ya da herhangi bir şifre üreticisi) ve buraya ekle. Kaynak kataloğu senkron uç noktasını (`/api/cron/resource-catalog-sync`) korur — Vercel Cron bunu otomatik `Authorization: Bearer $CRON_SECRET` başlığıyla gönderir. |
 

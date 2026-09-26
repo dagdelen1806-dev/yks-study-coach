@@ -59,7 +59,7 @@ vi.mock("./subscriptions/entitlementService", async (importOriginal) => ({
 }));
 
 // Ek ucu için oturum: "x-test-user" başlığındaki kullanıcı.
-vi.mock("./_core/sdk", () => ({ sdk: { authenticateRequest: vi.fn(async (req: { headers: Record<string, string | undefined> }) => { const id = Number(req.headers["x-test-user"]); if (!id) throw new Error("no session"); return { id }; }) } }));
+vi.mock("./_core/session", () => ({ authenticateRequest: vi.fn(async (req: { headers: Record<string, string | undefined> }) => { const id = Number(req.headers["x-test-user"]); if (!id) throw new Error("no session"); return { id }; }) }));
 
 const { appRouter } = await import("./routers");
 const { registerNoteAttachmentRoutes } = await import("./notes/attachmentRoutes");

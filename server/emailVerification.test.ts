@@ -20,7 +20,7 @@ vi.mock("./_core/mailer", () => ({ sendMail: vi.fn(async (mail: (typeof sentMail
 const { createVerificationToken, readVerificationToken, verifyEmailToken, sendVerificationEmail, appBaseUrl } = await import("./_core/emailVerification");
 const { ENV } = await import("./_core/env");
 const { parseIdentifier } = await import("./_core/loginIdentifier");
-const { sdk } = await import("./_core/sdk");
+const sdk = await import("./_core/session");
 const { buildVerifyEmail } = await import("./_core/emails/verifyEmail");
 const { EMAIL_VERIFICATION_RESEND_COOLDOWN_MS } = await import("@shared/const");
 
