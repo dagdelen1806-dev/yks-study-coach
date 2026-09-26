@@ -2,7 +2,9 @@ import { COOKIE_NAME } from "@shared/const";
 import { TRPCError } from "@trpc/server";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { normalizeIsbn } from "../shared/bookIdentity";
+import { changeLocalPassword, PasswordChangeError } from "./_core/devAuth";
 import { sendVerificationEmail } from "./_core/emailVerification";
+import { checkRateLimit } from "./_core/rateLimit";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
 import { protectedProcedure, metredFeatureProcedure } from "./_core/trpc";
@@ -184,6 +186,24 @@ export const appRouter = router({
         success: true,
       } as const;
     }),
+    // Profil menüsündeki "Şifre değiştir". Tahmin denemelerine karşı kullanıcı
+    // başına 15 dakikada 5 deneme.
+    changePassword: protectedProcedure
+      .input(z.object({ currentPassword: z.string().min(1).max(200), newPassword: z.string().min(1).max(200) }))
+      .mutation(async ({ ctx, input }) => {
+        try {
+          checkRateLimit(`change-password:${ctx.user.id}`, 5, 15 * 60_000);
+        } catch {
+          throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Çok fazla deneme yaptın. 15 dakika sonra tekrar dener misin?" });
+        }
+        try {
+          await changeLocalPassword(ctx.user.id, input.currentPassword, input.newPassword);
+          return { success: true } as const;
+        } catch (error) {
+          if (error instanceof PasswordChangeError) throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+          throw error;
+        }
+      }),
     // "E-postanı doğrula" ekranının "Tekrar gönder" butonu. requireUser'ın
     // doğrulama/onay kapısından muaf (bkz. _core/trpc.ts APPROVAL_GATE_ALLOWLIST).
     resendVerificationEmail: protectedProcedure.mutation(async ({ ctx }) => {

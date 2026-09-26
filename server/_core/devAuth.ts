@@ -30,6 +30,26 @@ function verifyPassword(password: string, stored: string): boolean {
   return timingSafeEqual(keyBuffer, derived);
 }
 
+export const MIN_NEW_PASSWORD_LENGTH = 8;
+
+export class PasswordChangeError extends Error {}
+
+/**
+ * Yerel (şifreli) hesabın şifresini değiştirir: mevcut şifre doğrulanır, yeni
+ * şifre girişteki ile aynı scrypt biçimiyle saklanır. Hata mesajları Türkçe ve
+ * kullanıcıya gösterilebilir (PasswordChangeError).
+ */
+export async function changeLocalPassword(userId: number, currentPassword: string, newPassword: string): Promise<void> {
+  if (newPassword.length < MIN_NEW_PASSWORD_LENGTH) throw new PasswordChangeError(`Yeni şifre en az ${MIN_NEW_PASSWORD_LENGTH} karakter olmalı.`);
+  if (newPassword === currentPassword) throw new PasswordChangeError("Yeni şifre mevcut şifreyle aynı olamaz.");
+  const db = await getDb();
+  if (!db) throw new PasswordChangeError("Veritabanı bağlantısı yok.");
+  const [user] = await db.select({ passwordHash: users.passwordHash }).from(users).where(eq(users.id, userId)).limit(1);
+  if (!user?.passwordHash) throw new PasswordChangeError("Bu hesap şifreyle giriş yapmıyor; şifresi buradan değiştirilemez.");
+  if (!verifyPassword(currentPassword, user.passwordHash)) throw new PasswordChangeError("Mevcut şifre hatalı.");
+  await db.update(users).set({ passwordHash: hashPassword(newPassword) }).where(eq(users.id, userId));
+}
+
 /**
  * Local-only sign-in (e-mail or phone + password), used instead of real
  * Manus OAuth when this project runs standalone (no `VITE_APP_ID`/OAuth
