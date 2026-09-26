@@ -7,7 +7,7 @@ import { bookContentConfig } from "../bookContent/config";
 import { suggestTopicsWithAi } from "../bookContent/aiMapper";
 import { matchTopic, type MatchMethod, type MatchTier } from "../bookContent/curriculumMatcher";
 import { getOcrProvider } from "../bookContent/ocrProvider";
-import { pageIssues, parseTableOfContents, type TocEntry } from "../bookContent/tocParser";
+import { looksLikeTopicList, pageIssues, parseTableOfContents, type TocEntry } from "../bookContent/tocParser";
 
 const bookIdInput = z.string().min(1).max(120);
 const examInput = z.enum(["TYT", "AYT"]).nullable().optional();
@@ -99,6 +99,9 @@ export const bookContentRouter = router({
       // 1) Yanlış fotoğrafı ayıkla (kapak ya da alakasız sayfa).
       const notes: string[] = [];
       const tocPages = pages.map((page, index) => ({ page, index })).filter(({ page, index }) => {
+        // Sağlayıcı alışılmadık bir düzeni ("Kitap Bitirme Planı" gibi) 'other' sayabilir; sayfa numaralı
+        // birkaç satır okuduysa içerik gerçektir — atma.
+        if (looksLikeTopicList(page)) return true;
         if (page.pageKind && page.pageKind !== "table_of_contents") {
           notes.push(`${index + 1}. fotoğraf ${page.pageKind === "cover" ? "kitap kapağı" : "içindekiler sayfası değil"} gibi görünüyor; atlandı.`);
           return false;

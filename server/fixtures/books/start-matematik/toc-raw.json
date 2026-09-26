@@ -1,0 +1,27 @@
+{
+  "_source": "ÜçDörtBeş — 0'dan Başla START Matematik: 'Kitap Bitirme Planı' sayfası (iki sütun, ünite/test yok, 'N. KONU' + 'Sayfa (N)'). Beklenen OCR çıktısı; sayfa başlığı 'section' olarak okunmuş hâliyle.",
+  "pages": [
+    {
+      "pageKind": "other",
+      "items": [
+        { "type": "section", "unitNumber": null, "title": "KİTAP BİTİRME PLANI", "label": null, "page": null },
+        { "type": "entry", "unitNumber": null, "title": "Toplama ve Çıkarma İşlemi", "label": "1.", "page": 3 },
+        { "type": "entry", "unitNumber": null, "title": "Çarpma ve Bölme İşlemi", "label": "2.", "page": 17 },
+        { "type": "entry", "unitNumber": null, "title": "İşlem Önceliği", "label": "3.", "page": 37 },
+        { "type": "entry", "unitNumber": null, "title": "Harfli İfadeler", "label": "4.", "page": 51 },
+        { "type": "entry", "unitNumber": null, "title": "Basit Denklem Çözümü", "label": "5.", "page": 69 },
+        { "type": "entry", "unitNumber": null, "title": "Rasyonel Sayılar", "label": "6.", "page": 89 },
+        { "type": "entry", "unitNumber": null, "title": "Ondalık Gösterim", "label": "7.", "page": 121 },
+        { "type": "entry", "unitNumber": null, "title": "Sayı Kümeleri", "label": "8.", "page": 143 },
+        { "type": "entry", "unitNumber": null, "title": "Oran ve Orantı", "label": "9.", "page": 161 },
+        { "type": "entry", "unitNumber": null, "title": "Rasyonel Denklemlerin Çözümü", "label": "10.", "page": 175 },
+        { "type": "entry", "unitNumber": null, "title": "İki Bilinmeyenli Denklemler", "label": "11.", "page": 189 },
+        { "type": "entry", "unitNumber": null, "title": "Basit Eşitsizlikler", "label": "12.", "page": 201 },
+        { "type": "entry", "unitNumber": null, "title": "Mutlak Değer", "label": "13.", "page": 219 },
+        { "type": "entry", "unitNumber": null, "title": "Üslü İfadeler", "label": "14.", "page": 239 },
+        { "type": "entry", "unitNumber": null, "title": "Köklü İfadeler", "label": "15.", "page": 269 },
+        { "type": "entry", "unitNumber": null, "title": "Çarpanlara Ayırma", "label": "16.", "page": 299 }
+      ]
+    }
+  ]
+}

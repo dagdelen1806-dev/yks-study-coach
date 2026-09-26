@@ -1,5 +1,5 @@
 import { trpc } from "@/lib/trpc";
-import { Camera, ImagePlus, Loader2, X } from "lucide-react";
+import { Camera, ImagePlus, Loader2, RotateCw, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import BookContentScanner, { type ScannerBook } from "./BookContentScanner";
@@ -41,12 +41,16 @@ export default function AddBookWizard({
   const galleryRef = useRef<HTMLInputElement>(null);
   const readCover = trpc.resources.extractBookFromPhoto.useMutation();
 
-  const handleCover = async (file?: File) => {
+  // Son kapak fotoğrafı ve dönüşü: yan çekilmiş kapak okunamazsa öğrenci yeniden çekmeden döndürüp tekrar deneyebilir.
+  const [lastCover, setLastCover] = useState<{ file: File; rotate: 0 | 90 | 180 | 270 } | null>(null);
+
+  const handleCover = async (file?: File, rotate: 0 | 90 | 180 | 270 = 0) => {
     if (!file || readCover.isPending) return;
     setError("");
+    setLastCover({ file, rotate });
     setCoverPreview(URL.createObjectURL(file));
     try {
-      const image = await compressImage(file);
+      const image = await compressImage(file, { rotate });
       const data = await readCover.mutateAsync({ dataUrl: image.dataUrl, mimeType: image.mimeType });
       if (data.imageKind === "table_of_contents") {
         setError("Bu fotoğraf kitabın içindekiler sayfası gibi görünüyor. Önce kitabın KAPAĞINI çek; içindekiler sayfasını bir sonraki adımda ekleyeceksin.");
@@ -124,7 +128,16 @@ export default function AddBookWizard({
         {step === "cover" && (
           <div className="mt-5">
             <p className="text-[12px] leading-5 text-[#6d7390]">İlk fotoğraf kitabın <strong>kapağı</strong> olsun: kitap adı, yayınevi ve dersi buradan okuyacağız. Kapağın tamamı görünsün, parlama olmasın.</p>
-            {error && <div role="alert" className="mt-3 rounded-xl bg-[#fff0ed] p-3 text-[12px] font-medium text-[#d95d4d]">{error}</div>}
+            {error && (
+              <div role="alert" className="mt-3 rounded-xl bg-[#fff0ed] p-3 text-[12px] font-medium text-[#d95d4d]">
+                {error}
+                {lastCover && !readCover.isPending && (
+                  <button onClick={() => void handleCover(lastCover.file, (((lastCover.rotate + 90) % 360) as 0 | 90 | 180 | 270))} className="mt-2 flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-[11px] font-semibold text-[#3b5ccc]">
+                    <RotateCw size={13} /> Fotoğraf yan mı? Döndürüp tekrar oku
+                  </button>
+                )}
+              </div>
+            )}
             {readCover.isPending ? (
               <div className="flex flex-col items-center py-10 text-center">
                 {coverPreview && <img src={coverPreview} alt="Kapak" className="mb-4 h-32 rounded-lg object-contain" />}

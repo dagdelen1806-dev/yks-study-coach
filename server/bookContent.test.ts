@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { CURRICULUM } from "../shared/curriculum";
 import { buildBookRecommendations, computeBookCompletion, minutesForWeakness, pickStudyDay, weaknessFromAccuracy, type ContentRow } from "./bookContent/bookStudyAllocation";
 import { matchTopic, type MatchableTopic } from "./bookContent/curriculumMatcher";
-import { parseTableOfContents, type TocRawPage } from "./bookContent/tocParser";
+import { looksLikeTopicList, parseTableOfContents, type TocRawPage } from "./bookContent/tocParser";
 
 // Gerçek kitap fikstürü: Bilgi Sarmal — Paragraf Soru Bankası (TYT-AYT).
 const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/books/paragraf-soru-bankasi/toc-raw.json"), "utf8")) as { pages: TocRawPage[] };
@@ -107,6 +107,39 @@ describe("matchTopic — curriculum mapping of the fixture book", () => {
     const result = matchTopic("Olasılık", topics, { subject: "Türkçe" });
     expect(result.best).toBeNull();
     expect(matchTopic("Olasılık", topics, { subject: "Matematik", exam: "TYT" }).best?.topicId).toBe(idOf("Olasılık"));
+  });
+});
+
+describe("topic-list pages — START Matematik 'Kitap Bitirme Planı'", () => {
+  const start = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/books/start-matematik/toc-raw.json"), "utf8")) as { pages: TocRawPage[] };
+
+  it("is kept even when the provider labels it 'other'", () => {
+    expect(start.pages[0].pageKind).toBe("other");
+    expect(looksLikeTopicList(start.pages[0])).toBe(true);
+    expect(looksLikeTopicList({ pageKind: "cover", items: [] })).toBe(false);
+  });
+
+  it("parses numbered topics (no units/tests) as topics with page ranges", () => {
+    const { entries, warnings } = parseTableOfContents(start.pages);
+    expect(warnings).toEqual([]);
+    expect(entries).toHaveLength(16);
+    expect(entries.every((entry) => entry.contentType === "topic")).toBe(true);
+    expect(entries[0]).toMatchObject({ title: "Toplama ve Çıkarma İşlemi", pageStart: 3, pageEnd: 16, matchText: "Toplama ve Çıkarma İşlemi" });
+    expect(entries[15]).toMatchObject({ title: "Çarpanlara Ayırma", pageStart: 299, pageEnd: null });
+  });
+
+  it("maps every topic to the TYT mathematics curriculum", () => {
+    const { entries } = parseTableOfContents(start.pages);
+    const expected: Record<string, string> = {
+      "Toplama ve Çıkarma İşlemi": "Temel Kavramlar", "İşlem Önceliği": "Temel Kavramlar", "Sayı Kümeleri": "Temel Kavramlar",
+      "Ondalık Gösterim": "Rasyonel Sayılar", "Oran ve Orantı": "Oran - Orantı", "Basit Denklem Çözümü": "Denklem Çözme",
+      "İki Bilinmeyenli Denklemler": "Denklem Çözme", "Üslü İfadeler": "Üslü Sayılar", "Köklü İfadeler": "Köklü Sayılar", "Mutlak Değer": "Mutlak Değer",
+    };
+    for (const entry of entries) {
+      const best = matchTopic(entry.matchText!, topics, { subject: "Matematik", exam: "TYT" }).best;
+      expect(best, entry.title).toBeTruthy();
+      if (expected[entry.title]) expect(best!.topicId, entry.title).toBe(idOf(expected[entry.title]));
+    }
   });
 });
 

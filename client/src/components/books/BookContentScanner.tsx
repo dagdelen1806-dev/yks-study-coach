@@ -136,7 +136,10 @@ export default function BookContentScanner({ book, onClose, onSaved, onAddAnothe
     setStep("reading");
     setError("");
     try {
-      const images = await Promise.all(pages.map((page) => compressImage(page.file, { rotate: page.rotate, crop: page.crop })));
+      // Tüm sayfalar tek istekte gider; Vercel istek gövdesi ~4.5 MB ile sınırlı (base64 %33 büyütür).
+      // Toplam ~3 MB bütçe sayfalara bölünür; tek sayfada küçük yazılar için çözünürlük biraz yüksek tutulur.
+      const perPageBytes = Math.min(1.5 * 1024 * 1024, Math.floor((3 * 1024 * 1024) / pages.length));
+      const images = await Promise.all(pages.map((page) => compressImage(page.file, { rotate: page.rotate, crop: page.crop, maxBytes: perPageBytes, maxDimension: pages.length <= 2 ? 2400 : 2000 })));
       const preview = await readToc.mutateAsync({ bookId: book.id, subject: book.subject || null, images: images.map(({ dataUrl, mimeType }) => ({ dataUrl, mimeType })) });
       setWarnings(preview.warnings);
       setRows(preview.entries.map((entry) => ({

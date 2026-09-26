@@ -32,7 +32,12 @@ export function pageIssues(page: TocRawPage): string[] {
   return issues;
 }
 
-export type ContentType = "topic_test" | "osym_type" | "review" | "simulation" | "topic";
+/** En az 3 sayfa numaralı satır okunduysa sayfa, sağlayıcının türü ne dediğinden bağımsız olarak bir konu listesidir. */
+export function looksLikeTopicList(page: TocRawPage): boolean {
+  return page.items.filter((item) => item.type === "entry" && item.page !== null && item.title.trim()).length >= 3;
+}
+
+export type ContentType ="topic_test" | "osym_type" | "review" | "simulation" | "topic";
 
 export type TocEntry = {
   order: number;
@@ -53,6 +58,8 @@ export type TocParseResult = { entries: TocEntry[]; warnings: string[] };
 const UNIT_ONLY = /^\d+\s*\.?\s*unite$/;
 
 function classify(label: string | null, title: string): { contentType: ContentType; testNumber: number | null } {
+  // Yalnızca sıra numarası olan etiket ("1", "12.") test değil, konu listesidir (ör. "Kitap Bitirme Planı").
+  if (label && /^\d+\s*[.)]?$/.test(label.trim())) return { contentType: "topic", testNumber: null };
   const text = normalizeForComparison(`${label ?? ""} ${label ? "" : title}`);
   const lastNumber = (() => { const all = text.match(/\d+/g); return all ? Number(all[all.length - 1]) : null; })();
   const testMatch = text.match(/^test\s*(\d+)/);
@@ -119,7 +126,8 @@ export function parseTableOfContents(pages: TocRawPage[]): TocParseResult {
         pageStart: item.page ?? null,
         pageEnd: null,
         // Konu testi kendi başlığıyla, ÖSYM tipi/başlıksız satır ünite adıyla eşlenir.
-        matchText: isMixed ? null : (contentType === "topic_test" && title ? title : unitTitle || title || null),
+        // Konu listesi satırı da kendi başlığıyla eşlenir ("KİTAP BİTİRME PLANI" gibi bir sayfa başlığıyla değil).
+        matchText: isMixed ? null : ((contentType === "topic_test" || contentType === "topic") && title ? title : unitTitle || title || null),
       });
     }
   }

@@ -58,8 +58,10 @@ const TYT: Record<string, SubjectTree> = {
   },
   Matematik: {
     "Sayılar": [
-      "Temel Kavramlar", "Sayı Basamakları", { topic: "Bölme ve Bölünebilme", aliases: ["bölünebilme kuralları"] }, { topic: "EBOB - EKOK", aliases: ["ebob ekok", "obeb okek"] },
-      "Rasyonel Sayılar", "Basit Eşitsizlikler", "Mutlak Değer", "Üslü Sayılar", "Köklü Sayılar", "Çarpanlara Ayırma", { topic: "Oran - Orantı", aliases: ["oran orantı"] }, "Denklem Çözme",
+      // Başlangıç kitapları konuları daha ince böler ("Toplama ve Çıkarma İşlemi", "Ondalık Gösterim"…); takma adlar onları doğru üst konuya bağlar.
+      { topic: "Temel Kavramlar", aliases: ["toplama ve çıkarma işlemi", "çarpma ve bölme işlemi", "dört işlem", "işlem önceliği", "sayı kümeleri", "sayılar"] }, "Sayı Basamakları", { topic: "Bölme ve Bölünebilme", aliases: ["bölünebilme kuralları"] }, { topic: "EBOB - EKOK", aliases: ["ebob ekok", "obeb okek"] },
+      { topic: "Rasyonel Sayılar", aliases: ["ondalık gösterim", "ondalık sayılar", "kesirler", "kesirli sayılar"] }, "Basit Eşitsizlikler", "Mutlak Değer", { topic: "Üslü Sayılar", aliases: ["üslü ifadeler"] }, { topic: "Köklü Sayılar", aliases: ["köklü ifadeler"] }, "Çarpanlara Ayırma", { topic: "Oran - Orantı", aliases: ["oran orantı", "oran ve orantı"] },
+      { topic: "Denklem Çözme", aliases: ["basit denklem çözümü", "birinci dereceden denklemler", "rasyonel denklemlerin çözümü", "iki bilinmeyenli denklemler", "harfli ifadeler", "cebirsel ifadeler"] },
     ],
     Problemler: [
       "Sayı Problemleri", "Kesir Problemleri", "Yaş Problemleri", "Yüzde Problemleri", { topic: "Kâr - Zarar Problemleri", aliases: ["kar zarar problemleri"] }, "Karışım Problemleri",
