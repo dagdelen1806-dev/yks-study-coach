@@ -195,6 +195,46 @@ export async function transcribeAudio(
 }
 
 /**
+ * Aynı Whisper servisine, bir URL yerine doğrudan ses baytlarıyla istek atar
+ * (Akıllı Defter: kayıt tarayıcıdan gelir, önce bir depolamaya yüklenmez).
+ */
+export async function transcribeAudioBuffer(audio: Buffer, mimeType: string, options: { language?: string; prompt?: string } = {}): Promise<TranscriptionResponse | TranscriptionError> {
+  if (!ENV.forgeApiUrl || !ENV.forgeApiKey) {
+    return { error: "Voice transcription service is not configured", code: "SERVICE_ERROR", details: "BUILT_IN_FORGE_API_URL / BUILT_IN_FORGE_API_KEY is not set" };
+  }
+  if (audio.length > 16 * 1024 * 1024) {
+    return { error: "Audio file exceeds maximum size limit", code: "FILE_TOO_LARGE" };
+  }
+  try {
+    const baseMime = mimeType.split(";")[0].trim();
+    const formData = new FormData();
+    formData.append("file", new Blob([new Uint8Array(audio)], { type: baseMime }), `audio.${getFileExtension(baseMime)}`);
+    formData.append("model", "whisper-1");
+    formData.append("response_format", "verbose_json");
+    if (options.language) formData.append("language", options.language);
+    formData.append("prompt", options.prompt || (options.language ? `Transcribe the user's voice to text, the user's working language is ${getLanguageName(options.language)}` : "Transcribe the user's voice to text"));
+
+    const baseUrl = ENV.forgeApiUrl.endsWith("/") ? ENV.forgeApiUrl : `${ENV.forgeApiUrl}/`;
+    const response = await fetch(new URL("v1/audio/transcriptions", baseUrl).toString(), {
+      method: "POST",
+      headers: { authorization: `Bearer ${ENV.forgeApiKey}`, "Accept-Encoding": "identity" },
+      body: formData,
+    });
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "");
+      return { error: "Transcription service request failed", code: "TRANSCRIPTION_FAILED", details: `${response.status} ${response.statusText}${errorText ? `: ${errorText.slice(0, 300)}` : ""}` };
+    }
+    const whisperResponse = (await response.json()) as WhisperResponse;
+    if (!whisperResponse.text || typeof whisperResponse.text !== "string") {
+      return { error: "Invalid transcription response", code: "SERVICE_ERROR" };
+    }
+    return whisperResponse;
+  } catch (error) {
+    return { error: "Voice transcription failed", code: "SERVICE_ERROR", details: error instanceof Error ? error.message : "Unknown error" };
+  }
+}
+
+/**
  * Helper function to get file extension from MIME type
  */
 function getFileExtension(mimeType: string): string {

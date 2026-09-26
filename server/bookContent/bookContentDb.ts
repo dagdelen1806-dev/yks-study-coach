@@ -4,6 +4,7 @@ import { CURRICULUM } from "../../shared/curriculum";
 import { getDb, getTopicCatalog, getUserTopicProgress, upsertBookTopicMapping } from "../db";
 import { buildBookRecommendations, computeBookCompletion, pickStudyDay, type BookRecommendation, type ContentRow, type PageRange } from "./bookStudyAllocation";
 import { deriveCurriculumWeakTopics, type ResolvableTopic } from "./examTopicResolver";
+import { insertPlanTask, pickDayForTask } from "../studyPlan/planTasks";
 import type { ContentType } from "./tocParser";
 
 type Db = NonNullable<Awaited<ReturnType<typeof getDb>>>;
@@ -238,48 +239,25 @@ export async function addRecommendationToPlan(userId: number, input: { topicId: 
   const recommendation = (await getWeakTopicBookRecommendations(userId)).find((rec) => rec.topicId === input.topicId && rec.bookId === input.bookId);
   if (!recommendation) throw new Error("Bu öneri artık geçerli değil (testler çözülmüş ya da zaten planlanmış olabilir).");
 
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
-  let date = isoDate(today);
-  if (input.when === "auto") {
-    const horizonEnd = new Date(today.getTime() + 7 * 86_400_000);
-    const [profile] = await db.select({ daily: studentProfiles.dailyStudyDuration }).from(studentProfiles).where(eq(studentProfiles.userId, userId)).limit(1);
-    const sessions = await db.select({ sessionDate: studyPlanSessions.sessionDate, minutes: studyPlanSessions.plannedMinutes, sourceBookId: studyPlanSessions.sourceBookId }).from(studyPlanSessions).where(and(eq(studyPlanSessions.userId, userId), eq(studyPlanSessions.status, "planned"), gte(studyPlanSessions.sessionDate, today), lte(studyPlanSessions.sessionDate, horizonEnd)));
-    const picked = pickStudyDay({ today: date, minutes: recommendation.minutes, dailyCapacity: profile?.daily ?? 120, load: sessions.map((session) => ({ date: isoDate(new Date(session.sessionDate)), minutes: session.minutes, isBook: Boolean(session.sourceBookId) })) });
-    if (!picked) throw new Error("Önümüzdeki 7 günde bu görev için yer yok — planın dolu. \"Bugün çalış\" ile yine de ekleyebilirsin.");
-    date = picked;
-  }
-
-  const sessionDate = new Date(`${date}T12:00:00Z`);
-  const [plan] = await db.select({ id: studyPlans.id }).from(studyPlans).where(and(eq(studyPlans.userId, userId), lte(studyPlans.weekStart, sessionDate), gte(studyPlans.weekEnd, sessionDate))).orderBy(studyPlans.createdAt).limit(1);
-  let planId = plan?.id;
-  if (!planId) {
-    const weekStart = new Date(`${date}T00:00:00Z`);
-    const weekEnd = new Date(weekStart.getTime() + 6 * 86_400_000 + 86_399_000);
-    const result = await db.insert(studyPlans).values({ userId, title: "Kitap görevleri", weekStart, weekEnd, summary: "Zayıf konular için kitaplarından önerilen görevler.", source: "manual" });
-    planId = Number(result[0].insertId);
-  }
-
+  const date = await pickDayForTask(userId, recommendation.minutes, input.when);
   const bookTitle = await resolveBookTitle(db, userId, input.bookId, input.bookTitle);
   const unitPart = recommendation.unitNumber !== null ? `Ünite ${recommendation.unitNumber}` : recommendation.unitTitle;
   const testPart = recommendation.testRange ? `Test ${recommendation.testRange}` : recommendation.labels.join(", ");
   const title = `${bookTitle} — ${unitPart} — ${testPart}`.slice(0, 180);
   const targetPages = recommendation.pageStart !== null ? `${recommendation.pageStart}-${recommendation.pageEnd ?? recommendation.pageStart}` : null;
 
-  await db.insert(studyPlanSessions).values({
-    planId,
-    userId,
-    sessionDate,
+  await insertPlanTask(userId, {
+    date,
     title,
     subject: recommendation.subject,
-    // Tam müfredat adı: tamamlanınca completeStudySession → upsertTopicProgress
-    // aynı yks_topics satırını günceller, zayıflık mevcut sistemce yeniden hesaplanır.
     topic: recommendation.topic,
     kind: recommendation.purpose === "review" ? "Tekrar" : "Soru",
-    plannedMinutes: recommendation.minutes,
+    minutes: recommendation.minutes,
     targetPages,
     targetTests: recommendation.testRange,
     sourceBookId: input.bookId,
+    planTitle: "Kitap görevleri",
+    planSummary: "Zayıf konular için kitaplarından önerilen görevler.",
   });
   return { date, title, minutes: recommendation.minutes };
 }

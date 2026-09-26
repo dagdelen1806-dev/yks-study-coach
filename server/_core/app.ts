@@ -3,6 +3,7 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { registerDevAuthRoutes } from "./devAuth";
 import { registerEmailVerificationRoutes } from "./emailVerification";
+import { registerNoteAttachmentRoutes } from "../notes/attachmentRoutes";
 import { registerStorageProxy } from "./storageProxy";
 import { registerWebhookRoutes } from "./webhooks";
 import { appRouter } from "../routers";
@@ -32,6 +33,7 @@ export function createApiApp(): Express {
   registerOAuthRoutes(app);
   registerDevAuthRoutes(app);
   registerEmailVerificationRoutes(app);
+  registerNoteAttachmentRoutes(app);
   app.use(
     "/api/trpc",
     createExpressMiddleware({

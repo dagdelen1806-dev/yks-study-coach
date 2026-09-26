@@ -5,6 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import type { AppRouter } from "../../../../server/routers";
 import BookContentScanner, { type ScannerBook } from "./BookContentScanner";
+import { NoteCard } from "../notebook/NoteList";
+import { useNotebook } from "../notebook/NotebookProvider";
 
 type Recommendation = inferRouterOutputs<AppRouter>["bookContent"]["recommendations"][number];
 type ContentRow = inferRouterOutputs<AppRouter>["bookContent"]["contents"][number];
@@ -182,6 +184,8 @@ export function BookDetailDialog({ book, onClose }: { book: ScannerBook; onClose
   const recommendations = trpc.bookContent.recommendations.useQuery(undefined, { retry: false });
   const summaries = trpc.bookContent.summaries.useQuery(undefined, { retry: false });
   const completion = summaries.data?.find((item) => item.bookId === book.id)?.completion;
+  const notebook = useNotebook();
+  const bookNotes = trpc.notes.list.useQuery({ bookId: book.id, limit: 6 }, { retry: false });
   const unitProgress = (unitNumber: number | null, unitTitle: string) => completion?.units.find((unit) => unit.unitNumber === unitNumber && unit.unitTitle === unitTitle);
   const addToPlan = useAddToPlan();
   const [scanning, setScanning] = useState(false);
@@ -241,6 +245,14 @@ export function BookDetailDialog({ book, onClose }: { book: ScannerBook; onClose
             <div className="mt-2 space-y-2">{bookRecs.map((rec) => <RecommendationRow key={recoKey(rec)} rec={rec} bookTitle={book.title} />)}</div>
           </div>
         )}
+
+        <div className="mt-5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-[12px] font-semibold text-[#1f2333]">📝 Bu kitaptaki notların {bookNotes.data?.items.length ? `(${bookNotes.data.items.length}${bookNotes.data.nextCursor ? "+" : ""})` : ""}</div>
+            <button onClick={() => notebook.open({ prefill: { bookId: book.id, subject: book.subject } })} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#c25e00]/25 px-3 text-[11px] font-semibold text-[#c25e00]">+ Not ekle</button>
+          </div>
+          {bookNotes.data?.items.length ? <div className="mt-2 space-y-2">{bookNotes.data.items.map((note) => <NoteCard key={note.id} note={note} onOpen={(id) => notebook.open({ noteId: id })} />)}</div> : <p className="mt-2 text-[12px] text-[#8b8c95]">Bu kitapla çalışırken aldığın notlar burada görünür.</p>}
+        </div>
 
         <div className="mt-5">
           <div className="flex items-center justify-between gap-2">

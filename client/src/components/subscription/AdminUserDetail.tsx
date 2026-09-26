@@ -91,6 +91,7 @@ export default function AdminUserDetail({ userId, onClose }: { userId: number; o
                     <StatBox label="Çalışılan konu" value={String(detail.data.topicProgress.length)} />
                     <StatBox label="Son 20 kayıt" value={String(detail.data.recentStudyLogs.length)} />
                   </div>
+                  <div className="rounded-xl border border-[#1f2333]/[0.07] p-3 text-[11px] text-[#545661]"><span className="font-semibold text-[#1f2333]">📒 Defter</span> · {detail.data.notebook.notes} not · {detail.data.notebook.voiceNotes} sesli · {detail.data.notebook.imageNotes} fotoğraflı · son aktivite {detail.data.notebook.lastActivity ? formatDateTime(detail.data.notebook.lastActivity) : "—"}<div className="mt-1 text-[10px] text-[#9a9ba3]">Not içerikleri öğrenciye özeldir; burada yalnızca sayılar gösterilir.</div></div>
                   {detail.data.user.rejectionReason && <div className="rounded-xl bg-[#fff0ed] p-3 text-[11px] text-[#d95d4d]">Red nedeni: {detail.data.user.rejectionReason}</div>}
                 </div>
               )}

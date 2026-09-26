@@ -13,6 +13,9 @@ const FEATURE_LABELS: Record<FeatureKey, string> = {
   ADVANCED_REPORTS: "Gelişmiş Raporlar",
   FOCUS_AURA_PREMIUM: "Premium Pusula Odak",
   MOCK_EXAM_ANALYTICS: "Deneme Analitiği",
+  NOTE_VOICE: "Sesli Not (ses → metin)",
+  NOTE_OCR: "Fotoğraftan Metin Çıkarma",
+  NOTE_AI: "Defter AI Araçları",
 };
 
 /**

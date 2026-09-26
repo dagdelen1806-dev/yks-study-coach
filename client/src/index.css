@@ -104,8 +104,11 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid 
 .form-input { height: 41px; width: 100%; border: 1px solid rgba(31,35,51,.1); border-radius: 11px; background: #fafafa; padding: 0 12px; color: #1f2333; font-size: 12px; outline: none; transition: border .18s ease, box-shadow .18s ease; }
 .form-input:focus { border-color: rgba(59,92,204,.5); box-shadow: 0 0 0 4px rgba(59,92,204,.08); }
 .session-dock { position: fixed; bottom: 24px; right: 24px; z-index: 50; display: flex; align-items: center; gap: 10px; border: 1px solid rgba(31,35,51,.08); border-radius: 17px; background: #fff; padding: 9px 10px 9px 9px; box-shadow: 0 15px 45px rgba(31,35,51,.15); animation: modal-in .25s cubic-bezier(.23,1,.32,1); }
-.animate-page-in { animation: page-in .35s cubic-bezier(.23,1,.32,1) both; }
-@keyframes page-in { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
+/* `backwards` (both değil): animasyon bittikten sonra öğede transform KALMAMALI. Kalan bir
+   transform (birim matris bile), sayfa içindeki `position: fixed` pencereleri (modal arka
+   planı) ekrana değil bu kutuya göre konumlandırıp kırpıyordu. */
+.animate-page-in { animation: page-in .35s cubic-bezier(.23,1,.32,1) backwards; }
+@keyframes page-in { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
 @keyframes modal-in { from { opacity: 0; transform: translateY(6px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; } }
 @media (max-width: 1100px) { .app-sidebar { width: 220px; } .app-main { margin-left: 220px; } .topbar, .content-wrap { padding-left: 28px; padding-right: 28px; } }
@@ -194,3 +197,29 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid 
 .breath-card .focus-secondary { margin-top: 18px; }
 .focus-running.is-breathing .synapse-field { opacity: .1; transition: opacity .4s ease; }
 @keyframes breathe-orb { 0%, 100% { transform: scale(.75); opacity: .72; } 50% { transform: scale(1.14); opacity: 1; } }
+
+/* ------------------------------------------------------------------
+   Akıllı Defter — editör içeriği (Tailwind preflight başlık/liste
+   stillerini sıfırladığı için burada yeniden tanımlanır).
+   ------------------------------------------------------------------ */
+.note-content { color: #1f2333; font-size: 15px; line-height: 1.7; word-break: break-word; }
+.note-content > * + * { margin-top: .55em; }
+.note-content h1 { font-size: 1.6em; font-weight: 700; letter-spacing: -.02em; line-height: 1.25; margin-top: .9em; }
+.note-content h2 { font-size: 1.3em; font-weight: 700; line-height: 1.3; margin-top: .8em; }
+.note-content h3 { font-size: 1.1em; font-weight: 700; line-height: 1.35; margin-top: .7em; color: #343643; }
+.note-content ul { list-style: disc; padding-left: 1.4em; }
+.note-content ol { list-style: decimal; padding-left: 1.4em; }
+.note-content li > p { margin: .15em 0; }
+.note-content blockquote { border-left: 3px solid #c9d3f5; background: #f7f9ff; border-radius: 0 12px 12px 0; padding: .5em .9em; color: #343643; }
+.note-content hr { border: none; border-top: 1px solid rgba(31,35,51,.12); margin: 1.2em 0; }
+.note-content a { color: #2f5fd0; text-decoration: underline; text-underline-offset: 2px; }
+.note-content mark { border-radius: 4px; padding: 0 2px; color: inherit; }
+.note-content ul[data-type="taskList"] { list-style: none; padding-left: .2em; }
+.note-content ul[data-type="taskList"] li { display: flex; align-items: flex-start; gap: .5em; }
+.note-content ul[data-type="taskList"] li > label { margin-top: .3em; user-select: none; }
+.note-content ul[data-type="taskList"] li > label input { width: 1.05em; height: 1.05em; accent-color: #3b5ccc; }
+.note-content ul[data-type="taskList"] li[data-checked="true"] > div { color: #8b8c95; text-decoration: line-through; }
+.note-content p.is-editor-empty:first-child::before { content: attr(data-placeholder); float: left; height: 0; pointer-events: none; color: #a0a1a9; }
+.note-content .ProseMirror-selectednode { outline: 2px solid rgba(59,92,204,.35); border-radius: 12px; }
+.note-content .katex-display { margin: .3em 0; }
+@media (prefers-reduced-motion: reduce) { .note-content * { transition: none !important; } }

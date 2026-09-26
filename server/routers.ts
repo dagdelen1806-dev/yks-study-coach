@@ -15,6 +15,7 @@ import { addBookStudyLog, addBookToInventory, addSourceSwitch, addTopicStudyLog,
 import { calculatePlanAdherence } from "../shared/planAdherence";
 import { topicsRouter } from "./routers/topics";
 import { bookContentRouter } from "./routers/bookContent";
+import { notesRouter } from "./routers/notes";
 import { resourceCatalogRouter } from "./routers/resourceCatalog";
 import { onboardingRouter } from "./routers/onboarding";
 import { subscriptionRouter } from "./routers/subscription";
@@ -381,6 +382,7 @@ export const appRouter = router({
 
   topics: topicsRouter,
   bookContent: bookContentRouter,
+  notes: notesRouter,
   catalog: resourceCatalogRouter,
   onboarding: onboardingRouter,
   subscription: subscriptionRouter,

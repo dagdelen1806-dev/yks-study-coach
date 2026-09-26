@@ -1,4 +1,4 @@
-import { decimal, index, int, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
+import { customType, decimal, index, int, mediumtext, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -198,6 +198,81 @@ export const userBookContents = mysqlTable("user_book_contents", {
 }, (table) => ({
   userBookIdx: index("user_book_contents_user_book_idx").on(table.userId, table.bookId),
   userTopicIdx: index("user_book_contents_user_topic_idx").on(table.userId, table.topicId),
+}));
+
+// ---------------------------------------------------------------------------
+// Akıllı Defter (öğrenci notları). İçerik HTML DEĞİL: blok tabanlı JSON belge
+// (ProseMirror/TipTap şeması; özel bloklar: formula, drawing, noteImage,
+// voiceClip — bkz. shared/noteContent.ts). Yeni blok türü eklemek migration
+// gerektirmez. `plainText` ve `stats` sunucuda içerikten üretilir (arama ve
+// liste önizlemesi için; istemcinin gönderdiğine güvenilmez).
+// Tüm bağlantılar opsiyoneldir; not hiçbir şeye bağlı olmak zorunda değildir.
+// Proje genelindeki desenle aynı: FK yok, `userId` kapsamı uygulama katmanında zorunlu.
+// ---------------------------------------------------------------------------
+const mediumBlob = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "mediumblob" });
+
+export const notes = mysqlTable("notes", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  // Çevrimdışı/yeniden gönderilen kayıtta aynı notun ikinci kez oluşmaması için istemcinin ürettiği kimlik.
+  clientId: varchar("clientId", { length: 40 }).notNull(),
+  title: varchar("title", { length: 200 }).notNull(),
+  content: mediumtext("content").notNull(),
+  plainText: mediumtext("plainText").notNull(),
+  // Liste önizlemesi: {"images":2,"voice":1,"voiceSeconds":32,"formulas":1,"drawings":0,...}
+  stats: varchar("stats", { length: 500 }).notNull(),
+  noteDate: timestamp("noteDate").notNull(),
+  status: mysqlEnum("status", ["active", "archived"]).default("active").notNull(),
+  visibility: mysqlEnum("visibility", ["private"]).default("private").notNull(),
+  isFavorite: int("isFavorite").default(0).notNull(),
+  isPinned: int("isPinned").default(0).notNull(),
+  reviewAt: timestamp("reviewAt"),
+  templateKey: varchar("templateKey", { length: 40 }),
+  subject: varchar("subject", { length: 80 }),
+  topicId: int("topicId"),
+  bookId: varchar("bookId", { length: 120 }),
+  bookContentId: int("bookContentId"),
+  studySessionId: int("studySessionId"),
+  mockExamId: int("mockExamId"),
+  version: int("version").default(1).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  userClientUnique: uniqueIndex("notes_user_client_unique").on(table.userId, table.clientId),
+  userDateIdx: index("notes_user_date_idx").on(table.userId, table.noteDate),
+  userTopicIdx: index("notes_user_topic_idx").on(table.userId, table.topicId),
+  userBookIdx: index("notes_user_book_idx").on(table.userId, table.bookId),
+  userSessionIdx: index("notes_user_session_idx").on(table.userId, table.studySessionId),
+  userReviewIdx: index("notes_user_review_idx").on(table.userId, table.reviewAt),
+}));
+
+export const noteTags = mysqlTable("note_tags", {
+  id: int("id").autoincrement().primaryKey(),
+  noteId: int("noteId").notNull(),
+  userId: int("userId").notNull(),
+  tag: varchar("tag", { length: 40 }).notNull(),
+}, (table) => ({
+  noteTagUnique: uniqueIndex("note_tags_note_tag_unique").on(table.noteId, table.tag),
+  userTagIdx: index("note_tags_user_tag_idx").on(table.userId, table.tag),
+}));
+
+// Not ekleri (fotoğraf, ses kaydı). Şimdilik veritabanında, sıkı boyut
+// sınırıyla (bkz. server/notes/config.ts) ve yalnızca sahibine, kimlik
+// doğrulamalı uçtan sunulur. Depolama bir arayüz arkasında
+// (server/notes/attachmentStorage.ts): nesne depolamaya geçiş tek dosya.
+export const noteAttachments = mysqlTable("note_attachments", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  noteId: int("noteId"),
+  kind: mysqlEnum("kind", ["image", "audio"]).notNull(),
+  mimeType: varchar("mimeType", { length: 60 }).notNull(),
+  byteSize: int("byteSize").notNull(),
+  data: mediumBlob("data").notNull(),
+  durationSec: int("durationSec"),
+  ocrText: text("ocrText"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  userNoteIdx: index("note_attachments_user_note_idx").on(table.userId, table.noteId),
 }));
 
 export const sourceSwitches = mysqlTable("source_switches", {

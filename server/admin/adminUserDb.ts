@@ -1,6 +1,7 @@
 import { and, count, desc, eq, gte, inArray, isNull, like, lt, or, sql } from "drizzle-orm";
 import { phoneFromOpenId } from "../_core/loginIdentifier";
 import { getDb, getStudentProfile } from "../db";
+import { getNoteStatsForAdmin } from "../notes/notesDb";
 import { catalogBooks, subscriptionPlans, subscriptions, topicProgress, topicStudyLogs, userBookContents, userMockExams, userResourceBooks, users } from "../../drizzle/schema";
 import { getEntitlements, getUsageSummaryForUser } from "../subscriptions/entitlementService";
 import { getPlanById, listAuditLogsForUser, listPaymentsForUser, writeAuditLog } from "../subscriptions/subscriptionDb";
@@ -170,7 +171,7 @@ export async function getUserDetailForAdmin(userId: number) {
   const [userRow] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
   if (!userRow) return null;
 
-  const [entitlements, usage, progressScore, payments, recentExams, topicRows, recentStudyLogs, auditLogs, profile, bookContentRows] = await Promise.all([
+  const [entitlements, usage, progressScore, payments, recentExams, topicRows, recentStudyLogs, auditLogs, profile, bookContentRows, notebook] = await Promise.all([
     getEntitlements(userId),
     getUsageSummaryForUser(userId),
     getStudyProgressScore(userId),
@@ -181,6 +182,8 @@ export async function getUserDetailForAdmin(userId: number) {
     listAuditLogsForUser(userId),
     getStudentProfile(userId),
     db.select({ bookId: userBookContents.bookId, mappingStatus: userBookContents.mappingStatus, mappingMethod: userBookContents.mappingMethod, mappingConfidence: userBookContents.mappingConfidence, source: userBookContents.source, createdAt: userBookContents.createdAt }).from(userBookContents).where(eq(userBookContents.userId, userId)),
+    // Defter: yalnızca sayılar — öğrencinin not içeriği admin tarafından görülmez.
+    getNoteStatsForAdmin(userId),
   ]);
 
   // Kitap içeriği özeti (OCR/eşleştirme kalitesi): kitap başına satır, eşleşen,
@@ -216,6 +219,7 @@ export async function getUserDetailForAdmin(userId: number) {
     user: { ...safeUser, phone: phoneFromOpenId(safeUser.openId) },
     profile,
     bookContents: bookContentsWithTitles,
+    notebook,
     subscription: subscriptionRow
       ? { ...subscriptionRow, providerSubscriptionId: maskId(subscriptionRow.providerSubscriptionId), providerCustomerId: maskId(subscriptionRow.providerCustomerId), planCode: plan?.code ?? "FREE", planName: plan?.name ?? "Ücretsiz", planTier: plan?.tier ?? "free" }
       : null,

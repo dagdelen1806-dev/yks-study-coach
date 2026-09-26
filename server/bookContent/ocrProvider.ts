@@ -74,3 +74,21 @@ export const llmVisionOcrProvider: OcrProvider = {
 };
 
 export const getOcrProvider = (): OcrProvider => llmVisionOcrProvider;
+
+/**
+ * Aynı OCR altyapısının serbest metin modu (Akıllı Defter: "Metni çıkar").
+ * Kitap içindekiler okumasıyla aynı sağlayıcı/anahtar; ikinci bir OCR motoru değil.
+ */
+export async function extractPlainTextFromImage(imageDataUrl: string): Promise<string> {
+  const response = await invokeLLM({
+    messages: [
+      { role: "system", content: "Görseldeki yazıyı olduğu gibi, Türkçe karakterleriyle ve satır yapısını koruyarak metne dök. Matematiksel ifadeleri düz yazıyla (ör. x^2 + y^2 = z^2) yaz. Yorum ekleme, özetleme, çevirme. Görselde okunabilir yazı yoksa boş string döndür." },
+      { role: "user", content: [{ type: "text" as const, text: "Bu görseldeki metni çıkar." }, { type: "image_url" as const, image_url: { url: imageDataUrl, detail: "high" as const } }] },
+    ],
+    response_format: { type: "json_schema", json_schema: { name: "note_image_text", strict: true, schema: { type: "object", properties: { text: { type: "string" } }, required: ["text"], additionalProperties: false } } },
+  });
+  const raw = response.choices[0]?.message?.content;
+  const jsonText = typeof raw === "string" ? raw : raw?.map((part) => (part.type === "text" ? part.text : "")).join("");
+  if (!jsonText) throw new Error("OCR yanıtı boş döndü");
+  return String((JSON.parse(jsonText) as { text?: string }).text ?? "").slice(0, 20_000).trim();
+}

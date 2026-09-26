@@ -13,6 +13,10 @@ export const FEATURE_KEYS = [
   "ADVANCED_REPORTS",
   "FOCUS_AURA_PREMIUM",
   "MOCK_EXAM_ANALYTICS",
+  // Akıllı Defter: ses → metin, fotoğraftan metin, AI araçları (özet/flashcard...).
+  "NOTE_VOICE",
+  "NOTE_OCR",
+  "NOTE_AI",
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
@@ -22,8 +26,8 @@ export type PlanTier = "free" | "premium" | "premium_plus";
 /** tier -> bu tier'ın erişebildiği özellik anahtarları. Üst tier'lar alt tier'ların tüm özelliklerini kapsar (aşağıda otomatik birleştirilir). */
 const TIER_FEATURES: Record<PlanTier, FeatureKey[]> = {
   free: [],
-  premium: ["AI_STUDY_PLAN", "OCR_EXAM_IMPORT", "OCR_BOOK_IMPORT", "ADVANCED_ANALYTICS", "PLAN_ADHERENCE", "RESOURCE_RECOMMENDATIONS", "ADVANCED_REPORTS", "FOCUS_AURA_PREMIUM", "MOCK_EXAM_ANALYTICS"],
-  premium_plus: ["AI_STUDY_PLAN", "OCR_EXAM_IMPORT", "OCR_BOOK_IMPORT", "ADVANCED_ANALYTICS", "PLAN_ADHERENCE", "RESOURCE_RECOMMENDATIONS", "ADVANCED_REPORTS", "FOCUS_AURA_PREMIUM", "MOCK_EXAM_ANALYTICS"],
+  premium: ["AI_STUDY_PLAN", "OCR_EXAM_IMPORT", "OCR_BOOK_IMPORT", "ADVANCED_ANALYTICS", "PLAN_ADHERENCE", "RESOURCE_RECOMMENDATIONS", "ADVANCED_REPORTS", "FOCUS_AURA_PREMIUM", "MOCK_EXAM_ANALYTICS", "NOTE_VOICE", "NOTE_OCR", "NOTE_AI"],
+  premium_plus: ["AI_STUDY_PLAN", "OCR_EXAM_IMPORT", "OCR_BOOK_IMPORT", "ADVANCED_ANALYTICS", "PLAN_ADHERENCE", "RESOURCE_RECOMMENDATIONS", "ADVANCED_REPORTS", "FOCUS_AURA_PREMIUM", "MOCK_EXAM_ANALYTICS", "NOTE_VOICE", "NOTE_OCR", "NOTE_AI"],
 };
 
 export function featuresForTier(tier: PlanTier): FeatureKey[] {
@@ -44,6 +48,9 @@ export const FEATURE_USAGE_LIMITS: Partial<Record<FeatureKey, { windowDays: numb
   AI_STUDY_PLAN: { windowDays: 30, maxUses: 60 },
   OCR_EXAM_IMPORT: { windowDays: 30, maxUses: 40 },
   OCR_BOOK_IMPORT: { windowDays: 30, maxUses: 40 },
+  NOTE_VOICE: { windowDays: 30, maxUses: 300 },
+  NOTE_OCR: { windowDays: 30, maxUses: 150 },
+  NOTE_AI: { windowDays: 30, maxUses: 100 },
 };
 
 /** FREE kullanıcıların kısıtlı biçimde erişebildiği (ama tam premium olmayan) uçlar için ayrı, daha düşük bir günlük/aylık limit — spec §10: "sınırlı study sessions, sınırlı exam entry". */
@@ -51,4 +58,8 @@ export const FREE_TIER_LIMITS: Partial<Record<FeatureKey, { windowDays: number; 
   AI_STUDY_PLAN: { windowDays: 30, maxUses: 3 },
   OCR_EXAM_IMPORT: { windowDays: 30, maxUses: 2 },
   OCR_BOOK_IMPORT: { windowDays: 30, maxUses: 3 },
+  // Defter herkesin temel aracı: ses → metin ücretsizde de makul ölçüde açık.
+  NOTE_VOICE: { windowDays: 30, maxUses: 30 },
+  NOTE_OCR: { windowDays: 30, maxUses: 10 },
+  NOTE_AI: { windowDays: 30, maxUses: 5 },
 };
