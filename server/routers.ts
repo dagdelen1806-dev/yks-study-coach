@@ -8,7 +8,7 @@ import { checkRateLimit } from "./_core/rateLimit";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
 import { protectedProcedure, metredFeatureProcedure } from "./_core/trpc";
-import { invokeLLM } from "./_core/llm";
+import { invokeLLM, llmUnavailableMessage } from "./_core/llm";
 import { validateDataUrl } from "./_core/fileValidation";
 import { z } from "zod";
 import { addBookStudyLog, addBookToInventory, addSourceSwitch, addTopicStudyLog, addUserMockExams, addUserResourceBooks, completeStudySession, getBookInventory, getBookStudyLogs, getBookTopicMappings, getCoachAlerts, getPlanAdherenceInputs, getSourceSwitches, getStudyCalendar, getUserMockExams, getUserResourceBooks, logCompletedRoutineSession, markCoachAlertRead, removeBookFromInventory, savePlanAdherence, saveStudyPlan, upsertBookTopicMapping } from "./db";
@@ -273,7 +273,7 @@ export const appRouter = router({
         };
       } catch (error) {
         console.warn("[Book Photo] Extraction failed:", error);
-        throw new Error("Fotoğraf okunamadı. Daha net, ışıklı bir kapak fotoğrafı dener misin?");
+        throw new Error(llmUnavailableMessage(error) ?? "Fotoğraf okunamadı. Daha net, ışıklı bir kapak fotoğrafı dener misin?");
       }
     }),
   }),

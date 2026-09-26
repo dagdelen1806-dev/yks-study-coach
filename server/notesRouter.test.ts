@@ -51,7 +51,7 @@ vi.mock("./notes/speechProvider", async (importOriginal) => {
 });
 
 const aiInvoke = vi.fn(async () => ({ choices: [{ message: { content: JSON.stringify({ items: [{ front: "Fotosentez nedir?", back: "Işık → kimyasal enerji" }] }) } }] }));
-vi.mock("./_core/llm", () => ({ invokeLLM: (...args: unknown[]) => (aiInvoke as (...a: unknown[]) => unknown)(...args) }));
+vi.mock("./_core/llm", async (importOriginal) => ({ ...(await importOriginal<typeof import("./_core/llm")>()), invokeLLM: (...args: unknown[]) => (aiInvoke as (...a: unknown[]) => unknown)(...args) }));
 vi.mock("./subscriptions/entitlementService", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./subscriptions/entitlementService")>()),
   assertUsageAvailable: vi.fn(async () => undefined),

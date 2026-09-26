@@ -63,7 +63,10 @@ Kendi `.env` dosyandaki (`env.template`'teki) isimlerle birebir aynı isimleri k
 | `VITE_APP_ID` | **Boş bırakma — herhangi bir dolu değer ver** (ör. `yks-study-coach-standalone`). Manus OAuth pasif olsa da, sunucu bu değeri her oturum jetonunun (JWT) `appId` alanına yazıyor ve doğrulama bu alanın dolu olmasını şart koşuyor; boş bırakılırsa kayıt/giriş "başarılı" görünür ama oturum hiçbir zaman gerçekten doğrulanamaz (canlıda böyle çöktüğü doğrulandı — `[Auth] Session payload missing required fields`). Gerçek bir Manus app id olması gerekmiyor, sadece boş olmaması yeterli. |
 | `OAUTH_SERVER_URL` | `.env`'deki değerle aynı. |
 | `OWNER_OPEN_ID` | `.env`'deki değerle aynı (boşsa boş kalabilir). |
-| `BUILT_IN_FORGE_API_URL` / `BUILT_IN_FORGE_API_KEY` | LLM çağrıları (AI Planım, OCR) için gerekli. |
+| `BUILT_IN_FORGE_API_URL` / `BUILT_IN_FORGE_API_KEY` | Manus Forge (yalnızca Manus platformunda). Manus dışı deploy'da bunun yerine aşağıdaki `LLM_*` değişkenlerini kullan. |
+| `LLM_API_KEY` (veya `OPENAI_API_KEY`) | **Kitap/deneme fotoğrafı okuma (OCR), AI Planım ve not AI için gerekli.** OpenAI uyumlu herhangi bir sağlayıcının anahtarı; tanımlıysa Forge yerine kullanılır. Yoksa fotoğraf okuma "servis açılmamış" hatası verir. |
+| `LLM_API_URL` | İsteğe bağlı. Varsayılan `https://api.openai.com/v1`. Gemini için `https://generativelanguage.googleapis.com/v1beta/openai`. |
+| `LLM_MODEL` | İsteğe bağlı; görsel okuyabilen bir model. Varsayılan `gpt-4o-mini` (Gemini için ör. `gemini-2.5-flash`). |
 | `PAYMENT_PROVIDER` | `mock` bırakabilirsin (sandbox); gerçek bir sağlayıcı bağlamadıysan `apple`/`google` değişkenlerini boş bırak. |
 | `CRON_SECRET` | Yeni: rastgele bir string üret (ör. `openssl rand -hex 32` ya da herhangi bir şifre üreticisi) ve buraya ekle. Kaynak kataloğu senkron uç noktasını (`/api/cron/resource-catalog-sync`) korur — Vercel Cron bunu otomatik `Authorization: Bearer $CRON_SECRET` başlığıyla gönderir. |
 

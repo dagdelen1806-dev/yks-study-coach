@@ -1,5 +1,5 @@
 import { trpc } from "@/lib/trpc";
-import { Camera, ImagePlus, Loader2, RotateCw, X } from "lucide-react";
+import { Camera, ImagePlus, Loader2, RotateCcw, RotateCw, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import BookContentScanner, { type ScannerBook } from "./BookContentScanner";
@@ -50,7 +50,7 @@ export default function AddBookWizard({
     setLastCover({ file, rotate });
     setCoverPreview(URL.createObjectURL(file));
     try {
-      const image = await compressImage(file, { rotate });
+      const image = await compressImage(file, { rotate, enhance: "photo" });
       const data = await readCover.mutateAsync({ dataUrl: image.dataUrl, mimeType: image.mimeType });
       if (data.imageKind === "table_of_contents") {
         setError("Bu fotoğraf kitabın içindekiler sayfası gibi görünüyor. Önce kitabın KAPAĞINI çek; içindekiler sayfasını bir sonraki adımda ekleyeceksin.");
@@ -132,15 +132,22 @@ export default function AddBookWizard({
               <div role="alert" className="mt-3 rounded-xl bg-[#fff0ed] p-3 text-[12px] font-medium text-[#d95d4d]">
                 {error}
                 {lastCover && !readCover.isPending && (
-                  <button onClick={() => void handleCover(lastCover.file, (((lastCover.rotate + 90) % 360) as 0 | 90 | 180 | 270))} className="mt-2 flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-[11px] font-semibold text-[#3b5ccc]">
-                    <RotateCw size={13} /> Fotoğraf yan mı? Döndürüp tekrar oku
-                  </button>
+                  <div className="mt-2">
+                    <div className="text-[11px] font-medium text-[#8b5a4f]">Fotoğraf yan mı? Yazının düz duracağı yöne döndürüp tekrar oku:</div>
+                    <div className="mt-1.5 flex gap-2">
+                      {([[270, "Sola çevir", RotateCcw], [90, "Sağa çevir", RotateCw]] as const).map(([turn, label, Icon]) => (
+                        <button key={label} onClick={() => void handleCover(lastCover.file, (((lastCover.rotate + turn) % 360) as 0 | 90 | 180 | 270))} className="flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-[11px] font-semibold text-[#3b5ccc]">
+                          <Icon size={13} /> {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
             )}
             {readCover.isPending ? (
               <div className="flex flex-col items-center py-10 text-center">
-                {coverPreview && <img src={coverPreview} alt="Kapak" className="mb-4 h-32 rounded-lg object-contain" />}
+                {coverPreview && <img src={coverPreview} alt="Kapak" style={lastCover?.rotate ? { transform: `rotate(${lastCover.rotate}deg)` } : undefined} className="mb-4 h-32 rounded-lg object-contain" />}
                 <Loader2 className="animate-spin text-[#3b5ccc]" size={24} />
                 <p className="mt-3 text-[12px] font-semibold text-[#1f2333]">Kapak okunuyor…</p>
               </div>
@@ -159,7 +166,7 @@ export default function AddBookWizard({
         {step === "review" && (
           <div className="mt-5">
             <div className="flex gap-4">
-              {coverPreview && <img src={coverPreview} alt="Kapak" className="hidden h-36 w-24 shrink-0 rounded-lg object-cover sm:block" />}
+              {coverPreview && <img src={coverPreview} alt="Kapak" style={lastCover?.rotate ? { transform: `rotate(${lastCover.rotate}deg)` } : undefined} className="hidden h-36 w-24 shrink-0 rounded-lg object-cover sm:block" />}
               <div className="grid flex-1 gap-3">
                 <label className="block"><span className="form-label">Kitap adı{hint("title")}</span><input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} className={`form-input ${lowClass("title")}`} autoFocus={!draft.title} /></label>
                 <label className="block"><span className="form-label">Yayınevi{hint("publisher")}</span><input value={draft.publisher} onChange={(event) => setDraft({ ...draft, publisher: event.target.value })} className={`form-input ${lowClass("publisher")}`} /></label>

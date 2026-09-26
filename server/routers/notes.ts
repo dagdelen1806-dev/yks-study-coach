@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { metredFeatureProcedure, protectedProcedure, router } from "../_core/trpc";
+import { llmUnavailableMessage } from "../_core/llm";
 import { extractPlainTextFromImage } from "../bookContent/ocrProvider";
 import { AttachmentError, decodeAttachment, getAttachmentStorage } from "../notes/attachmentStorage";
 import { notesConfig } from "../notes/config";
@@ -143,7 +144,7 @@ export const notesRouter = router({
         text = await extractPlainTextFromImage(`data:${attachment.mimeType};base64,${attachment.data.toString("base64")}`);
       } catch (error) {
         console.warn("[Notes] OCR failed:", error instanceof Error ? error.message : error);
-        throw new NoteError("Fotoğraftaki metin okunamadı. Daha net bir fotoğrafla tekrar dener misin?");
+        throw new NoteError(llmUnavailableMessage(error) ?? "Fotoğraftaki metin okunamadı. Daha net bir fotoğrafla tekrar dener misin?");
       }
       if (!text) throw new NoteError("Fotoğrafta okunabilir bir yazı bulunamadı.");
       await storage.setOcrText(userId, input.attachmentId, text);

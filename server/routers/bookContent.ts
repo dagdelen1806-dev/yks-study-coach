@@ -7,7 +7,8 @@ import { bookContentConfig } from "../bookContent/config";
 import { suggestTopicsWithAi } from "../bookContent/aiMapper";
 import { matchTopic, type MatchMethod, type MatchTier } from "../bookContent/curriculumMatcher";
 import { getOcrProvider } from "../bookContent/ocrProvider";
-import { looksLikeTopicList, pageIssues, parseTableOfContents, type TocEntry } from "../bookContent/tocParser";
+import { LlmUnavailableError, llmUnavailableMessage } from "../_core/llm";
+import { looksLikeTopicList,pageIssues, parseTableOfContents, type TocEntry } from "../bookContent/tocParser";
 
 const bookIdInput = z.string().min(1).max(120);
 const examInput = z.enum(["TYT", "AYT"]).nullable().optional();
@@ -91,7 +92,10 @@ export const bookContentRouter = router({
             return await provider.extractTableOfContentsPage(image.dataUrl);
           } catch (error) {
             console.warn(`[BookContent] OCR failed on page ${index + 1} (attempt ${attempt}):`, error instanceof Error ? error.message : error);
-            if (attempt >= 2) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `${index + 1}. sayfa okunamadı. Daha net, düz ve ışıklı bir fotoğrafla tekrar dener misin?` });
+            // Servis kapalı/anahtar hatalıysa tekrar denemek ve "daha net çek" demek anlamsız.
+            const serviceMessage = llmUnavailableMessage(error);
+            const permanent = error instanceof LlmUnavailableError && error.reason !== "provider";
+            if (permanent || attempt >= 2) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: serviceMessage ?? `${index + 1}. sayfa okunamadı. Daha net, düz ve ışıklı bir fotoğrafla tekrar dener misin?` });
           }
         }
       }));

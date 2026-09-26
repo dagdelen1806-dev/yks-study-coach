@@ -217,10 +217,55 @@ const resolveApiUrl = () =>
     ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`
     : "https://forge.manus.im/v1/chat/completions";
 
-const assertApiKey = () => {
-  if (!ENV.forgeApiKey) {
-    throw new Error("OPENAI_API_KEY is not configured");
+/**
+ * Yapay zekâ servisine ulaşılamadığında atılır. `reason` kullanıcıya doğru mesajı
+ * göstermek için: "fotoğraf net değil" demek yalnızca görsel gerçekten
+ * okunamadıysa doğru — servis kapalı/anahtar hatalıysa öğrenciyi boşuna yeniden çektirir.
+ */
+export class LlmUnavailableError extends Error {
+  constructor(readonly reason: "not_configured" | "auth" | "quota" | "too_large" | "provider", message: string) {
+    super(message);
+    this.name = "LlmUnavailableError";
   }
+}
+
+type LlmTarget = { chatUrl: string; modelsUrl: string; key: string; model: string | undefined };
+
+/** Öncelik: LLM_API_KEY/OPENAI_API_KEY (OpenAI uyumlu) → Forge. İkisi de yoksa null. */
+const resolveTarget = (): LlmTarget | null => {
+  if (ENV.llmApiKey) {
+    const base = ENV.llmApiUrl || "https://api.openai.com/v1";
+    return { chatUrl: `${base}/chat/completions`, modelsUrl: `${base}/models`, key: ENV.llmApiKey, model: ENV.llmModel || "gpt-4o-mini" };
+  }
+  if (ENV.forgeApiKey) {
+    return { chatUrl: resolveApiUrl(), modelsUrl: resolveApiUrl().replace(/chat\/completions$/, "models"), key: ENV.forgeApiKey, model: ENV.llmModel || undefined };
+  }
+  return null;
+};
+
+export const isLlmConfigured = () => resolveTarget() !== null;
+
+const requireTarget = (): LlmTarget => {
+  const target = resolveTarget();
+  if (!target) throw new LlmUnavailableError("not_configured", "LLM is not configured (set LLM_API_KEY / OPENAI_API_KEY or BUILT_IN_FORGE_API_KEY)");
+  return target;
+};
+
+/** Servis kaynaklı hatalar için öğrenciye gösterilecek Türkçe mesaj; görselle ilgili bir hataysa null. */
+export function llmUnavailableMessage(error: unknown): string | null {
+  if (!(error instanceof LlmUnavailableError)) return null;
+  switch (error.reason) {
+    case "not_configured": return "Fotoğraf okuma (yapay zekâ) servisi sunucuda henüz açılmamış. Sorun fotoğrafında değil — yönetici LLM_API_KEY ayarını yapınca çalışacak. Şimdilik bilgileri elle girebilirsin.";
+    case "auth": return "Fotoğraf okuma servisinin anahtarı geçersiz. Sorun fotoğrafında değil; yöneticiye haber ver.";
+    case "quota": return "Fotoğraf okuma servisi şu an yoğun ya da kotası doldu. Birkaç dakika sonra tekrar dener misin?";
+    case "too_large": return "Fotoğraf servis için çok büyük. Daha küçük bir fotoğrafla ya da kırparak tekrar dener misin?";
+    default: return "Fotoğraf okuma servisine şu an ulaşılamıyor. Sorun fotoğrafında değil; biraz sonra tekrar dener misin?";
+  }
+}
+
+const errorForStatus =(status: number, detail: string) => {
+  const reason = status === 401 || status === 403 ? "auth" : status === 402 || status === 429 ? "quota" : status === 413 ? "too_large" : "provider";
+  return new LlmUnavailableError(reason, `LLM invoke failed: ${status} – ${detail.slice(0, 500)}`);
 };
 
 const normalizeResponseFormat = ({
@@ -308,7 +353,10 @@ const fetchWithBackoff = async (
   for (let attempt = 0; attempt <= RETRY_MAX_RETRIES; attempt++) {
     try {
       const response = await fetch(url, init);
-      if (response.ok || attempt === RETRY_MAX_RETRIES) {
+      // 400/401/403/413 gibi hatalar tekrar denemekle düzelmez; yalnızca geçici olanlar (408/409/429/5xx) denenir.
+      // (Vercel fonksiyonu 60 sn ile sınırlı — boşuna bekleme zaman aşımına yol açıyordu.)
+      const transient = response.status === 408 || response.status === 409 || response.status === 429 || response.status >= 500;
+      if (response.ok || !transient || attempt === RETRY_MAX_RETRIES) {
         return response;
       }
 
@@ -340,7 +388,7 @@ const fetchWithBackoff = async (
 };
 
 export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
-  assertApiKey();
+  const target = requireTarget();
 
   const {
     messages,
@@ -362,8 +410,8 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     messages: messages.map(normalizeMessage),
   };
 
-  if (model) {
-    payload.model = model;
+  if (model || target.model) {
+    payload.model = model || target.model;
   }
 
   if (tools && tools.length > 0) {
@@ -401,20 +449,22 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     payload.response_format = normalizedResponseFormat;
   }
 
-  const response = await fetchWithBackoff(resolveApiUrl(), {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${ENV.forgeApiKey}`,
-    },
-    body: JSON.stringify(payload),
-  });
+  let response: Response;
+  try {
+    response = await fetchWithBackoff(target.chatUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${target.key}`,
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    throw new LlmUnavailableError("provider", `LLM request failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `LLM invoke failed: ${response.status} ${response.statusText} – ${errorText}`
-    );
+    throw errorForStatus(response.status, await response.text().catch(() => ""));
   }
 
   return (await response.json()) as InvokeResult;
@@ -433,14 +483,10 @@ export type ModelsResponse = {
 };
 
 export async function listLLMModels(): Promise<ModelsResponse> {
-  assertApiKey();
+  const target = requireTarget();
 
-  const url = ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0
-    ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/models`
-    : "https://forge.manus.im/v1/models";
-
-  const response = await fetchWithBackoff(url, {
-    headers: { authorization: `Bearer ${ENV.forgeApiKey}` },
+  const response = await fetchWithBackoff(target.modelsUrl, {
+    headers: { authorization: `Bearer ${target.key}` },
   });
 
   if (!response.ok) {

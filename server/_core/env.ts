@@ -27,6 +27,15 @@ export const ENV = {
   mailFrom: process.env.MAIL_FROM ?? "",
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
+  // Manus dışı deploy'da yapay zekâ (kitap/deneme fotoğrafı okuma, AI plan, not AI) için
+  // OpenAI uyumlu herhangi bir sağlayıcı. Tanımlıysa Forge yerine bu kullanılır.
+  //   LLM_API_KEY (ya da OPENAI_API_KEY) — zorunlu
+  //   LLM_API_URL — varsayılan https://api.openai.com/v1
+  //     (Gemini: https://generativelanguage.googleapis.com/v1beta/openai)
+  //   LLM_MODEL — görsel okuyabilen bir model; varsayılan gpt-4o-mini
+  llmApiKey: process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || "",
+  llmApiUrl: (process.env.LLM_API_URL ?? "").replace(/\/+$/, ""),
+  llmModel: process.env.LLM_MODEL ?? "",
 
   // --- Subscription / Payment (PHASE 2) — bkz. docs/subscription/SUBSCRIPTION-ARCHITECTURE.md ---
   // "mock" (sandbox, varsayılan) | "apple" | "google" | gerçek bir web sağlayıcısı seçildiğinde onun adı.

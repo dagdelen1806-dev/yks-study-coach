@@ -49,7 +49,7 @@ vi.mock("./subscriptions/subscriptionDb", () => ({
 // throw eder, aiPlan.generate'in aksine sessiz bir fallback'e düşmez) test
 // etmek için — spec §50/§51: "LLM çağrısı başarısız olursa usage yanlışlıkla
 // artırılmamalı" iddiasını gerçek router zinciri üzerinden doğrular.
-vi.mock("./_core/llm", () => ({ invokeLLM: vi.fn(async () => { throw new Error("LLM geçici olarak kullanılamıyor"); }) }));
+vi.mock("./_core/llm", async (importOriginal) => ({ ...(await importOriginal<typeof import("./_core/llm")>()), invokeLLM: vi.fn(async () => { throw new Error("LLM geçici olarak kullanılamıyor"); }) }));
 
 const { appRouter } = await import("./routers");
 const { MockPaymentProvider } = await import("./subscriptions/paymentProviders/mockProvider");
