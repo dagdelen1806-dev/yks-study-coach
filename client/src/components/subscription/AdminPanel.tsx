@@ -138,6 +138,9 @@ function LlmHealthCard() {
             <div>Anahtar: {data.config.configured ? `tanımlı (${data.config.keyLength} karakter)` : "TANIMLI DEĞİL"}</div>
             <div>Adres: <span className="font-mono">{data.config.baseUrl ?? "—"}</span>{data.config.usingDefaultUrl ? " (varsayılan)" : ""}</div>
             <div>Model: <span className="font-mono">{data.config.model ?? "—"}</span>{data.config.usingDefaultModel ? " (varsayılan)" : ""} · Ses: <span className="font-mono">{data.config.transcribeModel}</span></div>
+            {(data.config.rawUrl && data.config.rawUrl !== data.config.baseUrl) || (data.config.rawModel && data.config.rawModel !== data.config.model) ? (
+              <div className="mt-1 text-[#a1711d]">Vercel'deki değer otomatik düzeltildi: {data.config.rawUrl !== data.config.baseUrl && <span className="font-mono">LLM_API_URL "{data.config.rawUrl}" </span>}{data.config.rawModel !== data.config.model && <span className="font-mono">LLM_MODEL "{data.config.rawModel}"</span>} — Vercel'de de düzeltmen önerilir.</div>
+            ) : null}
           </div>
           {data.hints.map((hint) => <div key={hint} className="rounded-xl bg-[#fff8df] p-3 text-[11px] font-medium text-[#8a6116]">⚠ {hint}</div>)}
           {data.checks && (

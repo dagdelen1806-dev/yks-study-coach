@@ -3228,10 +3228,23 @@ var LlmUnavailableError = class extends Error {
 };
 var DEFAULT_LLM_API_URL = "https://api.openai.com/v1";
 var DEFAULT_LLM_MODEL = "gpt-4o-mini";
+var GEMINI_OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai";
+var DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
+function normalizeLlmSettings(rawUrl, rawModel, key) {
+  let baseUrl = (rawUrl || "").trim().replace(/\/+$/, "").replace(/\/chat\/completions$/, "").replace(/\/+$/, "");
+  let model = (rawModel || "").trim().replace(/^models\//, "");
+  const geminiKey = key.trim().startsWith("AIza");
+  if (!baseUrl) baseUrl = geminiKey ? GEMINI_OPENAI_BASE_URL : DEFAULT_LLM_API_URL;
+  if (baseUrl.includes("generativelanguage.googleapis.com")) {
+    baseUrl = GEMINI_OPENAI_BASE_URL;
+    if (!model.startsWith("gemini") || /^gemini-(1\.0|1\.5|pro($|-))/.test(model)) model = DEFAULT_GEMINI_MODEL;
+  }
+  return { baseUrl, model: model || DEFAULT_LLM_MODEL };
+}
 var resolveLlmTarget = () => {
   if (!ENV.llmApiKey) return null;
-  const baseUrl = ENV.llmApiUrl || DEFAULT_LLM_API_URL;
-  return { baseUrl, chatUrl: `${baseUrl}/chat/completions`, modelsUrl: `${baseUrl}/models`, key: ENV.llmApiKey, model: ENV.llmModel || DEFAULT_LLM_MODEL };
+  const { baseUrl, model } = normalizeLlmSettings(ENV.llmApiUrl, ENV.llmModel, ENV.llmApiKey);
+  return { baseUrl, chatUrl: `${baseUrl}/chat/completions`, modelsUrl: `${baseUrl}/models`, key: ENV.llmApiKey.trim(), model };
 };
 var requireTarget = () => {
   const target = resolveLlmTarget();
@@ -7486,6 +7499,9 @@ var adminSystemRouter = router({
       model: target?.model ?? null,
       usingDefaultUrl: !ENV.llmApiUrl,
       usingDefaultModel: !ENV.llmModel,
+      // Vercel'deki ham değerler (anahtar değil) — otomatik düzeltme yapıldıysa farkı görmek için.
+      rawUrl: ENV.llmApiUrl || null,
+      rawModel: ENV.llmModel || null,
       transcribeModel: ENV.transcribeModel || "whisper-1"
     };
     if (!target) return { config, hints: ["LLM_API_KEY (ya da OPENAI_API_KEY) tan\u0131ml\u0131 de\u011Fil ya da bu deploy'a ula\u015Fmad\u0131 \u2014 Vercel'de ekledikten sonra Redeploy gerekir."], checks: null };

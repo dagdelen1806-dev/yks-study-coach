@@ -48,6 +48,9 @@ export const adminSystemRouter = router({
       model: target?.model ?? null,
       usingDefaultUrl: !ENV.llmApiUrl,
       usingDefaultModel: !ENV.llmModel,
+      // Vercel'deki ham değerler (anahtar değil) — otomatik düzeltme yapıldıysa farkı görmek için.
+      rawUrl: ENV.llmApiUrl || null,
+      rawModel: ENV.llmModel || null,
       transcribeModel: ENV.transcribeModel || "whisper-1",
     };
     if (!target) return { config, hints: ["LLM_API_KEY (ya da OPENAI_API_KEY) tanımlı değil ya da bu deploy'a ulaşmadı — Vercel'de ekledikten sonra Redeploy gerekir."], checks: null };

@@ -58,6 +58,17 @@ describe("LLM availability errors", () => {
     expect(result.choices[0].message.content).toBe('{"sonuc":"tamam"}');
   });
 
+  it("repairs common provider settings that cause 404s", async () => {
+    const { normalizeLlmSettings } = await import("./_core/llm");
+    const gemini = "https://generativelanguage.googleapis.com/v1beta/openai";
+    expect(normalizeLlmSettings(`${gemini}/chat/completions/`, "gemini-2.5-flash", "AIzaXXX")).toEqual({ baseUrl: gemini, model: "gemini-2.5-flash" });
+    expect(normalizeLlmSettings("https://generativelanguage.googleapis.com", "gpt-4o-mini", "AIzaXXX")).toEqual({ baseUrl: gemini, model: "gemini-2.5-flash" });
+    expect(normalizeLlmSettings(gemini, "models/gemini-1.5-flash", "AIzaXXX")).toEqual({ baseUrl: gemini, model: "gemini-2.5-flash" });
+    expect(normalizeLlmSettings("", "", "AIzaXXX")).toEqual({ baseUrl: gemini, model: "gemini-2.5-flash" });
+    expect(normalizeLlmSettings("", "", "sk-abc")).toEqual({ baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" });
+    expect(normalizeLlmSettings("https://api.openai.com/v1/", "gpt-4.1-mini", "sk-abc")).toEqual({ baseUrl: "https://api.openai.com/v1", model: "gpt-4.1-mini" });
+  });
+
   it("shows the HTTP status for a rejected request so the admin can diagnose it", async () => {
     Object.assign(ENV, { llmApiKey: "k", llmApiUrl: "https://example.test/v1" });
     vi.stubGlobal("fetch", vi.fn(async () => new Response("model not found", { status: 404 })));

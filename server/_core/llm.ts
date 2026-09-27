@@ -231,10 +231,32 @@ export const DEFAULT_LLM_API_URL = "https://api.openai.com/v1";
 export const DEFAULT_LLM_MODEL = "gpt-4o-mini";
 
 /** LLM_API_KEY / OPENAI_API_KEY tanımlı değilse null (yapay zekâ özellikleri kapalı). */
+export const GEMINI_OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai";
+export const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
+
+/**
+ * Ayarlardaki yaygın hatalar düzeltilir (404'e yol açanlar): adresin sonuna
+ * yapıştırılmış "/chat/completions", Gemini adresinde eksik "/v1beta/openai",
+ * "models/" önekli model adı, Gemini anahtarı / adresiyle Gemini olmayan model.
+ */
+export function normalizeLlmSettings(rawUrl: string, rawModel: string, key: string): { baseUrl: string; model: string } {
+  let baseUrl = (rawUrl || "").trim().replace(/\/+$/, "").replace(/\/chat\/completions$/, "").replace(/\/+$/, "");
+  let model = (rawModel || "").trim().replace(/^models\//, "");
+  // Google AI Studio anahtarları "AIza" ile başlar; adres verilmediyse Gemini'ye yönlen.
+  const geminiKey = key.trim().startsWith("AIza");
+  if (!baseUrl) baseUrl = geminiKey ? GEMINI_OPENAI_BASE_URL : DEFAULT_LLM_API_URL;
+  if (baseUrl.includes("generativelanguage.googleapis.com")) {
+    baseUrl = GEMINI_OPENAI_BASE_URL;
+    // Gemini'de olmayan (gpt-…) ya da kullanımdan kalkmış (gemini-1.0/1.5, gemini-pro) model → güncel varsayılan.
+    if (!model.startsWith("gemini") || /^gemini-(1\.0|1\.5|pro($|-))/.test(model)) model = DEFAULT_GEMINI_MODEL;
+  }
+  return { baseUrl, model: model || DEFAULT_LLM_MODEL };
+}
+
 export const resolveLlmTarget = (): LlmTarget | null => {
   if (!ENV.llmApiKey) return null;
-  const baseUrl = ENV.llmApiUrl || DEFAULT_LLM_API_URL;
-  return { baseUrl, chatUrl: `${baseUrl}/chat/completions`, modelsUrl: `${baseUrl}/models`, key: ENV.llmApiKey, model: ENV.llmModel || DEFAULT_LLM_MODEL };
+  const { baseUrl, model } = normalizeLlmSettings(ENV.llmApiUrl, ENV.llmModel, ENV.llmApiKey);
+  return { baseUrl, chatUrl: `${baseUrl}/chat/completions`, modelsUrl: `${baseUrl}/models`, key: ENV.llmApiKey.trim(), model };
 };
 
 export const isLlmConfigured = () => resolveLlmTarget() !== null;
