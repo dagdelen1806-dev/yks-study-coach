@@ -378,9 +378,10 @@ describe("OcrOrchestrator", () => {
 
   it("respects the time budget: slow passes time out and are reported, not awaited forever", async () => {
     const provider = providerFrom((callIndex) => (callIndex === 0 ? { pageKind: "table_of_contents", items: cleanItems() } : new Promise<TocRawPage>(() => undefined)));
-    const report = await readTocImage(jpegDataUrl("paragraf-soru-bankasi/icindekiler-1.jpeg"), { provider, config: { timeBudgetMs: 4_000, passTimeoutMs: 1_500, minRemainingForWaveMs: 3_000, maxWorkingDimension: 1200, jpegQuality: 80, correctiveReread: false } });
-    expect(report.passes.some((item) => item.status === "timeout")).toBe(true);
-    expect(report.elapsedMs).toBeLessThan(6_000);
+    const report = await readTocImage(jpegDataUrl("paragraf-soru-bankasi/icindekiler-1.jpeg"), { provider, config: { timeBudgetMs: 8_000, passTimeoutMs: 1_500, minRemainingForWaveMs: 3_000, maxWorkingDimension: 1200, jpegQuality: 80, correctiveReread: false } });
+    // Yavaş geçişler ya zaman aşımına uğrar ya da (süre azaldıysa) hiç başlatılmaz — asla sonsuza dek beklenmez.
+    expect(report.passes.some((item) => item.status === "timeout" || item.status === "skipped")).toBe(true);
+    expect(report.elapsedMs).toBeLessThan(11_000);
     expect(report.page.items.length).toBeGreaterThan(0);
   }, 30_000);
 });

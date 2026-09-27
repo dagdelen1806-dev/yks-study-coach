@@ -75,6 +75,7 @@ function AdminDashboard() {
 
   return (
     <div className="space-y-5">
+      <LlmHealthCard />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {KPI_CARDS.map((card) => (
           <div key={card.key} className={`rounded-2xl p-4 ${card.tone}`}>
@@ -109,4 +110,45 @@ function AdminDashboard() {
 
 function MiniStat({ label, value }: { label: string; value: number | string }) {
   return <div className="rounded-xl bg-[#f7f5ef] p-3 text-center"><div className="text-[18px] font-semibold text-[#1f2333]">{value}</div><div className="mt-0.5 text-[10px] text-[#8b8c95]">{label}</div></div>;
+}
+
+/** Yapay zekâ bağlantı testi: ayar özeti + düz metin / JSON şema / görsel çağrıları. Anahtarın kendisi hiç gösterilmez. */
+function LlmHealthCard() {
+  const health = trpc.admin.system.llmHealth.useMutation();
+  const data = health.data;
+  const row = (label: string, result: { ok: boolean; ms: number; status: number | null; error: string | null } | undefined) => result && (
+    <div className={`rounded-xl p-3 text-[11px] ${result.ok ? "bg-[#eaf6f0] text-[#2e7a5d]" : "bg-[#fff0ed] text-[#9a3b2e]"}`}>
+      <div className="font-semibold">{result.ok ? "✓" : "✗"} {label} · {result.ms} ms{result.status ? ` · kod ${result.status}` : ""}</div>
+      {result.error && <div className="mt-1 break-words font-mono text-[10px] leading-4">{result.error}</div>}
+    </div>
+  );
+  return (
+    <Card className="soft-card p-5 sm:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-[15px] font-semibold text-[#1f2333]">Yapay zekâ bağlantı testi</h2>
+          <p className="mt-1 text-[12px] text-[#6d7390]">Fotoğraf okuma, AI plan ve not AI'nın kullandığı sağlayıcıyı (LLM_API_KEY / LLM_API_URL / LLM_MODEL) üç küçük gerçek çağrıyla dener.</p>
+        </div>
+        <button onClick={() => health.mutate()} disabled={health.isPending} className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#3b5ccc] px-4 text-[12px] font-semibold text-white disabled:opacity-50">{health.isPending ? <><Loader2 size={14} className="animate-spin" /> Deneniyor…</> : "Bağlantıyı test et"}</button>
+      </div>
+      {health.error && <p className="mt-3 text-[12px] text-[#d95d4d]">{health.error.message}</p>}
+      {data && (
+        <div className="mt-4 space-y-2">
+          <div className="rounded-xl bg-[#f7f5ef] p-3 text-[11px] leading-5 text-[#545661]">
+            <div>Anahtar: {data.config.configured ? `tanımlı (${data.config.keyLength} karakter)` : "TANIMLI DEĞİL"}</div>
+            <div>Adres: <span className="font-mono">{data.config.baseUrl ?? "—"}</span>{data.config.usingDefaultUrl ? " (varsayılan)" : ""}</div>
+            <div>Model: <span className="font-mono">{data.config.model ?? "—"}</span>{data.config.usingDefaultModel ? " (varsayılan)" : ""} · Ses: <span className="font-mono">{data.config.transcribeModel}</span></div>
+          </div>
+          {data.hints.map((hint) => <div key={hint} className="rounded-xl bg-[#fff8df] p-3 text-[11px] font-medium text-[#8a6116]">⚠ {hint}</div>)}
+          {data.checks && (
+            <div className="grid gap-2 sm:grid-cols-3">
+              {row("Düz metin", data.checks.text)}
+              {row("JSON şema", data.checks.json)}
+              {row("Görsel okuma", data.checks.vision)}
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
 }

@@ -43,6 +43,29 @@ describe("LLM availability errors", () => {
     expect(llmUnavailableMessage(new Error("json parse"))).toBeNull();
   });
 
+  it("falls back to json_object when the provider rejects json_schema (e.g. Gemini) and strips code fences", async () => {
+    Object.assign(ENV, { llmApiKey: "k", llmApiUrl: "https://generativelanguage.googleapis.com/v1beta/openai", llmModel: "gemini-2.5-flash" });
+    const bodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(String(init.body)));
+      if (bodies.length === 1) return new Response('{"error":{"message":"Invalid JSON payload: type must be a string"}}', { status: 400 });
+      return new Response(JSON.stringify({ id: "1", created: 0, model: "m", choices: [{ index: 0, message: { role: "assistant", content: "```json\n{\"sonuc\":\"tamam\"}\n```" }, finish_reason: "stop" }] }), { status: 200 });
+    }));
+    const result = await invokeLLM({ messages: [{ role: "user", content: "x" }], response_format: { type: "json_schema", json_schema: { name: "t", strict: true, schema: { type: "object", properties: { sonuc: { type: "string" } }, required: ["sonuc"], additionalProperties: false } } } });
+    expect(bodies).toHaveLength(2);
+    expect((bodies[1].response_format as { type: string }).type).toBe("json_object");
+    expect(JSON.stringify(bodies[1].messages)).toContain("sonuc");
+    expect(result.choices[0].message.content).toBe('{"sonuc":"tamam"}');
+  });
+
+  it("shows the HTTP status for a rejected request so the admin can diagnose it", async () => {
+    Object.assign(ENV, { llmApiKey: "k", llmApiUrl: "https://example.test/v1" });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("model not found", { status: 404 })));
+    const error = await invokeLLM({ messages: [{ role: "user", content: "x" }] }).catch((caught) => caught);
+    expect(error.status).toBe(404);
+    expect(llmUnavailableMessage(error)).toMatch(/kod 404.*LLM_MODEL/);
+  });
+
   it("never carries a key fragment from the provider's error text", async () => {
     Object.assign(ENV, { llmApiKey: "bad", llmApiUrl: "https://example.test/v1" });
     vi.stubGlobal("fetch", vi.fn(async () => new Response('{"error":{"message":"Incorrect API key provided: sk-proj-****************abcd"}}', { status: 401 })));

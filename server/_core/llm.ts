@@ -218,7 +218,7 @@ const normalizeToolChoice = (
  * okunamadıysa doğru — servis kapalı/anahtar hatalıysa öğrenciyi boşuna yeniden çektirir.
  */
 export class LlmUnavailableError extends Error {
-  constructor(readonly reason: "not_configured" | "auth" | "quota" | "too_large" | "provider", message: string) {
+  constructor(readonly reason: "not_configured" | "auth" | "quota" | "too_large" | "provider", message: string, readonly status?: number) {
     super(message);
     this.name = "LlmUnavailableError";
   }
@@ -253,7 +253,10 @@ export function llmUnavailableMessage(error: unknown): string | null {
     case "auth": return "Fotoğraf okuma servisinin anahtarı geçersiz. Sorun fotoğrafında değil; yöneticiye haber ver.";
     case "quota": return "Fotoğraf okuma servisi şu an yoğun ya da kotası doldu. Birkaç dakika sonra tekrar dener misin?";
     case "too_large": return "Fotoğraf servis için çok büyük. Daha küçük bir fotoğrafla ya da kırparak tekrar dener misin?";
-    default: return "Fotoğraf okuma servisine şu an ulaşılamıyor. Sorun fotoğrafında değil; biraz sonra tekrar dener misin?";
+    default:
+      // 400/404: istek reddedildi → çoğunlukla model adı ya da LLM_API_URL hatalı (yönetici ayarı). Kod, teşhis için gösterilir.
+      if (error.status === 400 || error.status === 404 || error.status === 422) return `Yapay zekâ sağlayıcısı isteği reddetti (kod ${error.status}). Sorun fotoğrafında değil; yönetici LLM_MODEL / LLM_API_URL ayarını kontrol etmeli (Admin → Yapay zekâ bağlantı testi).`;
+      return `Fotoğraf okuma servisine şu an ulaşılamıyor${error.status ? ` (kod ${error.status})` : ""}. Sorun fotoğrafında değil; biraz sonra tekrar dener misin?`;
   }
 }
 
@@ -261,7 +264,7 @@ const errorForStatus =(status: number, detail: string) => {
   const reason = status === 401 || status === 403 ? "auth" : status === 402 || status === 429 ? "quota" : status === 413 ? "too_large" : "provider";
   // Sağlayıcı hata metni (ör. 401'de maskelenmiş anahtar "sk-...abcd") loglara/yanıtlara anahtar parçası taşımasın.
   const safeDetail = detail.replace(/\b(sk-[A-Za-z0-9_*.\-]{4,}|AIza[0-9A-Za-z_\-]{10,}|Bearer\s+\S+)/g, "[redacted]");
-  return new LlmUnavailableError(reason, `LLM invoke failed: ${status} – ${safeDetail.slice(0, 500)}`);
+  return new LlmUnavailableError(reason, `LLM invoke failed: ${status} – ${safeDetail.slice(0, 500)}`, status);
 };
 
 const normalizeResponseFormat = ({
@@ -443,25 +446,47 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     payload.response_format = normalizedResponseFormat;
   }
 
-  let response: Response;
-  try {
-    response = await fetchWithBackoff(target.chatUrl, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${target.key}`,
-      },
-      body: JSON.stringify(payload),
-    });
-  } catch (error) {
-    throw new LlmUnavailableError("provider", `LLM request failed: ${error instanceof Error ? error.message : String(error)}`);
+  const send = async (body: Record<string, unknown>) => {
+    try {
+      return await fetchWithBackoff(target.chatUrl, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${target.key}`,
+        },
+        body: JSON.stringify(body),
+      });
+    } catch (error) {
+      throw new LlmUnavailableError("provider", `LLM request failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  let response = await send(payload);
+
+  // Bazı OpenAI uyumlu sağlayıcılar (ör. Gemini) katı `json_schema` biçimini ya da
+  // şemadaki bazı yapıları (["string","null"] birleşik tipleri) kabul etmez ve 400 döner.
+  // Bu durumda bir kez `json_object` moduna geçilir; şema talimat olarak verilir.
+  const format = payload.response_format as { type?: string; json_schema?: { schema?: unknown } } | undefined;
+  if (response.status === 400 && format?.type === "json_schema") {
+    const firstError = await response.text().catch(() => "");
+    console.warn(`[LLM] json_schema rejected (400), retrying with json_object: ${firstError.slice(0, 200).replace(/\b(sk-[A-Za-z0-9_*.\-]{4,}|AIza[0-9A-Za-z_\-]{10,})/g, "[redacted]")}`);
+    const schemaHint = { role: "system", content: `Yanıtı YALNIZCA şu JSON şemasına uyan geçerli bir JSON nesnesi olarak ver (açıklama, kod bloğu yok): ${JSON.stringify(format.json_schema?.schema ?? {})}` };
+    response = await send({ ...payload, messages: [schemaHint, ...(payload.messages as unknown[])], response_format: { type: "json_object" } });
   }
 
   if (!response.ok) {
     throw errorForStatus(response.status, await response.text().catch(() => ""));
   }
 
-  return (await response.json()) as InvokeResult;
+  const result = (await response.json()) as InvokeResult;
+  // JSON istendiyse, yanıtı ```json … ``` bloğuna saran sağlayıcılar için bloğu soy.
+  if (payload.response_format) {
+    for (const choice of result.choices ?? []) {
+      const content = choice.message?.content;
+      if (typeof content === "string") choice.message.content = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+    }
+  }
+  return result;
 }
 
 export type ModelInfo = {

@@ -3,6 +3,7 @@ import { adminAnalyticsRouter } from "./analytics";
 import { adminAuditRouter } from "./audit";
 import { adminPaymentsRouter } from "./payments";
 import { adminSubscriptionsRouter } from "./subscriptions";
+import { adminSystemRouter } from "./system";
 import { adminUsageRouter } from "./usage";
 import { adminUsersRouter } from "./users";
 
@@ -20,4 +21,5 @@ export const adminRouter = router({
   analytics: adminAnalyticsRouter,
   audit: adminAuditRouter,
   payments: adminPaymentsRouter,
+  system: adminSystemRouter,
 });

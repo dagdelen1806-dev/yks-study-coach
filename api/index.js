@@ -811,8 +811,8 @@ function normalizeIsbn(value) {
     const sum = compact.split("").reduce((total, char, index2) => total + (char === "X" ? 10 : Number(char)) * (10 - index2), 0);
     if (sum % 11 !== 0) return null;
     const body = `978${compact.slice(0, 9)}`;
-    const check = (10 - body.split("").reduce((total, digit, index2) => total + Number(digit) * (index2 % 2 === 0 ? 1 : 3), 0) % 10) % 10;
-    return `${body}${check}`;
+    const check2 = (10 - body.split("").reduce((total, digit, index2) => total + Number(digit) * (index2 % 2 === 0 ? 1 : 3), 0) % 10) % 10;
+    return `${body}${check2}`;
   }
   return null;
 }
@@ -2010,12 +2010,12 @@ async function readVerificationToken(token) {
   }
 }
 async function verifyEmailToken(token) {
-  const check = await readVerificationToken(token);
-  if (check.status !== "valid") return check.status;
+  const check2 = await readVerificationToken(token);
+  if (check2.status !== "valid") return check2.status;
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
-  const [user] = await db.select().from(users).where(eq2(users.id, check.userId)).limit(1);
-  if (!user || user.loginMethod !== "dev_email" || user.email !== check.email) return "invalid";
+  const [user] = await db.select().from(users).where(eq2(users.id, check2.userId)).limit(1);
+  if (!user || user.loginMethod !== "dev_email" || user.email !== check2.email) return "invalid";
   if (user.emailVerifiedAt) return "already";
   const grantAdmin = isAdminLogin(user.openId);
   await db.update(users).set({ emailVerifiedAt: /* @__PURE__ */ new Date(), ...grantAdmin ? { role: "admin", approvalStatus: "approved", approvedAt: user.approvedAt ?? /* @__PURE__ */ new Date() } : {} }).where(eq2(users.id, user.id));
@@ -3219,9 +3219,10 @@ var normalizeToolChoice = (toolChoice, tools) => {
   return toolChoice;
 };
 var LlmUnavailableError = class extends Error {
-  constructor(reason, message) {
+  constructor(reason, message, status) {
     super(message);
     this.reason = reason;
+    this.status = status;
     this.name = "LlmUnavailableError";
   }
 };
@@ -3249,13 +3250,14 @@ function llmUnavailableMessage(error) {
     case "too_large":
       return "Foto\u011Fraf servis i\xE7in \xE7ok b\xFCy\xFCk. Daha k\xFC\xE7\xFCk bir foto\u011Frafla ya da k\u0131rparak tekrar dener misin?";
     default:
-      return "Foto\u011Fraf okuma servisine \u015Fu an ula\u015F\u0131lam\u0131yor. Sorun foto\u011Fraf\u0131nda de\u011Fil; biraz sonra tekrar dener misin?";
+      if (error.status === 400 || error.status === 404 || error.status === 422) return `Yapay zek\xE2 sa\u011Flay\u0131c\u0131s\u0131 iste\u011Fi reddetti (kod ${error.status}). Sorun foto\u011Fraf\u0131nda de\u011Fil; y\xF6netici LLM_MODEL / LLM_API_URL ayar\u0131n\u0131 kontrol etmeli (Admin \u2192 Yapay zek\xE2 ba\u011Flant\u0131 testi).`;
+      return `Foto\u011Fraf okuma servisine \u015Fu an ula\u015F\u0131lam\u0131yor${error.status ? ` (kod ${error.status})` : ""}. Sorun foto\u011Fraf\u0131nda de\u011Fil; biraz sonra tekrar dener misin?`;
   }
 }
 var errorForStatus = (status, detail) => {
   const reason = status === 401 || status === 403 ? "auth" : status === 402 || status === 429 ? "quota" : status === 413 ? "too_large" : "provider";
   const safeDetail = detail.replace(/\b(sk-[A-Za-z0-9_*.\-]{4,}|AIza[0-9A-Za-z_\-]{10,}|Bearer\s+\S+)/g, "[redacted]");
-  return new LlmUnavailableError(reason, `LLM invoke failed: ${status} \u2013 ${safeDetail.slice(0, 500)}`);
+  return new LlmUnavailableError(reason, `LLM invoke failed: ${status} \u2013 ${safeDetail.slice(0, 500)}`, status);
 };
 var normalizeResponseFormat = ({
   responseFormat,
@@ -3383,23 +3385,39 @@ async function invokeLLM(params) {
   if (normalizedResponseFormat) {
     payload.response_format = normalizedResponseFormat;
   }
-  let response;
-  try {
-    response = await fetchWithBackoff(target.chatUrl, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${target.key}`
-      },
-      body: JSON.stringify(payload)
-    });
-  } catch (error) {
-    throw new LlmUnavailableError("provider", `LLM request failed: ${error instanceof Error ? error.message : String(error)}`);
+  const send = async (body) => {
+    try {
+      return await fetchWithBackoff(target.chatUrl, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${target.key}`
+        },
+        body: JSON.stringify(body)
+      });
+    } catch (error) {
+      throw new LlmUnavailableError("provider", `LLM request failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+  let response = await send(payload);
+  const format = payload.response_format;
+  if (response.status === 400 && format?.type === "json_schema") {
+    const firstError = await response.text().catch(() => "");
+    console.warn(`[LLM] json_schema rejected (400), retrying with json_object: ${firstError.slice(0, 200).replace(/\b(sk-[A-Za-z0-9_*.\-]{4,}|AIza[0-9A-Za-z_\-]{10,})/g, "[redacted]")}`);
+    const schemaHint = { role: "system", content: `Yan\u0131t\u0131 YALNIZCA \u015Fu JSON \u015Femas\u0131na uyan ge\xE7erli bir JSON nesnesi olarak ver (a\xE7\u0131klama, kod blo\u011Fu yok): ${JSON.stringify(format.json_schema?.schema ?? {})}` };
+    response = await send({ ...payload, messages: [schemaHint, ...payload.messages], response_format: { type: "json_object" } });
   }
   if (!response.ok) {
     throw errorForStatus(response.status, await response.text().catch(() => ""));
   }
-  return await response.json();
+  const result = await response.json();
+  if (payload.response_format) {
+    for (const choice of result.choices ?? []) {
+      const content = choice.message?.content;
+      if (typeof content === "string") choice.message.content = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+    }
+  }
+  return result;
 }
 
 // server/_core/fileValidation.ts
@@ -5584,9 +5602,9 @@ var bookContentRouter = router({
     await assertOwnsBook(userId, input.bookId);
     for (let index2 = 0; index2 < input.images.length; index2++) {
       const image = input.images[index2];
-      const check = validateDataUrl(image.dataUrl, image.mimeType);
-      if (!check.valid) throw new TRPCError2({ code: "BAD_REQUEST", message: `${index2 + 1}. foto\u011Fraf: ${check.reason}` });
-      if (check.buffer.byteLength > bookContentConfig.ocr.maxImageBytes) throw new TRPCError2({ code: "BAD_REQUEST", message: `${index2 + 1}. foto\u011Fraf \xE7ok b\xFCy\xFCk. Daha d\xFC\u015F\xFCk \xE7\xF6z\xFCn\xFCrl\xFCkle tekrar dener misin?` });
+      const check2 = validateDataUrl(image.dataUrl, image.mimeType);
+      if (!check2.valid) throw new TRPCError2({ code: "BAD_REQUEST", message: `${index2 + 1}. foto\u011Fraf: ${check2.reason}` });
+      if (check2.buffer.byteLength > bookContentConfig.ocr.maxImageBytes) throw new TRPCError2({ code: "BAD_REQUEST", message: `${index2 + 1}. foto\u011Fraf \xE7ok b\xFCy\xFCk. Daha d\xFC\u015F\xFCk \xE7\xF6z\xFCn\xFCrl\xFCkle tekrar dener misin?` });
     }
     const provider = getOcrProvider();
     const deadline = Date.now() + bookContentConfig.ocr.requestBudgetMs;
@@ -5792,14 +5810,14 @@ function normalizeTag(value) {
 function isValidNoteDoc(value, limits = { maxNodes: 2e4, maxDepth: 30 }) {
   if (!value || typeof value !== "object" || value.type !== "doc" || !Array.isArray(value.content)) return false;
   let count3 = 0;
-  const check = (node, depth) => {
+  const check2 = (node, depth) => {
     if (!node || typeof node !== "object" || typeof node.type !== "string") return false;
     if (++count3 > limits.maxNodes || depth > limits.maxDepth) return false;
     const children = node.content;
     if (children !== void 0 && !Array.isArray(children)) return false;
-    return (children ?? []).every((child) => check(child, depth + 1));
+    return (children ?? []).every((child) => check2(child, depth + 1));
   };
-  return check(value, 0);
+  return check2(value, 0);
 }
 var NOTE_AI_ACTIONS = {
   summarize: { label: "\xD6zet", menu: "\xD6zetle" },
@@ -7434,6 +7452,56 @@ var adminSubscriptionsRouter = router({
   })
 });
 
+// server/routers/admin/system.ts
+var redact = (text2) => text2.replace(/\b(sk-[A-Za-z0-9_*.\-]{4,}|AIza[0-9A-Za-z_\-]{10,}|Bearer\s+\S+)/g, "[redacted]");
+async function check(run) {
+  const started = Date.now();
+  try {
+    await run();
+    return { ok: true, ms: Date.now() - started, status: null, error: null };
+  } catch (error) {
+    return { ok: false, ms: Date.now() - started, status: error instanceof LlmUnavailableError ? error.status ?? null : null, error: redact(error instanceof Error ? error.message : String(error)).slice(0, 400) };
+  }
+}
+function configHints(baseUrl, model) {
+  const hints = [];
+  if (/\/chat\/completions\/?$/.test(baseUrl)) hints.push("LLM_API_URL '/chat/completions' ile bitmemeli; yaln\u0131zca k\xF6k adres (\xF6r. https://api.openai.com/v1).");
+  if (!/^https:\/\//.test(baseUrl)) hints.push("LLM_API_URL https:// ile ba\u015Flamal\u0131.");
+  if (baseUrl.includes("generativelanguage.googleapis.com")) {
+    if (!baseUrl.endsWith("/v1beta/openai")) hints.push("Gemini i\xE7in LLM_API_URL tam olarak https://generativelanguage.googleapis.com/v1beta/openai olmal\u0131.");
+    if (!model.startsWith("gemini")) hints.push(`Gemini adresiyle '${model}' modeli kullan\u0131lamaz; LLM_MODEL \xF6rn. gemini-2.5-flash olmal\u0131.`);
+  }
+  if (baseUrl.includes("api.openai.com") && model.startsWith("gemini")) hints.push("OpenAI adresiyle Gemini modeli kullan\u0131lamaz; LLM_MODEL \xF6rn. gpt-4o-mini olmal\u0131.");
+  if (/\s/.test(model)) hints.push("LLM_MODEL de\u011Ferinde bo\u015Fluk var.");
+  return hints;
+}
+var adminSystemRouter = router({
+  llmHealth: adminProcedure.mutation(async () => {
+    const target = resolveLlmTarget();
+    const config = {
+      configured: Boolean(target),
+      keyLength: ENV.llmApiKey ? ENV.llmApiKey.trim().length : 0,
+      keyHasWhitespace: ENV.llmApiKey !== ENV.llmApiKey.trim() || /\s/.test(ENV.llmApiKey.trim()),
+      baseUrl: target?.baseUrl ?? null,
+      model: target?.model ?? null,
+      usingDefaultUrl: !ENV.llmApiUrl,
+      usingDefaultModel: !ENV.llmModel,
+      transcribeModel: ENV.transcribeModel || "whisper-1"
+    };
+    if (!target) return { config, hints: ["LLM_API_KEY (ya da OPENAI_API_KEY) tan\u0131ml\u0131 de\u011Fil ya da bu deploy'a ula\u015Fmad\u0131 \u2014 Vercel'de ekledikten sonra Redeploy gerekir."], checks: null };
+    const hints = configHints(target.baseUrl, target.model);
+    if (config.keyHasWhitespace) hints.push("LLM_API_KEY de\u011Ferinde bo\u015Fluk/sat\u0131r sonu var; Vercel'de yeniden, bo\u015Fluksuz yap\u0131\u015Ft\u0131r.");
+    const text2 = await check(() => invokeLLM({ messages: [{ role: "user", content: "Yaln\u0131zca OK yaz." }], max_tokens: 5 }));
+    const json = await check(() => invokeLLM({
+      messages: [{ role: "user", content: '{"sonuc": "tamam", "sayi": null} d\xF6nd\xFCr.' }],
+      response_format: { type: "json_schema", json_schema: { name: "health", strict: true, schema: { type: "object", properties: { sonuc: { type: "string" }, sayi: { type: ["integer", "null"] } }, required: ["sonuc", "sayi"], additionalProperties: false } } }
+    }));
+    const image = encodeGrayToJpegDataUrl(createGray(64, 64, 230), 80);
+    const vision = await check(() => invokeLLM({ messages: [{ role: "user", content: [{ type: "text", text: "Bu g\xF6rselin rengi ne? Tek kelime." }, { type: "image_url", image_url: { url: image, detail: "low" } }] }], max_tokens: 10 }));
+    return { config, hints, checks: { text: text2, json, vision } };
+  })
+});
+
 // server/routers/admin/usage.ts
 import { z as z13 } from "zod";
 var adminUsageRouter = router({
@@ -7725,7 +7793,8 @@ var adminRouter = router({
   usage: adminUsageRouter,
   analytics: adminAnalyticsRouter,
   audit: adminAuditRouter,
-  payments: adminPaymentsRouter
+  payments: adminPaymentsRouter,
+  system: adminSystemRouter
 });
 
 // server/routers.ts
