@@ -27,7 +27,7 @@ const blockActions = (props: ReactNodeViewProps, extra?: React.ReactNode) =>
   props.editor.isEditable ? (
     <div className="absolute right-2 top-2 flex gap-1 opacity-100 sm:opacity-0 sm:transition sm:group-hover:opacity-100">
       {extra}
-      <button type="button" onClick={() => props.deleteNode()} className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/90 text-[#d95d4d] shadow-sm" aria-label="Bloğu sil"><Trash2 size={14} /></button>
+      <button type="button" onClick={() => props.deleteNode()} className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/90 text-danger shadow-sm" aria-label="Bloğu sil"><Trash2 size={14} /></button>
     </div>
   ) : null;
 
@@ -36,9 +36,9 @@ function FormulaView(props: ReactNodeViewProps) {
   const [editing, setEditing] = useState(() => props.editor.isEditable && consumeEditorToken(props.node.attrs.openToken));
   const html = useMemo(() => renderLatex(latex), [latex]);
   return (
-    <NodeViewWrapper className={`group relative my-2 rounded-xl border px-3 py-2 ${props.selected ? "border-[#3b5ccc]" : "border-transparent hover:border-[#1f2333]/10"}`} data-formula="">
-      <button type="button" onClick={() => props.editor.isEditable && setEditing(true)} className="block w-full overflow-x-auto text-left text-[#1f2333]" aria-label={`Formül: ${latex}. Düzenlemek için dokun.`} dangerouslySetInnerHTML={{ __html: html }} />
-      {blockActions(props, <button type="button" onClick={() => setEditing(true)} className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/90 text-[#3b5ccc] shadow-sm" aria-label="Formülü düzenle"><Pencil size={14} /></button>)}
+    <NodeViewWrapper className={`group relative my-2 rounded-xl border px-3 py-2 ${props.selected ? "border-brand" : "border-transparent hover:border-ink/10"}`} data-formula="">
+      <button type="button" onClick={() => props.editor.isEditable && setEditing(true)} className="block w-full overflow-x-auto text-left text-ink" aria-label={`Formül: ${latex}. Düzenlemek için dokun.`} dangerouslySetInnerHTML={{ __html: html }} />
+      {blockActions(props, <button type="button" onClick={() => setEditing(true)} className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/90 text-brand shadow-sm" aria-label="Formülü düzenle"><Pencil size={14} /></button>)}
       {editing && <FormulaEditor initial={latex} onCancel={() => { setEditing(false); if (!latex) props.deleteNode(); }} onSave={(value) => { props.updateAttributes({ latex: value }); setEditing(false); }} />}
     </NodeViewWrapper>
   );
@@ -59,9 +59,9 @@ function DrawingView(props: ReactNodeViewProps) {
   const strokes = (Array.isArray(props.node.attrs.strokes) ? props.node.attrs.strokes : []) as Stroke[];
   const [editing, setEditing] = useState(() => props.editor.isEditable && consumeEditorToken(props.node.attrs.openToken));
   return (
-    <NodeViewWrapper className={`group relative my-2 overflow-hidden rounded-xl border bg-white ${props.selected ? "border-[#3b5ccc]" : "border-[#1f2333]/10"}`}>
+    <NodeViewWrapper className={`group relative my-2 overflow-hidden rounded-xl border bg-white ${props.selected ? "border-brand" : "border-ink/10"}`}>
       <button type="button" onClick={() => props.editor.isEditable && setEditing(true)} className="block w-full" aria-label="Çizimi düzenle"><StrokesSvg strokes={strokes} className="block h-auto max-h-64 w-full" /></button>
-      {blockActions(props, <button type="button" onClick={() => setEditing(true)} className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/90 text-[#3b5ccc] shadow-sm" aria-label="Çizimi düzenle"><Pencil size={14} /></button>)}
+      {blockActions(props, <button type="button" onClick={() => setEditing(true)} className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/90 text-brand shadow-sm" aria-label="Çizimi düzenle"><Pencil size={14} /></button>)}
       {editing && <DrawingEditor initial={strokes} onCancel={() => { setEditing(false); if (!strokes.length) props.deleteNode(); }} onSave={(value) => { props.updateAttributes({ strokes: value }); setEditing(false); }} />}
     </NodeViewWrapper>
   );
@@ -94,14 +94,14 @@ function NoteImageView(props: ReactNodeViewProps) {
     onError: (error) => toast.error(error.message),
   });
   return (
-    <NodeViewWrapper className={`group relative my-2 overflow-hidden rounded-xl border bg-[#fafafa] ${props.selected ? "border-[#3b5ccc]" : "border-[#1f2333]/10"}`}>
+    <NodeViewWrapper className={`group relative my-2 overflow-hidden rounded-xl border bg-paper ${props.selected ? "border-brand" : "border-ink/10"}`}>
       <img src={attachmentUrl(attachmentId)} alt={ocrText ? `Fotoğraf: ${ocrText.slice(0, 80)}` : "Nota eklenen fotoğraf"} loading="lazy" className="mx-auto block max-h-[420px] w-auto max-w-full object-contain" />
       {blockActions(props, !ocrText ? (
-        <button type="button" onClick={() => extract.mutate({ attachmentId })} disabled={extract.isPending} className="flex h-8 items-center gap-1 rounded-lg bg-white/90 px-2 text-[11px] font-semibold text-[#3b5ccc] shadow-sm" aria-label="Fotoğraftaki metni çıkar">
+        <button type="button" onClick={() => extract.mutate({ attachmentId })} disabled={extract.isPending} className="flex h-8 items-center gap-1 rounded-lg bg-white/90 px-2 text-[12px] font-semibold text-brand shadow-sm" aria-label="Fotoğraftaki metni çıkar">
           {extract.isPending ? <Loader2 size={13} className="animate-spin" /> : <ScanText size={13} />} Metni çıkar
         </button>
       ) : undefined)}
-      {ocrText && <div className="border-t border-[#1f2333]/[0.06] px-3 py-1.5 text-[10px] text-[#8b8c95]">✓ Metin çıkarıldı (aramada bulunur)</div>}
+      {ocrText && <div className="border-t border-ink/[0.06] px-3 py-1.5 text-[12px] text-ink-3">✓ Metin çıkarıldı (aramada bulunur)</div>}
     </NodeViewWrapper>
   );
 }
@@ -123,9 +123,9 @@ function VoiceClipView(props: ReactNodeViewProps) {
   const attachmentId = props.node.attrs.attachmentId ? Number(props.node.attrs.attachmentId) : null;
   const duration = Number(props.node.attrs.duration) || 0;
   return (
-    <NodeViewWrapper className={`group relative my-2 flex items-center gap-3 rounded-xl border bg-[#f4f6ff] px-3 py-2 ${props.selected ? "border-[#3b5ccc]" : "border-[#3b5ccc]/15"}`}>
-      <span className="text-[13px] font-semibold text-[#3b5ccc]">🎙️ {formatDuration(duration)}</span>
-      {attachmentId ? <audio controls preload="none" src={attachmentUrl(attachmentId)} className="h-9 max-w-full flex-1" aria-label="Ses kaydı" /> : <span className="text-[11px] text-[#8b8c95]">Ses kaydı saklanmadı (yalnızca metni).</span>}
+    <NodeViewWrapper className={`group relative my-2 flex items-center gap-3 rounded-xl border bg-brand-soft px-3 py-2 ${props.selected ? "border-brand" : "border-brand/15"}`}>
+      <span className="text-[14px] font-semibold text-brand">🎙️ {formatDuration(duration)}</span>
+      {attachmentId ? <audio controls preload="none" src={attachmentUrl(attachmentId)} className="h-9 max-w-full flex-1" aria-label="Ses kaydı" /> : <span className="text-[12px] text-ink-3">Ses kaydı saklanmadı (yalnızca metni).</span>}
       {blockActions(props)}
     </NodeViewWrapper>
   );

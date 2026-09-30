@@ -1,4 +1,6 @@
 import { deriveTopicStatus, MIN_RELIABLE_QUESTION_COUNT } from "./topicStatus";
+import { palette, subjectPalette } from "./palette";
+export { formatDayRange, toLocalDateKey } from "./dates";
 
 export type ExamType = "TYT" | "AYT";
 export type TopicStatus = "Zayıf" | "Orta" | "İyi";
@@ -174,11 +176,11 @@ export type AiWeeklyPlan = {
 export const subjectOrder = ["Türkçe", "Matematik", "Fen", "Sosyal"] as const;
 
 export const trackedTopics = [
-  { topic: "Paragrafta anlam", subject: "Türkçe", max: 12, color: "#f07d69" },
-  { topic: "Problemler", subject: "Matematik", max: 12, color: "#3b5ccc" },
-  { topic: "Maddenin halleri", subject: "Fen", max: 6, color: "#55a98b" },
-  { topic: "Milli Mücadele", subject: "Sosyal", max: 6, color: "#d49a33" },
-  { topic: "Fonksiyonlar", subject: "Matematik", max: 10, color: "#8b7bd8" },
+  { topic: "Paragrafta anlam", subject: "Türkçe", max: 12, color: subjectPalette.Türkçe },
+  { topic: "Problemler", subject: "Matematik", max: 12, color: subjectPalette.Matematik },
+  { topic: "Maddenin halleri", subject: "Fen", max: 6, color: subjectPalette.Fen },
+  { topic: "Milli Mücadele", subject: "Sosyal", max: 6, color: subjectPalette.Sosyal },
+  { topic: "Fonksiyonlar", subject: "Matematik", max: 10, color: palette.violet },
 ];
 
 export const topicSeeds: Topic[] = [
@@ -269,11 +271,14 @@ export const dailyPlan = [
   { time: "15:00", title: "İntegral tekrar", meta: "AYT Matematik", done: false, tone: "lilac" },
 ];
 
+/** TYT ders başına soru sayısı (= alınabilecek en yüksek net). */
+export const tytSubjectTotals: Record<(typeof subjectOrder)[number], number> = { Türkçe: 40, Matematik: 40, Fen: 20, Sosyal: 20 };
+
 export const subjectBreakdown = [
-  { label: "Türkçe", value: 28.5, total: 40, color: "#f07d69" },
-  { label: "Matematik", value: 18.75, total: 40, color: "#3b5ccc" },
-  { label: "Fen", value: 12.5, total: 20, color: "#55a98b" },
-  { label: "Sosyal", value: 8.5, total: 20, color: "#d49a33" },
+  { label: "Türkçe", value: 28.5, total: 40, color: subjectPalette.Türkçe },
+  { label: "Matematik", value: 18.75, total: 40, color: subjectPalette.Matematik },
+  { label: "Fen", value: 12.5, total: 20, color: subjectPalette.Fen },
+  { label: "Sosyal", value: 8.5, total: 20, color: subjectPalette.Sosyal },
 ];
 
 export const curriculumSubjects = [
@@ -288,9 +293,9 @@ export const scopeSources = [
 ];
 
 export const statusMeta: Record<TopicStatus, { color: string; bg: string; description: string }> = {
-  Zayıf: { color: "#d95d4d", bg: "#fff0ed", description: "Öncelikli tekrar" },
-  Orta: { color: "#bd7c18", bg: "#fff8df", description: "Bir tur daha" },
-  İyi: { color: "#2e8666", bg: "#e9f7f0", description: "Koruma turu" },
+  Zayıf: { color: palette.danger, bg: palette.dangerSoft, description: "Öncelikli tekrar" },
+  Orta: { color: palette.warn, bg: palette.warnSoft, description: "Bir tur daha" },
+  İyi: { color: palette.success, bg: palette.successSoft, description: "Koruma turu" },
 };
 
 export const topicCounts = {
@@ -315,11 +320,20 @@ export const subjectFilters = ["Tümü", "Türkçe", "Matematik", "Fen", "Sosyal
 export const statusFilters = ["Tümü", "Zayıf", "Orta", "İyi"] as const;
 export const getNextStatus = (status: TopicStatus): TopicStatus => status === "Zayıf" ? "Orta" : status === "Orta" ? "İyi" : "Zayıf";
 export const formatExamDate = (date: string) => new Intl.DateTimeFormat("tr-TR", { day: "2-digit", month: "short" }).format(new Date(`${date}T12:00:00`));
-export const formatMinutes = (minutes: number) => `${Math.floor(minutes / 60)}s ${minutes % 60}dk`;
+/** "45 dk", "3 sa 20 dk". ("s" saniyeyle karışıyordu.) */
+export const formatMinutes = (minutes: number) => {
+  const total = Math.max(0, Math.round(minutes));
+  const hours = Math.floor(total / 60);
+  const rest = total % 60;
+  if (!hours) return `${rest} dk`;
+  return rest ? `${hours} sa ${rest} dk` : `${hours} sa`;
+};
+/** Türkçe yüzde yazımı: işaret sayıdan önce (%56). */
+export const formatPercent = (value: number) => `%${Math.round(value)}`;
 export const getStatusFromProgress = (progress: number): TopicStatus => deriveTopicStatus(progress, MIN_RELIABLE_QUESTION_COUNT).status;
 export const getDisplayName = (name?: string | null) => name?.split(" ")[0] || "Ece";
 export const getInitials = (name?: string | null) => (name || "Ece Deniz").split(" ").map((part) => part[0]).slice(0, 2).join("").toUpperCase();
-export const getColorForSubject = (subject: string) => ({ Türkçe: "#f07d69", Matematik: "#3b5ccc", Fen: "#55a98b", Sosyal: "#d49a33", Fizik: "#8b7bd8", Biyoloji: "#55a98b" }[subject] || "#3b5ccc");
+export const getColorForSubject = (subject: string) => subjectPalette[subject] ?? palette.brand;
 export const getStoredValue = <T,>(key: string, fallback: T): T => { if (typeof window === "undefined") return fallback; try { const value = window.localStorage.getItem(key); return value ? JSON.parse(value) as T : fallback; } catch { return fallback; } };
 export const storeValue = <T,>(key: string, value: T) => { if (typeof window !== "undefined") window.localStorage.setItem(key, JSON.stringify(value)); };
 export const localStorageKeys = { exams: "pusula-yks-exams", topics: "pusula-yks-topics", studyHistory: "pusula-yks-study-history", bookInventory: "pusula-yks-book-inventory", bookLogs: "pusula-yks-book-logs", sourceSwitches: "pusula-yks-source-switches", customBooks: "pusula-yks-custom-books", calendarSessions: "pusula-yks-calendar-sessions", onboardingDraft: "pusula-yks-onboarding-draft" } as const;
@@ -377,13 +391,11 @@ export const appNavSections = [
 export const adminNavSection = { key: "admin" as const, label: "Yönetim" };
 export const studyTip = "Önce zayıf konudan 25 dakika öğrenme, ardından 15 dakika soru çözme ve 5 dakika hata notu.";
 export const demoNotice = "Demo verileriyle başladı — kendi denemelerini ekledikçe koçun kişiselleşir.";
-export const currentWeekLabel = "16–22 Eylül";
-export const dateInputToday = new Date().toISOString().slice(0, 10);
 export const fieldLabels = { turkce: "Türkçe neti", matematik: "Matematik neti", fen: "Fen neti", sosyal: "Sosyal neti" };
 export const timeFieldLabels = { turkceTime: "Türkçe dk", matematikTime: "Matematik dk", fenTime: "Fen dk", sosyalTime: "Sosyal dk" };
 export const netDeltaLabel = (delta: number) => delta > 0 ? `+${delta.toFixed(2)}` : delta.toFixed(2);
 export const sourceCopy = "Veri kaynağı: ÖSYM sınav kapsamı ve MEB öğretim programları referans alınarak hazırlanan başlangıç konu haritası.";
-export const subjectColors: Record<string, string> = { Türkçe: "#f07d69", Matematik: "#3b5ccc", Fen: "#55a98b", Sosyal: "#d49a33", Fizik: "#8b7bd8", Biyoloji: "#55a98b" };
+export const subjectColors: Record<string, string> = subjectPalette;
 export const initialTopics = topicSeeds;
 export const initialResources = resourceSeeds;
 export const initialWeeklyBars = weeklyBars;
@@ -412,10 +424,10 @@ export const studySessionMinutes = 25;
 export const toastCopy = { topic: "Konu durumu güncellendi.", exam: "Deneme eklendi. Konu haritanı güncelledik.", start: "Çalışma oturumu başladı. 25 dakika sonra kısa bir nefes molası ver.", resource: "Kaynak listene kaydedildi." };
 export const sourceLinks = scopeSources;
 export const statusLegend = [
-  { label: "Zayıf", copy: "Öncelikli tekrar", color: "#d95d4d" }, { label: "Orta", copy: "Pekiştir", color: "#bd7c18" }, { label: "İyi", copy: "Koru", color: "#2e8666" },
+  { label: "Zayıf", copy: "Öncelikli tekrar", color: palette.danger }, { label: "Orta", copy: "Pekiştir", color: palette.warn }, { label: "İyi", copy: "Koru", color: palette.success },
 ];
 export const getStatusTone = (status: TopicStatus) => status === "Zayıf" ? "status-weak" : status === "Orta" ? "status-medium" : "status-good";
-export const getTopicAccent = (accent: Topic["accent"]) => ({ coral: "#f07d69", blue: "#3b5ccc", mint: "#55a98b", yellow: "#d49a33", lilac: "#8b7bd8" }[accent]);
+export const getTopicAccent = (accent: Topic["accent"]) => ({ coral: subjectPalette.Türkçe, blue: subjectPalette.Matematik, mint: subjectPalette.Fen, yellow: subjectPalette.Sosyal, lilac: subjectPalette.Fizik }[accent]);
 export const targetDateLabel = "19 Haziran 2027";
 export const dashboardMetrics = [
   { label: "Konu kapsama", value: "68%", change: "+8%", caption: "geçen haftaya göre", tone: "blue" },

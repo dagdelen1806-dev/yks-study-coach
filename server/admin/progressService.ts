@@ -4,6 +4,7 @@ import { topicProgress, topicStudyLogs, userMockExams, users } from "../../drizz
 import { calculatePlanAdherence } from "../../shared/planAdherence";
 import { calculateProgressScore, type ProgressScoreResult } from "../../shared/progressScore";
 import { targetNet } from "../../shared/yksData";
+import { toLocalDateKey } from "../../shared/dates";
 
 const CONSISTENCY_WINDOW_DAYS = 7;
 const ADHERENCE_WINDOW_DAYS = 30;
@@ -32,7 +33,7 @@ export async function getStudyProgressScore(userId: number): Promise<ProgressSco
     db.select({ net: userMockExams.net }).from(userMockExams).where(eq(userMockExams.userId, userId)),
   ]);
 
-  const activeDaysInWindow = new Set(recentLogs.map((row) => row.studyDate.toISOString().slice(0, 10))).size;
+  const activeDaysInWindow = new Set(recentLogs.map((row) => toLocalDateKey(row.studyDate))).size;
   const totalQuestions = allLogs.reduce((sum, row) => sum + row.questions, 0);
   const correctQuestions = allLogs.reduce((sum, row) => sum + row.correct, 0);
   const studiedTopicCount = topicRows.length;

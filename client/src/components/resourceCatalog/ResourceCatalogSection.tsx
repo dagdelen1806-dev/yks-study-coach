@@ -6,14 +6,15 @@ import { trpc } from "@/lib/trpc";
 import { BookOpen, BookmarkCheck, BookmarkPlus, CheckCircle2, ExternalLink, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { palette } from "@shared/palette";
 
 // Same color values already used for status/tone chips elsewhere in the app
 // (see `toneClasses` / `statusMeta` in Home.tsx) — reused here rather than
 // introducing a new ad-hoc palette for difficulty.
 const DIFFICULTY_META: Record<string, { label: string; dot: string; text: string; bg: string; emoji: string }> = {
-  easy: { label: "Kolay", dot: "#2e8666", text: "#2e8666", bg: "#e9f7f0", emoji: "🟢" },
-  medium: { label: "Orta", dot: "#bd7c18", text: "#bd7c18", bg: "#fff8df", emoji: "🟡" },
-  hard: { label: "Zor", dot: "#d95d4d", text: "#d95d4d", bg: "#fff0ed", emoji: "🔴" },
+  easy: { label: "Kolay", dot: palette.success, text: palette.success, bg: palette.successSoft, emoji: "🟢" },
+  medium: { label: "Orta", dot: palette.warn, text: palette.warn, bg: palette.warnSoft, emoji: "🟡" },
+  hard: { label: "Zor", dot: palette.danger, text: palette.danger, bg: palette.dangerSoft, emoji: "🔴" },
 };
 
 const BOOK_TYPE_LABELS: Record<string, string> = {
@@ -33,44 +34,44 @@ function DifficultyBadge({ label, confidence }: { label: string; confidence: num
   const meta = DIFFICULTY_META[label] ?? DIFFICULTY_META.medium;
   const lowConfidence = confidence < 0.55;
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold" style={{ color: meta.text, backgroundColor: meta.bg }} title={lowConfidence ? "Otomatik sınıflandırma, düşük güven — inceleme bekliyor olabilir" : undefined}>
+    <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-semibold" style={{ color: meta.text, backgroundColor: meta.bg }} title={lowConfidence ? "Otomatik sınıflandırma, düşük güven — inceleme bekliyor olabilir" : undefined}>
       <span>{meta.emoji}</span>
       {meta.label}
-      {lowConfidence && <span className="text-[9px] font-normal opacity-70">(taslak)</span>}
+      {lowConfidence && <span className="text-[11px] font-normal opacity-70">(taslak)</span>}
     </span>
   );
 }
 
 function BookCard({ book, owned, onToggleLibrary, togglePending }: { book: { id: number; name: string; slug: string; publisher: string | null; examScope: string; subject: string | null; bookType: string; imageUrl: string | null; difficultyLabel: string; difficultyScore: number; difficultyConfidence: number; price: number | null; productUrl: string | null }; owned: boolean; onToggleLibrary: () => void; togglePending: boolean }) {
   return (
-    <div className="flex flex-col gap-3 rounded-2xl border border-[#1f2333]/[0.06] bg-white p-4 shadow-sm transition hover:shadow-md">
+    <div className="flex flex-col gap-3 rounded-2xl border border-ink/[0.06] bg-white p-4 shadow-sm transition hover:shadow-md">
       <div className="flex items-start justify-between gap-2">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#edf1ff] text-[#3b5ccc]">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-soft text-brand">
           <BookOpen size={18} />
         </div>
         <DifficultyBadge label={book.difficultyLabel} confidence={book.difficultyConfidence} />
       </div>
       <div>
-        <div className="text-[14px] font-semibold leading-5 text-[#1f2333]">{book.name}</div>
-        <div className="mt-1 text-[12px] text-[#858690]">{book.publisher ?? "Yayıncı belirtilmemiş"}</div>
+        <div className="text-[14px] font-semibold leading-5 text-ink">{book.name}</div>
+        <div className="mt-1 text-[13px] text-ink-3">{book.publisher ?? "Yayıncı belirtilmemiş"}</div>
       </div>
-      <div className="flex flex-wrap gap-1.5 text-[10px] font-medium text-[#6d6e78]">
-        <span className="rounded-full bg-[#f5f4f0] px-2 py-0.5">{book.examScope.replace("_", " + ")}</span>
-        {book.subject && <span className="rounded-full bg-[#f5f4f0] px-2 py-0.5">{book.subject}</span>}
-        <span className="rounded-full bg-[#f5f4f0] px-2 py-0.5">{BOOK_TYPE_LABELS[book.bookType] ?? book.bookType}</span>
+      <div className="flex flex-wrap gap-1.5 text-[12px] font-medium text-ink-3">
+        <span className="rounded-full bg-paper px-2 py-0.5">{book.examScope.replace("_", " + ")}</span>
+        {book.subject && <span className="rounded-full bg-paper px-2 py-0.5">{book.subject}</span>}
+        <span className="rounded-full bg-paper px-2 py-0.5">{BOOK_TYPE_LABELS[book.bookType] ?? book.bookType}</span>
       </div>
       <button
         onClick={onToggleLibrary}
         disabled={togglePending}
-        className={`inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-[11px] font-semibold transition disabled:opacity-60 ${owned ? "bg-[#e9f7f0] text-[#2e8666] hover:bg-[#ddf0e6]" : "bg-[#1f2333] text-white hover:opacity-90"}`}
+        className={`inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-[12px] font-semibold transition disabled:opacity-60 ${owned ? "bg-success-soft text-success hover:bg-success-soft" : "bg-ink text-white hover:opacity-90"}`}
       >
         {owned ? <BookmarkCheck size={14} /> : <BookmarkPlus size={14} />}
         {owned ? "Kütüphanemde" : "Kütüphaneme ekle"}
       </button>
       <div className="mt-auto flex items-center justify-between pt-1">
-        <span className="text-[11px] text-[#9a9ba3]">{book.price ? `${book.price.toFixed(2)} ₺` : "Fiyat bilgisi yok"}</span>
+        <span className="text-[12px] text-ink-4">{book.price ? `${book.price.toFixed(2)} ₺` : "Fiyat bilgisi yok"}</span>
         {book.productUrl ? (
-          <a href={book.productUrl} target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#3b5ccc] hover:underline">
+          <a href={book.productUrl} target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-1 text-[12px] font-semibold text-brand hover:underline">
             Kaynağa git <ExternalLink size={12} />
           </a>
         ) : null}
@@ -85,28 +86,28 @@ function RecommendationPanel() {
 
   if (!user) {
     return (
-      <div className="rounded-2xl border border-dashed border-[#1f2333]/[0.12] bg-[#faf9f6] p-5 text-[12px] text-[#858690]">
+      <div className="rounded-2xl border border-dashed border-ink/[0.12] bg-paper p-5 text-[13px] text-ink-3">
         Seviyene uygun kaynak önerilerini görmek için giriş yap.
       </div>
     );
   }
 
-  if (recommendations.isLoading) return <div className="text-[12px] text-[#9a9ba3]">Öneriler hesaplanıyor…</div>;
+  if (recommendations.isLoading) return <div className="text-[13px] text-ink-4">Öneriler hesaplanıyor…</div>;
   if (!recommendations.data || recommendations.data.length === 0) {
-    return <div className="rounded-2xl border border-dashed border-[#1f2333]/[0.12] bg-[#faf9f6] p-5 text-[12px] text-[#858690]">Henüz yeterli konu ilerleme verisi yok — konu haritasında birkaç sonuç kaydettikçe burası kişiselleşir.</div>;
+    return <div className="rounded-2xl border border-dashed border-ink/[0.12] bg-paper p-5 text-[13px] text-ink-3">Henüz yeterli konu ilerleme verisi yok — konu haritasında birkaç sonuç kaydettikçe burası kişiselleşir.</div>;
   }
 
   return (
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
       {recommendations.data.map((rec) => (
-        <div key={`${rec.bookId}-${rec.topic}`} className="rounded-2xl border border-[#1f2333]/[0.06] bg-white p-4">
+        <div key={`${rec.bookId}-${rec.topic}`} className="rounded-2xl border border-ink/[0.06] bg-white p-4">
           <div className="flex items-center justify-between gap-2">
-            <span className="rounded-full bg-[#f1efff] px-2 py-0.5 text-[10px] font-semibold text-[#7566c3]">{rec.label}</span>
+            <span className="rounded-full bg-violet-soft px-2 py-0.5 text-[12px] font-semibold text-violet">{rec.label}</span>
             {rec.book && <DifficultyBadge label={rec.book.difficultyLabel} confidence={rec.book.difficultyConfidence} />}
           </div>
-          <div className="mt-2 text-[13px] font-semibold text-[#1f2333]">{rec.book?.name ?? `Kaynak #${rec.bookId}`}</div>
-          <div className="mt-1 text-[11px] text-[#858690]">{rec.subject} · {rec.topic}</div>
-          <p className="mt-2 text-[11px] leading-4 text-[#9a9ba3]">{rec.reason}</p>
+          <div className="mt-2 text-[14px] font-semibold text-ink">{rec.book?.name ?? `Kaynak #${rec.bookId}`}</div>
+          <div className="mt-1 text-[12px] text-ink-3">{rec.subject} · {rec.topic}</div>
+          <p className="mt-2 text-[12px] leading-4 text-ink-4">{rec.reason}</p>
         </div>
       ))}
     </div>
@@ -124,16 +125,16 @@ function AdminReviewPanel() {
   if (rows.length === 0) return null;
 
   return (
-    <div className="rounded-2xl border border-[#f3d9a8] bg-[#fffaf0] p-4">
-      <div className="mb-3 flex items-center gap-2 text-[13px] font-semibold text-[#8a5a12]">
+    <div className="rounded-2xl border border-warn-soft bg-warn-soft p-4">
+      <div className="mb-3 flex items-center gap-2 text-[14px] font-semibold text-warn">
         <Sparkles size={15} /> İnceleme bekleyen kaynaklar ({rows.length})
       </div>
       <div className="space-y-2">
         {rows.slice(0, 8).map((row) => (
-          <div key={row.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-white/70 px-3 py-2 text-[12px]">
+          <div key={row.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-white/70 px-3 py-2 text-[13px]">
             <div>
-              <span className="font-medium text-[#1f2333]">{row.name}</span>
-              <span className="ml-2 text-[#9a9ba3]">skor {row.difficultyScore} · güven {Number(row.difficultyConfidence).toFixed(2)} · {row.classificationMethod}</span>
+              <span className="font-medium text-ink">{row.name}</span>
+              <span className="ml-2 text-ink-4">skor {row.difficultyScore} · güven {Number(row.difficultyConfidence).toFixed(2)} · {row.classificationMethod}</span>
             </div>
             <div className="flex gap-2">
               <Button size="sm" variant="outline" onClick={() => approve.mutate({ bookId: row.id })} disabled={approve.isPending}>
@@ -202,7 +203,7 @@ export default function ResourceCatalogSection() {
       </div>
 
       <section>
-        <div className="mb-3 text-[13px] font-semibold text-[#1f2333]">Seviyene uygun kaynaklar</div>
+        <div className="mb-3 text-[14px] font-semibold text-ink">Seviyene uygun kaynaklar</div>
         <RecommendationPanel />
       </section>
 
@@ -240,9 +241,9 @@ export default function ResourceCatalogSection() {
           </Select>
         </div>
 
-        {list.isLoading && <div className="text-[12px] text-[#9a9ba3]">Kaynaklar yükleniyor…</div>}
+        {list.isLoading && <div className="text-[13px] text-ink-4">Kaynaklar yükleniyor…</div>}
         {!list.isLoading && (list.data?.items.length ?? 0) === 0 && (
-          <div className="rounded-2xl border border-dashed border-[#1f2333]/[0.12] bg-[#faf9f6] p-6 text-center text-[12px] text-[#858690]">
+          <div className="rounded-2xl border border-dashed border-ink/[0.12] bg-paper p-6 text-center text-[13px] text-ink-3">
             Bu filtrelerle eşleşen kaynak yok. Filtreleri değiştirmeyi dene ya da bir sync bekle.
           </div>
         )}
@@ -256,7 +257,7 @@ export default function ResourceCatalogSection() {
         {list.data && list.data.totalPages > 1 && (
           <div className="flex items-center justify-center gap-3 pt-2">
             <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Önceki</Button>
-            <span className="text-[12px] text-[#9a9ba3]">Sayfa {list.data.page} / {list.data.totalPages}</span>
+            <span className="text-[13px] text-ink-4">Sayfa {list.data.page} / {list.data.totalPages}</span>
             <Button variant="outline" size="sm" disabled={page >= list.data.totalPages} onClick={() => setPage((p) => p + 1)}>Sonraki</Button>
           </div>
         )}

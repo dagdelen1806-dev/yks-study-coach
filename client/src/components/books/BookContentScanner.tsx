@@ -44,9 +44,9 @@ type Confidence = Preview["confidence"];
 type ReadReport = Preview["report"];
 
 const QUALITY_BADGE: Record<ImageQualityReport["level"], { label: string; className: string }> = {
-  GOOD: { label: "İyi", className: "bg-[#eaf6f0] text-[#3c8a6d]" },
-  ACCEPTABLE: { label: "Okunabilir", className: "bg-[#fff8df] text-[#a1711d]" },
-  POOR: { label: "Zayıf", className: "bg-[#fff0ed] text-[#d95d4d]" },
+  GOOD: { label: "İyi", className: "bg-success-soft text-success" },
+  ACCEPTABLE: { label: "Okunabilir", className: "bg-warn-soft text-warn" },
+  POOR: { label: "Zayıf", className: "bg-danger-soft text-danger" },
 };
 
 // Okuma sırasında gösterilen aşamalar. Sunucu tek istekte çalıştığı için
@@ -305,71 +305,71 @@ export default function BookContentScanner({ book, onClose, onSaved, onAddAnothe
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="eyebrow mb-2">İçindekiler · {book.title}</div>
-            <h2 className="text-[20px] font-semibold tracking-[-0.04em] text-[#1f2333]">
+            <h2 className="text-[23px] font-semibold text-ink font-display">
               {step === "pages" ? "İçindekiler sayfalarını tara" : step === "reading" ? "Kitabın içeriğini analiz ediyoruz…" : step === "review" ? (source === "manual" ? "İçindekileri elle gir" : "Eşleşmeleri kontrol et") : "Kütüphanene eklendi ✓"}
             </h2>
           </div>
-          {step !== "reading" && <button onClick={onClose} className="rounded-lg p-2 text-[#8b8c95] hover:bg-[#f7f5ef]" aria-label="Kapat"><X size={16} /></button>}
+          {step !== "reading" && <button onClick={onClose} className="rounded-lg p-2 text-ink-3 hover:bg-paper" aria-label="Kapat"><X size={16} /></button>}
         </div>
 
         <div className="mt-4 flex gap-1.5" aria-hidden>
           {stepLabels.map((label, index) => (
             <div key={label} className="flex-1">
-              <div className={`h-1.5 rounded-full ${index <= stepIndex ? "bg-[#3b5ccc]" : "bg-[#eceae3]"}`} />
-              <div className={`mt-1 text-[9px] font-semibold ${index <= stepIndex ? "text-[#3b5ccc]" : "text-[#b0b1b8]"}`}>{label}</div>
+              <div className={`h-1.5 rounded-full ${index <= stepIndex ? "bg-brand" : "bg-rule"}`} />
+              <div className={`mt-1 text-[11px] font-semibold ${index <= stepIndex ? "text-brand" : "text-rule-strong"}`}>{label}</div>
             </div>
           ))}
         </div>
 
         {step === "pages" && (
           <div className="mt-5">
-            {intro && <div className="mb-3 rounded-xl bg-[#eaf6f0] p-3 text-[12px] font-medium leading-5 text-[#2e7a5d]">{intro}</div>}
+            {intro && <div className="mb-3 rounded-xl bg-success-soft p-3 text-[13px] font-medium leading-5 text-success">{intro}</div>}
             {draft && (
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#3b5ccc]/20 bg-[#f4f6ff] p-3 text-[12px] text-[#3b5ccc]">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-brand/20 bg-brand-soft p-3 text-[13px] text-brand">
                 <span>Bu kitap için yarım kalmış bir okuma var ({draft.rows.length} satır, {new Date(draft.savedAt).toLocaleDateString("tr-TR")}).</span>
-                <span className="flex gap-2"><button onClick={resumeDraft} className="rounded-lg bg-[#3b5ccc] px-2.5 py-1 text-[11px] font-semibold text-white">Kaldığın yerden devam et</button><button onClick={discardDraft} className="px-1 text-[11px] font-semibold text-[#8b8c95]">Sil</button></span>
+                <span className="flex gap-2"><button onClick={resumeDraft} className="rounded-lg bg-brand px-2.5 py-1 text-[12px] font-semibold text-white">Kaldığın yerden devam et</button><button onClick={discardDraft} className="px-1 text-[12px] font-semibold text-ink-3">Sil</button></span>
               </div>
             )}
-            <p className="text-[12px] leading-5 text-[#6d7390]">İçindekiler sayfalarını sırayla, düz ve ışıklı çek. Sayfa numaralarının okunaklı olduğundan emin ol. Birden fazla sayfa varsa hepsini ekle; oklarla sıralayabilirsin.</p>
-            {error && <div role="alert" className="mt-3 rounded-xl bg-[#fff0ed] p-3 text-[12px] font-medium text-[#d95d4d]">{error}</div>}
+            <p className="text-[13px] leading-5 text-ink-3">İçindekiler sayfalarını sırayla, düz ve ışıklı çek. Sayfa numaralarının okunaklı olduğundan emin ol. Birden fazla sayfa varsa hepsini ekle; oklarla sıralayabilirsin.</p>
+            {error && <div role="alert" className="mt-3 rounded-xl bg-danger-soft p-3 text-[13px] font-medium text-danger">{error}</div>}
             <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-4">
               {pages.map((page, index) => (
-                <div key={page.key} className="relative overflow-hidden rounded-xl border border-[#1f2333]/10">
-                  <img src={page.previewUrl} alt={`${index + 1}. sayfa`} className="h-32 w-full object-contain bg-[#f7f5ef]" style={previewStyle(page)} />
-                  <div className="absolute left-1.5 top-1.5 rounded-md bg-[#1f2333]/80 px-1.5 py-0.5 text-[10px] font-bold text-white">{index + 1}</div>
+                <div key={page.key} className="relative overflow-hidden rounded-xl border border-ink/10">
+                  <img src={page.previewUrl} alt={`${index + 1}. sayfa`} className="h-32 w-full object-contain bg-paper" style={previewStyle(page)} />
+                  <div className="absolute left-1.5 top-1.5 rounded-md bg-ink/80 px-1.5 py-0.5 text-[12px] font-bold text-white">{index + 1}</div>
                   <div className="absolute right-1.5 top-1.5">
-                    {page.analyzing ? <span className="flex items-center gap-1 rounded-md bg-white/90 px-1.5 py-0.5 text-[9px] font-semibold text-[#8b8c95]"><Loader2 size={10} className="animate-spin" /> Kontrol</span>
-                      : page.quality ? <span title={page.quality.issues.map((issue) => issue.message).join("\n")} className={`rounded-md px-1.5 py-0.5 text-[9px] font-bold ${QUALITY_BADGE[page.quality.level].className}`}>{QUALITY_BADGE[page.quality.level].label}</span> : null}
+                    {page.analyzing ? <span className="flex items-center gap-1 rounded-md bg-white/90 px-1.5 py-0.5 text-[11px] font-semibold text-ink-3"><Loader2 size={10} className="animate-spin" /> Kontrol</span>
+                      : page.quality ? <span title={page.quality.issues.map((issue) => issue.message).join("\n")} className={`rounded-md px-1.5 py-0.5 text-[11px] font-bold ${QUALITY_BADGE[page.quality.level].className}`}>{QUALITY_BADGE[page.quality.level].label}</span> : null}
                   </div>
                   <div className="absolute inset-x-0 bottom-0 flex justify-between bg-white/90 p-1">
                     <button onClick={() => movePage(index, -1)} disabled={index === 0} className="rounded p-1 disabled:opacity-30" aria-label="Öne al"><ArrowUp size={13} /></button>
                     <button onClick={() => movePage(index, 1)} disabled={index === pages.length - 1} className="rounded p-1 disabled:opacity-30" aria-label="Sona al"><ArrowDown size={13} /></button>
                     <button onClick={() => rotatePage(page)} className="rounded p-1" aria-label="Döndür"><RotateCw size={13} /></button>
-                    <button onClick={() => setEditingKey(editingKey === page.key ? null : page.key)} className={`rounded p-1 ${editingKey === page.key ? "text-[#3b5ccc]" : ""}`} aria-label="Kırp"><Crop size={13} /></button>
-                    <button onClick={() => removePage(page.key)} className="rounded p-1 text-[#d95d4d]" aria-label="Sayfayı çıkar"><Trash2 size={13} /></button>
+                    <button onClick={() => setEditingKey(editingKey === page.key ? null : page.key)} className={`rounded p-1 ${editingKey === page.key ? "text-brand" : ""}`} aria-label="Kırp"><Crop size={13} /></button>
+                    <button onClick={() => removePage(page.key)} className="rounded p-1 text-danger" aria-label="Sayfayı çıkar"><Trash2 size={13} /></button>
                   </div>
                 </div>
               ))}
               {pages.length < MAX_PAGES && (
-                <button onClick={() => cameraRef.current?.click()} className="flex h-32 flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-[#3b5ccc]/30 text-[11px] font-semibold text-[#3b5ccc] hover:bg-[#f4f6ff]">
+                <button onClick={() => cameraRef.current?.click()} className="flex h-32 flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-brand/30 text-[12px] font-semibold text-brand hover:bg-brand-soft">
                   <Camera size={20} />{pages.length === 0 ? "Sayfayı çek" : "Sonraki sayfa"}
                 </button>
               )}
             </div>
             {pages.some((page) => page.quality?.issues.some((issue) => issue.severity !== "info")) && (
-              <div className="mt-3 space-y-1 rounded-xl bg-[#fffaf0] p-3 text-[11px] leading-5 text-[#8a6116]" aria-live="polite">
+              <div className="mt-3 space-y-1 rounded-xl bg-warn-soft p-3 text-[12px] leading-5 text-warn" aria-live="polite">
                 {pages.map((page, index) => page.quality?.issues.filter((issue) => issue.severity !== "info").map((issue) => (
                   <div key={`${page.key}-${issue.code}`}>{issue.severity === "critical" ? "⛔" : "⚠"} {index + 1}. sayfa: {issue.message}</div>
                 )))}
               </div>
             )}
             {gateOpen && poorPages.length > 0 && (
-              <div role="alert" className="mt-3 rounded-xl border border-[#d95d4d]/25 bg-[#fff0ed] p-3 text-[12px] text-[#9a3b2e]">
+              <div role="alert" className="mt-3 rounded-xl border border-danger/25 bg-danger-soft p-3 text-[13px] text-danger-strong">
                 <div className="font-semibold">{poorPages.length === 1 ? "Bir fotoğraf" : `${poorPages.length} fotoğraf`} okunaklı olmayabilir.</div>
-                <div className="mt-1 text-[11px]">Yeniden çekersen daha doğru sonuç alırsın (okuma hakkın harcanmaz). İstersen yine de okuyabilirsin; emin olunamayan satırları sana işaretleyeceğiz.</div>
+                <div className="mt-1 text-[12px]">Yeniden çekersen daha doğru sonuç alırsın (okuma hakkın harcanmaz). İstersen yine de okuyabilirsin; emin olunamayan satırları sana işaretleyeceğiz.</div>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  <button onClick={() => { poorPages.forEach((page) => removePage(page.key)); setGateOpen(false); cameraRef.current?.click(); }} className="h-8 rounded-lg bg-[#d95d4d] px-3 text-[11px] font-semibold text-white">Fotoğrafı tekrar çek</button>
-                  <button onClick={() => void analyze(true)} className="h-8 rounded-lg border border-[#d95d4d]/30 bg-white px-3 text-[11px] font-semibold text-[#d95d4d]">Yine de oku</button>
+                  <button onClick={() => { poorPages.forEach((page) => removePage(page.key)); setGateOpen(false); cameraRef.current?.click(); }} className="h-8 rounded-lg bg-danger px-3 text-[12px] font-semibold text-white">Fotoğrafı tekrar çek</button>
+                  <button onClick={() => void analyze(true)} className="h-8 rounded-lg border border-danger/30 bg-white px-3 text-[12px] font-semibold text-danger">Yine de oku</button>
                 </div>
               </div>
             )}
@@ -378,10 +378,10 @@ export default function BookContentScanner({ book, onClose, onSaved, onAddAnothe
             <input ref={galleryRef} type="file" accept="image/*" multiple className="hidden" onChange={(event) => { addFiles(event.target.files); event.target.value = ""; }} />
             <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
               <div className="flex gap-2">
-                <button onClick={() => galleryRef.current?.click()} className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-[#1f2333]/10 px-3 text-[11px] font-semibold text-[#545661] hover:bg-[#f7f5ef]"><ImagePlus size={14} /> Galeriden seç</button>
-                <button onClick={startManual} className="h-9 rounded-xl px-3 text-[11px] font-semibold text-[#8b8c95] hover:text-[#343643]">Bilgileri elle gir</button>
+                <button onClick={() => galleryRef.current?.click()} className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-ink/10 px-3 text-[12px] font-semibold text-ink-2 hover:bg-paper"><ImagePlus size={14} /> Galeriden seç</button>
+                <button onClick={startManual} className="h-9 rounded-xl px-3 text-[12px] font-semibold text-ink-3 hover:text-ink-2">Bilgileri elle gir</button>
               </div>
-              <button onClick={() => void analyze()} disabled={pages.length === 0 || readToc.isPending || pages.some((page) => page.analyzing)} className="h-10 rounded-xl bg-[#3b5ccc] px-4 text-[12px] font-semibold text-white disabled:opacity-40">{error ? "Tekrar dene" : `Analiz et (${pages.length} sayfa)`}</button>
+              <button onClick={() => void analyze()} disabled={pages.length === 0 || readToc.isPending || pages.some((page) => page.analyzing)} className="h-10 rounded-xl bg-brand px-4 text-[13px] font-semibold text-white disabled:opacity-40">{error ? "Tekrar dene" : `Analiz et (${pages.length} sayfa)`}</button>
             </div>
           </div>
         )}
@@ -390,46 +390,46 @@ export default function BookContentScanner({ book, onClose, onSaved, onAddAnothe
           <div className="mx-auto max-w-sm py-8" aria-live="polite">
             <ol className="space-y-2.5">
               {READING_STAGES.map((stage, index) => (
-                <li key={stage.label} className={`flex items-center gap-2.5 text-[12px] ${index < readingStage ? "text-[#3c8a6d]" : index === readingStage ? "font-semibold text-[#1f2333]" : "text-[#b0b1b8]"}`}>
-                  {index < readingStage ? <CheckCircle2 size={16} /> : index === readingStage ? <Loader2 size={16} className="animate-spin text-[#3b5ccc]" /> : <Circle size={16} />}
-                  <span><span className="mr-1 text-[10px] text-[#9a9ba3]">{index + 1}/{READING_STAGES.length}</span>{stage.label}</span>
+                <li key={stage.label} className={`flex items-center gap-2.5 text-[13px] ${index < readingStage ? "text-success" : index === readingStage ? "font-semibold text-ink" : "text-rule-strong"}`}>
+                  {index < readingStage ? <CheckCircle2 size={16} /> : index === readingStage ? <Loader2 size={16} className="animate-spin text-brand" /> : <Circle size={16} />}
+                  <span><span className="mr-1 text-[12px] text-ink-4">{index + 1}/{READING_STAGES.length}</span>{stage.label}</span>
                 </li>
               ))}
             </ol>
-            <p className="mt-5 text-center text-[11px] leading-5 text-[#8b8c95]">Fotoğraf birkaç farklı iyileştirmeyle okunup sonuçlar karşılaştırılıyor. Bu 10–40 saniye sürebilir; sayfayı kapatma.</p>
+            <p className="mt-5 text-center text-[12px] leading-5 text-ink-3">Fotoğraf birkaç farklı iyileştirmeyle okunup sonuçlar karşılaştırılıyor. Bu 10–40 saniye sürebilir; sayfayı kapatma.</p>
           </div>
         )}
 
         {step === "review" && (
           <div className="mt-5">
             {source === "ocr" && confidence && (
-              <div className={`mb-3 rounded-xl p-3 text-[12px] ${confidence.needsReview ? "border border-[#e0b44c]/40 bg-[#fffaf0] text-[#8a6116]" : "bg-[#eaf6f0] text-[#2e7a5d]"}`}>
+              <div className={`mb-3 rounded-xl p-3 text-[13px] ${confidence.needsReview ? "border border-warn-fill/40 bg-warn-soft text-warn" : "bg-success-soft text-success"}`}>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="font-semibold">{confidence.needsReview ? "⚠ Bu sayfanın bazı bölümlerini net okuyamadık." : "✓ İçindekiler güvenle okundu."} <span className="font-normal">Okuma güveni %{Math.round(confidence.finalConfidence * 100)}</span></span>
-                  {flaggedRows > 0 && <button onClick={() => setOnlyFlagged((value) => !value)} className="rounded-lg bg-white px-2.5 py-1 text-[11px] font-semibold text-[#a1711d] shadow-sm">{onlyFlagged ? "Tümünü göster" : `Sonucu düzenle · ${flaggedRows} satırı kontrol et`}</button>}
+                  {flaggedRows > 0 && <button onClick={() => setOnlyFlagged((value) => !value)} className="rounded-lg bg-white px-2.5 py-1 text-[12px] font-semibold text-warn shadow-sm">{onlyFlagged ? "Tümünü göster" : `Sonucu düzenle · ${flaggedRows} satırı kontrol et`}</button>}
                 </div>
                 {confidence.needsReview && (
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px]">
                     <span>Sarı işaretli alanlar emin olunamayan yerler; düzeltebilir ya da fotoğrafı tekrar çekebilirsin.</span>
-                    <button onClick={() => { setStep("pages"); setRows([]); }} className="rounded-lg border border-[#e0b44c]/50 bg-white px-2.5 py-1 font-semibold">Fotoğrafı tekrar çek</button>
+                    <button onClick={() => { setStep("pages"); setRows([]); }} className="rounded-lg border border-warn-fill/50 bg-white px-2.5 py-1 font-semibold">Fotoğrafı tekrar çek</button>
                   </div>
                 )}
-                <div className="mt-1.5 text-[10px] opacity-80">Görüntü %{Math.round(confidence.imageConfidence * 100)} · Okuma %{Math.round(confidence.ocrConfidence * 100)} · Yapı %{Math.round(confidence.structureConfidence * 100)} · Konu eşleştirme %{Math.round(confidence.mappingConfidence * 100)}</div>
+                <div className="mt-1.5 text-[12px] opacity-80">Görüntü %{Math.round(confidence.imageConfidence * 100)} · Okuma %{Math.round(confidence.ocrConfidence * 100)} · Yapı %{Math.round(confidence.structureConfidence * 100)} · Konu eşleştirme %{Math.round(confidence.mappingConfidence * 100)}</div>
               </div>
             )}
             {warnings.length > 0 && (
-              <div className="mb-3 space-y-1 rounded-xl bg-[#fff8df] p-3 text-[11px] leading-5 text-[#8a6116]">
+              <div className="mb-3 space-y-1 rounded-xl bg-warn-soft p-3 text-[12px] leading-5 text-warn">
                 {warnings.map((warning) => <div key={warning}>⚠ {warning}</div>)}
                 <div className="font-semibold">Sayfa numaralarını aşağıdan düzeltebilirsin.</div>
               </div>
             )}
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-[12px]">
               <div className="flex flex-wrap gap-1.5">
-                <span className="rounded-full bg-[#eaf6f0] px-2 py-0.5 font-semibold text-[#3c8a6d]">{rows.filter((row) => row.topicId !== null && row.confirmed).length} eşleşti</span>
-                {pendingConfirm > 0 && <span className="rounded-full bg-[#fff8df] px-2 py-0.5 font-semibold text-[#a1711d]">{pendingConfirm} onay bekliyor</span>}
-                {unmatched > 0 && <span className="rounded-full bg-[#fff0ed] px-2 py-0.5 font-semibold text-[#d95d4d]">{unmatched} manuel eşleştirme gerekli</span>}
+                <span className="rounded-full bg-success-soft px-2 py-0.5 font-semibold text-success">{rows.filter((row) => row.topicId !== null && row.confirmed).length} eşleşti</span>
+                {pendingConfirm > 0 && <span className="rounded-full bg-warn-soft px-2 py-0.5 font-semibold text-warn">{pendingConfirm} onay bekliyor</span>}
+                {unmatched > 0 && <span className="rounded-full bg-danger-soft px-2 py-0.5 font-semibold text-danger">{unmatched} manuel eşleştirme gerekli</span>}
               </div>
-              <label className="flex items-center gap-1.5 text-[#8b8c95]"><input type="checkbox" checked={showAllSubjects} onChange={(event) => setShowAllSubjects(event.target.checked)} /> Tüm derslerin konularını göster</label>
+              <label className="flex items-center gap-1.5 text-ink-3"><input type="checkbox" checked={showAllSubjects} onChange={(event) => setShowAllSubjects(event.target.checked)} /> Tüm derslerin konularını göster</label>
             </div>
 
             <div className="max-h-[52vh] space-y-3 overflow-y-auto pr-1">
@@ -438,20 +438,20 @@ export default function BookContentScanner({ book, onClose, onSaved, onAddAnothe
                 const unitTopicIds = new Set(practice.map((row) => row.topicId));
                 const unitNeedsConfirm = practice.some((row) => row.topicId !== null && !row.confirmed);
                 return (
-                  <div key={unit.key} className="rounded-2xl border border-[#1f2333]/[0.07] p-3">
+                  <div key={unit.key} className="rounded-2xl border border-ink/[0.07] p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="min-w-0">
-                        <div className="text-[10px] font-bold uppercase tracking-[.08em] text-[#9a9ba3]">{unit.unitNumber !== null ? `${unit.unitNumber}. Ünite` : "Bölüm"}</div>
+                        <div className="text-[12px] font-bold text-ink-4">{unit.unitNumber !== null ? `${unit.unitNumber}. Ünite` : "Bölüm"}</div>
                         {source === "manual" ? (
-                          <input value={unit.unitTitle} onChange={(event) => setRows((current) => current.map((row) => (unitKey(row) === unit.key ? { ...row, unitTitle: event.target.value } : row)))} placeholder="Ünite adı" className="form-input mt-1 h-8 text-[12px]" />
+                          <input value={unit.unitTitle} onChange={(event) => setRows((current) => current.map((row) => (unitKey(row) === unit.key ? { ...row, unitTitle: event.target.value } : row)))} placeholder="Ünite adı" className="form-input mt-1 h-8 text-[13px]" />
                         ) : (
-                          <div className="truncate text-[13px] font-semibold text-[#1f2333]">{unit.unitTitle || "—"}</div>
+                          <div className="truncate text-[14px] font-semibold text-ink">{unit.unitTitle || "—"}</div>
                         )}
                       </div>
                       {practice.length > 0 && (
                         <div className="flex items-center gap-1.5">
-                          {unitNeedsConfirm && <button onClick={() => confirmUnit(unit.key)} className="inline-flex h-8 items-center gap-1 rounded-lg bg-[#55a98b] px-2.5 text-[11px] font-semibold text-white"><Check size={12} /> Onayla</button>}
-                          <select aria-label="Ünitenin konusunu değiştir" value={unitTopicIds.size === 1 ? String(Array.from(unitTopicIds)[0] ?? "") : ""} onChange={(event) => setUnitTopic(unit.key, event.target.value ? Number(event.target.value) : null)} className="form-input h-8 w-auto max-w-[220px] text-[11px]">
+                          {unitNeedsConfirm && <button onClick={() => confirmUnit(unit.key)} className="inline-flex h-8 items-center gap-1 rounded-lg bg-success px-2.5 text-[12px] font-semibold text-white"><Check size={12} /> Onayla</button>}
+                          <select aria-label="Ünitenin konusunu değiştir" value={unitTopicIds.size === 1 ? String(Array.from(unitTopicIds)[0] ?? "") : ""} onChange={(event) => setUnitTopic(unit.key, event.target.value ? Number(event.target.value) : null)} className="form-input h-8 w-auto max-w-[220px] text-[12px]">
                             <option value="">{unitTopicIds.size > 1 ? "Karışık — tümüne uygula…" : "Konu seç…"}</option>
                             {topicOptions.data?.map((topic) => <option key={topic.id} value={topic.id}>{showAllSubjects ? `${topic.subject} · ` : ""}{topic.topic}</option>)}
                           </select>
@@ -459,41 +459,41 @@ export default function BookContentScanner({ book, onClose, onSaved, onAddAnothe
                       )}
                     </div>
 
-                    <div className="mt-2 divide-y divide-[#1f2333]/[0.05]">
+                    <div className="mt-2 divide-y divide-ink/[0.05]">
                       {unit.rows.filter((row) => !onlyFlagged || row.reviewTitle || row.reviewPage).map((row) => (
-                        <div key={row.key} className="grid grid-cols-[1fr_auto] items-center gap-2 py-1.5 text-[11px] sm:grid-cols-[minmax(0,1.3fr)_auto_minmax(0,1.4fr)_auto]">
+                        <div key={row.key} className="grid grid-cols-[1fr_auto] items-center gap-2 py-1.5 text-[12px] sm:grid-cols-[minmax(0,1.3fr)_auto_minmax(0,1.4fr)_auto]">
                           <div className="min-w-0">
                             {source === "manual" ? (
                               <div className="flex gap-1">
-                                <input value={row.label} onChange={(event) => { const label = event.target.value; const number = label.match(/\d+/); updateRow(row.key, { label, testNumber: number ? Number(number[0]) : null }); }} style={{ width: 80 }} className="form-input h-7 text-[11px]" aria-label="Etiket" />
-                                <input value={row.title} onChange={(event) => updateRow(row.key, { title: event.target.value })} placeholder="Konu başlığı" className="form-input h-7 text-[11px]" aria-label="Başlık" />
+                                <input value={row.label} onChange={(event) => { const label = event.target.value; const number = label.match(/\d+/); updateRow(row.key, { label, testNumber: number ? Number(number[0]) : null }); }} style={{ width: 80 }} className="form-input h-7 text-[12px]" aria-label="Etiket" />
+                                <input value={row.title} onChange={(event) => updateRow(row.key, { title: event.target.value })} placeholder="Konu başlığı" className="form-input h-7 text-[12px]" aria-label="Başlık" />
                               </div>
                             ) : row.reviewTitle ? (
                               // Düşük güvenle okunan başlık: yalnızca bu alan düzenlemeye açılır.
                               <div className="flex items-center gap-1">
-                                <span className="shrink-0 font-semibold text-[#343643]">{row.label}</span>
-                                <input value={row.title} onChange={(event) => updateRow(row.key, { title: event.target.value })} onBlur={() => updateRow(row.key, { reviewTitle: false })} className="form-input h-7 border-[#e0b44c] bg-[#fffaf0] text-[11px]" aria-label="Başlık — kontrol et" title="Bu başlık net okunamadı; kontrol et." />
-                                <span className="shrink-0 rounded bg-[#fff8df] px-1 text-[9px] font-bold text-[#a1711d]" aria-hidden>?</span>
+                                <span className="shrink-0 font-semibold text-ink-2">{row.label}</span>
+                                <input value={row.title} onChange={(event) => updateRow(row.key, { title: event.target.value })} onBlur={() => updateRow(row.key, { reviewTitle: false })} className="form-input h-7 border-warn-fill bg-warn-soft text-[12px]" aria-label="Başlık — kontrol et" title="Bu başlık net okunamadı; kontrol et." />
+                                <span className="shrink-0 rounded bg-warn-soft px-1 text-[11px] font-bold text-warn" aria-hidden>?</span>
                               </div>
                             ) : (
-                              <div className="truncate"><span className="font-semibold text-[#343643]">{row.label}</span>{row.title && row.title !== row.label ? <span className="text-[#8b8c95]"> · {row.title}</span> : null}</div>
+                              <div className="truncate"><span className="font-semibold text-ink-2">{row.label}</span>{row.title && row.title !== row.label ? <span className="text-ink-3"> · {row.title}</span> : null}</div>
                             )}
-                            <div className="text-[9px] text-[#b0b1b8]">{CONTENT_TYPE_LABELS[row.contentType]}</div>
+                            <div className="text-[11px] text-rule-strong">{CONTENT_TYPE_LABELS[row.contentType]}</div>
                           </div>
-                          <div className="flex items-center gap-1 text-[#8b8c95]">
+                          <div className="flex items-center gap-1 text-ink-3">
                             sf.
-                            <input type="number" min={1} value={row.pageStart ?? ""} onChange={(event) => updateRow(row.key, { pageStart: event.target.value ? Number(event.target.value) : null, reviewPage: false })} style={{ width: 56 }} className={`form-input h-7 px-1.5 text-[11px] ${row.reviewPage ? "border-[#e0b44c] bg-[#fffaf0]" : ""}`} aria-label={row.reviewPage ? "Başlangıç sayfası — kontrol et" : "Başlangıç sayfası"} title={row.reviewPage ? "Bu sayfa numarası net okunamadı; kontrol et." : undefined} />
-                            {row.reviewPage && <span className="rounded bg-[#fff8df] px-1 text-[9px] font-bold text-[#a1711d]" aria-hidden>?</span>}
+                            <input type="number" min={1} value={row.pageStart ?? ""} onChange={(event) => updateRow(row.key, { pageStart: event.target.value ? Number(event.target.value) : null, reviewPage: false })} style={{ width: 56 }} className={`form-input h-7 px-1.5 text-[12px] ${row.reviewPage ? "border-warn-fill bg-warn-soft" : ""}`} aria-label={row.reviewPage ? "Başlangıç sayfası — kontrol et" : "Başlangıç sayfası"} title={row.reviewPage ? "Bu sayfa numarası net okunamadı; kontrol et." : undefined} />
+                            {row.reviewPage && <span className="rounded bg-warn-soft px-1 text-[11px] font-bold text-warn" aria-hidden>?</span>}
                             –
-                            <input type="number" min={1} value={row.pageEnd ?? ""} onChange={(event) => updateRow(row.key, { pageEnd: event.target.value ? Number(event.target.value) : null })} style={{ width: 56 }} className={`form-input h-7 px-1.5 text-[11px] ${row.pageStart !== null && row.pageEnd !== null && row.pageEnd < row.pageStart ? "border-[#d95d4d]" : ""}`} aria-label="Bitiş sayfası" />
+                            <input type="number" min={1} value={row.pageEnd ?? ""} onChange={(event) => updateRow(row.key, { pageEnd: event.target.value ? Number(event.target.value) : null })} style={{ width: 56 }} className={`form-input h-7 px-1.5 text-[12px] ${row.pageStart !== null && row.pageEnd !== null && row.pageEnd < row.pageStart ? "border-danger" : ""}`} aria-label="Bitiş sayfası" />
                           </div>
                           <div className="col-span-2 min-w-0 sm:col-span-1">
                             {isMixed(row.contentType) ? (
-                              <span className="text-[10px] text-[#b0b1b8]">Karma içerik — konuya bağlanmaz</span>
+                              <span className="text-[12px] text-rule-strong">Karma içerik — konuya bağlanmaz</span>
                             ) : (
                               <div className="flex items-center gap-1.5">
                                 <MatchBadge row={row} />
-                                <select aria-label="Konuyu değiştir" value={row.topicId ?? ""} onChange={(event) => setRowTopic(row.key, event.target.value ? Number(event.target.value) : null)} className="form-input h-7 min-w-0 flex-1 text-[11px]">
+                                <select aria-label="Konuyu değiştir" value={row.topicId ?? ""} onChange={(event) => setRowTopic(row.key, event.target.value ? Number(event.target.value) : null)} className="form-input h-7 min-w-0 flex-1 text-[12px]">
                                   <option value="">{row.tier === "manual" ? "Manuel eşleştirme gerekli…" : "Konu yok"}</option>
                                   {row.topicId !== null && !topicOptions.data?.some((topic) => topic.id === row.topicId) && <option value={row.topicId}>{topicLabel(row.topicId) ?? "Önerilen konu"}</option>}
                                   {topicOptions.data?.map((topic) => <option key={topic.id} value={topic.id}>{showAllSubjects ? `${topic.subject} · ` : ""}{topic.topic}</option>)}
@@ -501,7 +501,7 @@ export default function BookContentScanner({ book, onClose, onSaved, onAddAnothe
                               </div>
                             )}
                           </div>
-                          <button onClick={() => setRows((current) => current.filter((item) => item.key !== row.key))} className="justify-self-end rounded p-1 text-[#c4c5cc] hover:text-[#d95d4d]" aria-label="Satırı sil"><Trash2 size={12} /></button>
+                          <button onClick={() => setRows((current) => current.filter((item) => item.key !== row.key))} className="justify-self-end rounded p-1 text-rule-strong hover:text-danger" aria-label="Satırı sil"><Trash2 size={12} /></button>
                         </div>
                       ))}
                     </div>
@@ -512,26 +512,26 @@ export default function BookContentScanner({ book, onClose, onSaved, onAddAnothe
 
             <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
               <div className="flex gap-2">
-                <button onClick={addRow} className="inline-flex h-9 items-center gap-1 rounded-xl border border-[#1f2333]/10 px-3 text-[11px] font-semibold text-[#545661] hover:bg-[#f7f5ef]"><Plus size={13} /> Satır ekle</button>
-                {source === "manual" && <button onClick={() => setRows((current) => { const lastUnit = current[current.length - 1]?.unitNumber ?? 0; const unitNumber = lastUnit + 1; return [...current, { key: nextKey(), unitNumber, unitTitle: "", contentType: "topic_test", label: "Test 1", testNumber: 1, title: "", pageStart: null, pageEnd: null, topicId: null, method: "manual", confidence: 1, tier: "manual", confirmed: true }]; })} className="inline-flex h-9 items-center gap-1 rounded-xl border border-[#1f2333]/10 px-3 text-[11px] font-semibold text-[#545661] hover:bg-[#f7f5ef]"><Plus size={13} /> Ünite ekle</button>}
-                <button onClick={() => { setStep("pages"); setRows([]); }} className="h-9 rounded-xl px-3 text-[11px] font-semibold text-[#8b8c95] hover:text-[#343643]">Geri</button>
+                <button onClick={addRow} className="inline-flex h-9 items-center gap-1 rounded-xl border border-ink/10 px-3 text-[12px] font-semibold text-ink-2 hover:bg-paper"><Plus size={13} /> Satır ekle</button>
+                {source === "manual" && <button onClick={() => setRows((current) => { const lastUnit = current[current.length - 1]?.unitNumber ?? 0; const unitNumber = lastUnit + 1; return [...current, { key: nextKey(), unitNumber, unitTitle: "", contentType: "topic_test", label: "Test 1", testNumber: 1, title: "", pageStart: null, pageEnd: null, topicId: null, method: "manual", confidence: 1, tier: "manual", confirmed: true }]; })} className="inline-flex h-9 items-center gap-1 rounded-xl border border-ink/10 px-3 text-[12px] font-semibold text-ink-2 hover:bg-paper"><Plus size={13} /> Ünite ekle</button>}
+                <button onClick={() => { setStep("pages"); setRows([]); }} className="h-9 rounded-xl px-3 text-[12px] font-semibold text-ink-3 hover:text-ink-2">Geri</button>
               </div>
-              <button onClick={submit} disabled={save.isPending} className="h-10 rounded-xl bg-[#1f2333] px-4 text-[12px] font-semibold text-white disabled:opacity-50">{save.isPending ? "Kaydediliyor…" : "Kütüphaneye kaydet"}</button>
+              <button onClick={submit} disabled={save.isPending} className="h-10 rounded-xl bg-ink px-4 text-[13px] font-semibold text-white disabled:opacity-50">{save.isPending ? "Kaydediliyor…" : "Kütüphaneye kaydet"}</button>
             </div>
-            {unmatched > 0 && pendingConfirm === 0 && <p className="mt-2 text-[10px] text-[#9a9ba3]">Konusu seçilmeyen {unmatched} satır da kaydedilir, ancak zayıf konu önerilerinde kullanılmaz.</p>}
+            {unmatched > 0 && pendingConfirm === 0 && <p className="mt-2 text-[12px] text-ink-4">Konusu seçilmeyen {unmatched} satır da kaydedilir, ancak zayıf konu önerilerinde kullanılmaz.</p>}
             {report && <ReadingReport report={report} />}
           </div>
         )}
 
         {step === "saved" && (
           <div className="mt-6 text-center">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-[#eaf6f0] text-[22px]">📚</div>
-            <p className="mt-3 text-[13px] font-semibold text-[#1f2333]">{book.title} konuları kaydedildi.</p>
-            {savedSummary && <p className="mt-1 text-[12px] text-[#545661]">{savedSummary.units} ünite · {savedSummary.entries} içerik · {savedSummary.topics} YKS konusu</p>}
-            <p className="mx-auto mt-2 max-w-sm text-[12px] leading-5 text-[#6d7390]">Deneme sonuçlarında zayıf çıkan konular bu kitaptaki testlerle eşleşince "🎯 Bugünkü öneri" kartında sana kitaptan çalışma görevi önereceğiz; çözdükçe kitabın tamamlanma yüzdesi ilerleyecek.</p>
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-success-soft text-[22px]">📚</div>
+            <p className="mt-3 text-[14px] font-semibold text-ink">{book.title} konuları kaydedildi.</p>
+            {savedSummary && <p className="mt-1 text-[13px] text-ink-2">{savedSummary.units} ünite · {savedSummary.entries} içerik · {savedSummary.topics} YKS konusu</p>}
+            <p className="mx-auto mt-2 max-w-sm text-[13px] leading-5 text-ink-3">Deneme sonuçlarında zayıf çıkan konular bu kitaptaki testlerle eşleşince "🎯 Bugünkü öneri" kartında sana kitaptan çalışma görevi önereceğiz; çözdükçe kitabın tamamlanma yüzdesi ilerleyecek.</p>
             <div className="mt-5 flex flex-wrap justify-center gap-2">
-              {onAddAnother && <button onClick={onAddAnother} className="h-10 rounded-xl border border-[#3b5ccc]/25 px-4 text-[12px] font-semibold text-[#3b5ccc]">+ Başka kitap ekle</button>}
-              <button onClick={onClose} className="h-10 rounded-xl bg-[#3b5ccc] px-5 text-[12px] font-semibold text-white">Tamam</button>
+              {onAddAnother && <button onClick={onAddAnother} className="h-10 rounded-xl border border-brand/25 px-4 text-[13px] font-semibold text-brand">+ Başka kitap ekle</button>}
+              <button onClick={onClose} className="h-10 rounded-xl bg-brand px-5 text-[13px] font-semibold text-white">Tamam</button>
             </div>
           </div>
         )}
@@ -544,18 +544,18 @@ export default function BookContentScanner({ book, onClose, onSaved, onAddAnothe
 function CropEditor({ page, onChange, onClose }: { page: Page; onChange: (crop: CropInsets) => void; onClose: () => void }) {
   const sides: Array<[keyof CropInsets, string]> = [["top", "Üst"], ["bottom", "Alt"], ["left", "Sol"], ["right", "Sağ"]];
   return (
-    <div className="mt-3 rounded-2xl border border-[#3b5ccc]/15 bg-[#f7f9ff] p-3">
-      <div className="flex items-center justify-between"><span className="text-[12px] font-semibold text-[#1f2333]">Sayfayı kırp</span><button onClick={onClose} className="text-[11px] font-semibold text-[#3b5ccc]">Tamam</button></div>
+    <div className="mt-3 rounded-2xl border border-brand/15 bg-brand-soft p-3">
+      <div className="flex items-center justify-between"><span className="text-[13px] font-semibold text-ink">Sayfayı kırp</span><button onClick={onClose} className="text-[12px] font-semibold text-brand">Tamam</button></div>
       <div className="mt-2 grid gap-3 sm:grid-cols-[180px_1fr]">
         <div className="flex h-52 items-center justify-center overflow-hidden rounded-xl bg-white"><img src={page.previewUrl} alt="Kırpma önizlemesi" className="max-h-full max-w-full object-contain" style={previewStyle(page)} /></div>
         <div className="space-y-2">
           {sides.map(([side, label]) => (
-            <label key={side} className="block text-[11px] text-[#545661]">
+            <label key={side} className="block text-[12px] text-ink-2">
               <span className="flex justify-between"><span>{label}</span><span>%{Math.round(page.crop[side] * 100)}</span></span>
-              <input type="range" min={0} max={45} value={Math.round(page.crop[side] * 100)} onChange={(event) => onChange({ ...page.crop, [side]: Number(event.target.value) / 100 })} className="w-full accent-[#3b5ccc]" />
+              <input type="range" min={0} max={45} value={Math.round(page.crop[side] * 100)} onChange={(event) => onChange({ ...page.crop, [side]: Number(event.target.value) / 100 })} className="w-full accent-brand" />
             </label>
           ))}
-          <button onClick={() => onChange(NO_CROP)} className="text-[11px] font-semibold text-[#8b8c95]">Sıfırla</button>
+          <button onClick={() => onChange(NO_CROP)} className="text-[12px] font-semibold text-ink-3">Sıfırla</button>
         </div>
       </div>
     </div>
@@ -563,31 +563,31 @@ function CropEditor({ page, onChange, onClose }: { page: Page; onChange: (crop: 
 }
 
 function MatchBadge({ row }: { row: Row }) {
-  if (row.topicId === null) return <span className="shrink-0 rounded-full bg-[#fff0ed] px-1.5 py-0.5 text-[9px] font-bold text-[#d95d4d]">Eşleşme yok</span>;
-  if (row.method === "manual") return <span className="shrink-0 rounded-full bg-[#edf1ff] px-1.5 py-0.5 text-[9px] font-bold text-[#3b5ccc]">Elle seçildi</span>;
+  if (row.topicId === null) return <span className="shrink-0 rounded-full bg-danger-soft px-1.5 py-0.5 text-[11px] font-bold text-danger">Eşleşme yok</span>;
+  if (row.method === "manual") return <span className="shrink-0 rounded-full bg-brand-soft px-1.5 py-0.5 text-[11px] font-bold text-brand">Elle seçildi</span>;
   const percent = `%${Math.round(row.confidence * 100)}`;
-  if (row.method === "ai" && !row.confirmed) return <span title={row.reason} className="shrink-0 rounded-full bg-[#f3edff] px-1.5 py-0.5 text-[9px] font-bold text-[#7a55c9]">AI önerisi · onay gerekli {percent}</span>;
-  if (row.confirmed) return <span className="shrink-0 rounded-full bg-[#eaf6f0] px-1.5 py-0.5 text-[9px] font-bold text-[#3c8a6d]">✓ {percent}</span>;
-  return <span className="shrink-0 rounded-full bg-[#fff8df] px-1.5 py-0.5 text-[9px] font-bold text-[#a1711d]">Onay gerekli {percent}</span>;
+  if (row.method === "ai" && !row.confirmed) return <span title={row.reason} className="shrink-0 rounded-full bg-violet-soft px-1.5 py-0.5 text-[11px] font-bold text-violet">AI önerisi · onay gerekli {percent}</span>;
+  if (row.confirmed) return <span className="shrink-0 rounded-full bg-success-soft px-1.5 py-0.5 text-[11px] font-bold text-success">✓ {percent}</span>;
+  return <span className="shrink-0 rounded-full bg-warn-soft px-1.5 py-0.5 text-[11px] font-bold text-warn">Onay gerekli {percent}</span>;
 }
 
 /** Okuma raporu: hangi ön işleme adımları gerçekten uygulandı, kaç okuma yapıldı, ham OCR metni. */
 function ReadingReport({ report }: { report: ReadReport }) {
   return (
-    <details className="mt-3 rounded-xl border border-[#1f2333]/[0.07] p-3 text-[11px] text-[#545661]">
-      <summary className="cursor-pointer font-semibold text-[#343643]">Okuma raporu</summary>
+    <details className="mt-3 rounded-xl border border-ink/[0.07] p-3 text-[12px] text-ink-2">
+      <summary className="cursor-pointer font-semibold text-ink-2">Okuma raporu</summary>
       <div className="mt-2 space-y-3">
         {report.pages.map((page) => (
           <div key={page.index}>
-            <div className="font-semibold text-[#1f2333]">{page.index + 1}. sayfa {page.cached ? "· önceki okumadan" : ""} {page.quality ? `· görüntü: ${QUALITY_BADGE[page.quality.level].label}` : ""} · uzlaşı %{Math.round(page.agreement * 100)} · {(page.elapsedMs / 1000).toFixed(1)} sn</div>
+            <div className="font-semibold text-ink">{page.index + 1}. sayfa {page.cached ? "· önceki okumadan" : ""} {page.quality ? `· görüntü: ${QUALITY_BADGE[page.quality.level].label}` : ""} · uzlaşı %{Math.round(page.agreement * 100)} · {(page.elapsedMs / 1000).toFixed(1)} sn</div>
             <ul className="mt-1 space-y-0.5">
               {page.passes.map((pass) => (
-                <li key={pass.variantId} className={pass.variantId === page.chosenVariant ? "font-semibold text-[#3c8a6d]" : ""}>
+                <li key={pass.variantId} className={pass.variantId === page.chosenVariant ? "font-semibold text-success" : ""}>
                   {pass.variantId === page.chosenVariant ? "★ " : "• "}{pass.variantId} — {pass.status === "ok" ? `puan ${pass.score?.toFixed(2)} · ${pass.entries} satır` : pass.status === "skipped" ? "gerek kalmadı / süre yetmedi" : pass.status === "timeout" ? "zaman aşımı" : "okunamadı"}{pass.applied.length ? ` · ${pass.applied.join(" → ")}` : " · işlenmemiş orijinal"}
                 </li>
               ))}
             </ul>
-            <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-[#f7f5ef] p-2 text-[10px] leading-4">{page.rawText || "—"}</pre>
+            <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-paper p-2 text-[12px] leading-4">{page.rawText || "—"}</pre>
           </div>
         ))}
         {report.removed.length > 0 && <div>İçeriğe alınmayan satırlar: {report.removed.map((line) => `${line.text} (${line.reason})`).join(" · ")}</div>}

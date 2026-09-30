@@ -86,7 +86,7 @@ export default function NoteEditor({ noteId, draftClientId, prefill, onClose }: 
 
   if (noteId && existing.isError) {
     return (
-      <div className="modal-backdrop" style={{ zIndex: 300 }}><div className="modal-card max-w-[380px] text-center"><p className="text-[13px] text-[#d95d4d]">{existing.error.message}</p><button onClick={onClose} className="mt-4 h-10 rounded-xl border border-[#1f2333]/10 px-4 text-[12px] font-semibold">Kapat</button></div></div>
+      <div className="modal-backdrop" style={{ zIndex: 300 }}><div className="modal-card max-w-[380px] text-center"><p className="text-[14px] text-danger">{existing.error.message}</p><button onClick={onClose} className="mt-4 h-10 rounded-xl border border-ink/10 px-4 text-[13px] font-semibold">Kapat</button></div></div>
     );
   }
   if (!initial) {
@@ -250,52 +250,52 @@ function NoteEditorBody({ initial, startWith, onClose }: { initial: { payload: N
   const showSuggestion = !suggestionDismissed && suggestsStudyTask(plainText);
 
   return (
-    <div className="fixed inset-0 z-[300] flex items-stretch justify-center bg-[#1f2333]/40 sm:p-4" role="dialog" aria-modal="true" aria-label="Not düzenleyici">
+    <div className="fixed inset-0 z-[300] flex items-stretch justify-center bg-ink/40 sm:p-4" role="dialog" aria-modal="true" aria-label="Not düzenleyici">
       <div className="flex w-full max-w-3xl flex-col overflow-hidden bg-white sm:rounded-3xl sm:shadow-2xl">
         {/* Üst bölüm: ← başlık ⭐ 📌 ••• */}
-        <div className="flex items-center gap-1 border-b border-[#1f2333]/[0.07] px-2 py-2 sm:px-3">
-          <button onClick={() => void close()} className="flex h-10 w-10 items-center justify-center rounded-xl text-[#545661] hover:bg-[#f7f5ef]" aria-label="Kaydet ve kapat"><ArrowLeft size={18} /></button>
-          <input value={meta.title} onChange={(event) => updateMeta({ title: event.target.value })} placeholder="Başlık (isteğe bağlı)" maxLength={200} className="h-10 min-w-0 flex-1 bg-transparent px-1 text-[16px] font-semibold text-[#1f2333] outline-none placeholder:text-[#b0b1b8]" aria-label="Not başlığı" />
-          <button onClick={() => updateMeta({ isFavorite: !meta.isFavorite })} aria-pressed={Boolean(meta.isFavorite)} aria-label={meta.isFavorite ? "Favorilerden çıkar" : "Favorilere ekle"} className="flex h-10 w-10 items-center justify-center rounded-xl hover:bg-[#f7f5ef]"><Star size={18} className={meta.isFavorite ? "fill-[#f5b301] text-[#f5b301]" : "text-[#8b8c95]"} /></button>
-          <button onClick={() => updateMeta({ isPinned: !meta.isPinned })} aria-pressed={Boolean(meta.isPinned)} aria-label={meta.isPinned ? "Sabitlemeyi kaldır" : "Sabitle"} className="flex h-10 w-10 items-center justify-center rounded-xl hover:bg-[#f7f5ef]"><Pin size={18} className={meta.isPinned ? "fill-[#3b5ccc] text-[#3b5ccc]" : "text-[#8b8c95]"} /></button>
+        <div className="flex items-center gap-1 border-b border-ink/[0.07] px-2 py-2 sm:px-3">
+          <button onClick={() => void close()} className="flex h-10 w-10 items-center justify-center rounded-xl text-ink-2 hover:bg-paper" aria-label="Kaydet ve kapat"><ArrowLeft size={18} /></button>
+          <input value={meta.title} onChange={(event) => updateMeta({ title: event.target.value })} placeholder="Başlık (isteğe bağlı)" maxLength={200} className="h-10 min-w-0 flex-1 bg-transparent px-1 text-[16px] font-semibold text-ink outline-none placeholder:text-rule-strong" aria-label="Not başlığı" />
+          <button onClick={() => updateMeta({ isFavorite: !meta.isFavorite })} aria-pressed={Boolean(meta.isFavorite)} aria-label={meta.isFavorite ? "Favorilerden çıkar" : "Favorilere ekle"} className="flex h-10 w-10 items-center justify-center rounded-xl hover:bg-paper"><Star size={18} className={meta.isFavorite ? "fill-warn-fill text-warn-fill" : "text-ink-3"} /></button>
+          <button onClick={() => updateMeta({ isPinned: !meta.isPinned })} aria-pressed={Boolean(meta.isPinned)} aria-label={meta.isPinned ? "Sabitlemeyi kaldır" : "Sabitle"} className="flex h-10 w-10 items-center justify-center rounded-xl hover:bg-paper"><Pin size={18} className={meta.isPinned ? "fill-brand text-brand" : "text-ink-3"} /></button>
           <div className="relative">
-            <button onClick={() => setMenu((value) => !value)} aria-expanded={menu} aria-label="Diğer işlemler" className="flex h-10 w-10 items-center justify-center rounded-xl text-[#545661] hover:bg-[#f7f5ef]"><MoreHorizontal size={18} /></button>
+            <button onClick={() => setMenu((value) => !value)} aria-expanded={menu} aria-label="Diğer işlemler" className="flex h-10 w-10 items-center justify-center rounded-xl text-ink-2 hover:bg-paper"><MoreHorizontal size={18} /></button>
             {menu && (
-              <div className="absolute right-0 top-11 z-10 w-64 overflow-hidden rounded-2xl border border-[#1f2333]/10 bg-white py-1 text-[13px] shadow-xl" role="menu">
-                <div className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-[.08em] text-[#9a9ba3]">✨ AI (not metni AI servisine gönderilir)</div>
+              <div className="absolute right-0 top-11 z-10 w-64 overflow-hidden rounded-2xl border border-ink/10 bg-white py-1 text-[14px] shadow-xl" role="menu">
+                <div className="px-3 pb-1 pt-2 text-[12px] font-bold text-ink-4">✨ AI (not metni AI servisine gönderilir)</div>
                 {(Object.keys(NOTE_AI_ACTIONS) as NoteAiAction[]).map((action) => (
-                  <button key={action} role="menuitem" disabled={Boolean(aiPending)} onClick={() => void runAi(action)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left hover:bg-[#f7f5ef] disabled:opacity-50"><Sparkles size={14} className="text-[#7a55c9]" />{NOTE_AI_ACTIONS[action].menu}</button>
+                  <button key={action} role="menuitem" disabled={Boolean(aiPending)} onClick={() => void runAi(action)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left hover:bg-paper disabled:opacity-50"><Sparkles size={14} className="text-violet" />{NOTE_AI_ACTIONS[action].menu}</button>
                 ))}
-                <div className="my-1 h-px bg-[#1f2333]/[0.07]" />
-                <button role="menuitem" onClick={() => { setMenu(false); setTaskDialog(true); }} className="flex w-full items-center gap-2 px-3 py-2.5 text-left hover:bg-[#f7f5ef]"><CalendarClock size={14} className="text-[#3b5ccc]" /> Çalışma Planına Ekle</button>
-                <button role="menuitem" onClick={() => void remove()} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-[#d95d4d] hover:bg-[#fff0ed]"><Trash2 size={14} /> Notu sil</button>
+                <div className="my-1 h-px bg-ink/[0.07]" />
+                <button role="menuitem" onClick={() => { setMenu(false); setTaskDialog(true); }} className="flex w-full items-center gap-2 px-3 py-2.5 text-left hover:bg-paper"><CalendarClock size={14} className="text-brand" /> Çalışma Planına Ekle</button>
+                <button role="menuitem" onClick={() => void remove()} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-danger hover:bg-danger-soft"><Trash2 size={14} /> Notu sil</button>
               </div>
             )}
           </div>
         </div>
 
         {/* Ders / konu / kitap / etiket / tarih bilgileri */}
-        <div className="border-b border-[#1f2333]/[0.07] px-3 py-2 sm:px-4">
-          <button onClick={() => setShowMeta((value) => !value)} aria-expanded={showMeta} className="flex w-full flex-wrap items-center gap-1.5 text-left text-[11px]">
-            {meta.subject && <span className="rounded-full bg-[#edf1ff] px-2 py-0.5 font-semibold text-[#3b5ccc]">{meta.subject}{selectedTopic ? ` · ${selectedTopic.topic}` : ""}</span>}
-            {meta.bookId && <span className="rounded-full bg-[#fff4ea] px-2 py-0.5 font-semibold text-[#c25e00]">📚 {books.find((book) => book.id === meta.bookId)?.title ?? "Kitap"}</span>}
-            {meta.tags.map((tag) => <span key={tag} className="rounded-full bg-[#f7f5ef] px-2 py-0.5 text-[#545661]">#{tag}</span>)}
-            {meta.reviewAt && <span className="rounded-full bg-[#eaf6f0] px-2 py-0.5 text-[#2e7d4f]">🔁 {new Date(meta.reviewAt).toLocaleDateString("tr-TR", { day: "numeric", month: "short" })}</span>}
-            <span className="text-[#8b8c95]">📅 {new Date(meta.noteDate).toLocaleString("tr-TR", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })}</span>
-            <span className="ml-auto flex items-center gap-1 font-semibold text-[#3b5ccc]">{showMeta ? "Gizle" : "Ders, konu, kitap, etiket"} <ChevronDown size={13} className={showMeta ? "rotate-180" : ""} /></span>
+        <div className="border-b border-ink/[0.07] px-3 py-2 sm:px-4">
+          <button onClick={() => setShowMeta((value) => !value)} aria-expanded={showMeta} className="flex w-full flex-wrap items-center gap-1.5 text-left text-[12px]">
+            {meta.subject && <span className="rounded-full bg-brand-soft px-2 py-0.5 font-semibold text-brand">{meta.subject}{selectedTopic ? ` · ${selectedTopic.topic}` : ""}</span>}
+            {meta.bookId && <span className="rounded-full bg-warn-soft px-2 py-0.5 font-semibold text-warn">📚 {books.find((book) => book.id === meta.bookId)?.title ?? "Kitap"}</span>}
+            {meta.tags.map((tag) => <span key={tag} className="rounded-full bg-paper px-2 py-0.5 text-ink-2">#{tag}</span>)}
+            {meta.reviewAt && <span className="rounded-full bg-success-soft px-2 py-0.5 text-success">🔁 {new Date(meta.reviewAt).toLocaleDateString("tr-TR", { day: "numeric", month: "short" })}</span>}
+            <span className="text-ink-3">📅 {new Date(meta.noteDate).toLocaleString("tr-TR", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })}</span>
+            <span className="ml-auto flex items-center gap-1 font-semibold text-brand">{showMeta ? "Gizle" : "Ders, konu, kitap, etiket"} <ChevronDown size={13} className={showMeta ? "rotate-180" : ""} /></span>
           </button>
           {showMeta && (
             <div className="mt-2 grid gap-2 pb-1 sm:grid-cols-2">
-              <label className="block text-[11px]"><span className="form-label">Ders</span>
+              <label className="block text-[12px]"><span className="form-label">Ders</span>
                 <select value={meta.subject ?? ""} onChange={(event) => updateMeta({ subject: event.target.value || null, topicId: null })} className="form-input h-10"><option value="">Genel (ders yok)</option>{subjects.map((subject) => <option key={subject} value={subject}>{subject}</option>)}</select>
               </label>
-              <label className="block text-[11px]"><span className="form-label">Konu</span>
+              <label className="block text-[12px]"><span className="form-label">Konu</span>
                 <select value={meta.topicId ?? ""} onChange={(event) => { const topicId = event.target.value ? Number(event.target.value) : null; const topic = topics.find((item) => item.id === topicId); updateMeta({ topicId, subject: topic?.subject ?? meta.subject }); }} className="form-input h-10"><option value="">Konu seç…</option>{subjectTopics.map((topic) => <option key={topic.id} value={topic.id}>{meta.subject ? "" : `${topic.subject} · `}{topic.unit !== topic.subject ? `${topic.unit} → ` : ""}{topic.topic}</option>)}</select>
               </label>
-              <label className="block text-[11px]"><span className="form-label">Kitap</span>
+              <label className="block text-[12px]"><span className="form-label">Kitap</span>
                 <select value={meta.bookId ?? ""} onChange={(event) => updateMeta({ bookId: event.target.value || null, bookContentId: null })} className="form-input h-10"><option value="">Kitap yok</option>{books.map((book) => <option key={book.id} value={book.id}>{book.title}</option>)}</select>
               </label>
-              <label className="block text-[11px]"><span className="form-label">Ünite / test</span>
+              <label className="block text-[12px]"><span className="form-label">Ünite / test</span>
                 <select value={meta.bookContentId ?? ""} disabled={!meta.bookId || !bookContents.data?.length} onChange={(event) => { const content = bookContents.data?.find((row) => row.id === Number(event.target.value)); updateMeta({ bookContentId: content?.id ?? null, ...(content?.topicId && !meta.topicId ? { topicId: content.topicId, subject: content.topic?.subject ?? meta.subject } : {}) }); }} className="form-input h-10 disabled:opacity-50">
                   <option value="">{meta.bookId && !bookContents.data?.length ? "İçindekiler taranmamış" : "Bölüm seç…"}</option>
                   {bookContents.data?.map((row) => <option key={row.id} value={row.id}>{row.unitNumber !== null ? `${row.unitNumber}. Ünite · ` : ""}{row.label}{row.pageStart ? ` · sf. ${row.pageStart}` : ""}</option>)}
@@ -304,18 +304,18 @@ function NoteEditorBody({ initial, startWith, onClose }: { initial: { payload: N
               <div className="sm:col-span-2">
                 <span className="form-label">Etiketler</span>
                 <div className="flex flex-wrap items-center gap-1.5">
-                  {meta.tags.map((tag) => <button key={tag} onClick={() => updateMeta({ tags: meta.tags.filter((item) => item !== tag) })} className="rounded-full bg-[#f7f5ef] px-2 py-1 text-[11px] text-[#545661]" aria-label={`${tag} etiketini kaldır`}>#{tag} ×</button>)}
-                  <input value={tagInput} onChange={(event) => setTagInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === ",") { event.preventDefault(); addTag(tagInput); } }} placeholder="#etiket" className="h-8 w-28 rounded-lg border border-[#1f2333]/10 px-2 text-[11px]" aria-label="Etiket ekle" />
-                  {SUGGESTED_TAGS.filter((tag) => !meta.tags.includes(tag)).map((tag) => <button key={tag} onClick={() => addTag(tag)} className="rounded-full border border-dashed border-[#1f2333]/15 px-2 py-1 text-[11px] text-[#8b8c95]">+#{tag}</button>)}
+                  {meta.tags.map((tag) => <button key={tag} onClick={() => updateMeta({ tags: meta.tags.filter((item) => item !== tag) })} className="rounded-full bg-paper px-2 py-1 text-[12px] text-ink-2" aria-label={`${tag} etiketini kaldır`}>#{tag} ×</button>)}
+                  <input value={tagInput} onChange={(event) => setTagInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === ",") { event.preventDefault(); addTag(tagInput); } }} placeholder="#etiket" className="h-8 w-28 rounded-lg border border-ink/10 px-2 text-[12px]" aria-label="Etiket ekle" />
+                  {SUGGESTED_TAGS.filter((tag) => !meta.tags.includes(tag)).map((tag) => <button key={tag} onClick={() => addTag(tag)} className="rounded-full border border-dashed border-ink/15 px-2 py-1 text-[12px] text-ink-3">+#{tag}</button>)}
                 </div>
               </div>
-              <label className="block text-[11px]"><span className="form-label">Tarih</span>
+              <label className="block text-[12px]"><span className="form-label">Tarih</span>
                 <input type="datetime-local" value={toLocalInput(meta.noteDate)} onChange={(event) => event.target.value && updateMeta({ noteDate: fromLocalInput(event.target.value) })} className="form-input h-10" />
               </label>
-              <div className="text-[11px]"><span className="form-label">Tekrar tarihi</span>
+              <div className="text-[12px]"><span className="form-label">Tekrar tarihi</span>
                 <div className="flex flex-wrap gap-1.5">
-                  {[[0, "Bugün"], [3, "3 gün"], [7, "7 gün"], [14, "14 gün"]].map(([days, label]) => <button key={label} onClick={() => updateMeta({ reviewAt: daysFromToday(Number(days)) })} className="h-8 rounded-lg border border-[#1f2333]/10 px-2.5 text-[11px] text-[#343643] hover:bg-[#f4f6ff]">{label}</button>)}
-                  {meta.reviewAt && <button onClick={() => updateMeta({ reviewAt: null })} className="h-8 rounded-lg px-2 text-[11px] text-[#8b8c95]">Kaldır</button>}
+                  {[[0, "Bugün"], [3, "3 gün"], [7, "7 gün"], [14, "14 gün"]].map(([days, label]) => <button key={label} onClick={() => updateMeta({ reviewAt: daysFromToday(Number(days)) })} className="h-8 rounded-lg border border-ink/10 px-2.5 text-[12px] text-ink-2 hover:bg-brand-soft">{label}</button>)}
+                  {meta.reviewAt && <button onClick={() => updateMeta({ reviewAt: null })} className="h-8 rounded-lg px-2 text-[12px] text-ink-3">Kaldır</button>}
                 </div>
               </div>
             </div>
@@ -330,16 +330,16 @@ function NoteEditorBody({ initial, startWith, onClose }: { initial: { payload: N
 
         <div className="min-h-0 flex-1 overflow-y-auto">
           {showSuggestion && (
-            <div className="mx-4 mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-[#fff8df] px-3 py-2 text-[12px] text-[#8a6116]">
+            <div className="mx-4 mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-warn-soft px-3 py-2 text-[13px] text-warn">
               <span>Bu konuyu tekrar etmen gerektiğini yazmışsın. Çalışma planına ekleyelim mi?</span>
-              <span className="flex gap-2"><button onClick={() => setTaskDialog(true)} className="rounded-lg bg-[#1f2333] px-2.5 py-1 text-[11px] font-semibold text-white">Plana ekle</button><button onClick={() => setSuggestionDismissed(true)} className="px-1 text-[11px] font-semibold">Hayır</button></span>
+              <span className="flex gap-2"><button onClick={() => setTaskDialog(true)} className="rounded-lg bg-ink px-2.5 py-1 text-[12px] font-semibold text-white">Plana ekle</button><button onClick={() => setSuggestionDismissed(true)} className="px-1 text-[12px] font-semibold">Hayır</button></span>
             </div>
           )}
-          {aiPending && <div className="mx-4 mt-3 flex items-center gap-2 rounded-xl bg-[#f3edff] px-3 py-2 text-[12px] text-[#6f42c1]"><Loader2 size={14} className="animate-spin" /> ✨ {NOTE_AI_ACTIONS[aiPending].menu}…</div>}
+          {aiPending && <div className="mx-4 mt-3 flex items-center gap-2 rounded-xl bg-violet-soft px-3 py-2 text-[13px] text-violet"><Loader2 size={14} className="animate-spin" /> ✨ {NOTE_AI_ACTIONS[aiPending].menu}…</div>}
           <EditorContent editor={editor} />
         </div>
 
-        <div className={`border-t border-[#1f2333]/[0.07] px-4 py-2 text-[11px] ${status === "failed" ? "text-[#a1711d]" : "text-[#8b8c95]"}`} aria-live="polite">{statusLabel}</div>
+        <div className={`border-t border-ink/[0.07] px-4 py-2 text-[12px] ${status === "failed" ? "text-warn" : "text-ink-3"}`} aria-live="polite">{statusLabel}</div>
       </div>
 
       {insert === "voice" && <VoiceRecorder onClose={() => setInsert(null)} onDone={(result) => {
@@ -350,11 +350,11 @@ function NoteEditorBody({ initial, startWith, onClose }: { initial: { payload: N
       {consentFor && (
         <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setConsentFor(null)}>
           <div className="modal-card max-w-[400px]">
-            <h2 className="text-[16px] font-semibold text-[#1f2333]">✨ AI kullanımı</h2>
-            <p className="mt-2 text-[12px] leading-5 text-[#545661]">Bu işlem için <strong>bu notun metni</strong> AI servisine gönderilecek (fotoğraflar ve ses kayıtları gönderilmez). Sonuç notunun sonuna ayrı bir blok olarak eklenir; asıl metnin değişmez.</p>
+            <h2 className="text-[16px] font-semibold text-ink">✨ AI kullanımı</h2>
+            <p className="mt-2 text-[13px] leading-5 text-ink-2">Bu işlem için <strong>bu notun metni</strong> AI servisine gönderilecek (fotoğraflar ve ses kayıtları gönderilmez). Sonuç notunun sonuna ayrı bir blok olarak eklenir; asıl metnin değişmez.</p>
             <div className="mt-5 flex justify-end gap-2">
-              <button onClick={() => setConsentFor(null)} className="h-10 rounded-xl border border-[#1f2333]/10 px-4 text-[12px] font-semibold text-[#777983]">Vazgeç</button>
-              <button onClick={() => { try { localStorage.setItem(AI_CONSENT_KEY, "1"); } catch {} const action = consentFor; setConsentFor(null); void runAi(action); }} className="h-10 rounded-xl bg-[#6f42c1] px-4 text-[12px] font-semibold text-white">Anladım, devam et</button>
+              <button onClick={() => setConsentFor(null)} className="h-10 rounded-xl border border-ink/10 px-4 text-[13px] font-semibold text-ink-3">Vazgeç</button>
+              <button onClick={() => { try { localStorage.setItem(AI_CONSENT_KEY, "1"); } catch {} const action = consentFor; setConsentFor(null); void runAi(action); }} className="h-10 rounded-xl bg-violet px-4 text-[13px] font-semibold text-white">Anladım, devam et</button>
             </div>
           </div>
         </div>
@@ -386,17 +386,17 @@ function CreateTaskDialog({ topics, initialTopicId, ensureSaved, onTopicChosen, 
   return (
     <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <div className="modal-card max-w-[420px]">
-        <div className="flex items-center justify-between"><h2 className="text-[16px] font-semibold text-[#1f2333]">Çalışma Planına Ekle</h2><button onClick={onClose} className="rounded-lg p-2 text-[#8b8c95]" aria-label="Kapat"><X size={16} /></button></div>
-        <p className="mt-1 text-[12px] text-[#6d7390]">Plan motoru, günlük kapasitene göre uygun günü bulur; mevcut planın değişmez.</p>
-        <label className="mt-4 block text-[11px]"><span className="form-label">Konu</span>
+        <div className="flex items-center justify-between"><h2 className="text-[16px] font-semibold text-ink">Çalışma Planına Ekle</h2><button onClick={onClose} className="rounded-lg p-2 text-ink-3" aria-label="Kapat"><X size={16} /></button></div>
+        <p className="mt-1 text-[13px] text-ink-3">Plan motoru, günlük kapasitene göre uygun günü bulur; mevcut planın değişmez.</p>
+        <label className="mt-4 block text-[12px]"><span className="form-label">Konu</span>
           <select value={topicId ?? ""} onChange={(event) => setTopicId(event.target.value ? Number(event.target.value) : null)} className="form-input h-10"><option value="">Konu seç…</option>{topics.map((topic) => <option key={topic.id} value={topic.id}>{topic.subject} · {topic.topic}</option>)}</select>
         </label>
-        <label className="mt-3 block text-[11px]"><span className="form-label">Süre</span>
+        <label className="mt-3 block text-[12px]"><span className="form-label">Süre</span>
           <select value={minutes} onChange={(event) => setMinutes(Number(event.target.value))} className="form-input h-10">{[20, 30, 45, 60].map((value) => <option key={value} value={value}>{value} dk</option>)}</select>
         </label>
         <div className="mt-5 flex justify-end gap-2">
-          <button onClick={() => void submit("today")} disabled={createTask.isPending} className="h-10 rounded-xl border border-[#3b5ccc]/25 px-4 text-[12px] font-semibold text-[#3b5ccc] disabled:opacity-50">Bugün çalış</button>
-          <button onClick={() => void submit("auto")} disabled={createTask.isPending} className="h-10 rounded-xl bg-[#3b5ccc] px-4 text-[12px] font-semibold text-white disabled:opacity-50">Uygun güne ekle</button>
+          <button onClick={() => void submit("today")} disabled={createTask.isPending} className="h-10 rounded-xl border border-brand/25 px-4 text-[13px] font-semibold text-brand disabled:opacity-50">Bugün çalış</button>
+          <button onClick={() => void submit("auto")} disabled={createTask.isPending} className="h-10 rounded-xl bg-brand px-4 text-[13px] font-semibold text-white disabled:opacity-50">Uygun güne ekle</button>
         </div>
       </div>
     </div>

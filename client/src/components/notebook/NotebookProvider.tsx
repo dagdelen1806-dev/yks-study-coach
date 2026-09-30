@@ -24,7 +24,7 @@ export function NotebookProvider({ enabled, children }: { enabled: boolean; chil
     <NotebookContext.Provider value={{ open, enabled }}>
       {children}
       {enabled && !current && (
-        <button onClick={() => open()} className="fixed bottom-24 right-4 z-40 flex h-14 items-center gap-2 rounded-full bg-[#1f2333] px-5 text-[13px] font-semibold text-white shadow-[0_12px_30px_rgba(31,35,51,.3)] transition hover:scale-[1.03] sm:bottom-6 sm:right-6" aria-label="Hızlı not al">
+        <button onClick={() => open()} className="fixed bottom-24 right-4 z-40 flex h-14 items-center gap-2 rounded-full bg-ink px-5 text-[14px] font-semibold text-white shadow-float transition hover:scale-[1.03] sm:bottom-6 sm:right-6" aria-label="Hızlı not al">
           <Zap size={18} className="text-[#f5d90a]" /> Hızlı Not
         </button>
       )}

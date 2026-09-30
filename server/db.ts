@@ -8,6 +8,7 @@ import { normalizeIsbn } from "../shared/bookIdentity";
 import { CURRICULUM, isCurriculumOnlySlug } from "../shared/curriculum";
 import { deriveTopicStatus } from "../shared/topicStatus";
 import { topicSeeds, type ExamType, type TopicStatus } from "../shared/yksData";
+import { toLocalDateKey } from "../shared/dates";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -384,7 +385,7 @@ const parseJson = <T>(value: string, fallback: T): T => {
 const serializeUserMockExam = (row: typeof userMockExams.$inferSelect) => ({
   id: String(row.id),
   title: row.title,
-  date: row.examDate.toISOString().slice(0, 10),
+  date: toLocalDateKey(row.examDate),
   exam: row.exam,
   net: Number(row.net),
   delta: Number(row.delta),

@@ -54,14 +54,14 @@ function LocalSignInDialog() {
             ? "Kayıt olurken kullandığın e-posta adresi veya telefon numarası ve şifrenle giriş yap."
             : "Yeni bir hesap oluştur. E-postayla kayıt olursan önce adresini doğrulaman gerekir; ardından hesabın bir yönetici tarafından onaylanınca panele erişebilirsin."}
         </DialogDescription>
-        <div className="mt-1 flex rounded-xl bg-[#f7f5ef] p-1">
-          <button type="button" onClick={() => { setTab("login"); setError(""); }} className={`h-9 flex-1 rounded-lg text-[12px] font-semibold transition ${tab === "login" ? "bg-white text-[#1f2333] shadow-sm" : "text-[#8b8c95]"}`}>Giriş yap</button>
-          <button type="button" onClick={() => { setTab("register"); setError(""); }} className={`h-9 flex-1 rounded-lg text-[12px] font-semibold transition ${tab === "register" ? "bg-white text-[#1f2333] shadow-sm" : "text-[#8b8c95]"}`}>Kayıt ol</button>
+        <div className="mt-1 flex rounded-xl bg-paper p-1">
+          <button type="button" onClick={() => { setTab("login"); setError(""); }} className={`h-9 flex-1 rounded-lg text-[13px] font-semibold transition ${tab === "login" ? "bg-white text-ink shadow-sm" : "text-ink-3"}`}>Giriş yap</button>
+          <button type="button" onClick={() => { setTab("register"); setError(""); }} className={`h-9 flex-1 rounded-lg text-[13px] font-semibold transition ${tab === "register" ? "bg-white text-ink shadow-sm" : "text-ink-3"}`}>Kayıt ol</button>
         </div>
         <div className="mt-3 space-y-3">
           {tab === "register" && (
             <div className="space-y-1.5">
-              <label htmlFor="local-signin-name" className="text-[12px] font-semibold text-[#1f2333]">Adın</label>
+              <label htmlFor="local-signin-name" className="text-[13px] font-semibold text-ink">Adın</label>
               <Input
                 id="local-signin-name"
                 value={name}
@@ -75,7 +75,7 @@ function LocalSignInDialog() {
             </div>
           )}
           <div className="space-y-1.5">
-            <label htmlFor="local-signin-identifier" className="text-[12px] font-semibold text-[#1f2333]">E-posta veya telefon</label>
+            <label htmlFor="local-signin-identifier" className="text-[13px] font-semibold text-ink">E-posta veya telefon</label>
             <Input
               id="local-signin-identifier"
               value={identifier}
@@ -90,7 +90,7 @@ function LocalSignInDialog() {
             />
           </div>
           <div className="space-y-1.5">
-            <label htmlFor="local-signin-password" className="text-[12px] font-semibold text-[#1f2333]">Şifre</label>
+            <label htmlFor="local-signin-password" className="text-[13px] font-semibold text-ink">Şifre</label>
             <Input
               id="local-signin-password"
               type="password"
@@ -102,7 +102,7 @@ function LocalSignInDialog() {
               aria-invalid={Boolean(error)}
             />
           </div>
-          {error && <p role="alert" className="text-[11px] font-medium text-[#d95d4d]">{error}</p>}
+          {error && <p role="alert" className="text-[12px] font-medium text-danger">{error}</p>}
         </div>
         <div className="mt-4 flex justify-end">
           <Button onClick={submit} disabled={submitting}>{submitting ? (tab === "login" ? "Giriş yapılıyor…" : "Kayıt oluşturuluyor…") : tab === "login" ? "Giriş yap" : "Kayıt ol"}</Button>
@@ -120,16 +120,16 @@ function LocalSignInDialog() {
 // açıklayan UX katmanı, asıl güvenlik backend'de.
 function PendingApprovalScreen({ status, onLogout }: { status: "pending" | "rejected"; onLogout: () => void }) {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#f7f5ef] p-6">
-      <div className="w-full max-w-sm rounded-3xl border border-[#1f2333]/[0.07] bg-white p-7 text-center shadow-[0_20px_50px_rgba(31,35,51,0.08)]">
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-[#fff8df] text-[22px]">{status === "pending" ? "⏳" : "🚫"}</div>
-        <h1 className="mt-5 text-[18px] font-semibold tracking-[-0.03em] text-[#1f2333]">{status === "pending" ? "Kaydınızın tamamlanması bekleniyor" : "Kaydınız onaylanmadı"}</h1>
-        <p className="mt-2.5 text-[13px] leading-6 text-[#777983]">
+    <div className="flex min-h-screen items-center justify-center bg-paper p-6">
+      <div className="w-full max-w-sm rounded-3xl border border-ink/[0.07] bg-white p-7 text-center shadow-overlay">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-warn-soft text-[22px]">{status === "pending" ? "⏳" : "🚫"}</div>
+        <h1 className="mt-5 text-[21px] font-semibold text-ink font-display">{status === "pending" ? "Kaydınızın tamamlanması bekleniyor" : "Kaydınız onaylanmadı"}</h1>
+        <p className="mt-2.5 text-[14px] leading-6 text-ink-3">
           {status === "pending"
             ? "Hesabın oluşturuldu ama panele erişmeden önce bir yönetici tarafından onaylanması gerekiyor. Onaylandığında bu sayfayı yenilemen yeterli."
             : "Hesabınız için üyelik onayı verilmedi. Bir hata olduğunu düşünüyorsan yönetimle iletişime geç."}
         </p>
-        <button onClick={onLogout} className="mt-6 h-10 w-full rounded-xl border border-[#1f2333]/10 text-[12px] font-semibold text-[#777983] hover:bg-[#f7f5ef]">
+        <button onClick={onLogout} className="mt-6 h-10 w-full rounded-xl border border-ink/10 text-[13px] font-semibold text-ink-3 hover:bg-paper">
           Çıkış yap
         </button>
       </div>

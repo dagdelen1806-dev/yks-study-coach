@@ -50,22 +50,22 @@ export default function FormulaEditor({ initial, onSave, onCancel }: { initial: 
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="eyebrow mb-2">Formül</div>
-            <h2 className="text-[18px] font-semibold tracking-[-0.03em] text-[#1f2333]">Matematiksel ifade ekle</h2>
+            <h2 className="text-[21px] font-semibold text-ink font-display">Matematiksel ifade ekle</h2>
           </div>
-          <button onClick={onCancel} className="rounded-lg p-2 text-[#8b8c95] hover:bg-[#f7f5ef]" aria-label="Kapat"><X size={16} /></button>
+          <button onClick={onCancel} className="rounded-lg p-2 text-ink-3 hover:bg-paper" aria-label="Kapat"><X size={16} /></button>
         </div>
-        <div className="mt-4 min-h-[72px] overflow-x-auto rounded-2xl border border-[#1f2333]/[0.07] bg-[#fafafa] p-4 text-[#1f2333]" aria-live="polite" dangerouslySetInnerHTML={{ __html: preview }} />
+        <div className="mt-4 min-h-[72px] overflow-x-auto rounded-2xl border border-ink/[0.07] bg-paper p-4 text-ink" aria-live="polite" dangerouslySetInnerHTML={{ __html: preview }} />
         <label className="mt-3 block">
           <span className="form-label">LaTeX</span>
-          <textarea value={latex} onChange={(event) => setLatex(event.target.value)} rows={3} spellCheck={false} placeholder="ör. x^{2} + y^{2} = z^{2}" className="form-input h-auto py-2 font-mono text-[13px]" autoFocus />
+          <textarea value={latex} onChange={(event) => setLatex(event.target.value)} rows={3} spellCheck={false} placeholder="ör. x^{2} + y^{2} = z^{2}" className="form-input h-auto py-2 font-mono text-[14px]" autoFocus />
         </label>
         <div className="mt-3 flex flex-wrap gap-1.5">
-          {SNIPPETS.map((snippet) => <button key={snippet.label} onClick={() => insert(snippet.latex)} className="h-9 min-w-9 rounded-lg border border-[#1f2333]/10 px-2 text-[13px] text-[#343643] hover:bg-[#f4f6ff]">{snippet.label}</button>)}
+          {SNIPPETS.map((snippet) => <button key={snippet.label} onClick={() => insert(snippet.latex)} className="h-9 min-w-9 rounded-lg border border-ink/10 px-2 text-[14px] text-ink-2 hover:bg-brand-soft">{snippet.label}</button>)}
         </div>
-        <div className="mt-3 text-[11px] text-[#8b8c95]">Örnekler: {EXAMPLES.map((example) => <button key={example} onClick={() => setLatex(example)} className="mr-2 font-mono text-[#3b5ccc] underline-offset-2 hover:underline">{example}</button>)}</div>
+        <div className="mt-3 text-[12px] text-ink-3">Örnekler: {EXAMPLES.map((example) => <button key={example} onClick={() => setLatex(example)} className="mr-2 font-mono text-brand underline-offset-2 hover:underline">{example}</button>)}</div>
         <div className="mt-5 flex justify-end gap-2">
-          <button onClick={onCancel} className="h-10 rounded-xl border border-[#1f2333]/10 px-4 text-[12px] font-semibold text-[#777983]">Vazgeç</button>
-          <button onClick={() => onSave(latex.trim())} disabled={!latex.trim()} className="h-10 rounded-xl bg-[#1f2333] px-4 text-[12px] font-semibold text-white disabled:opacity-40">Kaydet</button>
+          <button onClick={onCancel} className="h-10 rounded-xl border border-ink/10 px-4 text-[13px] font-semibold text-ink-3">Vazgeç</button>
+          <button onClick={() => onSave(latex.trim())} disabled={!latex.trim()} className="h-10 rounded-xl bg-ink px-4 text-[13px] font-semibold text-white disabled:opacity-40">Kaydet</button>
         </div>
       </div>
     </div>

@@ -29,13 +29,13 @@ export default function AdminSubscriptionsPage() {
   return (
     <div className="space-y-4">
       <Card className="soft-card p-5 sm:p-6">
-        <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-[16px] font-semibold text-[#1f2333]">Elle Premium ver</h2></div>
-        <p className="mt-1 text-[11px] text-[#9a9ba3]">Gerçek bir ödeme olmadan, admin kararıyla verilir — ayrı bir "manuel" kaynak olarak işaretlenir, gerçek sağlayıcı aboneliğiyle karışmaz.</p>
+        <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-[16px] font-semibold text-ink">Elle Premium ver</h2></div>
+        <p className="mt-1 text-[12px] text-ink-4">Gerçek bir ödeme olmadan, admin kararıyla verilir — ayrı bir "manuel" kaynak olarak işaretlenir, gerçek sağlayıcı aboneliğiyle karışmaz.</p>
         <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_1fr_100px_1.4fr_auto]">
-          <input value={grantUserId} onChange={(event) => setGrantUserId(event.target.value)} placeholder="Kullanıcı ID" className="form-input text-[12px]" />
-          <select value={grantPlan} onChange={(event) => setGrantPlan(event.target.value)} className="form-input text-[12px]"><option value="PREMIUM_MONTHLY">Premium Aylık</option><option value="PREMIUM_YEARLY">Premium Yıllık</option></select>
-          <input type="number" min="1" value={grantDays} onChange={(event) => setGrantDays(event.target.value)} placeholder="gün" className="form-input text-[12px]" />
-          <input value={grantReason} onChange={(event) => setGrantReason(event.target.value)} placeholder="Neden (audit log'a yazılır)" className="form-input text-[12px]" />
+          <input value={grantUserId} onChange={(event) => setGrantUserId(event.target.value)} placeholder="Kullanıcı ID" className="form-input text-[13px]" />
+          <select value={grantPlan} onChange={(event) => setGrantPlan(event.target.value)} className="form-input text-[13px]"><option value="PREMIUM_MONTHLY">Premium Aylık</option><option value="PREMIUM_YEARLY">Premium Yıllık</option></select>
+          <input type="number" min="1" value={grantDays} onChange={(event) => setGrantDays(event.target.value)} placeholder="gün" className="form-input text-[13px]" />
+          <input value={grantReason} onChange={(event) => setGrantReason(event.target.value)} placeholder="Neden (audit log'a yazılır)" className="form-input text-[13px]" />
           <Button
             onClick={() => {
               const userId = Number(grantUserId);
@@ -43,7 +43,7 @@ export default function AdminSubscriptionsPage() {
               grant.mutate({ userId, planCode: grantPlan, days: Number(grantDays) || 30, reason: grantReason || undefined });
             }}
             disabled={grant.isPending}
-            className="h-10 rounded-xl bg-[#3b5ccc] text-[11px] font-semibold text-white"
+            className="h-10 rounded-xl bg-brand text-[12px] font-semibold text-white"
           >
             {grant.isPending ? "Veriliyor..." : "Ver"}
           </Button>
@@ -52,24 +52,24 @@ export default function AdminSubscriptionsPage() {
 
       <Card className="soft-card overflow-hidden">
         {list.isLoading ? (
-          <div className="flex justify-center p-10"><Loader2 className="animate-spin text-[#3b5ccc]" size={20} /></div>
+          <div className="flex justify-center p-10"><Loader2 className="animate-spin text-brand" size={20} /></div>
         ) : !list.data?.length ? (
-          <div className="p-8 text-center text-[12px] text-[#858690]">Henüz abonelik kaydı yok.</div>
+          <div className="p-8 text-center text-[13px] text-ink-3">Henüz abonelik kaydı yok.</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[860px] text-left text-[12px]">
-              <thead className="border-b border-[#1f2333]/[0.06] bg-[#fafafa] text-[10px] uppercase tracking-[.1em] text-[#9a9ba3]"><tr><th className="px-4 py-2.5">ID</th><th className="px-4 py-2.5">Kullanıcı</th><th className="px-4 py-2.5">Plan</th><th className="px-4 py-2.5">Durum</th><th className="px-4 py-2.5">Trial bitiş</th><th className="px-4 py-2.5">Dönem bitiş</th><th className="px-4 py-2.5">Manuel mi</th><th className="px-4 py-2.5" /></tr></thead>
-              <tbody className="divide-y divide-[#1f2333]/[0.06]">
+            <table className="w-full min-w-[860px] text-left text-[13px]">
+              <thead className="border-b border-ink/[0.06] bg-paper text-[12px] text-ink-4"><tr><th className="px-4 py-2.5">ID</th><th className="px-4 py-2.5">Kullanıcı</th><th className="px-4 py-2.5">Plan</th><th className="px-4 py-2.5">Durum</th><th className="px-4 py-2.5">Trial bitiş</th><th className="px-4 py-2.5">Dönem bitiş</th><th className="px-4 py-2.5">Manuel mi</th><th className="px-4 py-2.5" /></tr></thead>
+              <tbody className="divide-y divide-ink/[0.06]">
                 {list.data.map((row) => (
                   <tr key={row.userId}>
-                    <td className="px-4 py-2.5"><button onClick={() => { setGrantUserId(String(row.userId)); toast("Kullanıcı ID formda dolduruldu."); }} title="Elle Premium ver formuna doldur" className="rounded-md bg-[#f7f5ef] px-2 py-1 font-mono text-[11px] font-semibold text-[#3b5ccc] hover:bg-[#edf1ff]">#{row.userId}</button></td>
-                    <td className="px-4 py-2.5 font-medium text-[#343643]">{row.userName || row.userEmail || `#${row.userId}`}</td>
+                    <td className="px-4 py-2.5"><button onClick={() => { setGrantUserId(String(row.userId)); toast("Kullanıcı ID formda dolduruldu."); }} title="Elle Premium ver formuna doldur" className="rounded-md bg-paper px-2 py-1 font-mono text-[12px] font-semibold text-brand hover:bg-brand-soft">#{row.userId}</button></td>
+                    <td className="px-4 py-2.5 font-medium text-ink-2">{row.userName || row.userEmail || `#${row.userId}`}</td>
                     <td className="px-4 py-2.5">{row.planName}</td>
-                    <td className="px-4 py-2.5 text-[#8b8c95]">{subscriptionStatusLabel[row.status] ?? row.status}</td>
-                    <td className="px-4 py-2.5 text-[#8b8c95]">{formatDate(row.trialEndsAt)}</td>
-                    <td className="px-4 py-2.5 text-[#8b8c95]">{formatDate(row.currentPeriodEnd)}</td>
-                    <td className="px-4 py-2.5 text-[#8b8c95]">{row.isManualOverride ? "Evet" : "Hayır"}</td>
-                    <td className="px-4 py-2.5 text-right">{row.planCode !== "FREE" && <button onClick={() => revoke.mutate({ userId: row.userId })} className="text-[11px] font-semibold text-[#d95d4d]">Erişimi geri al</button>}</td>
+                    <td className="px-4 py-2.5 text-ink-3">{subscriptionStatusLabel[row.status] ?? row.status}</td>
+                    <td className="px-4 py-2.5 text-ink-3">{formatDate(row.trialEndsAt)}</td>
+                    <td className="px-4 py-2.5 text-ink-3">{formatDate(row.currentPeriodEnd)}</td>
+                    <td className="px-4 py-2.5 text-ink-3">{row.isManualOverride ? "Evet" : "Hayır"}</td>
+                    <td className="px-4 py-2.5 text-right">{row.planCode !== "FREE" && <button onClick={() => revoke.mutate({ userId: row.userId })} className="text-[12px] font-semibold text-danger">Erişimi geri al</button>}</td>
                   </tr>
                 ))}
               </tbody>

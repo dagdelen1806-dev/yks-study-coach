@@ -28,13 +28,13 @@ export function PremiumGate({ feature, onUpgrade, children }: { feature: Feature
   if (entitlement.isPremium) return <>{children}</>;
 
   return (
-    <div className="rounded-2xl border border-[#3b5ccc]/15 bg-[#f4f6ff] p-6 text-center">
-      <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-2xl bg-[#3b5ccc]/10 text-[#3b5ccc]"><Lock size={18} /></div>
-      <h3 className="mt-4 text-[15px] font-semibold text-[#1f2333]">{FEATURE_LABELS[feature]} Premium'da</h3>
-      <p className="mt-2 max-w-sm mx-auto text-[12px] leading-5 text-[#6b6c76]">
+    <div className="rounded-2xl border border-brand/15 bg-brand-soft p-6 text-center">
+      <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-2xl bg-brand/10 text-brand"><Lock size={18} /></div>
+      <h3 className="mt-4 text-[15px] font-semibold text-ink">{FEATURE_LABELS[feature]} Premium'da</h3>
+      <p className="mt-2 max-w-sm mx-auto text-[13px] leading-5 text-ink-3">
         {entitlement.isTrial ? `Deneme süren ${entitlement.trialEndsAt ? new Date(entitlement.trialEndsAt).toLocaleDateString("tr-TR") : ""} tarihinde bitiyor.` : "Bu özellik Premium abonelikte açılır — 10 gün ücretsiz denemeyle hemen başlayabilirsin."}
       </p>
-      <Button onClick={onUpgrade} className="mt-4 h-10 rounded-xl bg-[#3b5ccc] px-5 text-[12px] font-semibold text-white hover:bg-[#304db7]">
+      <Button onClick={onUpgrade} className="mt-4 h-10 rounded-xl bg-brand px-5 text-[13px] font-semibold text-white hover:bg-brand">
         <Sparkles className="mr-2" size={14} /> Premium'a Geç
       </Button>
     </div>

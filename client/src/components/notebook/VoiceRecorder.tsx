@@ -126,66 +126,66 @@ export default function VoiceRecorder({ onDone, onClose }: { onDone: (result: { 
     <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && phase === "idle" && onClose()}>
       <div className="modal-card max-w-[420px] text-center">
         <div className="flex items-center justify-between">
-          <div className="text-[15px] font-semibold text-[#1f2333]">🎙️ Sesli not</div>
-          <button onClick={cancel} className="rounded-lg p-2 text-[#8b8c95] hover:bg-[#f7f5ef]" aria-label="Kaydı iptal et ve kapat"><X size={16} /></button>
+          <div className="text-[15px] font-semibold text-ink">🎙️ Sesli not</div>
+          <button onClick={cancel} className="rounded-lg p-2 text-ink-3 hover:bg-paper" aria-label="Kaydı iptal et ve kapat"><X size={16} /></button>
         </div>
 
         {phase === "idle" && (
           <div className="py-6">
-            <button onClick={start} className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-[#d95d4d] text-white shadow-lg transition hover:scale-105" aria-label="Kayda başla"><Mic size={32} /></button>
-            <p className="mt-4 text-[12px] leading-5 text-[#6d7390]">Dokun ve konuş. Bitirince sesin Türkçe metne çevrilip notuna eklenecek; düzenleyebilirsin.</p>
-            <label className="mt-3 inline-flex items-center gap-2 text-[11px] text-[#545661]"><input type="checkbox" checked={keepAudio} onChange={(event) => setKeepAudio(event.target.checked)} className="accent-[#3b5ccc]" /> Ses kaydını da nota ekle</label>
+            <button onClick={start} className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-danger text-white shadow-lg transition hover:scale-105" aria-label="Kayda başla"><Mic size={32} /></button>
+            <p className="mt-4 text-[13px] leading-5 text-ink-3">Dokun ve konuş. Bitirince sesin Türkçe metne çevrilip notuna eklenecek; düzenleyebilirsin.</p>
+            <label className="mt-3 inline-flex items-center gap-2 text-[12px] text-ink-2"><input type="checkbox" checked={keepAudio} onChange={(event) => setKeepAudio(event.target.checked)} className="accent-brand" /> Ses kaydını da nota ekle</label>
           </div>
         )}
 
         {recording && (
           <div className="py-6" aria-live="polite">
-            <div className={`mx-auto flex h-20 w-20 items-center justify-center rounded-full ${phase === "recording" ? "animate-pulse bg-[#d95d4d]" : "bg-[#8b8c95]"} text-white`}><Mic size={30} /></div>
-            <div className="mt-3 font-mono text-[22px] font-semibold text-[#1f2333]">{formatDuration(seconds)}</div>
-            <div className="text-[12px] text-[#6d7390]">{phase === "recording" ? "Kayıt yapılıyor…" : "Duraklatıldı"}</div>
+            <div className={`mx-auto flex h-20 w-20 items-center justify-center rounded-full ${phase === "recording" ? "animate-pulse bg-danger" : "bg-ink-3"} text-white`}><Mic size={30} /></div>
+            <div className="mt-3 text-[25px] font-semibold text-ink font-display">{formatDuration(seconds)}</div>
+            <div className="text-[13px] text-ink-3">{phase === "recording" ? "Kayıt yapılıyor…" : "Duraklatıldı"}</div>
             <div className="mt-5 flex justify-center gap-2">
               {phase === "recording"
-                ? <button onClick={pause} className="flex h-11 items-center gap-1.5 rounded-xl border border-[#1f2333]/10 px-4 text-[12px] font-semibold text-[#343643]"><Pause size={15} /> Duraklat</button>
-                : <button onClick={resume} className="flex h-11 items-center gap-1.5 rounded-xl border border-[#1f2333]/10 px-4 text-[12px] font-semibold text-[#343643]"><Play size={15} /> Devam et</button>}
-              <button onClick={finish} disabled={seconds < 1} className="flex h-11 items-center gap-1.5 rounded-xl bg-[#1f2333] px-4 text-[12px] font-semibold text-white disabled:opacity-40"><Square size={14} /> Bitir</button>
+                ? <button onClick={pause} className="flex h-11 items-center gap-1.5 rounded-xl border border-ink/10 px-4 text-[13px] font-semibold text-ink-2"><Pause size={15} /> Duraklat</button>
+                : <button onClick={resume} className="flex h-11 items-center gap-1.5 rounded-xl border border-ink/10 px-4 text-[13px] font-semibold text-ink-2"><Play size={15} /> Devam et</button>}
+              <button onClick={finish} disabled={seconds < 1} className="flex h-11 items-center gap-1.5 rounded-xl bg-ink px-4 text-[13px] font-semibold text-white disabled:opacity-40"><Square size={14} /> Bitir</button>
             </div>
-            <button onClick={cancel} className="mt-3 text-[11px] font-semibold text-[#8b8c95]">Kaydı iptal et</button>
+            <button onClick={cancel} className="mt-3 text-[12px] font-semibold text-ink-3">Kaydı iptal et</button>
           </div>
         )}
 
         {phase === "requesting" && (
           <div className="py-10" aria-live="polite">
-            <Loader2 className="mx-auto animate-spin text-[#d95d4d]" size={26} />
-            <p className="mt-3 text-[13px] font-semibold text-[#1f2333]">Mikrofon izni bekleniyor…</p>
-            <p className="mt-1 text-[12px] text-[#8b8c95]">Tarayıcının sorduğu izne "İzin ver" de.</p>
+            <Loader2 className="mx-auto animate-spin text-danger" size={26} />
+            <p className="mt-3 text-[14px] font-semibold text-ink">Mikrofon izni bekleniyor…</p>
+            <p className="mt-1 text-[13px] text-ink-3">Tarayıcının sorduğu izne "İzin ver" de.</p>
           </div>
         )}
 
         {phase === "transcribing" && (
           <div className="py-10" aria-live="polite">
-            <Loader2 className="mx-auto animate-spin text-[#3b5ccc]" size={28} />
-            <p className="mt-3 text-[13px] font-semibold text-[#1f2333]">Notuna dönüştürülüyor…</p>
+            <Loader2 className="mx-auto animate-spin text-brand" size={28} />
+            <p className="mt-3 text-[14px] font-semibold text-ink">Notuna dönüştürülüyor…</p>
           </div>
         )}
 
         {phase === "dictating" && (
           <div className="py-4 text-left">
-            <div className="text-center text-[12px] text-[#6d7390]">Tarayıcı diktesi açık — konuş, metin aşağıda belirir.</div>
-            <div className="mt-3 min-h-[80px] rounded-xl bg-[#f7f5ef] p-3 text-[13px] text-[#1f2333]">{dictation || "…"}</div>
+            <div className="text-center text-[13px] text-ink-3">Tarayıcı diktesi açık — konuş, metin aşağıda belirir.</div>
+            <div className="mt-3 min-h-[80px] rounded-xl bg-paper p-3 text-[14px] text-ink">{dictation || "…"}</div>
             <div className="mt-4 flex justify-end gap-2">
-              <button onClick={() => { recognition.current?.stop(); setPhase("idle"); }} className="h-10 rounded-xl border border-[#1f2333]/10 px-4 text-[12px] font-semibold text-[#777983]">Vazgeç</button>
-              <button onClick={() => { recognition.current?.stop(); if (dictation.trim()) onDone({ text: dictation.trim(), attachmentId: null, durationSec: 0 }); }} disabled={!dictation.trim()} className="h-10 rounded-xl bg-[#1f2333] px-4 text-[12px] font-semibold text-white disabled:opacity-40">Nota ekle</button>
+              <button onClick={() => { recognition.current?.stop(); setPhase("idle"); }} className="h-10 rounded-xl border border-ink/10 px-4 text-[13px] font-semibold text-ink-3">Vazgeç</button>
+              <button onClick={() => { recognition.current?.stop(); if (dictation.trim()) onDone({ text: dictation.trim(), attachmentId: null, durationSec: 0 }); }} disabled={!dictation.trim()} className="h-10 rounded-xl bg-ink px-4 text-[13px] font-semibold text-white disabled:opacity-40">Nota ekle</button>
             </div>
           </div>
         )}
 
         {phase === "error" && (
           <div className="py-5">
-            <p role="alert" className="rounded-xl bg-[#fff0ed] p-3 text-[12px] font-medium text-[#d95d4d]">{error || "Bir sorun oluştu."}</p>
+            <p role="alert" className="rounded-xl bg-danger-soft p-3 text-[13px] font-medium text-danger">{error || "Bir sorun oluştu."}</p>
             <div className="mt-4 flex flex-wrap justify-center gap-2">
-              {blob.current && !serviceDown && <button onClick={() => void send()} className="h-10 rounded-xl bg-[#3b5ccc] px-4 text-[12px] font-semibold text-white">Tekrar dene</button>}
-              <button onClick={() => { blob.current = null; cancelled.current = false; setPhase("idle"); }} className="h-10 rounded-xl border border-[#1f2333]/10 px-4 text-[12px] font-semibold text-[#545661]">Yeni kayıt</button>
-              {serviceDown && getSpeechRecognition() && <button onClick={startDictation} className="h-10 rounded-xl border border-[#3b5ccc]/25 px-4 text-[12px] font-semibold text-[#3b5ccc]">Tarayıcı ile yazıya dök</button>}
+              {blob.current && !serviceDown && <button onClick={() => void send()} className="h-10 rounded-xl bg-brand px-4 text-[13px] font-semibold text-white">Tekrar dene</button>}
+              <button onClick={() => { blob.current = null; cancelled.current = false; setPhase("idle"); }} className="h-10 rounded-xl border border-ink/10 px-4 text-[13px] font-semibold text-ink-2">Yeni kayıt</button>
+              {serviceDown && getSpeechRecognition() && <button onClick={startDictation} className="h-10 rounded-xl border border-brand/25 px-4 text-[13px] font-semibold text-brand">Tarayıcı ile yazıya dök</button>}
             </div>
           </div>
         )}

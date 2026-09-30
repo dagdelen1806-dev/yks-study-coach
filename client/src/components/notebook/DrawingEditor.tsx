@@ -108,27 +108,27 @@ export default function DrawingEditor({ initial, onSave, onCancel }: { initial: 
     <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onCancel()}>
       <div className="modal-card max-w-[860px] p-4 sm:p-6">
         <div className="flex items-center justify-between gap-3">
-          <div className="text-[15px] font-semibold text-[#1f2333]">🖊 Kalemle yaz / çiz</div>
-          <button onClick={onCancel} className="rounded-lg p-2 text-[#8b8c95] hover:bg-[#f7f5ef]" aria-label="Kapat"><X size={16} /></button>
+          <div className="text-[15px] font-semibold text-ink">🖊 Kalemle yaz / çiz</div>
+          <button onClick={onCancel} className="rounded-lg p-2 text-ink-3 hover:bg-paper" aria-label="Kapat"><X size={16} /></button>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
           {PEN_PRESETS.map((item) => (
-            <button key={item.label} onClick={() => { setPreset(item); setEraser(false); }} aria-label={item.label} aria-pressed={!eraser && preset.label === item.label} className={`flex h-10 w-10 items-center justify-center rounded-xl border ${!eraser && preset.label === item.label ? "border-[#1f2333] ring-2 ring-[#1f2333]/15" : "border-[#1f2333]/10"}`}>
+            <button key={item.label} onClick={() => { setPreset(item); setEraser(false); }} aria-label={item.label} aria-pressed={!eraser && preset.label === item.label} className={`flex h-10 w-10 items-center justify-center rounded-xl border ${!eraser && preset.label === item.label ? "border-ink ring-2 ring-ink/15" : "border-ink/10"}`}>
               {item.tool === "highlighter" ? <Highlighter size={16} color="#a67c00" /> : <PenLine size={16} color={item.color} />}
             </button>
           ))}
-          <button onClick={() => setEraser((value) => !value)} aria-label="Silgi" aria-pressed={eraser} className={`flex h-10 w-10 items-center justify-center rounded-xl border ${eraser ? "border-[#1f2333] ring-2 ring-[#1f2333]/15" : "border-[#1f2333]/10"}`}><Eraser size={16} /></button>
-          <span className="mx-1 h-6 w-px bg-[#1f2333]/10" />
-          {WIDTHS.map((value) => <button key={value} onClick={() => setWidth(value)} aria-label={`Kalınlık ${value}`} aria-pressed={width === value} className={`flex h-10 w-10 items-center justify-center rounded-xl border ${width === value ? "border-[#3b5ccc]" : "border-[#1f2333]/10"}`}><span className="rounded-full bg-[#1f2333]" style={{ width: value + 2, height: value + 2 }} /></button>)}
-          <span className="mx-1 h-6 w-px bg-[#1f2333]/10" />
-          <button onClick={undo} disabled={!undoStack.length} aria-label="Geri al" className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#1f2333]/10 disabled:opacity-30"><Undo2 size={16} /></button>
-          <button onClick={redo} disabled={!redoStack.length} aria-label="Yinele" className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#1f2333]/10 disabled:opacity-30"><Redo2 size={16} /></button>
-          <button onClick={() => commit([])} disabled={!strokes.length} className="ml-auto h-10 rounded-xl px-3 text-[11px] font-semibold text-[#d95d4d] disabled:opacity-30">Temizle</button>
+          <button onClick={() => setEraser((value) => !value)} aria-label="Silgi" aria-pressed={eraser} className={`flex h-10 w-10 items-center justify-center rounded-xl border ${eraser ? "border-ink ring-2 ring-ink/15" : "border-ink/10"}`}><Eraser size={16} /></button>
+          <span className="mx-1 h-6 w-px bg-ink/10" />
+          {WIDTHS.map((value) => <button key={value} onClick={() => setWidth(value)} aria-label={`Kalınlık ${value}`} aria-pressed={width === value} className={`flex h-10 w-10 items-center justify-center rounded-xl border ${width === value ? "border-brand" : "border-ink/10"}`}><span className="rounded-full bg-ink" style={{ width: value + 2, height: value + 2 }} /></button>)}
+          <span className="mx-1 h-6 w-px bg-ink/10" />
+          <button onClick={undo} disabled={!undoStack.length} aria-label="Geri al" className="flex h-10 w-10 items-center justify-center rounded-xl border border-ink/10 disabled:opacity-30"><Undo2 size={16} /></button>
+          <button onClick={redo} disabled={!redoStack.length} aria-label="Yinele" className="flex h-10 w-10 items-center justify-center rounded-xl border border-ink/10 disabled:opacity-30"><Redo2 size={16} /></button>
+          <button onClick={() => commit([])} disabled={!strokes.length} className="ml-auto h-10 rounded-xl px-3 text-[12px] font-semibold text-danger disabled:opacity-30">Temizle</button>
         </div>
         <svg
           ref={svgRef}
           viewBox={`0 0 ${CANVAS_WIDTH} ${CANVAS_HEIGHT}`}
-          className="mt-3 w-full touch-none select-none rounded-2xl border border-[#1f2333]/10 bg-white"
+          className="mt-3 w-full touch-none select-none rounded-2xl border border-ink/10 bg-white"
           style={{ aspectRatio: `${CANVAS_WIDTH} / ${CANVAS_HEIGHT}`, cursor: eraser ? "cell" : "crosshair" }}
           onPointerDown={onDown}
           onPointerMove={onMove}
@@ -141,8 +141,8 @@ export default function DrawingEditor({ initial, onSave, onCancel }: { initial: 
           {visible.map((stroke, index) => <path key={index} d={strokeToPath(stroke)} fill="none" stroke={stroke.color} strokeWidth={stroke.tool === "highlighter" ? stroke.width * 4 : stroke.width} strokeOpacity={stroke.tool === "highlighter" ? 0.35 : 1} strokeLinecap="round" strokeLinejoin="round" />)}
         </svg>
         <div className="mt-4 flex justify-end gap-2">
-          <button onClick={onCancel} className="h-10 rounded-xl border border-[#1f2333]/10 px-4 text-[12px] font-semibold text-[#777983]">Vazgeç</button>
-          <button onClick={() => onSave(strokes)} disabled={!strokes.length} className="h-10 rounded-xl bg-[#1f2333] px-4 text-[12px] font-semibold text-white disabled:opacity-40">Nota ekle</button>
+          <button onClick={onCancel} className="h-10 rounded-xl border border-ink/10 px-4 text-[13px] font-semibold text-ink-3">Vazgeç</button>
+          <button onClick={() => onSave(strokes)} disabled={!strokes.length} className="h-10 rounded-xl bg-ink px-4 text-[13px] font-semibold text-white disabled:opacity-40">Nota ekle</button>
         </div>
       </div>
     </div>

@@ -113,30 +113,30 @@ export default function VerifyEmailScreen({
   const resendLabel = sendState === "sending" ? "Mail gönderiliyor…" : cooldownSeconds > 0 ? `Tekrar gönder ${cooldownSeconds} sn` : "Doğrulama Mailini Tekrar Gönder";
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#f7f5ef] p-4 sm:p-6">
-      <div className="w-full max-w-md rounded-3xl border border-[#1f2333]/[0.07] bg-white p-6 shadow-[0_20px_50px_rgba(31,35,51,0.08)] sm:p-7">
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-[#eef1fc] text-[22px]">✉️</div>
-        <h1 className="mt-5 text-center text-[18px] font-semibold tracking-[-0.03em] text-[#1f2333]">Pusula YKS'ye hoş geldin{name ? `, ${name}` : ""}!</h1>
-        <p className="mt-2.5 text-center text-[13px] leading-6 text-[#777983]">Devam etmek için e-posta adresini doğrulaman gerekiyor. Doğrulama bağlantısını şu adrese gönderdik:</p>
-        <p className="mt-2 break-all text-center text-[14px] font-semibold text-[#1f2333]">{email}</p>
+    <div className="flex min-h-screen items-center justify-center bg-paper p-4 sm:p-6">
+      <div className="w-full max-w-md rounded-3xl border border-ink/[0.07] bg-white p-6 shadow-overlay sm:p-7">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-soft text-[22px]">✉️</div>
+        <h1 className="mt-5 text-center text-[21px] font-semibold text-ink font-display">Pusula YKS'ye hoş geldin{name ? `, ${name}` : ""}!</h1>
+        <p className="mt-2.5 text-center text-[14px] leading-6 text-ink-3">Devam etmek için e-posta adresini doğrulaman gerekiyor. Doğrulama bağlantısını şu adrese gönderdik:</p>
+        <p className="mt-2 break-all text-center text-[14px] font-semibold text-ink">{email}</p>
 
-        {sendState === "sent" && <p role="status" className="mt-4 rounded-xl bg-[#eaf6f0] p-3 text-center text-[12px] font-medium text-[#3c8a6d]">Mail gönderildi ✓ Gelen kutunu kontrol et.</p>}
-        {message && <p role="alert" className={`mt-4 rounded-xl p-3 text-center text-[12px] font-medium ${sendState === "error" ? "bg-[#fff0ed] text-[#d95d4d]" : "bg-[#f7f5ef] text-[#6b6d77]"}`}>{message}</p>}
+        {sendState === "sent" && <p role="status" className="mt-4 rounded-xl bg-success-soft p-3 text-center text-[13px] font-medium text-success">Mail gönderildi ✓ Gelen kutunu kontrol et.</p>}
+        {message && <p role="alert" className={`mt-4 rounded-xl p-3 text-center text-[13px] font-medium ${sendState === "error" ? "bg-danger-soft text-danger" : "bg-paper text-ink-3"}`}>{message}</p>}
 
         <div className="mt-5 space-y-2">
-          <button onClick={handleResend} disabled={resendDisabled} className="h-11 w-full rounded-xl bg-[#3b5ccc] text-[13px] font-semibold text-white transition hover:bg-[#3350b5] disabled:cursor-not-allowed disabled:opacity-50">
+          <button onClick={handleResend} disabled={resendDisabled} className="h-11 w-full rounded-xl bg-brand text-[14px] font-semibold text-white transition hover:bg-brand disabled:cursor-not-allowed disabled:opacity-50">
             {resendLabel}
           </button>
-          <button onClick={handleCheck} disabled={checking} className="h-10 w-full rounded-xl border border-[#1f2333]/10 text-[12px] font-semibold text-[#343643] hover:bg-[#f7f5ef] disabled:opacity-50">
+          <button onClick={handleCheck} disabled={checking} className="h-10 w-full rounded-xl border border-ink/10 text-[13px] font-semibold text-ink-2 hover:bg-paper disabled:opacity-50">
             {checking ? "Kontrol ediliyor…" : "Doğruladım, devam et"}
           </button>
         </div>
 
         {!changing ? (
-          <button onClick={() => { setChanging(true); setChangeError(""); }} className="mt-3 w-full text-center text-[12px] font-semibold text-[#3b5ccc] hover:underline">E-posta adresimi değiştirmek istiyorum</button>
+          <button onClick={() => { setChanging(true); setChangeError(""); }} className="mt-3 w-full text-center text-[13px] font-semibold text-brand hover:underline">E-posta adresimi değiştirmek istiyorum</button>
         ) : (
-          <div className="mt-4 space-y-2 rounded-2xl border border-[#1f2333]/[0.07] p-3">
-            <label htmlFor="verify-new-email" className="text-[12px] font-semibold text-[#1f2333]">Yeni e-posta adresi</label>
+          <div className="mt-4 space-y-2 rounded-2xl border border-ink/[0.07] p-3">
+            <label htmlFor="verify-new-email" className="text-[13px] font-semibold text-ink">Yeni e-posta adresi</label>
             <input
               id="verify-new-email"
               type="email"
@@ -146,27 +146,27 @@ export default function VerifyEmailScreen({
               placeholder="ece@ornek.com"
               autoComplete="email"
               maxLength={320}
-              className="form-input h-10 w-full text-[13px]"
+              className="form-input h-10 w-full text-[14px]"
               aria-invalid={Boolean(changeError)}
             />
-            {changeError && <p role="alert" className="text-[11px] font-medium text-[#d95d4d]">{changeError}</p>}
+            {changeError && <p role="alert" className="text-[12px] font-medium text-danger">{changeError}</p>}
             <div className="flex gap-2">
-              <button onClick={() => setChanging(false)} className="h-9 flex-1 rounded-lg border border-[#1f2333]/10 text-[12px] font-semibold text-[#777983]">Vazgeç</button>
-              <button onClick={handleChangeEmail} disabled={changeSubmitting} className="h-9 flex-1 rounded-lg bg-[#1f2333] text-[12px] font-semibold text-white disabled:opacity-50">{changeSubmitting ? "Kaydediliyor…" : "Kaydet ve gönder"}</button>
+              <button onClick={() => setChanging(false)} className="h-9 flex-1 rounded-lg border border-ink/10 text-[13px] font-semibold text-ink-3">Vazgeç</button>
+              <button onClick={handleChangeEmail} disabled={changeSubmitting} className="h-9 flex-1 rounded-lg bg-ink text-[13px] font-semibold text-white disabled:opacity-50">{changeSubmitting ? "Kaydediliyor…" : "Kaydet ve gönder"}</button>
             </div>
           </div>
         )}
 
-        <div className="mt-6 rounded-2xl bg-[#f7f5ef] p-4">
-          <div className="text-[12px] font-semibold text-[#1f2333]">Mail gelmedi mi?</div>
-          <ul className="mt-2 space-y-1 text-[12px] leading-5 text-[#6b6d77]">
+        <div className="mt-6 rounded-2xl bg-paper p-4">
+          <div className="text-[13px] font-semibold text-ink">Mail gelmedi mi?</div>
+          <ul className="mt-2 space-y-1 text-[13px] leading-5 text-ink-3">
             <li>• Spam / Gereksiz klasörünü kontrol et</li>
             <li>• Birkaç dakika bekle</li>
             <li>• Hâlâ gelmediyse tekrar gönder</li>
           </ul>
         </div>
 
-        <button onClick={onLogout} className="mt-4 w-full text-center text-[12px] font-semibold text-[#8b8c95] hover:text-[#343643]">Çıkış yap</button>
+        <button onClick={onLogout} className="mt-4 w-full text-center text-[13px] font-semibold text-ink-3 hover:text-ink-2">Çıkış yap</button>
       </div>
     </div>
   );

@@ -44,14 +44,14 @@ type Update = <K extends keyof OnboardingDraft>(field: K, value: OnboardingDraft
 function Field({ label, hint, required, error, htmlFor, children }: { label: string; hint?: string; required?: boolean; error?: string; htmlFor: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
-      <label htmlFor={htmlFor} className="flex items-baseline gap-1 text-[13px] font-semibold text-[#1f2333]">
+      <label htmlFor={htmlFor} className="flex items-baseline gap-1 text-[14px] font-semibold text-ink">
         {label}
-        {required && <span className="text-[#d95d4d]" aria-hidden="true">*</span>}
-        {!required && <span className="text-[10px] font-medium text-[#a2a3ab]">(isteğe bağlı)</span>}
+        {required && <span className="text-danger" aria-hidden="true">*</span>}
+        {!required && <span className="text-[12px] font-medium text-ink-4">(isteğe bağlı)</span>}
       </label>
-      {hint && <p className="text-[11px] leading-4 text-[#9a9ba3]">{hint}</p>}
+      {hint && <p className="text-[12px] leading-4 text-ink-4">{hint}</p>}
       {children}
-      {error && <p role="alert" className="text-[11px] font-medium text-[#d95d4d]">{error}</p>}
+      {error && <p role="alert" className="text-[12px] font-medium text-danger">{error}</p>}
     </div>
   );
 }
@@ -64,7 +64,7 @@ function Chip({ label, selected, onClick }: { label: string; selected: boolean; 
       aria-checked={selected}
       onClick={onClick}
       className={`rounded-full border px-3.5 py-2 text-[12.5px] font-medium transition ${
-        selected ? "border-[#3b5ccc] bg-[#3b5ccc] text-white" : "border-[#e5e4dd] bg-white text-[#52535e] hover:border-[#3b5ccc]/40"
+        selected ? "border-brand bg-brand text-white" : "border-rule bg-white text-ink-2 hover:border-brand/40"
       }`}
     >
       {label}
@@ -175,7 +175,7 @@ function StepRoutine({ draft, errors, update }: { draft: OnboardingDraft; errors
       </Field>
       <Field label="Genelde saat kaçta ders çalışmaya başlarsın?" error={errors.preferredStudyStartTime} htmlFor="onboarding-start-time">
         <Input id="onboarding-start-time" type="time" value={draft.preferredStudyStartTime} onChange={(e) => update("preferredStudyStartTime", e.target.value)} className="max-w-[140px]" aria-invalid={Boolean(errors.preferredStudyStartTime)} />
-        <p className="mt-1.5 text-[11px] text-[#8b8c95]">Pusula Odak, günlük planını bu saatten başlayarak gerçek saat dilimlerine böler (ör. 16:00–16:40, 16:50–17:30...).</p>
+        <p className="mt-1.5 text-[12px] text-ink-3">Pusula Odak, günlük planını bu saatten başlayarak gerçek saat dilimlerine böler (ör. 16:00–16:40, 16:50–17:30...).</p>
       </Field>
       <Field label="Haftanın hangi günleri çalışabilirsin?" htmlFor="onboarding-study-days">
         <ChipGroup id="onboarding-study-days" options={STUDY_DAYS} value={draft.availableStudyDays} onChange={(next) => update("availableStudyDays", next)} multi />
@@ -359,7 +359,7 @@ export default function OnboardingFlow({
   if (profileQuery.isLoading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
-        <div className="flex items-center gap-2 text-[13px] text-[#9a9ba3]"><Sparkles size={16} className="animate-pulse" /> Profilin hazırlanıyor…</div>
+        <div className="flex items-center gap-2 text-[14px] text-ink-4"><Sparkles size={16} className="animate-pulse" /> Profilin hazırlanıyor…</div>
       </div>
     );
   }
@@ -367,22 +367,22 @@ export default function OnboardingFlow({
   return (
     <div className={`mx-auto flex w-full max-w-xl flex-col justify-center px-5 sm:px-0 ${onClose ? "py-2" : "min-h-screen py-10"}`}>
       <div className="mb-6">
-        <div className="mb-3 flex items-center justify-between text-[11px] font-semibold text-[#9a9ba3]">
+        <div className="mb-3 flex items-center justify-between text-[12px] font-semibold text-ink-4">
           <span>{meta.eyebrow}</span>
           <span>{step + 1} / {TOTAL_ONBOARDING_STEPS}</span>
         </div>
         <Progress value={progressPercent} aria-label="Onboarding ilerlemesi" />
       </div>
 
-      <div className={onClose ? "" : "rounded-3xl border border-[#1f2333]/[0.06] bg-white p-6 shadow-sm sm:p-8"}>
+      <div className={onClose ? "" : "rounded-3xl border border-ink/[0.06] bg-white p-6 shadow-sm sm:p-8"}>
         {step === 0 && !onClose && (
           <div className="mb-2">
             <div className="eyebrow mb-2">Hoş geldin{userName ? `, ${userName.split(" ")[0]}` : ""}</div>
-            <h1 className="text-[22px] font-semibold tracking-[-0.03em] text-[#1f2333]">YKS çalışma yolculuğunu birlikte planlayalım</h1>
+            <h1 className="text-[25px] font-semibold text-ink font-display">YKS çalışma yolculuğunu birlikte planlayalım</h1>
           </div>
         )}
-        <h2 className="text-[17px] font-semibold text-[#1f2333]">{meta.title}</h2>
-        <p className="mb-6 mt-1 text-[12px] leading-5 text-[#858690]">{STEP_INTRO[meta.key]}</p>
+        <h2 className="text-[17px] font-semibold text-ink">{meta.title}</h2>
+        <p className="mb-6 mt-1 text-[13px] leading-5 text-ink-3">{STEP_INTRO[meta.key]}</p>
 
         <StepComponent draft={draft} errors={errors} update={update} />
 
@@ -392,7 +392,7 @@ export default function OnboardingFlow({
               <ArrowLeft size={15} /> Geri
             </Button>
             {onClose && (
-              <Button type="button" variant="ghost" onClick={onClose} className="text-[#9a9ba3]">
+              <Button type="button" variant="ghost" onClick={onClose} className="text-ink-4">
                 Kapat
               </Button>
             )}
@@ -403,7 +403,7 @@ export default function OnboardingFlow({
           </Button>
         </div>
       </div>
-      {!onClose && <p className="mt-4 text-center text-[11px] text-[#a2a3ab]">İstediğin zaman profil ayarlarından bu bilgileri güncelleyebilirsin.</p>}
+      {!onClose && <p className="mt-4 text-center text-[12px] text-ink-4">İstediğin zaman profil ayarlarından bu bilgileri güncelleyebilirsin.</p>}
     </div>
   );
 }

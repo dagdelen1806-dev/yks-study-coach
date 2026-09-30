@@ -44,7 +44,7 @@ export const FONT_SIZES = [
 export type InsertAction = "voice" | "photo" | "formula" | "drawing";
 
 const Btn = ({ label, active, onClick, disabled, children }: { label: string; active?: boolean; onClick: () => void; disabled?: boolean; children: React.ReactNode }) => (
-  <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={onClick} disabled={disabled} aria-label={label} title={label} aria-pressed={active} className={`flex h-10 min-w-10 shrink-0 items-center justify-center rounded-lg px-2 text-[#343643] transition disabled:opacity-30 ${active ? "bg-[#e3e9ff] text-[#3b5ccc]" : "hover:bg-[#f7f5ef]"}`}>{children}</button>
+  <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={onClick} disabled={disabled} aria-label={label} title={label} aria-pressed={active} className={`flex h-10 min-w-10 shrink-0 items-center justify-center rounded-lg px-2 text-ink-2 transition disabled:opacity-30 ${active ? "bg-brand-soft text-brand" : "hover:bg-paper"}`}>{children}</button>
 );
 
 /**
@@ -82,53 +82,53 @@ export default function EditorToolbar({ editor, onInsert }: { editor: Editor; on
   const chain = () => editor.chain().focus();
 
   return (
-    <div className="border-b border-[#1f2333]/[0.07] bg-white/95 backdrop-blur" role="toolbar" aria-label="Not araç çubuğu">
+    <div className="border-b border-ink/[0.07] bg-white/95 backdrop-blur" role="toolbar" aria-label="Not araç çubuğu">
       <div className="flex items-center gap-1 overflow-x-auto px-2 py-1.5">
-        <Btn label="Sesli not" onClick={() => onInsert("voice")}><Mic size={17} className="text-[#d95d4d]" /></Btn>
+        <Btn label="Sesli not" onClick={() => onInsert("voice")}><Mic size={17} className="text-danger" /></Btn>
         <Btn label="Fotoğraf ekle" onClick={() => onInsert("photo")}><Camera size={17} /></Btn>
         <Btn label="Formül ekle" onClick={() => onInsert("formula")}><Sigma size={17} /></Btn>
         <Btn label="Kalemle çiz" onClick={() => onInsert("drawing")}><PenLine size={17} /></Btn>
-        <span className="mx-1 h-6 w-px shrink-0 bg-[#1f2333]/10" />
+        <span className="mx-1 h-6 w-px shrink-0 bg-ink/10" />
         {(["text", "paragraph", "color"] as const).map((key) => (
-          <button key={key} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => setPanel(panel === key ? null : key)} aria-expanded={panel === key} className={`h-9 shrink-0 rounded-lg px-2.5 text-[11px] font-semibold ${panel === key ? "bg-[#1f2333] text-white" : "text-[#545661] hover:bg-[#f7f5ef]"}`}>
+          <button key={key} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => setPanel(panel === key ? null : key)} aria-expanded={panel === key} className={`h-9 shrink-0 rounded-lg px-2.5 text-[12px] font-semibold ${panel === key ? "bg-ink text-white" : "text-ink-2 hover:bg-paper"}`}>
             {key === "text" ? "Yazı" : key === "paragraph" ? "Paragraf" : "Renk"}
           </button>
         ))}
-        <span className="mx-1 h-6 w-px shrink-0 bg-[#1f2333]/10" />
+        <span className="mx-1 h-6 w-px shrink-0 bg-ink/10" />
         <Btn label="Geri al" disabled={!state.canUndo} onClick={() => chain().undo().run()}><Undo2 size={16} /></Btn>
         <Btn label="Yinele" disabled={!state.canRedo} onClick={() => chain().redo().run()}><Redo2 size={16} /></Btn>
       </div>
 
       {panel === "text" && (
-        <div className="flex items-center gap-1 overflow-x-auto border-t border-[#1f2333]/[0.05] px-2 py-1.5">
+        <div className="flex items-center gap-1 overflow-x-auto border-t border-ink/[0.05] px-2 py-1.5">
           <Btn label="Kalın" active={state.bold} onClick={() => chain().toggleBold().run()}><Bold size={16} /></Btn>
           <Btn label="İtalik" active={state.italic} onClick={() => chain().toggleItalic().run()}><Italic size={16} /></Btn>
           <Btn label="Altı çizili" active={state.underline} onClick={() => chain().toggleUnderline().run()}><Underline size={16} /></Btn>
           <Btn label="Üstü çizili" active={state.strike} onClick={() => chain().toggleStrike().run()}><Strikethrough size={16} /></Btn>
-          <span className="mx-1 h-6 w-px shrink-0 bg-[#1f2333]/10" />
+          <span className="mx-1 h-6 w-px shrink-0 bg-ink/10" />
           <Btn label="Başlık 1" active={state.h1} onClick={() => chain().toggleHeading({ level: 1 }).run()}><Heading1 size={17} /></Btn>
           <Btn label="Başlık 2" active={state.h2} onClick={() => chain().toggleHeading({ level: 2 }).run()}><Heading2 size={17} /></Btn>
           <Btn label="Başlık 3" active={state.h3} onClick={() => chain().toggleHeading({ level: 3 }).run()}><Heading3 size={17} /></Btn>
-          <span className="mx-1 h-6 w-px shrink-0 bg-[#1f2333]/10" />
-          <label className="flex shrink-0 items-center gap-1 text-[11px] text-[#545661]"><Type size={14} aria-hidden />
-            <select aria-label="Yazı tipi" value={state.fontFamily ?? ""} onChange={(event) => (event.target.value ? chain().setFontFamily(event.target.value).run() : chain().unsetFontFamily().run())} className="h-9 rounded-lg border border-[#1f2333]/10 bg-white px-1.5 text-[11px]">
+          <span className="mx-1 h-6 w-px shrink-0 bg-ink/10" />
+          <label className="flex shrink-0 items-center gap-1 text-[12px] text-ink-2"><Type size={14} aria-hidden />
+            <select aria-label="Yazı tipi" value={state.fontFamily ?? ""} onChange={(event) => (event.target.value ? chain().setFontFamily(event.target.value).run() : chain().unsetFontFamily().run())} className="h-9 rounded-lg border border-ink/10 bg-white px-1.5 text-[12px]">
               {FONT_FAMILIES.map((font) => <option key={font.name} value={font.value ?? ""}>{font.name}</option>)}
             </select>
           </label>
-          <select aria-label="Yazı boyutu" value={state.fontSize ?? ""} onChange={(event) => (event.target.value ? chain().setFontSize(event.target.value).run() : chain().unsetFontSize().run())} className="h-9 shrink-0 rounded-lg border border-[#1f2333]/10 bg-white px-1.5 text-[11px]">
+          <select aria-label="Yazı boyutu" value={state.fontSize ?? ""} onChange={(event) => (event.target.value ? chain().setFontSize(event.target.value).run() : chain().unsetFontSize().run())} className="h-9 shrink-0 rounded-lg border border-ink/10 bg-white px-1.5 text-[12px]">
             {FONT_SIZES.map((size) => <option key={size.name} value={size.value ?? ""}>{size.name}</option>)}
           </select>
         </div>
       )}
 
       {panel === "paragraph" && (
-        <div className="flex items-center gap-1 overflow-x-auto border-t border-[#1f2333]/[0.05] px-2 py-1.5">
+        <div className="flex items-center gap-1 overflow-x-auto border-t border-ink/[0.05] px-2 py-1.5">
           <Btn label="Madde listesi" active={state.bullet} onClick={() => chain().toggleBulletList().run()}><List size={16} /></Btn>
           <Btn label="Numaralı liste" active={state.ordered} onClick={() => chain().toggleOrderedList().run()}><ListOrdered size={16} /></Btn>
           <Btn label="Yapılacaklar listesi" active={state.task} onClick={() => chain().toggleTaskList().run()}><CheckSquare size={16} /></Btn>
           <Btn label="Alıntı" active={state.quote} onClick={() => chain().toggleBlockquote().run()}><Quote size={16} /></Btn>
           <Btn label="Ayırıcı çizgi" onClick={() => chain().setHorizontalRule().run()}><Minus size={16} /></Btn>
-          <span className="mx-1 h-6 w-px shrink-0 bg-[#1f2333]/10" />
+          <span className="mx-1 h-6 w-px shrink-0 bg-ink/10" />
           <Btn label="Sola hizala" active={state.left} onClick={() => chain().setTextAlign("left").run()}><AlignLeft size={16} /></Btn>
           <Btn label="Ortala" active={state.center} onClick={() => chain().setTextAlign("center").run()}><AlignCenter size={16} /></Btn>
           <Btn label="Sağa hizala" active={state.right} onClick={() => chain().setTextAlign("right").run()}><AlignRight size={16} /></Btn>
@@ -136,17 +136,17 @@ export default function EditorToolbar({ editor, onInsert }: { editor: Editor; on
       )}
 
       {panel === "color" && (
-        <div className="flex items-center gap-1.5 overflow-x-auto border-t border-[#1f2333]/[0.05] px-2 py-1.5">
-          <span className="shrink-0 text-[10px] font-semibold text-[#8b8c95]">Yazı</span>
+        <div className="flex items-center gap-1.5 overflow-x-auto border-t border-ink/[0.05] px-2 py-1.5">
+          <span className="shrink-0 text-[12px] font-semibold text-ink-3">Yazı</span>
           {TEXT_COLORS.map((color) => (
-            <button key={color.name} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => (color.value ? chain().setColor(color.value).run() : chain().unsetColor().run())} aria-label={`Yazı rengi: ${color.name}`} aria-pressed={state.color === color.value} className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border text-[14px] font-bold ${state.color === color.value ? "border-[#1f2333]" : "border-[#1f2333]/10"}`} style={{ color: color.value ?? "#1f2333" }}>A</button>
+            <button key={color.name} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => (color.value ? chain().setColor(color.value).run() : chain().unsetColor().run())} aria-label={`Yazı rengi: ${color.name}`} aria-pressed={state.color === color.value} className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border text-[14px] font-bold ${state.color === color.value ? "border-ink" : "border-ink/10"}`} style={{ color: color.value ?? "#1f2333" }}>A</button>
           ))}
-          <span className="mx-1 h-6 w-px shrink-0 bg-[#1f2333]/10" />
-          <Highlighter size={14} className="shrink-0 text-[#8b8c95]" aria-hidden />
+          <span className="mx-1 h-6 w-px shrink-0 bg-ink/10" />
+          <Highlighter size={14} className="shrink-0 text-ink-3" aria-hidden />
           {HIGHLIGHT_COLORS.map((color) => (
-            <button key={color.name} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => chain().toggleHighlight({ color: color.value }).run()} aria-label={`Vurgu: ${color.name}`} aria-pressed={state.highlight === color.value} className={`h-9 w-9 shrink-0 rounded-lg border ${state.highlight === color.value ? "border-[#1f2333]" : "border-[#1f2333]/10"}`} style={{ background: color.value }} />
+            <button key={color.name} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => chain().toggleHighlight({ color: color.value }).run()} aria-label={`Vurgu: ${color.name}`} aria-pressed={state.highlight === color.value} className={`h-9 w-9 shrink-0 rounded-lg border ${state.highlight === color.value ? "border-ink" : "border-ink/10"}`} style={{ background: color.value }} />
           ))}
-          <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => chain().unsetHighlight().run()} className="h-9 shrink-0 rounded-lg px-2 text-[11px] text-[#8b8c95]">Vurguyu kaldır</button>
+          <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => chain().unsetHighlight().run()} className="h-9 shrink-0 rounded-lg px-2 text-[12px] text-ink-3">Vurguyu kaldır</button>
         </div>
       )}
     </div>

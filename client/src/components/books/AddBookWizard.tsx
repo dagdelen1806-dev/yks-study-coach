@@ -102,8 +102,8 @@ export default function AddBookWizard({
     );
   }
 
-  const hint = (field: keyof FieldConfidence) => confidence[field] < LOW && <span className="ml-1.5 rounded bg-[#fff8df] px-1 py-px text-[9px] font-bold text-[#a1711d]">kontrol et</span>;
-  const lowClass = (field: keyof FieldConfidence) => (confidence[field] < LOW ? "border-[#e0b44c]" : "");
+  const hint = (field: keyof FieldConfidence) => confidence[field] < LOW && <span className="ml-1.5 rounded bg-warn-soft px-1 py-px text-[11px] font-bold text-warn">kontrol et</span>;
+  const lowClass = (field: keyof FieldConfidence) => (confidence[field] < LOW ? "border-warn-fill" : "");
 
   return (
     <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !readCover.isPending && onClose()}>
@@ -111,32 +111,32 @@ export default function AddBookWizard({
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="eyebrow mb-2">Kitap ekle · 1. adım</div>
-            <h2 className="text-[20px] font-semibold tracking-[-0.04em] text-[#1f2333]">{step === "cover" ? "Kitabın kapağını çek" : "Kitap bilgilerini kontrol et"}</h2>
+            <h2 className="text-[23px] font-semibold text-ink font-display">{step === "cover" ? "Kitabın kapağını çek" : "Kitap bilgilerini kontrol et"}</h2>
           </div>
-          {!readCover.isPending && <button onClick={onClose} className="rounded-lg p-2 text-[#8b8c95] hover:bg-[#f7f5ef]" aria-label="Kapat"><X size={16} /></button>}
+          {!readCover.isPending && <button onClick={onClose} className="rounded-lg p-2 text-ink-3 hover:bg-paper" aria-label="Kapat"><X size={16} /></button>}
         </div>
 
         <div className="mt-4 flex gap-1.5" aria-hidden>
           {["Kapak", "İçindekiler", "Onay", "Tamam"].map((label, index) => (
             <div key={label} className="flex-1">
-              <div className={`h-1.5 rounded-full ${index === 0 ? "bg-[#3b5ccc]" : "bg-[#eceae3]"}`} />
-              <div className={`mt-1 text-[9px] font-semibold ${index === 0 ? "text-[#3b5ccc]" : "text-[#b0b1b8]"}`}>{label}</div>
+              <div className={`h-1.5 rounded-full ${index === 0 ? "bg-brand" : "bg-rule"}`} />
+              <div className={`mt-1 text-[11px] font-semibold ${index === 0 ? "text-brand" : "text-rule-strong"}`}>{label}</div>
             </div>
           ))}
         </div>
 
         {step === "cover" && (
           <div className="mt-5">
-            <p className="text-[12px] leading-5 text-[#6d7390]">İlk fotoğraf kitabın <strong>kapağı</strong> olsun: kitap adı, yayınevi ve dersi buradan okuyacağız. Kapağın tamamı görünsün, parlama olmasın.</p>
+            <p className="text-[13px] leading-5 text-ink-3">İlk fotoğraf kitabın <strong>kapağı</strong> olsun: kitap adı, yayınevi ve dersi buradan okuyacağız. Kapağın tamamı görünsün, parlama olmasın.</p>
             {error && (
-              <div role="alert" className="mt-3 rounded-xl bg-[#fff0ed] p-3 text-[12px] font-medium text-[#d95d4d]">
+              <div role="alert" className="mt-3 rounded-xl bg-danger-soft p-3 text-[13px] font-medium text-danger">
                 {error}
                 {lastCover && !readCover.isPending && (
                   <div className="mt-2">
-                    <div className="text-[11px] font-medium text-[#8b5a4f]">Fotoğraf yan mı? Yazının düz duracağı yöne döndürüp tekrar oku:</div>
+                    <div className="text-[12px] font-medium text-warn">Fotoğraf yan mı? Yazının düz duracağı yöne döndürüp tekrar oku:</div>
                     <div className="mt-1.5 flex gap-2">
                       {([[270, "Sola çevir", RotateCcw], [90, "Sağa çevir", RotateCw]] as const).map(([turn, label, Icon]) => (
-                        <button key={label} onClick={() => void handleCover(lastCover.file, (((lastCover.rotate + turn) % 360) as 0 | 90 | 180 | 270))} className="flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-[11px] font-semibold text-[#3b5ccc]">
+                        <button key={label} onClick={() => void handleCover(lastCover.file, (((lastCover.rotate + turn) % 360) as 0 | 90 | 180 | 270))} className="flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-[12px] font-semibold text-brand">
                           <Icon size={13} /> {label}
                         </button>
                       ))}
@@ -148,18 +148,18 @@ export default function AddBookWizard({
             {readCover.isPending ? (
               <div className="flex flex-col items-center py-10 text-center">
                 {coverPreview && <img src={coverPreview} alt="Kapak" style={lastCover?.rotate ? { transform: `rotate(${lastCover.rotate}deg)` } : undefined} className="mb-4 h-32 rounded-lg object-contain" />}
-                <Loader2 className="animate-spin text-[#3b5ccc]" size={24} />
-                <p className="mt-3 text-[12px] font-semibold text-[#1f2333]">Kapak okunuyor…</p>
+                <Loader2 className="animate-spin text-brand" size={24} />
+                <p className="mt-3 text-[13px] font-semibold text-ink">Kapak okunuyor…</p>
               </div>
             ) : (
               <div className="mt-4 grid gap-2 sm:grid-cols-2">
-                <button onClick={() => cameraRef.current?.click()} className="flex h-28 flex-col items-center justify-center gap-1.5 rounded-2xl border-2 border-dashed border-[#3b5ccc]/30 text-[12px] font-semibold text-[#3b5ccc] hover:bg-[#f4f6ff]"><Camera size={22} /> Kapağı çek</button>
-                <button onClick={() => galleryRef.current?.click()} className="flex h-28 flex-col items-center justify-center gap-1.5 rounded-2xl border border-[#1f2333]/10 text-[12px] font-semibold text-[#545661] hover:bg-[#f7f5ef]"><ImagePlus size={22} /> Galeriden seç</button>
+                <button onClick={() => cameraRef.current?.click()} className="flex h-28 flex-col items-center justify-center gap-1.5 rounded-2xl border-2 border-dashed border-brand/30 text-[13px] font-semibold text-brand hover:bg-brand-soft"><Camera size={22} /> Kapağı çek</button>
+                <button onClick={() => galleryRef.current?.click()} className="flex h-28 flex-col items-center justify-center gap-1.5 rounded-2xl border border-ink/10 text-[13px] font-semibold text-ink-2 hover:bg-paper"><ImagePlus size={22} /> Galeriden seç</button>
               </div>
             )}
             <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(event) => { void handleCover(event.target.files?.[0]); event.target.value = ""; }} />
             <input ref={galleryRef} type="file" accept="image/*" className="hidden" onChange={(event) => { void handleCover(event.target.files?.[0]); event.target.value = ""; }} />
-            {!readCover.isPending && <button onClick={() => { setDraft(EMPTY_DRAFT); setConfidence(FULL_CONFIDENCE); setStep("review"); }} className="mt-3 text-[11px] font-semibold text-[#8b8c95] hover:text-[#343643]">Fotoğraf olmadan, bilgileri elle gir</button>}
+            {!readCover.isPending && <button onClick={() => { setDraft(EMPTY_DRAFT); setConfidence(FULL_CONFIDENCE); setStep("review"); }} className="mt-3 text-[12px] font-semibold text-ink-3 hover:text-ink-2">Fotoğraf olmadan, bilgileri elle gir</button>}
           </div>
         )}
 
@@ -185,8 +185,8 @@ export default function AddBookWizard({
               </div>
             </div>
             <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
-              <button onClick={() => { setStep("cover"); setError(""); }} className="h-10 rounded-xl px-3 text-[12px] font-semibold text-[#8b8c95] hover:text-[#343643]">Kapağı yeniden çek</button>
-              <button onClick={confirmCover} disabled={creating} className="h-10 rounded-xl bg-[#3b5ccc] px-5 text-[12px] font-semibold text-white disabled:opacity-50">{creating ? "Ekleniyor…" : "Kaydet ve içindekilere geç →"}</button>
+              <button onClick={() => { setStep("cover"); setError(""); }} className="h-10 rounded-xl px-3 text-[13px] font-semibold text-ink-3 hover:text-ink-2">Kapağı yeniden çek</button>
+              <button onClick={confirmCover} disabled={creating} className="h-10 rounded-xl bg-brand px-5 text-[13px] font-semibold text-white disabled:opacity-50">{creating ? "Ekleniyor…" : "Kaydet ve içindekilere geç →"}</button>
             </div>
           </div>
         )}
