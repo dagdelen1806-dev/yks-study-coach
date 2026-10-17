@@ -1402,8 +1402,8 @@ function describeErrorMapForPlan(map, limit = 5) {
   if (!focus.length) return null;
   return focus.map((item) => `${item.subject}${item.topic ? ` / ${item.topic}` : ""}: ${item.open} \xE7\xF6z\xFClemeyen soru${item.topErrorType ? ` (en s\u0131k i\u015Faretlenen hata t\xFCr\xFC: ${ERROR_TYPES[item.topErrorType].label})` : ""}`).join("\n");
 }
-var paragraph = (text2) => text2?.trim() ? { type: "paragraph", content: [{ type: "text", text: text2.trim() }] } : { type: "paragraph" };
-var heading = (text2) => ({ type: "heading", attrs: { level: 3 }, content: [{ type: "text", text: text2 }] });
+var paragraph = (text3) => text3?.trim() ? { type: "paragraph", content: [{ type: "text", text: text3.trim() }] } : { type: "paragraph" };
+var heading = (text3) => ({ type: "heading", attrs: { level: 3 }, content: [{ type: "text", text: text3 }] });
 function buildQuestionDoc(input) {
   const content = [];
   if (input.questionImageId) content.push({ type: "noteImage", attrs: { attachmentId: input.questionImageId, ...input.questionOcrText ? { ocrText: input.questionOcrText } : {} } });
@@ -1972,7 +1972,7 @@ var escapeHtml = (value) => value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;",
 function buildVerifyEmail({ to, name, verifyUrl, expiresInMinutes }) {
   const greeting = name ? `Merhaba ${name},` : "Merhaba,";
   const subject = "Pusula YKS hesab\u0131n\u0131 do\u011Frula";
-  const text2 = [
+  const text3 = [
     greeting,
     "",
     "Pusula YKS'ye ho\u015F geldin! Hesab\u0131n\u0131 kullanmaya ba\u015Flamak i\xE7in e-posta adresini do\u011Frulaman gerekiyor.",
@@ -2023,7 +2023,7 @@ function buildVerifyEmail({ to, name, verifyUrl, expiresInMinutes }) {
 </table>
 </body>
 </html>`;
-  return { to, subject, html, text: text2 };
+  return { to, subject, html, text: text3 };
 }
 
 // server/_core/env.ts
@@ -2559,9 +2559,9 @@ var databaseAttachmentStorage = {
     const [row] = await db.select({ mimeType: noteAttachments.mimeType, data: noteAttachments.data, kind: noteAttachments.kind, noteId: noteAttachments.noteId }).from(noteAttachments).where(and2(eq4(noteAttachments.id, id2), eq4(noteAttachments.userId, userId))).limit(1);
     return row ?? null;
   },
-  async setOcrText(userId, id2, text2) {
+  async setOcrText(userId, id2, text3) {
     const db = await requireDb();
-    await db.update(noteAttachments).set({ ocrText: text2 }).where(and2(eq4(noteAttachments.id, id2), eq4(noteAttachments.userId, userId)));
+    await db.update(noteAttachments).set({ ocrText: text3 }).where(and2(eq4(noteAttachments.id, id2), eq4(noteAttachments.userId, userId)));
   },
   async syncNoteLinks(userId, noteId, referencedIds) {
     const db = await requireDb();
@@ -3598,6 +3598,7 @@ async function invokeLLM(params) {
     model,
     thinking,
     reasoning,
+    reasoningEffort,
     maxTokens,
     max_tokens
   } = params;
@@ -3625,6 +3626,9 @@ async function invokeLLM(params) {
   if (reasoning) {
     payload.reasoning = reasoning;
   }
+  if (reasoningEffort && /^gemini-2\.5/.test(String(payload.model))) {
+    payload.reasoning_effort = reasoningEffort;
+  }
   const normalizedResponseFormat = normalizeResponseFormat({
     responseFormat,
     response_format,
@@ -3649,6 +3653,11 @@ async function invokeLLM(params) {
     }
   };
   let response = await send(payload);
+  if (response.status === 400 && "reasoning_effort" in payload) {
+    console.warn("[LLM] reasoning_effort rejected (400), retrying without it");
+    delete payload.reasoning_effort;
+    response = await send(payload);
+  }
   const format = payload.response_format;
   if (response.status === 400 && format?.type === "json_schema") {
     const firstError = await response.text().catch(() => "");
@@ -4025,8 +4034,8 @@ function curriculumSubjectsFor(subject, category) {
 // server/bookContent/curriculumMatcher.ts
 init_turkishText();
 var STOPWORDS = /* @__PURE__ */ new Set(["ve", "ile", "de", "da", "test", "testi", "testleri", "soru", "sorulari", "konu", "konulari", "unite", "bolum", "tyt", "ayt", "yks", "yeni", "nesil"]);
-var contentTokens = (text2) => normalizeForComparison(text2).split(" ").filter((token) => token.length > 1 && !STOPWORDS.has(token));
-var stems = (text2, length) => new Set(contentTokens(text2).map((token) => token.slice(0, length)));
+var contentTokens = (text3) => normalizeForComparison(text3).split(" ").filter((token) => token.length > 1 && !STOPWORDS.has(token));
+var stems = (text3, length) => new Set(contentTokens(text3).map((token) => token.slice(0, length)));
 function dice(a, b) {
   if (a.size === 0 || b.size === 0) return 0;
   let shared = 0;
@@ -4387,20 +4396,20 @@ var DIGIT_LOOKALIKES = { I: "1", l: "1", "|": "1", i: "1", "!": "1", O: "0", o: 
 function parsePageNumber(raw) {
   if (raw === null || raw === void 0) return { value: null, corrected: false, raw: "" };
   if (typeof raw === "number") return { value: Number.isInteger(raw) && raw > 0 && raw < 2e3 ? raw : null, corrected: false, raw: String(raw) };
-  const text2 = raw.trim();
-  const inParens = /\(\s*([^)]{1,6})\s*\)/.exec(text2)?.[1];
-  const token = (inParens ?? text2.split(/[\s.…·_-]+/).filter(Boolean).pop() ?? "").trim();
-  if (!token || token.length > 4) return { value: null, corrected: false, raw: text2 };
+  const text3 = raw.trim();
+  const inParens = /\(\s*([^)]{1,6})\s*\)/.exec(text3)?.[1];
+  const token = (inParens ?? text3.split(/[\s.…·_-]+/).filter(Boolean).pop() ?? "").trim();
+  if (!token || token.length > 4) return { value: null, corrected: false, raw: text3 };
   if (/^\d+$/.test(token)) {
     const value2 = Number(token);
-    return { value: value2 > 0 && value2 < 2e3 ? value2 : null, corrected: false, raw: text2 };
+    return { value: value2 > 0 && value2 < 2e3 ? value2 : null, corrected: false, raw: text3 };
   }
   const letters = token.replace(/\d/g, "");
-  if (!/\d/.test(token) || letters.length > token.length - letters.length) return { value: null, corrected: false, raw: text2 };
+  if (!/\d/.test(token) || letters.length > token.length - letters.length) return { value: null, corrected: false, raw: text3 };
   const mapped = token.split("").map((char) => /\d/.test(char) ? char : DIGIT_LOOKALIKES[char] ?? "?").join("");
-  if (!/^\d+$/.test(mapped)) return { value: null, corrected: false, raw: text2 };
+  if (!/^\d+$/.test(mapped)) return { value: null, corrected: false, raw: text3 };
   const value = Number(mapped);
-  return { value: value > 0 && value < 2e3 ? value : null, corrected: true, raw: text2 };
+  return { value: value > 0 && value < 2e3 ? value : null, corrected: true, raw: text3 };
 }
 function splitTrailingPage(title) {
   const match = /^(.*?)[\s.…·_]{3,}\s*\(?\s*([0-9IlOoZS|]{1,4})\s*\)?\s*$/.exec(title);
@@ -4427,34 +4436,34 @@ function textSimilarity(a, b) {
 var TURKISH_LETTERS = /[A-Za-zÇĞİÖŞÜçğıöşüÂâÎîÛû]/;
 var TURKISH_SPECIFIC = /[ÇĞİÖŞÜçğıöşü]/g;
 var VOWELS = /[AEIİOÖUÜaeıioöuüâîû]/;
-function turkishPlausibility(text2) {
-  const compact = text2.replace(/\s+/g, "");
+function turkishPlausibility(text3) {
+  const compact = text3.replace(/\s+/g, "");
   if (!compact) return 0;
   const letters = compact.split("").filter((char) => TURKISH_LETTERS.test(char)).length;
   const digits = compact.split("").filter((char) => /\d/.test(char)).length;
   const symbols = compact.length - letters - digits - (compact.match(/[.,;:()'’\-–—/&]/g)?.length ?? 0);
-  const words = text2.split(/\s+/).filter((word) => word.replace(/[^A-Za-zÇĞİÖŞÜçğıöşü]/g, "").length >= 2);
+  const words = text3.split(/\s+/).filter((word) => word.replace(/[^A-Za-zÇĞİÖŞÜçğıöşü]/g, "").length >= 2);
   const wordsWithVowel = words.filter((word) => VOWELS.test(word)).length;
   const letterRatio = letters / Math.max(1, compact.length - digits);
   const vowelRatio = words.length ? wordsWithVowel / words.length : 0.5;
   return Math.max(0, Math.min(1, 0.6 * letterRatio + 0.4 * vowelRatio - 0.15 * Math.max(0, symbols)));
 }
-var turkishCharCount = (text2) => text2.match(TURKISH_SPECIFIC)?.length ?? 0;
+var turkishCharCount = (text3) => text3.match(TURKISH_SPECIFIC)?.length ?? 0;
 
 // server/bookContent/tocPostprocess.ts
 var HEADING_WORDS = /* @__PURE__ */ new Set(["icindekiler", "icerik", "icerikler", "kitap bitirme plani", "konular", "konu listesi", "konu takip cizelgesi", "sayfa", "test", "unite"]);
 function noiseReason(item, context) {
-  const text2 = `${item.label ?? ""} ${item.title}`.trim();
-  const normalized = normalizeForComparison(text2);
+  const text3 = `${item.label ?? ""} ${item.title}`.trim();
+  const normalized = normalizeForComparison(text3);
   if (!normalized) return "decorative";
-  if (/\bisbn\b/.test(normalized) || /\b97[89][\d\s-]{10,}/.test(text2)) return "isbn";
-  if (/\d{8,}/.test(text2.replace(/[\s-]/g, "")) && !/[a-zçğıöşü]{3,}/i.test(text2)) return "barcode";
-  if (/(www\.|https?:\/\/|\.com\b|\.com\.tr\b|@)/i.test(text2)) return "url";
-  if (/©|\bcopyright\b|tum haklari|yayin hakki|baski\s*:|matbaa/.test(`${text2} ${normalized}`.toLowerCase())) return "copyright";
+  if (/\bisbn\b/.test(normalized) || /\b97[89][\d\s-]{10,}/.test(text3)) return "isbn";
+  if (/\d{8,}/.test(text3.replace(/[\s-]/g, "")) && !/[a-zçğıöşü]{3,}/i.test(text3)) return "barcode";
+  if (/(www\.|https?:\/\/|\.com\b|\.com\.tr\b|@)/i.test(text3)) return "url";
+  if (/©|\bcopyright\b|tum haklari|yayin hakki|baski\s*:|matbaa/.test(`${text3} ${normalized}`.toLowerCase())) return "copyright";
   if (HEADING_WORDS.has(normalized)) return "heading";
   if (context.publisher && normalizeForComparison(context.publisher) === normalized) return "publisher";
   if (context.title && item.type !== "unit" && normalizeForComparison(context.title) === normalized) return "book_title";
-  if (!/[a-zçğıöşü]/i.test(text2) && item.page === null) return "decorative";
+  if (!/[a-zçğıöşü]/i.test(text3) && item.page === null) return "decorative";
   return null;
 }
 function repairPageNumbers(items) {
@@ -5544,16 +5553,16 @@ function looksLikeTopicList(page) {
 var UNIT_ONLY = /^\d+\s*\.?\s*unite$/;
 function classify(label, title) {
   if (label && /^\d+\s*[.)]?$/.test(label.trim())) return { contentType: "topic", testNumber: null };
-  const text2 = normalizeForComparison(`${label ?? ""} ${label ? "" : title}`);
+  const text3 = normalizeForComparison(`${label ?? ""} ${label ? "" : title}`);
   const lastNumber = (() => {
-    const all = text2.match(/\d+/g);
+    const all = text3.match(/\d+/g);
     return all ? Number(all[all.length - 1]) : null;
   })();
-  const testMatch = text2.match(/^test\s*(\d+)/);
+  const testMatch = text3.match(/^test\s*(\d+)/);
   if (testMatch) return { contentType: "topic_test", testNumber: Number(testMatch[1]) };
-  if (text2.includes("egitim kontrol") || text2.startsWith("osym")) return { contentType: "osym_type", testNumber: lastNumber };
-  if (text2.includes("sarmal") || text2.includes("karma") || text2.includes("genel tekrar")) return { contentType: "review", testNumber: lastNumber };
-  if (text2.includes("simulasyon") || text2.includes("deneme")) return { contentType: "simulation", testNumber: lastNumber };
+  if (text3.includes("egitim kontrol") || text3.startsWith("osym")) return { contentType: "osym_type", testNumber: lastNumber };
+  if (text3.includes("sarmal") || text3.includes("karma") || text3.includes("genel tekrar")) return { contentType: "review", testNumber: lastNumber };
+  if (text3.includes("simulasyon") || text3.includes("deneme")) return { contentType: "simulation", testNumber: lastNumber };
   return { contentType: label ? "topic_test" : "topic", testNumber: lastNumber };
 }
 var cleanTitle = (value) => value.replace(/\s+/g, " ").replace(/^[\s\-–—:.]+|[\s\-–—:.]+$/g, "").trim();
@@ -5808,7 +5817,7 @@ async function matchEntries(entries, subject) {
   const unresolvedTexts = Array.from(new Set(matched.filter((entry) => entry.tier === "manual" && entry.matchText).map((entry) => entry.matchText)));
   if (unresolvedTexts.length > 0) {
     const candidates = topics.filter((topic) => !subject || topic.subject === subject);
-    const ai = await suggestTopicsWithAi(unresolvedTexts.map((text2, key) => ({ key, text: text2, unitTitle: matched.find((entry) => entry.matchText === text2)?.unitTitle ?? "" })), candidates);
+    const ai = await suggestTopicsWithAi(unresolvedTexts.map((text3, key) => ({ key, text: text3, unitTitle: matched.find((entry) => entry.matchText === text3)?.unitTitle ?? "" })), candidates);
     const byText = new Map(ai.map((answer) => [unresolvedTexts[answer.key], answer]));
     for (const entry of matched) {
       const answer = entry.tier === "manual" && entry.matchText ? byText.get(entry.matchText) : void 0;
@@ -6077,13 +6086,13 @@ var NOTE_AI_ACTIONS = {
   review: { label: "Tekrar etmem gerekenler", menu: "Tekrar etmem gerekenleri bul" }
 };
 function aiResultToNodes(action, items) {
-  const text2 = (value) => value.trim() ? [{ type: "text", text: value.trim() }] : [];
+  const text3 = (value) => value.trim() ? [{ type: "text", text: value.trim() }] : [];
   const listType = action === "questions" ? "orderedList" : "bulletList";
   const list = {
     type: listType,
     content: items.map((item) => ({
       type: "listItem",
-      content: action === "flashcards" && item.back ? [{ type: "paragraph", content: [{ type: "text", text: "S: ", marks: [{ type: "bold" }] }, ...text2(item.front)] }, { type: "paragraph", content: [{ type: "text", text: "C: ", marks: [{ type: "bold" }] }, ...text2(item.back)] }] : [{ type: "paragraph", content: text2(item.front) }]
+      content: action === "flashcards" && item.back ? [{ type: "paragraph", content: [{ type: "text", text: "S: ", marks: [{ type: "bold" }] }, ...text3(item.front)] }, { type: "paragraph", content: [{ type: "text", text: "C: ", marks: [{ type: "bold" }] }, ...text3(item.back)] }] : [{ type: "paragraph", content: text3(item.front) }]
     }))
   };
   return [{ type: "blockquote", content: [{ type: "paragraph", content: [{ type: "text", text: `\u2728 AI \xB7 ${NOTE_AI_ACTIONS[action].label}`, marks: [{ type: "bold" }] }] }, list] }];
@@ -6508,17 +6517,17 @@ var notesRouter = router({
     const provider = getSpeechProvider();
     if (!provider) throw new NoteError("Ses \u2192 metin \u015Fu an kapal\u0131.");
     const { mimeType, data } = decodeAttachment(input.dataUrl, "audio");
-    let text2;
+    let text3;
     try {
-      ({ text: text2 } = await provider.transcribe(data, mimeType));
+      ({ text: text3 } = await provider.transcribe(data, mimeType));
     } catch (error) {
       if (error instanceof SpeechToTextError) throw new NoteError(error.message);
       throw error;
     }
-    if (!text2) throw new NoteError("Kay\u0131tta konu\u015Fma alg\u0131lanamad\u0131. Mikrofona biraz daha yak\u0131n konu\u015Fup tekrar dener misin?");
+    if (!text3) throw new NoteError("Kay\u0131tta konu\u015Fma alg\u0131lanamad\u0131. Mikrofona biraz daha yak\u0131n konu\u015Fup tekrar dener misin?");
     const durationSec = Math.round(input.durationSec);
     const attachment = input.keepAudio ? await getAttachmentStorage().put(userId, { kind: "audio", mimeType, data, durationSec }) : null;
-    return { text: text2, durationSec, attachmentId: attachment?.id ?? null };
+    return { text: text3, durationSec, attachmentId: attachment?.id ?? null };
   })),
   // Fotoğraftaki metni çıkar (kitap OCR'ıyla aynı sağlayıcı).
   extractText: metredFeatureProcedure("NOTE_OCR").input(z4.object({ attachmentId: z4.number().int().positive() })).mutation(({ ctx, input }) => userFacing(async () => {
@@ -6526,16 +6535,16 @@ var notesRouter = router({
     const storage = getAttachmentStorage();
     const attachment = await storage.get(userId, input.attachmentId);
     if (!attachment || attachment.kind !== "image") throw new NoteError("Foto\u011Fraf bulunamad\u0131.");
-    let text2;
+    let text3;
     try {
-      text2 = await extractPlainTextFromImage(`data:${attachment.mimeType};base64,${attachment.data.toString("base64")}`);
+      text3 = await extractPlainTextFromImage(`data:${attachment.mimeType};base64,${attachment.data.toString("base64")}`);
     } catch (error) {
       console.warn("[Notes] OCR failed:", error instanceof Error ? error.message : error);
       throw new NoteError(llmUnavailableMessage(error) ?? "Foto\u011Fraftaki metin okunamad\u0131. Daha net bir foto\u011Frafla tekrar dener misin?");
     }
-    if (!text2) throw new NoteError("Foto\u011Frafta okunabilir bir yaz\u0131 bulunamad\u0131.");
-    await storage.setOcrText(userId, input.attachmentId, text2);
-    return { text: text2 };
+    if (!text3) throw new NoteError("Foto\u011Frafta okunabilir bir yaz\u0131 bulunamad\u0131.");
+    await storage.setOcrText(userId, input.attachmentId, text3);
+    return { text: text3 };
   })),
   // AI araçları: sonuç notun ÜZERİNE YAZILMAZ; eklenecek blok olarak döner.
   ai: metredFeatureProcedure("NOTE_AI").input(z4.object({ id: z4.number().int().positive(), action: z4.enum(Object.keys(NOTE_AI_ACTIONS)) })).mutation(({ ctx, input }) => userFacing(async () => {
@@ -7220,6 +7229,60 @@ var classScheduleRouter = router({
     }
   })
 });
+
+// server/studyPlan/normalizeAiPlan.ts
+var KINDS = ["\xD6\u011Frenme", "Soru", "Tekrar", "Deneme analizi"];
+var text2 = (value, max) => typeof value === "string" ? value.trim().slice(0, max) : "";
+var optionalText = (value, max) => text2(value, max) || null;
+var positiveInt = (value, min, max) => {
+  const number = Math.round(Number(value));
+  return Number.isFinite(number) && number > 0 ? Math.min(max, Math.max(min, number)) : null;
+};
+function normalizeAiPlan(raw, fallback) {
+  if (!raw || typeof raw !== "object") return fallback;
+  const plan = raw;
+  const days = (Array.isArray(plan.days) ? plan.days : []).slice(0, 7).flatMap((value) => {
+    if (!value || typeof value !== "object") return [];
+    const day = value;
+    const sessions = (Array.isArray(day.sessions) ? day.sessions : []).slice(0, 6).flatMap((item) => {
+      if (!item || typeof item !== "object") return [];
+      const session = item;
+      const subject = text2(session.subject, 80);
+      const topic = text2(session.topic, 180);
+      const minutes = positiveInt(session.minutes, 10, 240);
+      if (!subject || !topic || !minutes) return [];
+      const kind = KINDS.includes(session.kind) ? session.kind : "Soru";
+      return [{
+        title: text2(session.title, 180) || `${subject} \xB7 ${topic}`,
+        subject,
+        topic,
+        minutes,
+        kind,
+        rationale: text2(session.rationale, 600),
+        ...text2(session.bookId, 120) ? { bookId: text2(session.bookId, 120) } : {},
+        ...text2(session.bookTitle, 180) ? { bookTitle: text2(session.bookTitle, 180) } : {},
+        ...positiveInt(session.targetQuestions, 1, 500) ? { targetQuestions: positiveInt(session.targetQuestions, 1, 500) } : {},
+        targetPages: optionalText(session.targetPages, 80),
+        targetTests: optionalText(session.targetTests, 80)
+      }];
+    });
+    if (!sessions.length) return [];
+    return [{ day: text2(day.day, 20), date: text2(day.date, 10), totalMinutes: sessions.reduce((sum, session) => sum + session.minutes, 0), sessions }];
+  });
+  if (!days.length) return fallback;
+  const focus = (Array.isArray(plan.focus) ? plan.focus : []).flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const entry = item;
+    return text2(entry.topic, 180) && text2(entry.subject, 80) ? [{ topic: text2(entry.topic, 180), subject: text2(entry.subject, 80), reason: text2(entry.reason, 400) }] : [];
+  });
+  return {
+    ...fallback,
+    summary: text2(plan.summary, 2e3) || fallback.summary,
+    focus,
+    days,
+    coachNote: text2(plan.coachNote, 1e3) || fallback.coachNote
+  };
+}
 
 // server/routers/resourceCatalog.ts
 import { TRPCError as TRPCError7 } from "@trpc/server";
@@ -8400,7 +8463,7 @@ var adminSubscriptionsRouter = router({
 });
 
 // server/routers/admin/system.ts
-var redact = (text2) => text2.replace(/\b(sk-[A-Za-z0-9_*.\-]{4,}|AIza[0-9A-Za-z_\-]{10,}|Bearer\s+\S+)/g, "[redacted]");
+var redact = (text3) => text3.replace(/\b(sk-[A-Za-z0-9_*.\-]{4,}|AIza[0-9A-Za-z_\-]{10,}|Bearer\s+\S+)/g, "[redacted]");
 async function check(run) {
   const started = Date.now();
   try {
@@ -8441,14 +8504,14 @@ var adminSystemRouter = router({
     if (!target) return { config, hints: ["LLM_API_KEY (ya da OPENAI_API_KEY) tan\u0131ml\u0131 de\u011Fil ya da bu deploy'a ula\u015Fmad\u0131 \u2014 Vercel'de ekledikten sonra Redeploy gerekir."], checks: null };
     const hints = configHints(target.baseUrl, target.model);
     if (config.keyHasWhitespace) hints.push("LLM_API_KEY de\u011Ferinde bo\u015Fluk/sat\u0131r sonu var; Vercel'de yeniden, bo\u015Fluksuz yap\u0131\u015Ft\u0131r.");
-    const text2 = await check(() => invokeLLM({ messages: [{ role: "user", content: "Yaln\u0131zca OK yaz." }], max_tokens: 5 }));
+    const text3 = await check(() => invokeLLM({ messages: [{ role: "user", content: "Yaln\u0131zca OK yaz." }], max_tokens: 5 }));
     const json = await check(() => invokeLLM({
       messages: [{ role: "user", content: '{"sonuc": "tamam", "sayi": null} d\xF6nd\xFCr.' }],
       response_format: { type: "json_schema", json_schema: { name: "health", strict: true, schema: { type: "object", properties: { sonuc: { type: "string" }, sayi: { type: ["integer", "null"] } }, required: ["sonuc", "sayi"], additionalProperties: false } } }
     }));
     const image = encodeGrayToJpegDataUrl(createGray(64, 64, 230), 80);
     const vision = await check(() => invokeLLM({ messages: [{ role: "user", content: [{ type: "text", text: "Bu g\xF6rselin rengi ne? Tek kelime." }, { type: "image_url", image_url: { url: image, detail: "low" } }] }], max_tokens: 10 }));
-    return { config, hints, checks: { text: text2, json, vision } };
+    return { config, hints, checks: { text: text3, json, vision } };
   })
 });
 
@@ -9040,7 +9103,7 @@ ${notebookSignal}` : "";
 
 \xD6\u011Frencinin okul/dershane program\u0131na g\xF6re bu haftan\u0131n bo\u015F zaman\u0131 (oturumlar\u0131 yaln\u0131zca bu aral\u0131klara ve her g\xFCn\xFCn bo\u015F dakikas\u0131n\u0131 a\u015Fmayacak \u015Fekilde planla; 23:30'dan sonra oturum koyma; o g\xFCn okulda i\u015Flenen YKS derslerine ak\u015Fam k\u0131sa bir peki\u015Ftirme oturumu eklemek iyi olur):
 ${scheduleSignal}` : "";
-      const prompt = `Bir YKS \xF6\u011Frencisi i\xE7in 7 g\xFCnl\xFCk uygulanabilir \xE7al\u0131\u015Fma program\u0131 olu\u015Ftur. Hedef: ${input.goal}. Haftal\u0131k toplam s\xFCre: ${input.availableMinutes} dakika. \xD6ncelik, zay\u0131f konular ve son deneme performans\u0131 olsun. Zay\u0131f konular\u0131 tamamen yok sayma; orta konulara peki\u015Ftirme, iyi konulara koruma oturumu ekle. Her g\xFCn toplam 60-150 dakika ve 2-4 oturum planla. T\xFCrk\xE7e yan\u0131t \xFCret. Ki\u015Fisel raftaki kitaplar\u0131 m\xFCmk\xFCn oldu\u011Funca ilgili zay\u0131f konu oturumlar\u0131na ba\u011Fla. Bir kitab\u0131n mappings alan\u0131nda ilgili konu varsa targetPages alan\u0131na ger\xE7ek sayfa aral\u0131\u011F\u0131n\u0131 ve targetTests alan\u0131na ger\xE7ek test aral\u0131\u011F\u0131n\u0131 yaz; e\u015Fle\u015Ftirme yoksa uydurma aral\u0131k verme, null b\u0131rak. Soru oturumlar\u0131nda ger\xE7ek\xE7i g\xFCnl\xFCk soru hedefi yaz.
+      const prompt = `Bir YKS \xF6\u011Frencisi i\xE7in 7 g\xFCnl\xFCk uygulanabilir \xE7al\u0131\u015Fma program\u0131 olu\u015Ftur. Hedef: ${input.goal}. Haftal\u0131k toplam s\xFCre: ${input.availableMinutes} dakika. \xD6ncelik, zay\u0131f konular ve son deneme performans\u0131 olsun. Zay\u0131f konular\u0131 tamamen yok sayma; orta konulara peki\u015Ftirme, iyi konulara koruma oturumu ekle. Her g\xFCn toplam 60-150 dakika ve 2-4 oturum planla. T\xFCrk\xE7e yan\u0131t \xFCret. Ki\u015Fisel raftaki kitaplar\u0131 m\xFCmk\xFCn oldu\u011Funca ilgili zay\u0131f konu oturumlar\u0131na ba\u011Fla. Bir kitab\u0131n mappings alan\u0131nda ilgili konu varsa targetPages alan\u0131na ger\xE7ek sayfa aral\u0131\u011F\u0131n\u0131 ve targetTests alan\u0131na ger\xE7ek test aral\u0131\u011F\u0131n\u0131 yaz; e\u015Fle\u015Ftirme yoksa uydurma aral\u0131k verme, bo\u015F metin ("") b\u0131rak. Soru oturumlar\u0131nda ger\xE7ek\xE7i g\xFCnl\xFCk soru hedefi yaz.
 
 Zay\u0131f/orta/iyi konu verisi:
 ${JSON.stringify(input.topics)}
@@ -9055,6 +9118,7 @@ Ki\u015Fisel raf ve \xE7\xF6z\xFCm durumu:
 ${JSON.stringify(input.books)}${targetContext}${coachingContext}${notebookContext}${scheduleContext}`;
       try {
         const response = await invokeLLM({
+          reasoningEffort: "low",
           messages: [
             { role: "system", content: "Sen deneyimli, \xF6l\xE7\xFCl\xFC ve motive edici bir YKS \xE7al\u0131\u015Fma ko\xE7usun. Sadece verilen verilere dayan; ger\xE7ek\xE7i olmayan hedefler verme. Yan\u0131t\u0131n JSON \u015Femas\u0131na tam uysun." },
             { role: "user", content: prompt }
@@ -9069,7 +9133,7 @@ ${JSON.stringify(input.books)}${targetContext}${coachingContext}${notebookContex
                 properties: {
                   summary: { type: "string" },
                   focus: { type: "array", items: { type: "object", properties: { topic: { type: "string" }, subject: { type: "string" }, reason: { type: "string" } }, required: ["topic", "subject", "reason"], additionalProperties: false } },
-                  days: { type: "array", minItems: 7, maxItems: 7, items: { type: "object", properties: { day: { type: "string" }, date: { type: "string" }, totalMinutes: { type: "integer" }, sessions: { type: "array", minItems: 2, maxItems: 4, items: { type: "object", properties: { title: { type: "string" }, subject: { type: "string" }, topic: { type: "string" }, minutes: { type: "integer" }, kind: { type: "string", enum: ["\xD6\u011Frenme", "Soru", "Tekrar", "Deneme analizi"] }, rationale: { type: "string" }, bookId: { type: "string" }, bookTitle: { type: "string" }, targetQuestions: { type: "integer" }, targetPages: { type: ["string", "null"] }, targetTests: { type: ["string", "null"] } }, required: ["title", "subject", "topic", "minutes", "kind", "rationale"], additionalProperties: false } } }, required: ["day", "date", "totalMinutes", "sessions"], additionalProperties: false } },
+                  days: { type: "array", minItems: 7, maxItems: 7, items: { type: "object", properties: { day: { type: "string" }, date: { type: "string" }, totalMinutes: { type: "integer" }, sessions: { type: "array", minItems: 2, maxItems: 4, items: { type: "object", properties: { title: { type: "string" }, subject: { type: "string" }, topic: { type: "string" }, minutes: { type: "integer" }, kind: { type: "string", enum: ["\xD6\u011Frenme", "Soru", "Tekrar", "Deneme analizi"] }, rationale: { type: "string" }, bookId: { type: "string" }, bookTitle: { type: "string" }, targetQuestions: { type: "integer" }, targetPages: { type: "string" }, targetTests: { type: "string" } }, required: ["title", "subject", "topic", "minutes", "kind", "rationale"], additionalProperties: false } } }, required: ["day", "date", "totalMinutes", "sessions"], additionalProperties: false } },
                   coachNote: { type: "string" }
                 },
                 required: ["summary", "focus", "days", "coachNote"],
@@ -9081,7 +9145,7 @@ ${JSON.stringify(input.books)}${targetContext}${coachingContext}${notebookContex
         const content = response.choices[0]?.message?.content;
         const jsonText = typeof content === "string" ? content : content?.map((part) => part.type === "text" ? part.text : "").join("");
         if (!jsonText) return fallbackPlan;
-        return JSON.parse(jsonText);
+        return normalizeAiPlan(JSON.parse(jsonText), fallbackPlan);
       } catch (error) {
         console.warn("[AI Plan] Falling back to deterministic plan:", error);
         return fallbackPlan;
@@ -9268,8 +9332,8 @@ var HARD_PHRASES = ["ileri", "zor", "extreme", "advanced", "master", "pro", "ile
 var normalizedPhrases = (phrases) => phrases.map((phrase) => normalizeKeepingTurkish(phrase));
 var EASY = normalizedPhrases(EASY_PHRASES);
 var HARD = normalizedPhrases(HARD_PHRASES);
-var countPhraseMatches = (text2, phrases) => {
-  const padded = ` ${normalizeKeepingTurkish(text2)} `;
+var countPhraseMatches = (text3, phrases) => {
+  const padded = ` ${normalizeKeepingTurkish(text3)} `;
   return phrases.filter((phrase) => padded.includes(` ${phrase} `));
 };
 var BOOK_TYPE_MODIFIER = {
@@ -9754,8 +9818,8 @@ async function isCrawlingAllowed() {
   try {
     const response = await fetch(`${BASE_URL}/robots.txt`);
     if (!response.ok) return true;
-    const text2 = await response.text();
-    const blanketDisallow = /User-agent:\s*\*[\s\S]*?Disallow:\s*\/\s*$/im.test(text2);
+    const text3 = await response.text();
+    const blanketDisallow = /User-agent:\s*\*[\s\S]*?Disallow:\s*\/\s*$/im.test(text3);
     return !blanketDisallow;
   } catch {
     return true;

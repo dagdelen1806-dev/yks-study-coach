@@ -20,6 +20,7 @@ import { questionsRouter } from "./routers/questions";
 import { getNotebookPlanSignal } from "./notes/questionsDb";
 import { classScheduleRouter } from "./routers/classSchedule";
 import { getPlanScheduleContext } from "./schedule/classScheduleDb";
+import { normalizeAiPlan } from "./studyPlan/normalizeAiPlan";
 import { resourceCatalogRouter } from "./routers/resourceCatalog";
 import { onboardingRouter } from "./routers/onboarding";
 import { subscriptionRouter } from "./routers/subscription";
@@ -326,9 +327,10 @@ export const appRouter = router({
       const scheduleContext = scheduleSignal
         ? `\n\nÖğrencinin okul/dershane programına göre bu haftanın boş zamanı (oturumları yalnızca bu aralıklara ve her günün boş dakikasını aşmayacak şekilde planla; 23:30'dan sonra oturum koyma; o gün okulda işlenen YKS derslerine akşam kısa bir pekiştirme oturumu eklemek iyi olur):\n${scheduleSignal}`
         : "";
-      const prompt = `Bir YKS öğrencisi için 7 günlük uygulanabilir çalışma programı oluştur. Hedef: ${input.goal}. Haftalık toplam süre: ${input.availableMinutes} dakika. Öncelik, zayıf konular ve son deneme performansı olsun. Zayıf konuları tamamen yok sayma; orta konulara pekiştirme, iyi konulara koruma oturumu ekle. Her gün toplam 60-150 dakika ve 2-4 oturum planla. Türkçe yanıt üret. Kişisel raftaki kitapları mümkün olduğunca ilgili zayıf konu oturumlarına bağla. Bir kitabın mappings alanında ilgili konu varsa targetPages alanına gerçek sayfa aralığını ve targetTests alanına gerçek test aralığını yaz; eşleştirme yoksa uydurma aralık verme, null bırak. Soru oturumlarında gerçekçi günlük soru hedefi yaz.\n\nZayıf/orta/iyi konu verisi:\n${JSON.stringify(input.topics)}\n\nÖncelikli zayıf konular:\n${JSON.stringify(weakTopics)}\n\nSon denemeler:\n${JSON.stringify(recentExams)}\n\nKişisel raf ve çözüm durumu:\n${JSON.stringify(input.books)}${targetContext}${coachingContext}${notebookContext}${scheduleContext}`;
+      const prompt = `Bir YKS öğrencisi için 7 günlük uygulanabilir çalışma programı oluştur. Hedef: ${input.goal}. Haftalık toplam süre: ${input.availableMinutes} dakika. Öncelik, zayıf konular ve son deneme performansı olsun. Zayıf konuları tamamen yok sayma; orta konulara pekiştirme, iyi konulara koruma oturumu ekle. Her gün toplam 60-150 dakika ve 2-4 oturum planla. Türkçe yanıt üret. Kişisel raftaki kitapları mümkün olduğunca ilgili zayıf konu oturumlarına bağla. Bir kitabın mappings alanında ilgili konu varsa targetPages alanına gerçek sayfa aralığını ve targetTests alanına gerçek test aralığını yaz; eşleştirme yoksa uydurma aralık verme, boş metin ("") bırak. Soru oturumlarında gerçekçi günlük soru hedefi yaz.\n\nZayıf/orta/iyi konu verisi:\n${JSON.stringify(input.topics)}\n\nÖncelikli zayıf konular:\n${JSON.stringify(weakTopics)}\n\nSon denemeler:\n${JSON.stringify(recentExams)}\n\nKişisel raf ve çözüm durumu:\n${JSON.stringify(input.books)}${targetContext}${coachingContext}${notebookContext}${scheduleContext}`;
       try {
         const response = await invokeLLM({
+          reasoningEffort: "low",
           messages: [
             { role: "system", content: "Sen deneyimli, ölçülü ve motive edici bir YKS çalışma koçusun. Sadece verilen verilere dayan; gerçekçi olmayan hedefler verme. Yanıtın JSON şemasına tam uysun." },
             { role: "user", content: prompt },
@@ -343,7 +345,7 @@ export const appRouter = router({
                 properties: {
                   summary: { type: "string" },
                   focus: { type: "array", items: { type: "object", properties: { topic: { type: "string" }, subject: { type: "string" }, reason: { type: "string" } }, required: ["topic", "subject", "reason"], additionalProperties: false } },
-                  days: { type: "array", minItems: 7, maxItems: 7, items: { type: "object", properties: { day: { type: "string" }, date: { type: "string" }, totalMinutes: { type: "integer" }, sessions: { type: "array", minItems: 2, maxItems: 4, items: { type: "object", properties: { title: { type: "string" }, subject: { type: "string" }, topic: { type: "string" }, minutes: { type: "integer" }, kind: { type: "string", enum: ["Öğrenme", "Soru", "Tekrar", "Deneme analizi"] }, rationale: { type: "string" }, bookId: { type: "string" }, bookTitle: { type: "string" }, targetQuestions: { type: "integer" }, targetPages: { type: ["string", "null"] }, targetTests: { type: ["string", "null"] } }, required: ["title", "subject", "topic", "minutes", "kind", "rationale"], additionalProperties: false } } }, required: ["day", "date", "totalMinutes", "sessions"], additionalProperties: false } },
+                  days: { type: "array", minItems: 7, maxItems: 7, items: { type: "object", properties: { day: { type: "string" }, date: { type: "string" }, totalMinutes: { type: "integer" }, sessions: { type: "array", minItems: 2, maxItems: 4, items: { type: "object", properties: { title: { type: "string" }, subject: { type: "string" }, topic: { type: "string" }, minutes: { type: "integer" }, kind: { type: "string", enum: ["Öğrenme", "Soru", "Tekrar", "Deneme analizi"] }, rationale: { type: "string" }, bookId: { type: "string" }, bookTitle: { type: "string" }, targetQuestions: { type: "integer" }, targetPages: { type: "string" }, targetTests: { type: "string" } }, required: ["title", "subject", "topic", "minutes", "kind", "rationale"], additionalProperties: false } } }, required: ["day", "date", "totalMinutes", "sessions"], additionalProperties: false } },
                   coachNote: { type: "string" },
                 },
                 required: ["summary", "focus", "days", "coachNote"],
@@ -355,7 +357,7 @@ export const appRouter = router({
         const content = response.choices[0]?.message?.content;
         const jsonText = typeof content === "string" ? content : content?.map((part) => part.type === "text" ? part.text : "").join("");
         if (!jsonText) return fallbackPlan;
-        return JSON.parse(jsonText);
+        return normalizeAiPlan(JSON.parse(jsonText), fallbackPlan);
       } catch (error) {
         console.warn("[AI Plan] Falling back to deterministic plan:", error);
         return fallbackPlan;

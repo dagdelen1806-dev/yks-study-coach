@@ -69,6 +69,8 @@ export type InvokeParams = {
   model?: string;
   thinking?: Record<string, unknown>;
   reasoning?: Record<string, unknown>;
+  /** Uzun yapılandırılmış çıktılarda gecikmeyi düşürmek için; yalnızca Gemini 2.5 modellerine gönderilir. */
+  reasoningEffort?: "low" | "medium" | "high";
 };
 
 export type ToolCall = {
@@ -423,6 +425,7 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     model,
     thinking,
     reasoning,
+    reasoningEffort,
     maxTokens,
     max_tokens,
   } = params;
@@ -456,6 +459,10 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   if (reasoning) {
     payload.reasoning = reasoning;
   }
+  // Gemini 2.5 varsayılan olarak uzun "düşünür"; OpenAI modelleri bu alanı tanımayabilir.
+  if (reasoningEffort && /^gemini-2\.5/.test(String(payload.model))) {
+    payload.reasoning_effort = reasoningEffort;
+  }
 
   const normalizedResponseFormat = normalizeResponseFormat({
     responseFormat,
@@ -484,6 +491,13 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   };
 
   let response = await send(payload);
+
+  // Sağlayıcı reasoning_effort'u reddederse (400) onsuz bir kez daha dene.
+  if (response.status === 400 && "reasoning_effort" in payload) {
+    console.warn("[LLM] reasoning_effort rejected (400), retrying without it");
+    delete payload.reasoning_effort;
+    response = await send(payload);
+  }
 
   // Bazı OpenAI uyumlu sağlayıcılar (ör. Gemini) katı `json_schema` biçimini ya da
   // şemadaki bazı yapıları (["string","null"] birleşik tipleri) kabul etmez ve 400 döner.
