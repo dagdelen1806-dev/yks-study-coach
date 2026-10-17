@@ -9,6 +9,7 @@ import { CURRICULUM, isCurriculumOnlySlug } from "../shared/curriculum";
 import { deriveTopicStatus } from "../shared/topicStatus";
 import { topicSeeds, type ExamType, type TopicStatus } from "../shared/yksData";
 import { toLocalDateKey } from "../shared/dates";
+import { NOTEBOOK_REVIEW_TASK_KIND } from "../shared/questionNotebook";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -526,7 +527,9 @@ export async function completeStudySession(userId: number, input: { sessionId: n
   // Takvim/Pusula Odak oturumundan gelen gerçek performans, konu haritasındaki
   // durumu (Zayıf/Orta/İyi) da günceller — bu sayede AI Planım, yalnızca Konu
   // Haritası'na elle girilen verileri değil, fiilen çalışılan oturumları da görür.
-  if (actualQuestions > 0) {
+  // "Defter Tekrarı" görevi farklı konulardan soruları kapsar: konu haritasına
+  // "Defterim" adında sahte bir konu yazılmasın diye atlanır.
+  if (actualQuestions > 0 && existing[0].kind !== NOTEBOOK_REVIEW_TASK_KIND) {
     await upsertTopicProgress(userId, { exam: FALLBACK_EXAM, subject: plan.topicLog.subject, topic: plan.topicLog.topic, accuracy: (correct / actualQuestions) * 100, questionCount: actualQuestions, studyDate: completedAt });
   }
   return getStudyCalendar(userId);

@@ -1,6 +1,7 @@
-import { and, desc, eq, gte, inArray, isNotNull, like, lt, lte, or, sql, type SQL } from "drizzle-orm";
-import { bookInventory, catalogBooks, noteTags, notes, studyPlanSessions, userBookContents, userMockExams, userResourceBooks, yksTopics } from "../../drizzle/schema";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, like, lt, lte, ne, or, sql, type SQL } from "drizzle-orm";
+import { bookInventory, catalogBooks, notebookQuestions, noteTags, notes, questionAttempts, studyPlanSessions, userBookContents, userMockExams, userResourceBooks, yksTopics } from "../../drizzle/schema";
 import { computeNoteStats, deriveNoteTitle, extractPlainText, isValidNoteDoc, normalizeTag, type NoteDoc, type NoteNode, type NoteStats } from "../../shared/noteContent";
+import { QUESTION_TEMPLATE_KEY, type ErrorType } from "../../shared/questionNotebook";
 import { getDb } from "../db";
 import { insertPlanTask, pickDayForTask } from "../studyPlan/planTasks";
 import { getAttachmentStorage } from "./attachmentStorage";
@@ -163,6 +164,8 @@ export type ListFilters = {
   from?: Date | null;
   to?: Date | null;
   subject?: string | null;
+  /** Hiçbir ders defterine konmamış notlar ("Genel"). */
+  noSubject?: boolean;
   topicId?: number | null;
   bookId?: string | null;
   tag?: string | null;
@@ -172,6 +175,8 @@ export type ListFilters = {
   pinned?: boolean;
   studySessionId?: number | null;
   reviewDue?: boolean;
+  /** Soru kartlarını (Soru Defterim) hariç tut / yalnızca onları getir. */
+  questions?: "exclude" | "only";
   cursor?: string | null;
   limit?: number;
 };
@@ -211,12 +216,15 @@ export async function listNotes(userId: number, filters: ListFilters) {
   if (filters.from) conditions.push(gte(notes.noteDate, filters.from));
   if (filters.to) conditions.push(lte(notes.noteDate, filters.to));
   if (filters.subject) conditions.push(eq(notes.subject, filters.subject));
+  if (filters.noSubject) conditions.push(isNull(notes.subject));
   if (filters.topicId) conditions.push(eq(notes.topicId, filters.topicId));
   if (filters.bookId) conditions.push(eq(notes.bookId, filters.bookId));
   if (filters.studySessionId) conditions.push(eq(notes.studySessionId, filters.studySessionId));
   if (filters.favorite) conditions.push(eq(notes.isFavorite, 1));
   if (filters.pinned) conditions.push(eq(notes.isPinned, 1));
   if (filters.reviewDue) conditions.push(and(isNotNull(notes.reviewAt), lte(notes.reviewAt, endOfToday()))!);
+  if (filters.questions === "exclude") conditions.push(or(isNull(notes.templateKey), ne(notes.templateKey, QUESTION_TEMPLATE_KEY))!);
+  if (filters.questions === "only") conditions.push(eq(notes.templateKey, QUESTION_TEMPLATE_KEY));
   if (filters.tag) {
     const tag = normalizeTag(filters.tag);
     if (tag) conditions.push(sql`EXISTS (SELECT 1 FROM ${noteTags} WHERE ${noteTags.noteId} = ${notes.id} AND ${noteTags.tag} = ${tag})`);
@@ -233,8 +241,11 @@ export async function listNotes(userId: number, filters: ListFilters) {
   }
 
   const rows = await db
-    .select({ id: notes.id, clientId: notes.clientId, title: notes.title, plainText: notes.plainText, stats: notes.stats, noteDate: notes.noteDate, subject: notes.subject, topicId: notes.topicId, bookId: notes.bookId, studySessionId: notes.studySessionId, isFavorite: notes.isFavorite, isPinned: notes.isPinned, reviewAt: notes.reviewAt, updatedAt: notes.updatedAt })
+    .select({ id: notes.id, clientId: notes.clientId, title: notes.title, plainText: notes.plainText, stats: notes.stats, noteDate: notes.noteDate, subject: notes.subject, topicId: notes.topicId, bookId: notes.bookId, studySessionId: notes.studySessionId, isFavorite: notes.isFavorite, isPinned: notes.isPinned, reviewAt: notes.reviewAt, templateKey: notes.templateKey, updatedAt: notes.updatedAt,
+      // Soru kartıysa ders defteri akışında kart olarak çizilebilsin diye özet bilgisi.
+      question: { id: notebookQuestions.id, status: notebookQuestions.status, nextReviewAt: notebookQuestions.nextReviewAt, errorType: notebookQuestions.errorType, questionImageId: notebookQuestions.questionImageId, stuckPoint: notebookQuestions.stuckPoint } })
     .from(notes)
+    .leftJoin(notebookQuestions, and(eq(notebookQuestions.noteId, notes.id), eq(notebookQuestions.userId, userId)))
     .where(and(...conditions))
     .orderBy(desc(notes.noteDate), desc(notes.id))
     .limit(limit + 1);
@@ -255,6 +266,7 @@ export async function listNotes(userId: number, filters: ListFilters) {
       tags: tags.filter((item) => item.noteId === row.id).map((item) => item.tag),
       topic: row.topicId !== null ? links.topicById.get(row.topicId)?.topic ?? null : null,
       bookTitle: row.bookId ? links.bookTitle.get(row.bookId) ?? null : null,
+      question: row.question?.id ? { ...row.question, errorType: row.question.errorType as ErrorType | null } : null,
     })),
     nextCursor: rows.length > limit && last ? `${new Date(last.noteDate).getTime()}_${last.id}` : null,
   };
@@ -282,6 +294,12 @@ export async function deleteNote(userId: number, id: number) {
   const [row] = await db.select({ id: notes.id }).from(notes).where(and(eq(notes.id, id), eq(notes.userId, userId))).limit(1);
   if (!row) throw new NoteError("Not bulunamadı.");
   await getAttachmentStorage().deleteForNote(userId, id);
+  // Soru kartıysa kart ve tekrar denemeleri de gider.
+  const [question] = await db.select({ id: notebookQuestions.id }).from(notebookQuestions).where(and(eq(notebookQuestions.userId, userId), eq(notebookQuestions.noteId, id))).limit(1);
+  if (question) {
+    await db.delete(questionAttempts).where(and(eq(questionAttempts.userId, userId), eq(questionAttempts.questionId, question.id)));
+    await db.delete(notebookQuestions).where(eq(notebookQuestions.id, question.id));
+  }
   await db.delete(noteTags).where(and(eq(noteTags.userId, userId), eq(noteTags.noteId, id)));
   await db.delete(notes).where(and(eq(notes.id, id), eq(notes.userId, userId)));
 }

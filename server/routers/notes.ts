@@ -48,6 +48,7 @@ export const notesRouter = router({
       from: z.string().datetime().nullable().optional(),
       to: z.string().datetime().nullable().optional(),
       subject: z.string().max(80).nullable().optional(),
+      noSubject: z.boolean().optional(),
       topicId: optionalId,
       bookId: z.string().max(120).nullable().optional(),
       tag: z.string().max(40).nullable().optional(),
@@ -57,6 +58,7 @@ export const notesRouter = router({
       pinned: z.boolean().optional(),
       studySessionId: optionalId,
       reviewDue: z.boolean().optional(),
+      questions: z.enum(["exclude", "only"]).optional(),
       cursor: z.string().max(40).nullable().optional(),
       limit: z.number().int().min(1).max(100).optional(),
     }))

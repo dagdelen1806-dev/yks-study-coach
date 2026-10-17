@@ -27,11 +27,11 @@ const getSpeechRecognition = (): (new () => SpeechRecognitionLike) | null => {
  * "Tekrar dene" aynı kaydı yeniden gönderir. Sunucu servisi kapalıysa ve tarayıcı
  * destekliyorsa tarayıcının kendi Türkçe dikte özelliğine geçilebilir.
  */
-export default function VoiceRecorder({ onDone, onClose }: { onDone: (result: { text: string; attachmentId: number | null; durationSec: number }) => void; onClose: () => void }) {
+export default function VoiceRecorder({ onDone, onClose, offerKeepAudio = true }: { onDone: (result: { text: string; attachmentId: number | null; durationSec: number }) => void; onClose: () => void; /** false: yalnızca metin döner, ses kaydı saklanmaz. */ offerKeepAudio?: boolean }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [seconds, setSeconds] = useState(0);
   const [error, setError] = useState("");
-  const [keepAudio, setKeepAudio] = useState(true);
+  const [keepAudio, setKeepAudio] = useState(offerKeepAudio);
   const [serviceDown, setServiceDown] = useState(false);
   const [dictation, setDictation] = useState("");
   const recorder = useRef<MediaRecorder | null>(null);
@@ -134,7 +134,7 @@ export default function VoiceRecorder({ onDone, onClose }: { onDone: (result: { 
           <div className="py-6">
             <button onClick={start} className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-danger text-white shadow-lg transition hover:scale-105" aria-label="Kayda başla"><Mic size={32} /></button>
             <p className="mt-4 text-[13px] leading-5 text-ink-3">Dokun ve konuş. Bitirince sesin Türkçe metne çevrilip notuna eklenecek; düzenleyebilirsin.</p>
-            <label className="mt-3 inline-flex items-center gap-2 text-[12px] text-ink-2"><input type="checkbox" checked={keepAudio} onChange={(event) => setKeepAudio(event.target.checked)} className="accent-brand" /> Ses kaydını da nota ekle</label>
+            {offerKeepAudio && <label className="mt-3 inline-flex items-center gap-2 text-[12px] text-ink-2"><input type="checkbox" checked={keepAudio} onChange={(event) => setKeepAudio(event.target.checked)} className="accent-brand" /> Ses kaydını da nota ekle</label>}
           </div>
         )}
 

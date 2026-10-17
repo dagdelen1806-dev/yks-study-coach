@@ -1,14 +1,20 @@
 import { trpc } from "@/lib/trpc";
-import { NOTE_TEMPLATES } from "@shared/noteContent";
-import { Camera, CloudOff, LayoutList, Loader2, Mic, PenLine, Plus, Search, Sigma, SquarePen, Star, Waypoints } from "lucide-react";
+import { CloudOff, LayoutList, Loader2, Plus, Search, Star, Waypoints } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { listUnsyncedDrafts, removeDraft, saveDraft, type StoredDraft } from "./drafts";
+import MoveToSubject from "./MoveToSubject";
+import { NewNoteDialog } from "./NewNoteDialog";
 import { NoteCard, NoteTimeline } from "./NoteList";
 import { useNotebook } from "./NotebookProvider";
+import QuestionsPanel, { QuestionReviewCard } from "./QuestionsPanel";
+import SubjectNotebook from "./SubjectNotebook";
+import { orderedSubjects, parseTabKey, subjectIcon, tabKey, type NotebookTab } from "./subjects";
 import { useCurriculumTopics, useMyBooks } from "./useNotebookData";
 
 type Range = "today" | "week" | "month" | "all";
+const TAB_KEY = "pusula:notebook-tab";
+const SUBJECT_TAB_KEY = "pusula:notebook-subject-tab";
 
 /** Yerel saatle aralık sınırları (sunucuya ISO olarak gider). */
 export function rangeBounds(range: Range, reference = new Date()): { from: string | null; to: string | null } {
@@ -23,13 +29,58 @@ export function rangeBounds(range: Range, reference = new Date()): { from: strin
 }
 
 /**
- * 📒 Defter — öğrencinin kişisel çalışma alanı: zaman filtreleri, ders/konu/
- * kitap/etiket/tür filtreleri, arama, liste ve zaman çizelgesi görünümü,
- * sabitlenenler, tekrar zamanı gelenler ve eşitlenmemiş taslaklar.
+ * 📒 Defterim — her ders bir sekme (ders defteri). "📚 Tümü" bütün defteri
+ * (Sorularım / Notlarım) gösterir; ders sekmesi o dersin soruları ve notları;
+ * "Genel" henüz bir derse konmamış olanlar. Seçili sekme cihazda hatırlanır.
  */
 export default function NotebookSection() {
+  const [tab, setTab] = useState<NotebookTab>(() => { try { return parseTabKey(localStorage.getItem(SUBJECT_TAB_KEY)); } catch { return { kind: "all" }; } });
+  const selectTab = (value: NotebookTab) => { setTab(value); try { localStorage.setItem(SUBJECT_TAB_KEY, tabKey(value)); } catch {} };
+  const summary = trpc.questions.subjectSummary.useQuery(undefined, { retry: false });
+  const counts = new Map((summary.data ?? []).map((row) => [row.subject, row]));
+  const general = counts.get(null);
+  const subjectsWithContent = (summary.data ?? []).map((row) => row.subject).filter((subject): subject is string => Boolean(subject));
+  const subjectTabs = orderedSubjects(subjectsWithContent);
+  const activeKey = tabKey(tab);
+  const tabButton = (value: NotebookTab, label: React.ReactNode, badge?: { total: number; due: number }) => {
+    const active = tabKey(value) === activeKey;
+    return (
+      <button key={tabKey(value)} role="tab" aria-selected={active} onClick={() => selectTab(value)} className={`flex h-10 shrink-0 items-center gap-1.5 rounded-xl px-3.5 text-[13px] font-semibold transition ${active ? "bg-ink text-white shadow-sm" : "bg-white text-ink-2 hover:bg-paper"}`}>
+        {label}
+        {badge && badge.total > 0 && <span className={`rounded-full px-1.5 text-[11px] ${active ? "bg-white/20" : "bg-paper text-ink-3"}`}>{badge.total}</span>}
+        {badge && badge.due > 0 && <span className="h-2 w-2 rounded-full bg-success" aria-label={`${badge.due} soru tekrar bekliyor`} />}
+      </button>
+    );
+  };
+
+  return (
+    <div className="space-y-5 animate-page-in">
+      <div>
+        <div className="eyebrow mb-2">Akıllı Defter</div>
+        <h1 className="page-heading">📒 Benim Defterim</h1>
+        <p className="page-subtitle">Her ders için bir defterin var: çözemediğin soruları ve kendi notlarını ilgili dersin defterine ekle, zamanı gelince tekrar et.</p>
+      </div>
+
+      {/* Telefonda yatay kaydırılır (çubuk gizli), geniş ekranda satır kırar. */}
+      <div className="-mx-4 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:overflow-visible sm:px-0 [&::-webkit-scrollbar]:hidden" role="tablist" aria-label="Ders defterleri">
+        <div className="flex w-max gap-1.5 sm:w-auto sm:flex-wrap">
+          {tabButton({ kind: "all" }, "📚 Tümü")}
+          {subjectTabs.map((subject) => { const row = counts.get(subject); return tabButton({ kind: "subject", subject }, <><span aria-hidden>{subjectIcon(subject)}</span> {subject}</>, row && { total: row.notes + row.questions, due: row.due }); })}
+          {general && general.notes + general.questions > 0 && tabButton({ kind: "general" }, "📒 Genel", { total: general.notes + general.questions, due: general.due })}
+        </div>
+      </div>
+
+      {tab.kind === "all" ? <AllNotebook /> : <SubjectNotebook key={activeKey} subject={tab.kind === "subject" ? tab.subject : null} counts={tab.kind === "subject" ? counts.get(tab.subject) : general} />}
+    </div>
+  );
+}
+
+/** "📚 Tümü": bütün defter — Sorularım (soru kartları) ve Notlarım (filtreli not listesi). */
+function AllNotebook() {
   const notebook = useNotebook();
   const utils = trpc.useUtils();
+  const [tab, setTab] = useState<"questions" | "notes">(() => { try { return localStorage.getItem(TAB_KEY) === "notes" ? "notes" : "questions"; } catch { return "questions"; } });
+  const selectTab = (value: "questions" | "notes") => { setTab(value); try { localStorage.setItem(TAB_KEY, value); } catch {} };
   const [range, setRange] = useState<Range>("week");
   const [subject, setSubject] = useState("");
   const [topicId, setTopicId] = useState<number | null>(null);
@@ -51,10 +102,12 @@ export default function NotebookSection() {
   useEffect(() => { const timer = window.setTimeout(() => setQ(searchInput.trim()), 300); return () => window.clearTimeout(timer); }, [searchInput]);
 
   const bounds = useMemo(() => rangeBounds(range), [range]);
-  const filters = { ...bounds, subject: subject || null, topicId, bookId: bookId || null, tag: tag || null, kind: kind || null, q: q || null, favorite: favorite || undefined };
-  const list = trpc.notes.list.useInfiniteQuery(filters, { getNextPageParam: (page) => page.nextCursor ?? undefined, retry: false });
-  const pinned = trpc.notes.list.useQuery({ pinned: true, limit: 6 }, { retry: false });
-  const reviewDue = trpc.notes.list.useQuery({ reviewDue: true, limit: 6 }, { retry: false });
+  // Soru kartları "Sorularım"da yaşar; "Notlarım" yalnızca serbest notları listeler.
+  const filters = { ...bounds, subject: subject || null, topicId, bookId: bookId || null, tag: tag || null, kind: kind || null, q: q || null, favorite: favorite || undefined, questions: "exclude" as const };
+  const notesTab = tab === "notes";
+  const list = trpc.notes.list.useInfiniteQuery(filters, { getNextPageParam: (page) => page.nextCursor ?? undefined, retry: false, enabled: notesTab });
+  const pinned = trpc.notes.list.useQuery({ pinned: true, limit: 6, questions: "exclude" }, { retry: false, enabled: notesTab });
+  const reviewDue = trpc.notes.list.useQuery({ reviewDue: true, limit: 6, questions: "exclude" }, { retry: false, enabled: notesTab });
   const notes = list.data?.pages.flatMap((page) => page.items) ?? [];
   const hasFilters = Boolean(subject || topicId || bookId || tag || kind || favorite || q);
 
@@ -76,18 +129,18 @@ export default function NotebookSection() {
     toast[ok === unsynced.length ? "success" : "error"](ok === unsynced.length ? `${ok} not eşitlendi.` : "Bazı notlar eşitlenemedi; bağlantını kontrol et.");
   };
 
-  const openNew = (options: Parameters<typeof notebook.open>[0]) => { setShowNew(false); notebook.open(options); };
-
   return (
-    <div className="space-y-5 animate-page-in">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <div className="eyebrow mb-2">Akıllı Defter</div>
-          <h1 className="page-heading">📒 Benim Defterim</h1>
-          <p className="page-subtitle">Konuşarak, yazarak, fotoğraf, formül ve çizimle not al; notlarını ders, konu ve kitaplarınla eşle, zamanı gelince tekrar et.</p>
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-1 rounded-2xl bg-paper p-1 sm:flex-none" role="tablist" aria-label="Defter bölümü">
+          {([["questions", "❓ Sorularım"], ["notes", "📝 Notlarım"]] as const).map(([key, label]) => (
+            <button key={key} role="tab" aria-selected={tab === key} onClick={() => selectTab(key)} className={`h-10 flex-1 rounded-xl px-5 text-[14px] font-semibold sm:flex-none ${tab === key ? "bg-white text-ink shadow-sm" : "text-ink-3"}`}>{label}</button>
+          ))}
         </div>
-        <button onClick={() => setShowNew(true)} className="flex h-12 shrink-0 items-center justify-center gap-2 rounded-2xl bg-ink px-5 text-[14px] font-semibold text-white shadow-lg"><Plus size={17} /> Yeni Not</button>
+        {tab === "notes" && <button onClick={() => setShowNew(true)} className="flex h-11 shrink-0 items-center justify-center gap-2 rounded-2xl bg-ink px-5 text-[14px] font-semibold text-white shadow-lg"><Plus size={17} /> Yeni Not</button>}
       </div>
+
+      {tab === "questions" ? <QuestionsPanel /> : (<>
 
       {unsynced.length > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-warn-fill/40 bg-warn-soft px-4 py-3 text-[13px] text-warn">
@@ -155,28 +208,12 @@ export default function NotebookSection() {
       ) : view === "timeline" ? (
         <NoteTimeline notes={notes} onOpen={(id) => notebook.open({ noteId: id })} />
       ) : (
-        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">{notes.map((note) => <NoteCard key={note.id} note={note} onOpen={(id) => notebook.open({ noteId: id })} />)}</div>
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">{notes.map((note) => <NoteCard key={note.id} note={note} onOpen={(id) => notebook.open({ noteId: id })} footer={!note.subject && <MoveToSubject noteId={note.id} />} />)}</div>
       )}
       {list.hasNextPage && <div className="text-center"><button onClick={() => void list.fetchNextPage()} disabled={list.isFetchingNextPage} className="h-10 rounded-xl border border-ink/10 px-5 text-[13px] font-semibold text-ink-2">{list.isFetchingNextPage ? "Yükleniyor…" : "Daha fazla göster"}</button></div>}
+      </>)}
 
-      {showNew && (
-        <div className="modal-backdrop items-end sm:items-center" onMouseDown={(event) => event.target === event.currentTarget && setShowNew(false)}>
-          <div className="modal-card max-w-[480px]">
-            <div className="text-[15px] font-semibold text-ink">➕ Yeni Not</div>
-            <div className="mt-4 grid grid-cols-5 gap-2">
-              {([["Yaz", <SquarePen key="t" size={20} />, undefined], ["Ses", <Mic key="v" size={20} className="text-danger" />, "voice"], ["Fotoğraf", <Camera key="p" size={20} />, "photo"], ["Formül", <Sigma key="f" size={20} />, "formula"], ["Çiz", <PenLine key="d" size={20} />, "drawing"]] as const).map(([label, icon, startWith]) => (
-                <button key={label} onClick={() => openNew({ prefill: { startWith } })} className="flex h-20 flex-col items-center justify-center gap-1.5 rounded-2xl border border-ink/10 text-[12px] font-semibold text-ink-2 hover:bg-brand-soft">{icon}{label}</button>
-              ))}
-            </div>
-            <div className="mt-5 text-[12px] font-bold text-ink-4">Şablonlar</div>
-            <div className="mt-2 grid gap-2 sm:grid-cols-2">
-              {NOTE_TEMPLATES.map((template) => (
-                <button key={template.key} onClick={() => openNew({ prefill: { templateKey: template.key } })} className="rounded-xl border border-ink/10 px-3 py-2.5 text-left text-[13px] hover:bg-paper"><span className="font-semibold text-ink">{template.icon} {template.label}</span><span className="mt-0.5 block text-[12px] text-ink-3">{template.sections.slice(0, 3).join(" · ")}…</span></button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+      {showNew && <NewNoteDialog onClose={() => setShowNew(false)} />}
     </div>
   );
 }
@@ -199,10 +236,14 @@ export function DayNotes({ date }: { date: string }) {
   );
 }
 
-/** Genel Bakış: tekrar tarihi gelen notlar (bildirim sistemi olmadığı için panoda gösterilir). */
+/** Genel Bakış: tekrar zamanı gelen sorular ve notlar (bildirim sistemi olmadığı için panoda gösterilir). */
 export function ReviewDueNotes() {
+  return <><QuestionReviewCard compact /><ReviewDueNoteList /></>;
+}
+
+function ReviewDueNoteList() {
   const notebook = useNotebook();
-  const due = trpc.notes.list.useQuery({ reviewDue: true, limit: 4 }, { retry: false });
+  const due = trpc.notes.list.useQuery({ reviewDue: true, limit: 4, questions: "exclude" }, { retry: false });
   if (!due.data?.items.length) return null;
   return (
     <div className="soft-card border-success/20 bg-success-soft p-4 sm:p-5">

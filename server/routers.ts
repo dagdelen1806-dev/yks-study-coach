@@ -16,6 +16,8 @@ import { calculatePlanAdherence } from "../shared/planAdherence";
 import { topicsRouter } from "./routers/topics";
 import { bookContentRouter } from "./routers/bookContent";
 import { notesRouter } from "./routers/notes";
+import { questionsRouter } from "./routers/questions";
+import { getNotebookPlanSignal } from "./notes/questionsDb";
 import { resourceCatalogRouter } from "./routers/resourceCatalog";
 import { onboardingRouter } from "./routers/onboarding";
 import { subscriptionRouter } from "./routers/subscription";
@@ -301,7 +303,7 @@ export const appRouter = router({
     // bir LLM çağrısı yapan (maliyetli) bir işlemdi. Artık giriş + onay
     // zorunlu (`protectedProcedure` içeren `metredFeatureProcedure`) VE
     // free/premium'a göre kullanım kotalı (bkz. shared/entitlements.ts).
-    generate: metredFeatureProcedure("AI_STUDY_PLAN").input(planInput).mutation(async ({ input }) => {
+    generate: metredFeatureProcedure("AI_STUDY_PLAN").input(planInput).mutation(async ({ ctx, input }) => {
       const weakTopics = input.topics.filter((topic) => topic.status === "Zayıf");
       const recentExams = input.exams.slice(0, 3);
       const profile = input.studentProfile;
@@ -311,7 +313,13 @@ export const appRouter = router({
       const coachingContext = profile && (profile.dailyStudyDuration || profile.preferredStudyMethods?.length || profile.studyObstacles || profile.coachingStyle || profile.mainGoal)
         ? `\n\nÖğrencinin koçluk tercihleri (varsa bunlara uy — örn. tercih ettiği çalışma yöntemine ağırlık ver, iletişim tarzına uygun bir dille yaz): ${JSON.stringify({ dailyStudyDuration: profile.dailyStudyDuration, preferredStudyMethods: profile.preferredStudyMethods, studyObstacles: profile.studyObstacles, coachingStyle: profile.coachingStyle, mainGoal: profile.mainGoal })}`
         : "";
-      const prompt = `Bir YKS öğrencisi için 7 günlük uygulanabilir çalışma programı oluştur. Hedef: ${input.goal}. Haftalık toplam süre: ${input.availableMinutes} dakika. Öncelik, zayıf konular ve son deneme performansı olsun. Zayıf konuları tamamen yok sayma; orta konulara pekiştirme, iyi konulara koruma oturumu ekle. Her gün toplam 60-150 dakika ve 2-4 oturum planla. Türkçe yanıt üret. Kişisel raftaki kitapları mümkün olduğunca ilgili zayıf konu oturumlarına bağla. Bir kitabın mappings alanında ilgili konu varsa targetPages alanına gerçek sayfa aralığını ve targetTests alanına gerçek test aralığını yaz; eşleştirme yoksa uydurma aralık verme, null bırak. Soru oturumlarında gerçekçi günlük soru hedefi yaz.\n\nZayıf/orta/iyi konu verisi:\n${JSON.stringify(input.topics)}\n\nÖncelikli zayıf konular:\n${JSON.stringify(weakTopics)}\n\nSon denemeler:\n${JSON.stringify(recentExams)}\n\nKişisel raf ve çözüm durumu:\n${JSON.stringify(input.books)}${targetContext}${coachingContext}`;
+      // Soru Defterim: öğrencinin son 60 günde çözemediği soruların konu dağılımı. Zayıflık
+      // hesabının yerine geçmez; plana "defterdeki soruları tekrar" oturumları için ek sinyaldir.
+      const notebookSignal = ctx.user ? await getNotebookPlanSignal(ctx.user.id).catch(() => null) : null;
+      const notebookContext = notebookSignal
+        ? `\n\nÖğrencinin Soru Defteri (kendi kaydettiği, henüz öğrenemediği sorular — bu konulara kısa "Tekrar" oturumları ekle, öğrenciyi etiketleme):\n${notebookSignal}`
+        : "";
+      const prompt = `Bir YKS öğrencisi için 7 günlük uygulanabilir çalışma programı oluştur. Hedef: ${input.goal}. Haftalık toplam süre: ${input.availableMinutes} dakika. Öncelik, zayıf konular ve son deneme performansı olsun. Zayıf konuları tamamen yok sayma; orta konulara pekiştirme, iyi konulara koruma oturumu ekle. Her gün toplam 60-150 dakika ve 2-4 oturum planla. Türkçe yanıt üret. Kişisel raftaki kitapları mümkün olduğunca ilgili zayıf konu oturumlarına bağla. Bir kitabın mappings alanında ilgili konu varsa targetPages alanına gerçek sayfa aralığını ve targetTests alanına gerçek test aralığını yaz; eşleştirme yoksa uydurma aralık verme, null bırak. Soru oturumlarında gerçekçi günlük soru hedefi yaz.\n\nZayıf/orta/iyi konu verisi:\n${JSON.stringify(input.topics)}\n\nÖncelikli zayıf konular:\n${JSON.stringify(weakTopics)}\n\nSon denemeler:\n${JSON.stringify(recentExams)}\n\nKişisel raf ve çözüm durumu:\n${JSON.stringify(input.books)}${targetContext}${coachingContext}${notebookContext}`;
       try {
         const response = await invokeLLM({
           messages: [
@@ -383,6 +391,7 @@ export const appRouter = router({
   topics: topicsRouter,
   bookContent: bookContentRouter,
   notes: notesRouter,
+  questions: questionsRouter,
   catalog: resourceCatalogRouter,
   onboarding: onboardingRouter,
   subscription: subscriptionRouter,

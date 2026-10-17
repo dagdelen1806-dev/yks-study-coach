@@ -274,6 +274,56 @@ export const noteAttachments = mysqlTable("note_attachments", {
   userNoteIdx: index("note_attachments_user_note_idx").on(table.userId, table.noteId),
 }));
 
+// Soru Defterim: öğrencinin çözemediği soru kartı. Kart bir notun içinde yaşar
+// (noteId — ekler, takvim, arama), tekrar takvimi ve sonuçları burada tutulur.
+// Kartın alanları asıl kaynaktır; not içeriği bunlardan yeniden üretilir
+// (bkz. shared/questionNotebook.ts → buildQuestionDoc).
+export const notebookQuestions = mysqlTable("notebook_questions", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  noteId: int("noteId").notNull(),
+  subject: varchar("subject", { length: 80 }),
+  topicId: int("topicId"),
+  questionImageId: int("questionImageId"),
+  solutionImageId: int("solutionImageId"),
+  voiceAttachmentId: int("voiceAttachmentId"),
+  voiceDuration: int("voiceDuration"),
+  stuckPoint: text("stuckPoint"),
+  solutionText: text("solutionText"),
+  // Hata türü: AI önerirse "ai", öğrenci seçer ya da onaylarsa "student".
+  errorType: varchar("errorType", { length: 30 }),
+  errorTypeSource: mysqlEnum("errorTypeSource", ["student", "ai"]),
+  difficulty: mysqlEnum("difficulty", ["easy", "medium", "hard"]),
+  // AI'ın önerdiği konu (öğrenci düzelttiyse topicId'den farklı kalır: öneri isabeti ölçülebilsin).
+  aiTopicId: int("aiTopicId"),
+  status: mysqlEnum("status", ["unsolved", "learning", "mastered"]).default("unsolved").notNull(),
+  reviewStage: int("reviewStage").default(0).notNull(),
+  nextReviewAt: timestamp("nextReviewAt"),
+  attemptCount: int("attemptCount").default(0).notNull(),
+  lastResult: mysqlEnum("lastResult", ["solved", "partial", "failed"]),
+  lastAttemptAt: timestamp("lastAttemptAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  noteUnique: uniqueIndex("notebook_questions_note_unique").on(table.noteId),
+  userReviewIdx: index("notebook_questions_user_review_idx").on(table.userId, table.nextReviewAt),
+  userTopicIdx: index("notebook_questions_user_topic_idx").on(table.userId, table.topicId),
+}));
+
+// "Tekrar çöz" denemeleri: soru kartının gelişim geçmişi.
+export const questionAttempts = mysqlTable("question_attempts", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  questionId: int("questionId").notNull(),
+  result: mysqlEnum("result", ["solved", "partial", "failed"]).notNull(),
+  sawSolution: int("sawSolution").default(0).notNull(),
+  seconds: int("seconds"),
+  stageBefore: int("stageBefore").notNull(),
+  attemptedAt: timestamp("attemptedAt").defaultNow().notNull(),
+}, (table) => ({
+  userQuestionIdx: index("question_attempts_user_question_idx").on(table.userId, table.questionId),
+}));
+
 // Kitap içindekiler OCR sonucu önbelleği: aynı öğrencinin aynı fotoğrafı (SHA-256)
 // aynı işlem hattı sürümüyle tekrar okunmaz. Görselin kendisi SAKLANMAZ; yalnızca
 // okuma sonucu (JSON). Öğrenciye özeldir (userId), başka öğrenciyle paylaşılmaz.

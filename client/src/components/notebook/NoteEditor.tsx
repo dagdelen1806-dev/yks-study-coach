@@ -7,6 +7,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import EditorToolbar, { type InsertAction } from "./EditorToolbar";
 import NoteImageDialog from "./NoteImageDialog";
+import { QuestionByNote } from "./QuestionDetail";
+import { QUESTION_TEMPLATE_KEY } from "@shared/questionNotebook";
 import VoiceRecorder from "./VoiceRecorder";
 import { isEmptyDraft, newClientId, readDraft, removeDraft, saveDraft, type NoteDraftPayload, type SyncStatus } from "./drafts";
 import { noteExtensions } from "./extensions";
@@ -41,7 +43,7 @@ const daysFromToday = (days: number) => { const date = new Date(); date.setHours
  * Not düzenleyici (yeni not, mevcut not ya da taslaktan devam). Açılışta
  * içeriği hazırlar, sonra NoteEditorBody'yi çizer.
  */
-export default function NoteEditor({ noteId, draftClientId, prefill, onClose }: { noteId?: number | null; draftClientId?: string | null; prefill?: NotePrefill; onClose: () => void }) {
+export default function NoteEditor({ noteId, draftClientId, prefill, onClose, onReviewQuestion }: { noteId?: number | null; draftClientId?: string | null; prefill?: NotePrefill; onClose: () => void; onReviewQuestion?: (questionId: number) => void }) {
   const existing = trpc.notes.get.useQuery({ id: noteId ?? 0 }, { enabled: Boolean(noteId), retry: false });
   const initial = useMemo<{ payload: NoteDraftPayload; serverId: number | null; status: SyncStatus } | null>(() => {
     if (noteId) {
@@ -88,6 +90,11 @@ export default function NoteEditor({ noteId, draftClientId, prefill, onClose }: 
     return (
       <div className="modal-backdrop" style={{ zIndex: 300 }}><div className="modal-card max-w-[380px] text-center"><p className="text-[14px] text-danger">{existing.error.message}</p><button onClick={onClose} className="mt-4 h-10 rounded-xl border border-ink/10 px-4 text-[13px] font-semibold">Kapat</button></div></div>
     );
+  }
+  // Soru kartının notu (takvim, gün notları...) zengin düzenleyicide değil, kart ekranında açılır:
+  // kartın alanları asıl kaynaktır, not içeriği onlardan üretilir.
+  if (noteId && existing.data?.templateKey === QUESTION_TEMPLATE_KEY) {
+    return <QuestionByNote noteId={noteId} onClose={onClose} onReview={(id) => onReviewQuestion?.(id)} />;
   }
   if (!initial) {
     return <div className="modal-backdrop" style={{ zIndex: 300 }}><Loader2 className="animate-spin text-white" size={28} /></div>;
@@ -193,6 +200,7 @@ function NoteEditorBody({ initial, startWith, onClose }: { initial: { payload: N
     else if (saving.current) await saving.current.catch(() => undefined);
     void utils.notes.list.invalidate();
     void utils.notes.calendar.invalidate();
+    void utils.questions.subjectSummary.invalidate();
     onClose();
   };
 
@@ -229,6 +237,7 @@ function NoteEditorBody({ initial, startWith, onClose }: { initial: { payload: N
       removeDraft(meta.clientId);
       void utils.notes.list.invalidate();
       void utils.notes.calendar.invalidate();
+      void utils.questions.subjectSummary.invalidate();
       toast.success("Not silindi.");
       onClose();
     } catch (error) {

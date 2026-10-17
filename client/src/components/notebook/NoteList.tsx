@@ -8,7 +8,7 @@ export type NoteSummary = inferRouterOutputs<AppRouter>["notes"]["list"]["items"
 const typeIcon = (note: NoteSummary) => (note.stats.voice ? "🎙️" : note.stats.images ? "📷" : note.stats.formulas ? "∑" : note.stats.drawings ? "🖊" : "✍️");
 
 /** Liste kartı: sade — başlık, kısa önizleme, ders/konu, tarih, küçük içerik göstergeleri. */
-export function NoteCard({ note, onOpen }: { note: NoteSummary; onOpen: (id: number) => void }) {
+export function NoteCard({ note, onOpen, footer }: { note: NoteSummary; onOpen: (id: number) => void; /** Kartın altında, düğmenin dışında (ör. "Derse ekle"). */ footer?: React.ReactNode }) {
   const indicators = [
     note.stats.voice ? `🎙️ ${formatDuration(note.stats.voiceSeconds)}` : null,
     note.stats.images ? `📷 ${note.stats.images} görsel` : null,
@@ -17,7 +17,8 @@ export function NoteCard({ note, onOpen }: { note: NoteSummary; onOpen: (id: num
     note.stats.checklist ? `☑ ${note.stats.checklistDone}/${note.stats.checklist}` : null,
   ].filter(Boolean);
   return (
-    <button onClick={() => onOpen(note.id)} className="w-full rounded-2xl border border-ink/[0.07] bg-white p-4 text-left transition hover:border-brand/40">
+    <div className="overflow-hidden rounded-2xl border border-ink/[0.07] bg-white transition hover:border-brand/40">
+    <button onClick={() => onOpen(note.id)} className="w-full p-4 text-left">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 text-[14px] font-semibold text-ink"><span aria-hidden className="mr-1">{typeIcon(note)}</span>{note.title}</div>
         <div className="flex shrink-0 gap-1">
@@ -34,6 +35,8 @@ export function NoteCard({ note, onOpen }: { note: NoteSummary; onOpen: (id: num
         <span className="ml-auto text-ink-4">{new Date(note.noteDate).toLocaleString("tr-TR", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })}</span>
       </div>
     </button>
+    {footer}
+    </div>
   );
 }
 

@@ -9,7 +9,7 @@ type Rotation = 0 | 90 | 180 | 270;
  * 📷 Fotoğraf ekle: kamera/galeri → döndür / kırp / önizle → küçültülüp yüklenir.
  * (Küçültme kitap taramasıyla ortak yardımcıdan; yükleme sunucuda tür/boyut/kota doğrulanır.)
  */
-export default function NoteImageDialog({ onDone, onClose }: { onDone: (attachmentId: number) => void; onClose: () => void }) {
+export default function NoteImageDialog({ onDone, onClose, confirmLabel = "Nota ekle" }: { onDone: (attachmentId: number) => void; onClose: () => void; confirmLabel?: string }) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [rotate, setRotate] = useState<Rotation>(0);
@@ -82,7 +82,7 @@ export default function NoteImageDialog({ onDone, onClose }: { onDone: (attachme
         <input ref={galleryRef} type="file" accept="image/*" className="hidden" onChange={(event) => { choose(event.target.files?.[0]); event.target.value = ""; }} />
         <div className="mt-5 flex justify-end gap-2">
           <button onClick={onClose} disabled={busy} className="h-10 rounded-xl border border-ink/10 px-4 text-[13px] font-semibold text-ink-3">Vazgeç</button>
-          <button onClick={save} disabled={!file || busy} className="flex h-10 items-center gap-1.5 rounded-xl bg-ink px-4 text-[13px] font-semibold text-white disabled:opacity-40">{busy && <Loader2 size={14} className="animate-spin" />} Nota ekle</button>
+          <button onClick={save} disabled={!file || busy} className="flex h-10 items-center gap-1.5 rounded-xl bg-ink px-4 text-[13px] font-semibold text-white disabled:opacity-40">{busy && <Loader2 size={14} className="animate-spin" />} {confirmLabel}</button>
         </div>
       </div>
     </div>
