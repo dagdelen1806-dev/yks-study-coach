@@ -62,14 +62,24 @@ export function isReviewDue(nextReviewAt: Date | null, now: Date): boolean {
 export type ReviewState = { reviewStage: number; status: QuestionStatus; nextReviewAt: Date | null };
 
 /**
+ * Tekrarda kademeli yardım: önce ipucu, sonra ilk adım, en son tam çözüm.
+ * Yalnızca ipucuyla çözmek basamak ilerletir; ilk adımı ya da çözümü gördükten
+ * sonra çözmek "kısmen" sayılır.
+ */
+export const HINT_LEVELS = { none: 0, hint: 1, firstStep: 2, solution: 3 } as const;
+export type HintLevel = (typeof HINT_LEVELS)[keyof typeof HINT_LEVELS];
+export const HINT_LEVEL_LABELS: Record<number, string> = { 1: "ipucuyla", 2: "ilk adımı görerek", 3: "çözüme bakarak" };
+
+/**
  * Bir "Tekrar çöz" denemesinden sonraki durum.
- * - Çözdüm (çözüme bakmadan): bir sonraki basamak; son basamaktaysa öğrenildi.
- * - Çözümü açıp çözdüm ya da kısmen: aynı basamakta kalır, o basamağın aralığı kadar sonra.
+ * - Çözdüm (çözüme bakmadan, en fazla ipucuyla): bir sonraki basamak; son basamaktaysa öğrenildi.
+ * - İlk adımı / çözümü görüp çözdüm ya da kısmen: aynı basamakta kalır, o basamağın aralığı kadar sonra.
  * - Çözemedim: başa döner, ertesi gün.
  */
-export function scheduleAfterAttempt(current: { reviewStage: number }, result: AttemptResult, sawSolution: boolean, now: Date): ReviewState {
+export function scheduleAfterAttempt(current: { reviewStage: number }, result: AttemptResult, sawSolution: boolean, now: Date, hintLevel = 0): ReviewState {
   const stage = Math.min(Math.max(current.reviewStage, 0), REVIEW_INTERVALS_DAYS.length - 1);
-  const effective: AttemptResult = result === "solved" && sawSolution ? "partial" : result;
+  const helped = sawSolution || hintLevel >= HINT_LEVELS.firstStep;
+  const effective: AttemptResult = result === "solved" && helped ? "partial" : result;
   if (effective === "failed") return { reviewStage: 0, status: "unsolved", nextReviewAt: reviewDateAfter(REVIEW_INTERVALS_DAYS[0], now) };
   if (effective === "partial") return { reviewStage: stage, status: "learning", nextReviewAt: reviewDateAfter(REVIEW_INTERVALS_DAYS[stage], now) };
   const next = stage + 1;
@@ -173,4 +183,45 @@ export function buildQuestionDoc(input: QuestionContent): NoteDoc {
 export function questionTitle(subject: string | null, topic: string | null, createdAt: Date): string {
   if (subject || topic) return `❓ ${[subject, topic].filter(Boolean).join(" · ")}`.slice(0, 200);
   return `❓ Soru · ${createdAt.toLocaleDateString("tr-TR", { day: "numeric", month: "long" })}`;
+}
+
+// ---------------------------------------------------------------------------
+// ✨ Adım adım çöz (AI çözümü)
+// ---------------------------------------------------------------------------
+
+/** AI çözümü: her adımda işlem + neden; sonunda sağlama. Cevabı değil yöntemi öğretmek için. */
+export type AiSolution = {
+  method: string;
+  steps: Array<{ work: string; why: string }>;
+  answer: string;
+  check: string;
+  hint: string;
+};
+
+const clip = (value: unknown, max: number) => (typeof value === "string" ? value.trim().slice(0, max) : "");
+
+/** Kayıtlı ya da AI'dan gelen JSON'u güvenli biçimde AiSolution'a çevirir; adım yoksa null. */
+export function parseAiSolution(raw: unknown): AiSolution | null {
+  let value = raw;
+  if (typeof value === "string") {
+    try { value = JSON.parse(value); } catch { return null; }
+  }
+  if (!value || typeof value !== "object") return null;
+  const input = value as Record<string, unknown>;
+  const steps = (Array.isArray(input.steps) ? input.steps : [])
+    .map((step) => (step && typeof step === "object" ? { work: clip((step as Record<string, unknown>).work, 600), why: clip((step as Record<string, unknown>).why, 600) } : null))
+    .filter((step): step is { work: string; why: string } => Boolean(step && (step.work || step.why)))
+    .slice(0, 12);
+  if (!steps.length) return null;
+  return { method: clip(input.method, 400), steps, answer: clip(input.answer, 400), check: clip(input.check, 600), hint: clip(input.hint, 400) };
+}
+
+/** "Çözüm notuma ekle": AI çözümünü öğrencinin düzenleyebileceği düz metne çevirir. */
+export function aiSolutionToText(solution: AiSolution): string {
+  return [
+    solution.method && `Yöntem: ${solution.method}`,
+    ...solution.steps.map((step, index) => `${index + 1}) ${step.work}${step.why ? ` (${step.why})` : ""}`),
+    solution.answer && `Sonuç: ${solution.answer}`,
+    solution.check && `Kontrol: ${solution.check}`,
+  ].filter(Boolean).join("\n");
 }

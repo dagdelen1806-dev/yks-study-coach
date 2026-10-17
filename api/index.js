@@ -364,6 +364,9 @@ var notebookQuestions = mysqlTable("notebook_questions", {
   difficulty: mysqlEnum("difficulty", ["easy", "medium", "hard"]),
   // AI'ın önerdiği konu (öğrenci düzelttiyse topicId'den farklı kalır: öneri isabeti ölçülebilsin).
   aiTopicId: int("aiTopicId"),
+  // ✨ Adım adım çöz: AI çözümü (JSON, AiSolution). Kartta saklanır; tekrar açmak yeniden ücret ödetmez.
+  aiSolution: text("aiSolution"),
+  aiSolutionAt: timestamp("aiSolutionAt"),
   status: mysqlEnum("status", ["unsolved", "learning", "mastered"]).default("unsolved").notNull(),
   reviewStage: int("reviewStage").default(0).notNull(),
   nextReviewAt: timestamp("nextReviewAt"),
@@ -383,6 +386,8 @@ var questionAttempts = mysqlTable("question_attempts", {
   questionId: int("questionId").notNull(),
   result: mysqlEnum("result", ["solved", "partial", "failed"]).notNull(),
   sawSolution: int("sawSolution").default(0).notNull(),
+  // Kademeli ipucu: 0 yok, 1 ipucu, 2 ilk adım, 3 tam çözüm (HINT_LEVELS).
+  hintLevel: int("hintLevel").default(0).notNull(),
   seconds: int("seconds"),
   stageBefore: int("stageBefore").notNull(),
   attemptedAt: timestamp("attemptedAt").defaultNow().notNull()
@@ -1341,9 +1346,11 @@ function reviewDateAfter(days, now) {
   return new Date(date.getTime() + days * DAY_MS);
 }
 var firstReviewAt = (now) => reviewDateAfter(REVIEW_INTERVALS_DAYS[0], now);
-function scheduleAfterAttempt(current, result, sawSolution, now) {
+var HINT_LEVELS = { none: 0, hint: 1, firstStep: 2, solution: 3 };
+function scheduleAfterAttempt(current, result, sawSolution, now, hintLevel = 0) {
   const stage = Math.min(Math.max(current.reviewStage, 0), REVIEW_INTERVALS_DAYS.length - 1);
-  const effective = result === "solved" && sawSolution ? "partial" : result;
+  const helped = sawSolution || hintLevel >= HINT_LEVELS.firstStep;
+  const effective = result === "solved" && helped ? "partial" : result;
   if (effective === "failed") return { reviewStage: 0, status: "unsolved", nextReviewAt: reviewDateAfter(REVIEW_INTERVALS_DAYS[0], now) };
   if (effective === "partial") return { reviewStage: stage, status: "learning", nextReviewAt: reviewDateAfter(REVIEW_INTERVALS_DAYS[stage], now) };
   const next = stage + 1;
@@ -1396,6 +1403,22 @@ function buildQuestionDoc(input) {
 function questionTitle(subject, topic, createdAt) {
   if (subject || topic) return `\u2753 ${[subject, topic].filter(Boolean).join(" \xB7 ")}`.slice(0, 200);
   return `\u2753 Soru \xB7 ${createdAt.toLocaleDateString("tr-TR", { day: "numeric", month: "long" })}`;
+}
+var clip = (value, max) => typeof value === "string" ? value.trim().slice(0, max) : "";
+function parseAiSolution(raw) {
+  let value = raw;
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (!value || typeof value !== "object") return null;
+  const input = value;
+  const steps = (Array.isArray(input.steps) ? input.steps : []).map((step) => step && typeof step === "object" ? { work: clip(step.work, 600), why: clip(step.why, 600) } : null).filter((step) => Boolean(step && (step.work || step.why))).slice(0, 12);
+  if (!steps.length) return null;
+  return { method: clip(input.method, 400), steps, answer: clip(input.answer, 400), check: clip(input.check, 600), hint: clip(input.hint, 400) };
 }
 
 // server/db.ts
@@ -6563,6 +6586,70 @@ async function suggestQuestionDetails(input, invoke = invokeLLM) {
   };
 }
 
+// server/notes/questionSolver.ts
+function subjectGuidance(subject) {
+  const name = (subject ?? "").toLocaleLowerCase("tr-TR");
+  if (/geometri/.test(name)) return "\u015Eekildeki verileri \xF6nce listele, hangi teoremi/ba\u011F\u0131nt\u0131y\u0131 neden kulland\u0131\u011F\u0131n\u0131 s\xF6yle, en sonda sonucu sa\u011Fla.";
+  if (/matematik/.test(name)) return "Bilinmeyeni ve verilenleri yaz, denklemi kur, her i\u015Flemin nedenini s\xF6yle; en sonda buldu\u011Fun de\u011Feri yerine koyarak sa\u011Fla.";
+  if (/fizik/.test(name)) return "Verilenleri birimleriyle yaz, do\u011Fru form\xFCl\xFC NEDEN se\xE7ti\u011Fini s\xF6yle, birim kontrol\xFC yap.";
+  if (/kimya/.test(name)) return "Mol / k\xFCtle / deri\u015Fim ili\u015Fkisini kur, gerekiyorsa denklemi denkle\u015Ftir, birim ve korunum kontrol\xFC yap.";
+  if (/biyoloji/.test(name)) return "Sorunun hangi kavram\u0131 \xF6l\xE7t\xFC\u011F\xFCn\xFC s\xF6yle, do\u011Fru se\xE7ene\u011Fin gerek\xE7esini ve en g\xFC\xE7l\xFC \xE7eldiricinin neden yanl\u0131\u015F oldu\u011Funu a\xE7\u0131kla.";
+  if (subject) return "Sorunun neyi \xF6l\xE7t\xFC\u011F\xFCn\xFC s\xF6yle, metinden/bilgiden kan\u0131tla do\u011Fru se\xE7ene\u011Fe ula\u015F ve en g\xFC\xE7l\xFC \xE7eldiricinin neden yanl\u0131\u015F oldu\u011Funu a\xE7\u0131kla.";
+  return "Sorunun t\xFCr\xFCn\xFC belirle ve ona uygun y\xF6ntemle \xE7\xF6z; say\u0131sal ise sa\u011Fla, s\xF6zel ise \xE7eldiricileri a\xE7\u0131kla.";
+}
+async function solveQuestion(input, invoke = invokeLLM) {
+  const questionText = input.ocrText?.trim();
+  if (!input.imageDataUrl && !questionText) throw new Error("\xC7\xF6z\xFClecek soru yok: kartta soru foto\u011Fraf\u0131 olmal\u0131.");
+  const system = [
+    "Bir YKS \xF6\u011Frencisinin \xE7\xF6zemedi\u011Fi soruyu sab\u0131rl\u0131 bir \xF6\u011Fretmen gibi ADIM ADIM T\xFCrk\xE7e \xE7\xF6z\xFCyorsun. Ama\xE7 cevab\u0131 de\u011Fil y\xF6ntemi \xF6\u011Fretmek.",
+    `Ders: ${input.subject ?? "belirtilmemi\u015F"}${input.topic ? ` \xB7 Konu: ${input.topic}` : ""}. ${subjectGuidance(input.subject)}`,
+    "Kurallar:",
+    "- method: bu soru tipinde kullan\u0131lacak y\xF6ntemi tek c\xFCmleyle s\xF6yle.",
+    "- steps: 2\u20138 ad\u0131m. work = o ad\u0131mda yap\u0131lan i\u015Flem (matemati\u011Fi d\xFCz yaz\u0131yla, \xF6r. x^2, \u221A, \u03C0); why = bunu NEDEN yapt\u0131\u011F\u0131n, tek k\u0131sa c\xFCmle.",
+    "- answer: k\u0131sa sonu\xE7 (\xE7oktan se\xE7meliyse \u015F\u0131k + de\u011Fer).",
+    "- check: sa\u011Flama ya da kontrol, tek c\xFCmle.",
+    "- hint: cevab\u0131 ve sonucu ELE VERMEYEN, \xF6\u011Frenciyi do\u011Fru y\xF6nteme y\xF6nelten tek c\xFCmle ipucu.",
+    "- \xD6\u011Frenci tak\u0131ld\u0131\u011F\u0131 yeri yazd\u0131ysa o ad\u0131m\u0131 \xF6zellikle a\xE7\u0131k anlat.",
+    "- Soru okunam\u0131yorsa ya da eksikse uydurma: steps i\xE7ine tek ad\u0131m olarak neyin okunamad\u0131\u011F\u0131n\u0131 yaz, answer bo\u015F string."
+  ].join("\n");
+  const userText = [
+    questionText ? `Sorunun metni (OCR, hatal\u0131 olabilir; g\xF6rsel varsa g\xF6rsel esast\u0131r):
+${questionText.slice(0, 4e3)}` : null,
+    input.stuckPoint?.trim() ? `\xD6\u011Frencinin tak\u0131ld\u0131\u011F\u0131 yer: "${input.stuckPoint.trim().slice(0, 1500)}"` : null
+  ].filter(Boolean).join("\n\n") || "Soruyu g\xF6rselden oku ve \xE7\xF6z.";
+  const response = await invoke({
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: input.imageDataUrl ? [{ type: "text", text: userText }, { type: "image_url", image_url: { url: input.imageDataUrl, detail: "high" } }] : userText }
+    ],
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "question_solution",
+        strict: true,
+        schema: {
+          type: "object",
+          properties: {
+            method: { type: "string" },
+            steps: { type: "array", items: { type: "object", properties: { work: { type: "string" }, why: { type: "string" } }, required: ["work", "why"], additionalProperties: false } },
+            answer: { type: "string" },
+            check: { type: "string" },
+            hint: { type: "string" }
+          },
+          required: ["method", "steps", "answer", "check", "hint"],
+          additionalProperties: false
+        }
+      }
+    }
+  });
+  const raw = response.choices[0]?.message?.content;
+  const jsonText = typeof raw === "string" ? raw : raw?.map((part) => part.type === "text" ? part.text : "").join("");
+  if (!jsonText) throw new Error("AI yan\u0131t\u0131 bo\u015F d\xF6nd\xFC.");
+  const solution = parseAiSolution(jsonText.replace(/```json|```/g, "").trim());
+  if (!solution) throw new Error("AI \xE7\xF6z\xFCm\xFC okunamad\u0131.");
+  return solution;
+}
+
 // server/notes/questionsDb.ts
 import { and as and8, asc, desc as desc4, eq as eq10, gte as gte6, isNotNull as isNotNull2, isNull as isNull5, lt as lt5, lte as lte4, ne as ne2, sql as sql5 } from "drizzle-orm";
 async function requireDb4() {
@@ -6704,15 +6791,29 @@ var questionColumns = {
   attemptCount: notebookQuestions.attemptCount,
   lastResult: notebookQuestions.lastResult,
   lastAttemptAt: notebookQuestions.lastAttemptAt,
+  aiSolution: notebookQuestions.aiSolution,
+  aiSolutionAt: notebookQuestions.aiSolutionAt,
   createdAt: notebookQuestions.createdAt
 };
-var shape = (row) => ({ ...row, errorType: row.errorType });
+var shape = (row) => ({ ...row, errorType: row.errorType, aiSolution: row.aiSolution ? parseAiSolution(row.aiSolution) : null });
 async function getQuestion(userId, id2) {
   const db = await requireDb4();
   const [row] = await db.select(questionColumns).from(notebookQuestions).leftJoin(yksTopics, eq10(yksTopics.id, notebookQuestions.topicId)).where(and8(eq10(notebookQuestions.id, id2), eq10(notebookQuestions.userId, userId))).limit(1);
   if (!row) return null;
-  const attempts = await db.select({ result: questionAttempts.result, sawSolution: questionAttempts.sawSolution, attemptedAt: questionAttempts.attemptedAt }).from(questionAttempts).where(and8(eq10(questionAttempts.userId, userId), eq10(questionAttempts.questionId, id2))).orderBy(desc4(questionAttempts.attemptedAt)).limit(20);
+  const attempts = await db.select({ result: questionAttempts.result, sawSolution: questionAttempts.sawSolution, hintLevel: questionAttempts.hintLevel, attemptedAt: questionAttempts.attemptedAt }).from(questionAttempts).where(and8(eq10(questionAttempts.userId, userId), eq10(questionAttempts.questionId, id2))).orderBy(desc4(questionAttempts.attemptedAt), desc4(questionAttempts.id)).limit(20);
   return { ...shape(row), attempts: attempts.map((attempt) => ({ ...attempt, sawSolution: attempt.sawSolution === 1 })) };
+}
+async function getSolveContext(userId, id2) {
+  const db = await requireDb4();
+  const [row] = await db.select({ questionImageId: notebookQuestions.questionImageId, stuckPoint: notebookQuestions.stuckPoint, subject: notebookQuestions.subject, topic: yksTopics.topic, content: notes.content }).from(notebookQuestions).innerJoin(notes, eq10(notes.id, notebookQuestions.noteId)).leftJoin(yksTopics, eq10(yksTopics.id, notebookQuestions.topicId)).where(and8(eq10(notebookQuestions.id, id2), eq10(notebookQuestions.userId, userId))).limit(1);
+  if (!row) throw new NoteError("Soru bulunamad\u0131.");
+  return { questionImageId: row.questionImageId, ocrText: ocrTextOf(row.content, row.questionImageId), stuckPoint: row.stuckPoint, subject: row.subject, topic: row.topic };
+}
+async function saveAiSolution(userId, id2, solution) {
+  const db = await requireDb4();
+  const aiSolutionAt = /* @__PURE__ */ new Date();
+  await db.update(notebookQuestions).set({ aiSolution: JSON.stringify(solution), aiSolutionAt }).where(and8(eq10(notebookQuestions.id, id2), eq10(notebookQuestions.userId, userId)));
+  return { aiSolution: solution, aiSolutionAt };
 }
 async function getQuestionIdByNote(userId, noteId) {
   const db = await requireDb4();
@@ -6744,8 +6845,9 @@ async function recordAttempt(userId, id2, input) {
   const [row] = await db.select({ reviewStage: notebookQuestions.reviewStage }).from(notebookQuestions).where(and8(eq10(notebookQuestions.id, id2), eq10(notebookQuestions.userId, userId))).limit(1);
   if (!row) throw new NoteError("Soru bulunamad\u0131.");
   const now = /* @__PURE__ */ new Date();
-  const next = scheduleAfterAttempt(row, input.result, input.sawSolution, now);
-  await db.insert(questionAttempts).values({ userId, questionId: id2, result: input.result, sawSolution: input.sawSolution ? 1 : 0, seconds: input.seconds ? Math.min(Math.round(input.seconds), 7200) : null, stageBefore: row.reviewStage, attemptedAt: now });
+  const hintLevel = Math.min(Math.max(Math.round(input.hintLevel ?? 0), 0), HINT_LEVELS.solution);
+  const next = scheduleAfterAttempt(row, input.result, input.sawSolution, now, hintLevel);
+  await db.insert(questionAttempts).values({ userId, questionId: id2, result: input.result, sawSolution: input.sawSolution ? 1 : 0, hintLevel, seconds: input.seconds ? Math.min(Math.round(input.seconds), 7200) : null, stageBefore: row.reviewStage, attemptedAt: now });
   await db.update(notebookQuestions).set({ ...next, attemptCount: sql5`${notebookQuestions.attemptCount} + 1`, lastResult: input.result, lastAttemptAt: now }).where(eq10(notebookQuestions.id, id2));
   return next;
 }
@@ -6891,7 +6993,7 @@ var questionsRouter = router({
     return updateQuestion(ctx.user.id, questionId, patch);
   })),
   delete: protectedProcedure.input(z5.object({ id })).mutation(({ ctx, input }) => userFacing2(() => deleteQuestion(ctx.user.id, input.id))),
-  attempt: protectedProcedure.input(z5.object({ id, result: z5.enum(ATTEMPT_RESULT_KEYS), sawSolution: z5.boolean(), seconds: z5.number().min(0).max(7200).nullable().optional() })).mutation(({ ctx, input }) => userFacing2(() => recordAttempt(ctx.user.id, input.id, input))),
+  attempt: protectedProcedure.input(z5.object({ id, result: z5.enum(ATTEMPT_RESULT_KEYS), sawSolution: z5.boolean(), hintLevel: z5.number().int().min(HINT_LEVELS.none).max(HINT_LEVELS.solution).optional(), seconds: z5.number().min(0).max(7200).nullable().optional() })).mutation(({ ctx, input }) => userFacing2(() => recordAttempt(ctx.user.id, input.id, input))),
   // subject: verilmezse tüm dersler, null ise derssiz ("Genel"), metinse o dersin defteri.
   summary: protectedProcedure.input(z5.object({ subject: subjectScope }).optional()).query(({ ctx, input }) => userFacing2(() => getReviewSummary(ctx.user.id, input?.subject))),
   errorMap: protectedProcedure.input(z5.object({ days: z5.number().int().min(1).max(365).nullable(), subject: subjectScope })).query(({ ctx, input }) => userFacing2(() => getErrorMap(ctx.user.id, input.days, input.subject))),
@@ -6901,6 +7003,25 @@ var questionsRouter = router({
   moveToSubject: protectedProcedure.input(z5.object({ noteId: id, subject: z5.string().trim().min(1).max(80).nullable() })).mutation(({ ctx, input }) => userFacing2(() => moveNoteToSubject(ctx.user.id, input.noteId, input.subject))),
   addReviewTask: protectedProcedure.mutation(({ ctx }) => userFacing2(() => addReviewTask(ctx.user.id))),
   finishReview: protectedProcedure.input(z5.object({ minutes: z5.number().min(0).max(600), solved: z5.number().int().min(0).max(100), partial: z5.number().int().min(0).max(100), failed: z5.number().int().min(0).max(100) })).mutation(({ ctx, input }) => userFacing2(() => finishReviewSession(ctx.user.id, input))),
+  // ✨ Adım adım çöz: kartı AI ile çözer ve karta kaydeder (AI not araçları kotasından sayılır).
+  // İstemci kayıtlı çözümü `get` ile zaten alır; bu uç yalnızca ilk çözüm ya da "Yeniden çöz" için çağrılır.
+  solve: metredFeatureProcedure("NOTE_AI").input(z5.object({ id })).mutation(({ ctx, input }) => userFacing2(async () => {
+    const context = await getSolveContext(ctx.user.id, input.id);
+    let imageDataUrl = null;
+    if (context.questionImageId) {
+      const attachment = await getAttachmentStorage().get(ctx.user.id, context.questionImageId);
+      if (attachment?.kind === "image") imageDataUrl = `data:${attachment.mimeType};base64,${attachment.data.toString("base64")}`;
+    }
+    if (!imageDataUrl && !context.ocrText?.trim()) throw new NoteError("Bu kartta \xE7\xF6z\xFClecek bir soru foto\u011Fraf\u0131 yok.");
+    let solution;
+    try {
+      solution = await solveQuestion({ imageDataUrl, ocrText: context.ocrText, stuckPoint: context.stuckPoint, subject: context.subject, topic: context.topic });
+    } catch (error) {
+      console.warn("[Questions] solve failed:", error instanceof Error ? error.message : error);
+      throw new NoteError(llmUnavailableMessage(error) ?? "\xC7\xF6z\xFCm \u015Fu an haz\u0131rlanamad\u0131. Biraz sonra tekrar dene.");
+    }
+    return saveAiSolution(ctx.user.id, input.id, solution);
+  })),
   // ✨ Öner: fotoğrafı okur, müfredattan konu + zorluk + olası hata türü önerir (fotoğraf okuma kotasından sayılır).
   suggest: metredFeatureProcedure("NOTE_OCR").input(z5.object({ attachmentId: optionalId2, stuckPoint: z5.string().max(4e3).nullable().optional() })).mutation(({ ctx, input }) => userFacing2(async () => {
     let imageDataUrl = null;

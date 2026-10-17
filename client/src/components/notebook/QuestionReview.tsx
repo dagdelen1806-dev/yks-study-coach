@@ -1,8 +1,9 @@
 import { trpc } from "@/lib/trpc";
-import { ERROR_TYPES, MAX_QUESTIONS_PER_REVIEW, REVIEW_INTERVALS_DAYS, type AttemptResult } from "@shared/questionNotebook";
-import { Eye, Loader2, X } from "lucide-react";
+import { ERROR_TYPES, HINT_LEVELS, MAX_QUESTIONS_PER_REVIEW, REVIEW_INTERVALS_DAYS, type AttemptResult } from "@shared/questionNotebook";
+import { Eye, Footprints, Lightbulb, Loader2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { AiSolutionSteps, useAiSolve } from "./AiSolution";
 import { attachmentUrl } from "./nodes";
 
 const RESULT_BUTTONS: Array<{ result: AttemptResult; label: string; className: string }> = [
@@ -13,8 +14,9 @@ const RESULT_BUTTONS: Array<{ result: AttemptResult; label: string; className: s
 
 /**
  * 🔁 Tekrar çöz: önce yalnızca soru görünür; öğrenci dener, sonra sonucunu
- * işaretler. Çözüm notu istenirse açılır — açıldıktan sonra "Çözdüm" denese de
- * basamak ilerlemez (çözüme bakarak çözmek öğrenmiş sayılmaz). Oturum bitince
+ * işaretler. Takılırsa yardım kademeli açılır: 💡 ipucu → ilk adım → çözüm.
+ * Yalnızca ipucuyla çözmek basamak ilerletir; ilk adımı ya da çözümü gördükten
+ * sonra "Çözdüm" denese de basamak ilerlemez. Oturum bitince
  * bugünün "Defter Tekrarı" plan görevi varsa sonuçlarla tamamlanır.
  */
 export default function QuestionReview({ questionIds, subject, onClose }: { questionIds?: number[]; subject?: string | null; onClose: () => void }) {
@@ -24,7 +26,9 @@ export default function QuestionReview({ questionIds, subject, onClose }: { ques
   // Oturum başında liste sabitlenir: denenen kart "zamanı gelenler"den çıkınca sıra kaymasın.
   const [queue, setQueue] = useState<NonNullable<typeof due.data>["items"] | null>(null);
   const [index, setIndex] = useState(0);
-  const [revealed, setRevealed] = useState(false);
+  // Kademeli yardım: 0 yok → 1 ipucu → 2 ilk adım → 3 tam çözüm (HINT_LEVELS).
+  const [hintLevel, setHintLevel] = useState<number>(HINT_LEVELS.none);
+  const revealed = hintLevel >= HINT_LEVELS.solution;
   const [results, setResults] = useState<AttemptResult[]>([]);
   const [finished, setFinished] = useState<{ taskCompleted: boolean } | null>(null);
   const startedAt = useRef(Date.now());
@@ -39,6 +43,12 @@ export default function QuestionReview({ questionIds, subject, onClose }: { ques
   }, [questionIds, single.data, due.data, queue]);
 
   const current = queue?.[index] ?? null;
+  // Kayıtlı AI çözümü yoksa ipucu için bir kez çözdürülür (karta kaydedilir); sonra kademeler ücretsiz açılır.
+  const solver = useAiSolve(current?.id ?? null, (result) => {
+    setQueue((items) => items?.map((item) => (item.id === current?.id ? { ...item, ...result } : item)) ?? items);
+    setHintLevel((level) => Math.max(level, HINT_LEVELS.hint));
+  });
+  const aiSolution = current?.aiSolution ?? null;
   const loading = !queue && (due.isLoading || single.isLoading);
   const failedToLoad = !queue && (due.isError || single.isError);
 
@@ -57,14 +67,14 @@ export default function QuestionReview({ questionIds, subject, onClose }: { ques
   const mark = async (result: AttemptResult) => {
     if (!current || attempt.isPending) return;
     try {
-      await attempt.mutateAsync({ id: current.id, result, sawSolution: revealed, seconds: (Date.now() - questionStartedAt.current) / 1000 });
+      await attempt.mutateAsync({ id: current.id, result, sawSolution: revealed, hintLevel, seconds: (Date.now() - questionStartedAt.current) / 1000 });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Sonuç kaydedilemedi.");
       return;
     }
     const next = [...results, result];
     setResults(next);
-    setRevealed(false);
+    setHintLevel(HINT_LEVELS.none);
     questionStartedAt.current = Date.now();
     if (queue && index + 1 < queue.length) setIndex(index + 1);
     else await complete(next);
@@ -118,15 +128,43 @@ export default function QuestionReview({ questionIds, subject, onClose }: { ques
                 </div>
               )}
 
+              {!revealed && hintLevel >= HINT_LEVELS.hint && aiSolution?.hint && (
+                <div className="mt-3 rounded-xl border border-violet/20 bg-violet-soft p-3 text-[14px] text-ink-2"><span className="font-semibold text-violet">💡 İpucu:</span> {aiSolution.hint}</div>
+              )}
+              {!revealed && hintLevel >= HINT_LEVELS.firstStep && aiSolution?.steps[0] && (
+                <div className="mt-2 rounded-xl border border-violet/20 bg-white p-3">
+                  <div className="text-[11px] font-bold tracking-wide text-violet">ADIM 1</div>
+                  <p className="mt-0.5 text-[14px] font-semibold text-ink">{aiSolution.steps[0].work}</p>
+                  {aiSolution.steps[0].why && <p className="mt-0.5 text-[13px] text-ink-3">{aiSolution.steps[0].why}</p>}
+                </div>
+              )}
+
               {revealed ? (
-                <div className="mt-3 rounded-xl border border-success/25 bg-success-soft p-3">
-                  <div className="text-[13px] font-semibold text-success">🗣️ Çözüm notun</div>
-                  {current.solutionImageId && <img src={attachmentUrl(current.solutionImageId)} alt="Çözüm" className="mt-2 max-h-64 rounded-lg border border-ink/10" />}
-                  <p className="mt-1 whitespace-pre-wrap text-[14px] text-ink-2">{current.solutionText || (current.solutionImageId ? "" : "Bu soruya henüz çözüm notu eklememişsin. Çözünce karttan ekleyebilirsin.")}</p>
+                <div className="mt-3 space-y-3">
+                  {(current.solutionText || current.solutionImageId || !aiSolution) && (
+                    <div className="rounded-xl border border-success/25 bg-success-soft p-3">
+                      <div className="text-[13px] font-semibold text-success">🗣️ Çözüm notun</div>
+                      {current.solutionImageId && <img src={attachmentUrl(current.solutionImageId)} alt="Çözüm" className="mt-2 max-h-64 rounded-lg border border-ink/10" />}
+                      <p className="mt-1 whitespace-pre-wrap text-[14px] text-ink-2">{current.solutionText || (current.solutionImageId ? "" : "Bu soruya henüz çözüm notu eklememişsin. Çözünce karttan ekleyebilirsin.")}</p>
+                    </div>
+                  )}
+                  {aiSolution && <div className="rounded-xl border border-violet/20 p-3"><div className="mb-2 text-[13px] font-semibold text-violet">✨ Adım adım çözüm</div><AiSolutionSteps solution={aiSolution} /></div>}
                 </div>
               ) : (
-                <button onClick={() => setRevealed(true)} className="mt-3 flex h-10 items-center gap-1.5 rounded-xl border border-ink/10 px-3 text-[13px] font-semibold text-ink-2 hover:bg-paper"><Eye size={15} /> Çözümü göster</button>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {aiSolution ? (
+                    <>
+                      {hintLevel < HINT_LEVELS.hint && aiSolution.hint && <button onClick={() => setHintLevel(HINT_LEVELS.hint)} className="flex h-10 items-center gap-1.5 rounded-xl border border-violet/30 px-3 text-[13px] font-semibold text-violet hover:bg-violet-soft"><Lightbulb size={15} /> İpucu</button>}
+                      {hintLevel < HINT_LEVELS.firstStep && <button onClick={() => setHintLevel(HINT_LEVELS.firstStep)} className="flex h-10 items-center gap-1.5 rounded-xl border border-violet/30 px-3 text-[13px] font-semibold text-violet hover:bg-violet-soft"><Footprints size={15} /> İlk adım</button>}
+                    </>
+                  ) : current.questionImageId ? (
+                    <button onClick={() => void solver.run()} disabled={solver.pending} className="flex h-10 items-center gap-1.5 rounded-xl border border-violet/30 px-3 text-[13px] font-semibold text-violet hover:bg-violet-soft disabled:opacity-60">{solver.pending ? <Loader2 size={15} className="animate-spin" /> : <Lightbulb size={15} />} {solver.pending ? "Hazırlanıyor…" : "✨ AI ipucu"}</button>
+                  ) : null}
+                  <button onClick={() => setHintLevel(HINT_LEVELS.solution)} className="flex h-10 items-center gap-1.5 rounded-xl border border-ink/10 px-3 text-[13px] font-semibold text-ink-2 hover:bg-paper"><Eye size={15} /> Çözümü göster</button>
+                </div>
               )}
+              {hintLevel === HINT_LEVELS.hint && <p className="mt-2 text-[12px] text-ink-4">Yalnızca ipucuyla çözersen soru yine bir sonraki basamağa geçer.</p>}
+              {hintLevel === HINT_LEVELS.firstStep && <p className="mt-2 text-[12px] text-ink-4">İlk adımı gördün: “Çözdüm” desen de bu soru aynı basamakta kalır.</p>}
               {revealed && <p className="mt-2 text-[12px] text-ink-4">Çözüme baktın: “Çözdüm” desen de bu soru aynı basamakta kalır.</p>}
             </div>
           )}
@@ -135,13 +173,14 @@ export default function QuestionReview({ questionIds, subject, onClose }: { ques
             <div className="py-10 text-center">
               <div className="text-[34px]" aria-hidden>{solved === results.length && results.length ? "🏆" : "💪"}</div>
               <p className="mt-2 text-[16px] font-semibold text-ink">{results.length} sorudan {solved} tanesini çözdün.</p>
-              <p className="mt-1 text-[13px] text-ink-3">Çözemediklerin yarın yeniden karşına çıkacak; çözdüklerin bir sonraki basamağa geçti.</p>
+              <p className="mt-1 text-[13px] text-ink-3">Çözemediklerin yarın yeniden karşına çıkacak; kendi başına (en fazla ipucuyla) çözdüklerin bir sonraki basamağa geçti.</p>
               {finished.taskCompleted && <p className="mt-3 inline-block rounded-full bg-success-soft px-3 py-1 text-[12px] font-semibold text-success">✓ Bugünün defter görevi tamamlandı</p>}
               <div className="mt-6"><button onClick={onClose} className="h-11 rounded-xl bg-ink px-6 text-[14px] font-semibold text-white">Kapat</button></div>
             </div>
           )}
         </div>
 
+        {solver.consentDialog}
         {current && !finished && (
           <div className="grid grid-cols-3 gap-2 border-t border-ink/[0.07] p-3 sm:p-4">
             {RESULT_BUTTONS.map((button) => (

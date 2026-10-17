@@ -1,8 +1,9 @@
 import { trpc } from "@/lib/trpc";
-import { DIFFICULTIES, ERROR_TYPES, QUESTION_STATUS_LABELS, REVIEW_INTERVALS_DAYS, type Difficulty, type ErrorType } from "@shared/questionNotebook";
-import { Camera, Loader2, Mic, RotateCcw, Trash2, X } from "lucide-react";
+import { DIFFICULTIES, ERROR_TYPES, HINT_LEVEL_LABELS, QUESTION_STATUS_LABELS, REVIEW_INTERVALS_DAYS, aiSolutionToText, type Difficulty, type ErrorType } from "@shared/questionNotebook";
+import { Camera, Loader2, Mic, RotateCcw, Sparkles, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { AiSolutionSteps, useAiSolve } from "./AiSolution";
 import NoteImageDialog from "./NoteImageDialog";
 import { Chip } from "./QuestionCapture";
 import VoiceRecorder from "./VoiceRecorder";
@@ -33,6 +34,9 @@ export default function QuestionDetail({ id, onClose, onReview }: { id: number; 
   const remove = trpc.questions.delete.useMutation();
   const [form, setForm] = useState<{ subject: string; topicId: number | null; stuckPoint: string; solutionText: string; solutionImageId: number | null; errorType: ErrorType | null; difficulty: Difficulty | null } | null>(null);
   const [dialog, setDialog] = useState<null | "solutionPhoto" | "solutionVoice">(null);
+  // Kayıtlı çözüm kapalı açılır: öğrenci önce kendi denesin.
+  const [showSolution, setShowSolution] = useState(false);
+  const solver = useAiSolve(id, () => setShowSolution(true));
 
   type Loaded = NonNullable<typeof question.data>;
   const formFrom = (data: Loaded) => ({ subject: data.subject ?? "", topicId: data.topicId, stuckPoint: data.stuckPoint ?? "", solutionText: data.solutionText ?? "", solutionImageId: data.solutionImageId, errorType: data.errorType, difficulty: data.difficulty });
@@ -76,6 +80,19 @@ export default function QuestionDetail({ id, onClose, onReview }: { id: number; 
     }
   };
 
+  const addToNote = () => {
+    if (!data.aiSolution) return;
+    patch({ solutionText: [form.solutionText.trim(), aiSolutionToText(data.aiSolution)].filter(Boolean).join("\n\n").slice(0, 4000) });
+    toast.success("Çözüm notuna eklendi — kendi cümlelerinle düzenleyip kaydet.");
+  };
+
+  const markStuck = (stepIndex: number) => {
+    const step = data.aiSolution?.steps[stepIndex];
+    if (!step) return;
+    patch({ stuckPoint: [form.stuckPoint.trim(), `Adım ${stepIndex + 1}: ${step.work}`].filter(Boolean).join("\n").slice(0, 4000) });
+    toast.success("Takıldığın adım karta yazıldı. Hata türünü de seçip kaydet.");
+  };
+
   const close = () => { if (dirty && !window.confirm("Kaydedilmemiş değişiklikler var. Yine de kapatılsın mı?")) return; onClose(); };
   const nextReview = data.nextReviewAt ? new Date(data.nextReviewAt).toLocaleDateString("tr-TR", { weekday: "long", day: "numeric", month: "long" }) : null;
 
@@ -116,6 +133,28 @@ export default function QuestionDetail({ id, onClose, onReview }: { id: number; 
             </div>
           </div>
 
+          <div className="rounded-2xl border border-violet/20 bg-violet-soft/40 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-[13px] font-semibold text-ink">✨ Adım adım çözüm</span>
+              {data.aiSolution && (
+                <div className="flex gap-1.5">
+                  <button type="button" onClick={addToNote} className="h-8 rounded-lg bg-white px-2.5 text-[12px] font-semibold text-ink-2 shadow-sm">Çözüm notuma ekle</button>
+                  <button type="button" onClick={() => void solver.run()} disabled={solver.pending} className="flex h-8 items-center gap-1 rounded-lg px-2.5 text-[12px] font-semibold text-violet disabled:opacity-50">{solver.pending && <Loader2 size={12} className="animate-spin" />} Yeniden çöz</button>
+                </div>
+              )}
+            </div>
+            {data.aiSolution ? (
+              showSolution
+                ? <div className="mt-3"><AiSolutionSteps solution={data.aiSolution} onStuck={markStuck} /></div>
+                : <button type="button" onClick={() => setShowSolution(true)} className="mt-2 text-[13px] font-semibold text-violet">Kayıtlı çözümü göster</button>
+            ) : (
+              <div className="mt-2">
+                <p className="text-[12px] text-ink-3">{data.questionImageId ? "Takıldığın soruyu AI bir öğretmen gibi adım adım, her adımın nedeniyle çözsün. Önce kendin denemen daha çok öğretir." : "Adım adım çözüm için kartta soru fotoğrafı olmalı."}</p>
+                {data.questionImageId && <button type="button" onClick={() => void solver.run()} disabled={solver.pending} className="mt-2 flex h-9 items-center gap-1.5 rounded-xl bg-violet px-3 text-[13px] font-semibold text-white disabled:opacity-60">{solver.pending ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} {solver.pending ? "Çözülüyor…" : "Adım adım çöz"}</button>}
+              </div>
+            )}
+          </div>
+
           <div className="grid gap-2 sm:grid-cols-2">
             <label className="block text-[12px]"><span className="form-label">Ders</span>
               <select value={form.subject} onChange={(event) => patch({ subject: event.target.value, topicId: null })} className="form-input h-10"><option value="">Ders yok</option>{subjects.map((item) => <option key={item} value={item}>{item}</option>)}</select>
@@ -138,7 +177,7 @@ export default function QuestionDetail({ id, onClose, onReview }: { id: number; 
             <div>
               <span className="form-label">Tekrar geçmişi</span>
               <ol className="space-y-1 text-[13px] text-ink-2">
-                {data.attempts.map((item, index) => <li key={index} className="flex justify-between rounded-lg bg-paper px-3 py-1.5"><span>{RESULT_LABEL[item.result]}{item.sawSolution ? " · çözüme bakarak" : ""}</span><span className="text-ink-4">{new Date(item.attemptedAt).toLocaleDateString("tr-TR", { day: "numeric", month: "short" })}</span></li>)}
+                {data.attempts.map((item, index) => <li key={index} className="flex justify-between rounded-lg bg-paper px-3 py-1.5"><span>{RESULT_LABEL[item.result]}{item.sawSolution ? " · çözüme bakarak" : item.hintLevel ? ` · ${HINT_LEVEL_LABELS[item.hintLevel]}` : ""}</span><span className="text-ink-4">{new Date(item.attemptedAt).toLocaleDateString("tr-TR", { day: "numeric", month: "short" })}</span></li>)}
               </ol>
             </div>
           )}
@@ -150,6 +189,7 @@ export default function QuestionDetail({ id, onClose, onReview }: { id: number; 
         </div>
       </div>
 
+      {solver.consentDialog}
       {dialog === "solutionPhoto" && <NoteImageDialog confirmLabel="Çözümü ekle" onClose={() => setDialog(null)} onDone={(attachmentId) => { setDialog(null); patch({ solutionImageId: attachmentId }); }} />}
       {dialog === "solutionVoice" && <VoiceRecorder offerKeepAudio={false} onClose={() => setDialog(null)} onDone={(result) => { setDialog(null); patch({ solutionText: [form.solutionText.trim(), result.text].filter(Boolean).join(" ") }); }} />}
     </div>

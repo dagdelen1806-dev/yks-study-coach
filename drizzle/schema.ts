@@ -296,6 +296,9 @@ export const notebookQuestions = mysqlTable("notebook_questions", {
   difficulty: mysqlEnum("difficulty", ["easy", "medium", "hard"]),
   // AI'ın önerdiği konu (öğrenci düzelttiyse topicId'den farklı kalır: öneri isabeti ölçülebilsin).
   aiTopicId: int("aiTopicId"),
+  // ✨ Adım adım çöz: AI çözümü (JSON, AiSolution). Kartta saklanır; tekrar açmak yeniden ücret ödetmez.
+  aiSolution: text("aiSolution"),
+  aiSolutionAt: timestamp("aiSolutionAt"),
   status: mysqlEnum("status", ["unsolved", "learning", "mastered"]).default("unsolved").notNull(),
   reviewStage: int("reviewStage").default(0).notNull(),
   nextReviewAt: timestamp("nextReviewAt"),
@@ -317,6 +320,8 @@ export const questionAttempts = mysqlTable("question_attempts", {
   questionId: int("questionId").notNull(),
   result: mysqlEnum("result", ["solved", "partial", "failed"]).notNull(),
   sawSolution: int("sawSolution").default(0).notNull(),
+  // Kademeli ipucu: 0 yok, 1 ipucu, 2 ilk adım, 3 tam çözüm (HINT_LEVELS).
+  hintLevel: int("hintLevel").default(0).notNull(),
   seconds: int("seconds"),
   stageBefore: int("stageBefore").notNull(),
   attemptedAt: timestamp("attemptedAt").defaultNow().notNull(),

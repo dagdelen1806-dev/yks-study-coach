@@ -20,6 +20,12 @@ vi.mock("./notes/questionsDb", () => ({
   getSubjectSummary: record("getSubjectSummary", []),
   moveNoteToSubject: record("moveNoteToSubject", { subject: "Matematik" }),
   getNotebookPlanSignal: vi.fn(async () => null),
+  getSolveContext: vi.fn(async (userId: number, id: number) => {
+    calls.push({ fn: "getSolveContext", userId, args: [id] });
+    if (userId !== 1 || id !== 3) throw new Error("Soru bulunamadı.");
+    return { questionImageId: 100, ocrText: "3x − 5 = 16", stuckPoint: "ikinci adım", subject: "Matematik", topic: "Problemler" };
+  }),
+  saveAiSolution: vi.fn(async (userId: number, id: number, aiSolution: unknown) => { calls.push({ fn: "saveAiSolution", userId, args: [id] }); return { aiSolution, aiSolutionAt: new Date() }; }),
 }));
 
 vi.mock("./bookContent/bookContentDb", async (importOriginal) => ({
@@ -117,5 +123,34 @@ describe("questions router — ✨ suggestion", () => {
   it("turns an AI failure into a friendly message", async () => {
     aiInvoke.mockRejectedValueOnce(new Error("boom"));
     await expect(callerFor(makeUser(1)).questions.suggest({ attachmentId: 100 })).rejects.toThrow(/kendin seçebilirsin|AI/);
+  });
+});
+
+describe("questions router — ✨ step-by-step solve", () => {
+  const solution = { method: "Denklem kur", steps: [{ work: "3x = 21", why: "İki tarafa 5 ekle" }], answer: "x = 7", check: "3·7 − 5 = 16 ✓", hint: "Bilinmeyeni yalnız bırak" };
+
+  it("solves the student's own card and saves the solution on it", async () => {
+    aiInvoke.mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify(solution) } }] });
+    const result = await callerFor(makeUser(1)).questions.solve({ id: 3 });
+    expect(result.aiSolution).toEqual(solution);
+    expect(calls.map((call) => [call.fn, call.userId, ...call.args])).toEqual([["getSolveContext", 1, 3], ["saveAiSolution", 1, 3]]);
+  });
+
+  it("never solves another student's card", async () => {
+    await expect(callerFor(makeUser(2)).questions.solve({ id: 3 })).rejects.toThrow();
+    expect(aiInvoke).not.toHaveBeenCalled();
+    expect(calls.some((call) => call.fn === "saveAiSolution")).toBe(false);
+  });
+
+  it("does not save anything when the AI fails", async () => {
+    aiInvoke.mockRejectedValueOnce(new Error("boom"));
+    await expect(callerFor(makeUser(1)).questions.solve({ id: 3 })).rejects.toThrow(/hazırlanamadı|AI/);
+    expect(calls.some((call) => call.fn === "saveAiSolution")).toBe(false);
+  });
+
+  it("passes the hint level of a review attempt through", async () => {
+    await callerFor(makeUser(1)).questions.attempt({ id: 3, result: "solved", sawSolution: false, hintLevel: 1 });
+    expect(calls[0]).toMatchObject({ fn: "recordAttempt", userId: 1, args: [3, { hintLevel: 1 }] });
+    await expect(callerFor(makeUser(1)).questions.attempt({ id: 3, result: "solved", sawSolution: false, hintLevel: 7 })).rejects.toThrow();
   });
 });

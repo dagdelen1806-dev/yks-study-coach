@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, gte, isNotNull, isNull, lt, lte, ne, sql, type SQL } from "drizzle-orm";
 import { notebookQuestions, notes, questionAttempts, studyPlanSessions, yksTopics } from "../../drizzle/schema";
 import {
+  HINT_LEVELS,
   MAX_QUESTIONS_PER_REVIEW,
   NOTEBOOK_REVIEW_TASK_KIND,
   QUESTION_TEMPLATE_KEY,
@@ -8,9 +9,11 @@ import {
   buildQuestionDoc,
   describeErrorMapForPlan,
   firstReviewAt,
+  parseAiSolution,
   questionTitle,
   reviewTaskMinutes,
   scheduleAfterAttempt,
+  type AiSolution,
   type AttemptResult,
   type Difficulty,
   type ErrorType,
@@ -196,18 +199,42 @@ const questionColumns = {
   attemptCount: notebookQuestions.attemptCount,
   lastResult: notebookQuestions.lastResult,
   lastAttemptAt: notebookQuestions.lastAttemptAt,
+  aiSolution: notebookQuestions.aiSolution,
+  aiSolutionAt: notebookQuestions.aiSolutionAt,
   createdAt: notebookQuestions.createdAt,
 };
 
-type QuestionRow = { errorType: string | null } & Record<string, unknown>;
-const shape = <T extends QuestionRow>(row: T) => ({ ...row, errorType: row.errorType as ErrorType | null });
+type QuestionRow = { errorType: string | null; aiSolution: string | null } & Record<string, unknown>;
+const shape = <T extends QuestionRow>(row: T): Omit<T, "errorType" | "aiSolution"> & { errorType: ErrorType | null; aiSolution: AiSolution | null } => ({ ...row, errorType: row.errorType as ErrorType | null, aiSolution: row.aiSolution ? parseAiSolution(row.aiSolution) : null });
 
 export async function getQuestion(userId: number, id: number) {
   const db = await requireDb();
   const [row] = await db.select(questionColumns).from(notebookQuestions).leftJoin(yksTopics, eq(yksTopics.id, notebookQuestions.topicId)).where(and(eq(notebookQuestions.id, id), eq(notebookQuestions.userId, userId))).limit(1);
   if (!row) return null;
-  const attempts = await db.select({ result: questionAttempts.result, sawSolution: questionAttempts.sawSolution, attemptedAt: questionAttempts.attemptedAt }).from(questionAttempts).where(and(eq(questionAttempts.userId, userId), eq(questionAttempts.questionId, id))).orderBy(desc(questionAttempts.attemptedAt)).limit(20);
+  const attempts = await db.select({ result: questionAttempts.result, sawSolution: questionAttempts.sawSolution, hintLevel: questionAttempts.hintLevel, attemptedAt: questionAttempts.attemptedAt }).from(questionAttempts).where(and(eq(questionAttempts.userId, userId), eq(questionAttempts.questionId, id))).orderBy(desc(questionAttempts.attemptedAt), desc(questionAttempts.id)).limit(20);
   return { ...shape(row), attempts: attempts.map((attempt) => ({ ...attempt, sawSolution: attempt.sawSolution === 1 })) };
+}
+
+/** ✨ Adım adım çöz için kartın sorusu: fotoğraf, OCR metni, takıldığı yer, ders/konu. */
+export async function getSolveContext(userId: number, id: number) {
+  const db = await requireDb();
+  const [row] = await db
+    .select({ questionImageId: notebookQuestions.questionImageId, stuckPoint: notebookQuestions.stuckPoint, subject: notebookQuestions.subject, topic: yksTopics.topic, content: notes.content })
+    .from(notebookQuestions)
+    .innerJoin(notes, eq(notes.id, notebookQuestions.noteId))
+    .leftJoin(yksTopics, eq(yksTopics.id, notebookQuestions.topicId))
+    .where(and(eq(notebookQuestions.id, id), eq(notebookQuestions.userId, userId)))
+    .limit(1);
+  if (!row) throw new NoteError("Soru bulunamadı.");
+  return { questionImageId: row.questionImageId, ocrText: ocrTextOf(row.content, row.questionImageId), stuckPoint: row.stuckPoint, subject: row.subject, topic: row.topic };
+}
+
+/** AI çözümünü karta yazar: kart yeniden açıldığında çözüm için yeniden ücret ödenmez. */
+export async function saveAiSolution(userId: number, id: number, solution: AiSolution) {
+  const db = await requireDb();
+  const aiSolutionAt = new Date();
+  await db.update(notebookQuestions).set({ aiSolution: JSON.stringify(solution), aiSolutionAt }).where(and(eq(notebookQuestions.id, id), eq(notebookQuestions.userId, userId)));
+  return { aiSolution: solution, aiSolutionAt };
 }
 
 export async function getQuestionIdByNote(userId: number, noteId: number) {
@@ -249,13 +276,14 @@ export async function deleteQuestion(userId: number, id: number) {
 }
 
 /** "Tekrar çöz" sonucu: deneme kaydedilir, kartın basamağı ve sonraki tekrar günü güncellenir. */
-export async function recordAttempt(userId: number, id: number, input: { result: AttemptResult; sawSolution: boolean; seconds?: number | null }) {
+export async function recordAttempt(userId: number, id: number, input: { result: AttemptResult; sawSolution: boolean; hintLevel?: number | null; seconds?: number | null }) {
   const db = await requireDb();
   const [row] = await db.select({ reviewStage: notebookQuestions.reviewStage }).from(notebookQuestions).where(and(eq(notebookQuestions.id, id), eq(notebookQuestions.userId, userId))).limit(1);
   if (!row) throw new NoteError("Soru bulunamadı.");
   const now = new Date();
-  const next = scheduleAfterAttempt(row, input.result, input.sawSolution, now);
-  await db.insert(questionAttempts).values({ userId, questionId: id, result: input.result, sawSolution: input.sawSolution ? 1 : 0, seconds: input.seconds ? Math.min(Math.round(input.seconds), 7200) : null, stageBefore: row.reviewStage, attemptedAt: now });
+  const hintLevel = Math.min(Math.max(Math.round(input.hintLevel ?? 0), 0), HINT_LEVELS.solution);
+  const next = scheduleAfterAttempt(row, input.result, input.sawSolution, now, hintLevel);
+  await db.insert(questionAttempts).values({ userId, questionId: id, result: input.result, sawSolution: input.sawSolution ? 1 : 0, hintLevel, seconds: input.seconds ? Math.min(Math.round(input.seconds), 7200) : null, stageBefore: row.reviewStage, attemptedAt: now });
   await db.update(notebookQuestions).set({ ...next, attemptCount: sql`${notebookQuestions.attemptCount} + 1`, lastResult: input.result, lastAttemptAt: now }).where(eq(notebookQuestions.id, id));
   return next;
 }

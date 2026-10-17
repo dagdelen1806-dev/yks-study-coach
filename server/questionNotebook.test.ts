@@ -1,18 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
 import { extractPlainText } from "../shared/noteContent";
 import {
+  HINT_LEVELS,
   REVIEW_INTERVALS_DAYS,
+  aiSolutionToText,
   buildErrorMap,
   buildQuestionDoc,
   describeErrorMapForPlan,
   firstReviewAt,
   isReviewDue,
+  parseAiSolution,
   questionTitle,
   reviewTaskMinutes,
   scheduleAfterAttempt,
 } from "../shared/questionNotebook";
 import { referencedAttachmentIds } from "./notes/notesDb";
 import { suggestQuestionDetails } from "./notes/questionAi";
+import { solveQuestion, subjectGuidance } from "./notes/questionSolver";
 
 const now = new Date(2026, 9, 17, 21, 30);
 const daysLater = (date: Date | null) => (date ? Math.round((date.getTime() - new Date(2026, 9, 17, 6).getTime()) / 86_400_000) : null);
@@ -130,5 +134,56 @@ describe("question suggestion (AI)", () => {
 
   it("refuses to run with neither a photo nor a description", async () => {
     await expect(suggestQuestionDetails({ imageDataUrl: null, stuckPoint: "  ", topics }, reply({}))).rejects.toThrow(/fotoğraf/);
+  });
+});
+
+describe("hint ladder in review", () => {
+  it("a hint alone still advances the stage", () => {
+    expect(scheduleAfterAttempt({ reviewStage: 1 }, "solved", false, now, HINT_LEVELS.hint)).toMatchObject({ reviewStage: 2, status: "learning" });
+  });
+
+  it("seeing the first step or the solution keeps the stage", () => {
+    expect(scheduleAfterAttempt({ reviewStage: 1 }, "solved", false, now, HINT_LEVELS.firstStep)).toMatchObject({ reviewStage: 1, status: "learning" });
+    expect(scheduleAfterAttempt({ reviewStage: 1 }, "solved", true, now, HINT_LEVELS.solution)).toMatchObject({ reviewStage: 1, status: "learning" });
+  });
+
+  it("failing still resets regardless of hints", () => {
+    expect(scheduleAfterAttempt({ reviewStage: 3 }, "failed", false, now, HINT_LEVELS.hint).reviewStage).toBe(0);
+  });
+});
+
+describe("step-by-step solution (AI)", () => {
+  const solution = { method: "Denklem kur", steps: [{ work: "3x = 21", why: "İki tarafa 5 ekle" }, { work: "x = 7", why: "3'e böl" }], answer: "x = 7", check: "3·7 − 5 = 16 ✓", hint: "Bilinmeyeni yalnız bırak" };
+  const reply = (body: unknown) => vi.fn(async () => ({ choices: [{ message: { content: typeof body === "string" ? body : JSON.stringify(body) } }] })) as never;
+
+  it("parses and cleans a stored solution, rejecting one without steps", () => {
+    expect(parseAiSolution(JSON.stringify(solution))).toEqual(solution);
+    expect(parseAiSolution({ ...solution, steps: [{ work: "  ", why: "" }, { work: " a ", why: 3 }] })?.steps).toEqual([{ work: "a", why: "" }]);
+    expect(parseAiSolution({ ...solution, steps: [] })).toBeNull();
+    expect(parseAiSolution("{bozuk")).toBeNull();
+  });
+
+  it("turns a solution into an editable note text", () => {
+    expect(aiSolutionToText(solution)).toBe("Yöntem: Denklem kur\n1) 3x = 21 (İki tarafa 5 ekle)\n2) x = 7 (3'e böl)\nSonuç: x = 7\nKontrol: 3·7 − 5 = 16 ✓");
+  });
+
+  it("adapts the approach to the subject", () => {
+    expect(subjectGuidance("Matematik")).toMatch(/sağla/);
+    expect(subjectGuidance("Fizik")).toMatch(/birim/);
+    expect(subjectGuidance("Tarih")).toMatch(/çeldirici/);
+  });
+
+  it("sends the photo, OCR text and stuck point, and returns the parsed steps", async () => {
+    const invoke = reply("```json\n" + JSON.stringify(solution) + "\n```");
+    const result = await solveQuestion({ imageDataUrl: "data:image/png;base64,AAAA", ocrText: "3x − 5 = 16", stuckPoint: "ikinci adım", subject: "Matematik", topic: "Denklemler" }, invoke);
+    expect(result).toEqual(solution);
+    const request = (invoke as unknown as { mock: { calls: Array<[{ messages: Array<{ content: unknown }> }]> } }).mock.calls[0][0];
+    expect(JSON.stringify(request.messages)).toContain("ikinci adım");
+    expect(JSON.stringify(request.messages)).toContain("Matematik · Konu: Denklemler");
+  });
+
+  it("refuses without a question and fails loudly on an unusable answer", async () => {
+    await expect(solveQuestion({ imageDataUrl: null, ocrText: " ", stuckPoint: "x", subject: null, topic: null }, reply(solution))).rejects.toThrow(/fotoğraf/);
+    await expect(solveQuestion({ imageDataUrl: null, ocrText: "soru", stuckPoint: null, subject: null, topic: null }, reply({ ...solution, steps: [] }))).rejects.toThrow(/okunamadı/);
   });
 });

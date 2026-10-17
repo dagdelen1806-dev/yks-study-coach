@@ -6,9 +6,10 @@ import { getMatchableTopics } from "../bookContent/bookContentDb";
 import { AttachmentError, getAttachmentStorage } from "../notes/attachmentStorage";
 import { NoteError } from "../notes/notesDb";
 import { suggestQuestionDetails } from "../notes/questionAi";
-import { addReviewTask, createQuestion, deleteQuestion, finishReviewSession, getErrorMap, getQuestion, getQuestionIdByNote, getReviewSummary, getSubjectSummary, listQuestions, moveNoteToSubject, recordAttempt, updateQuestion } from "../notes/questionsDb";
+import { solveQuestion } from "../notes/questionSolver";
+import { addReviewTask, createQuestion, deleteQuestion, finishReviewSession, getErrorMap, getQuestion, getQuestionIdByNote, getReviewSummary, getSolveContext, getSubjectSummary, listQuestions, moveNoteToSubject, recordAttempt, saveAiSolution, updateQuestion } from "../notes/questionsDb";
 import { PlanTaskError } from "../studyPlan/planTasks";
-import { ATTEMPT_RESULT_KEYS, DIFFICULTY_KEYS, ERROR_TYPE_KEYS } from "../../shared/questionNotebook";
+import { ATTEMPT_RESULT_KEYS, DIFFICULTY_KEYS, ERROR_TYPE_KEYS, HINT_LEVELS } from "../../shared/questionNotebook";
 
 async function userFacing<T>(work: () => Promise<T>): Promise<T> {
   try {
@@ -70,7 +71,7 @@ export const questionsRouter = router({
   delete: protectedProcedure.input(z.object({ id })).mutation(({ ctx, input }) => userFacing(() => deleteQuestion(ctx.user.id, input.id))),
 
   attempt: protectedProcedure
-    .input(z.object({ id, result: z.enum(ATTEMPT_RESULT_KEYS), sawSolution: z.boolean(), seconds: z.number().min(0).max(7200).nullable().optional() }))
+    .input(z.object({ id, result: z.enum(ATTEMPT_RESULT_KEYS), sawSolution: z.boolean(), hintLevel: z.number().int().min(HINT_LEVELS.none).max(HINT_LEVELS.solution).optional(), seconds: z.number().min(0).max(7200).nullable().optional() }))
     .mutation(({ ctx, input }) => userFacing(() => recordAttempt(ctx.user.id, input.id, input))),
 
   // subject: verilmezse tüm dersler, null ise derssiz ("Genel"), metinse o dersin defteri.
@@ -89,6 +90,28 @@ export const questionsRouter = router({
   finishReview: protectedProcedure
     .input(z.object({ minutes: z.number().min(0).max(600), solved: z.number().int().min(0).max(100), partial: z.number().int().min(0).max(100), failed: z.number().int().min(0).max(100) }))
     .mutation(({ ctx, input }) => userFacing(() => finishReviewSession(ctx.user.id, input))),
+
+  // ✨ Adım adım çöz: kartı AI ile çözer ve karta kaydeder (AI not araçları kotasından sayılır).
+  // İstemci kayıtlı çözümü `get` ile zaten alır; bu uç yalnızca ilk çözüm ya da "Yeniden çöz" için çağrılır.
+  solve: metredFeatureProcedure("NOTE_AI")
+    .input(z.object({ id }))
+    .mutation(({ ctx, input }) => userFacing(async () => {
+      const context = await getSolveContext(ctx.user!.id, input.id);
+      let imageDataUrl: string | null = null;
+      if (context.questionImageId) {
+        const attachment = await getAttachmentStorage().get(ctx.user!.id, context.questionImageId);
+        if (attachment?.kind === "image") imageDataUrl = `data:${attachment.mimeType};base64,${attachment.data.toString("base64")}`;
+      }
+      if (!imageDataUrl && !context.ocrText?.trim()) throw new NoteError("Bu kartta çözülecek bir soru fotoğrafı yok.");
+      let solution;
+      try {
+        solution = await solveQuestion({ imageDataUrl, ocrText: context.ocrText, stuckPoint: context.stuckPoint, subject: context.subject, topic: context.topic });
+      } catch (error) {
+        console.warn("[Questions] solve failed:", error instanceof Error ? error.message : error);
+        throw new NoteError(llmUnavailableMessage(error) ?? "Çözüm şu an hazırlanamadı. Biraz sonra tekrar dene.");
+      }
+      return saveAiSolution(ctx.user!.id, input.id, solution);
+    })),
 
   // ✨ Öner: fotoğrafı okur, müfredattan konu + zorluk + olası hata türü önerir (fotoğraf okuma kotasından sayılır).
   suggest: metredFeatureProcedure("NOTE_OCR")
