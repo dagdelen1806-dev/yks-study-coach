@@ -79,7 +79,19 @@ export function generateDailyFocusPlan(
   });
 }
 
-export type TimedSession = { id: number | string; sessionDate: string | Date; plannedMinutes: number; status?: string };
+/** AI haftalık plana gönderilebilecek en fazla konu (sunucu girdi sınırı ile aynı). */
+export const AI_PLAN_MAX_TOPICS = 50;
+
+/**
+ * Konu haritası büyüdükçe (müfredatın tamamı) tüm konular AI'a gönderilemez: önce verisi olan
+ * zayıf konular (ilerlemesi en düşükten), sonra orta, iyi; en son verisi yetersiz olanlar.
+ */
+export function selectTopicsForAiPlan<T extends { status: "Zayıf" | "Orta" | "İyi"; progress: number; insufficientData?: boolean }>(topics: T[], max = AI_PLAN_MAX_TOPICS): T[] {
+  const rank = (topic: T) => (topic.insufficientData ? 3 : topic.status === "Zayıf" ? 0 : topic.status === "Orta" ? 1 : 2);
+  return [...topics].sort((a, b) => rank(a) - rank(b) || a.progress - b.progress).slice(0, max);
+}
+
+export type TimedSession ={ id: number | string; sessionDate: string | Date; plannedMinutes: number; status?: string };
 
 /**
  * Bugünün planlı (tamamlanmamış) oturumları arasından, saat penceresi

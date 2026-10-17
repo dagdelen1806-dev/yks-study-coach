@@ -1,5 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { buildSubjectTopicMap, findCurrentAndNextSession, FOCUS_SESSION_MINUTES, generateDailyFocusPlan } from "../shared/focusPlan";
+import { AI_PLAN_MAX_TOPICS, buildSubjectTopicMap, findCurrentAndNextSession, FOCUS_SESSION_MINUTES, generateDailyFocusPlan, selectTopicsForAiPlan } from "../shared/focusPlan";
+
+describe("selectTopicsForAiPlan", () => {
+  it("büyük konu haritasından sınır kadarını, önce verisi olan zayıf konuları seçer", () => {
+    const topics = [
+      ...Array.from({ length: 120 }, (_, index) => ({ topic: `Boş ${index}`, status: "Zayıf" as const, progress: 0, insufficientData: true })),
+      ...Array.from({ length: 40 }, (_, index) => ({ topic: `İyi ${index}`, status: "İyi" as const, progress: 80 })),
+      { topic: "Türev", status: "Zayıf" as const, progress: 35 },
+      { topic: "Problemler", status: "Zayıf" as const, progress: 10 },
+      { topic: "Fonksiyon", status: "Orta" as const, progress: 55 },
+    ];
+    const picked = selectTopicsForAiPlan(topics);
+    expect(picked).toHaveLength(AI_PLAN_MAX_TOPICS);
+    expect(picked.slice(0, 3).map((topic) => topic.topic)).toEqual(["Problemler", "Türev", "Fonksiyon"]);
+    expect(picked.filter((topic) => topic.status === "İyi")).toHaveLength(40);
+  });
+});
 
 describe("generateDailyFocusPlan", () => {
   it("320 dk için 40 dk'lık 8 oturum üretir", () => {
