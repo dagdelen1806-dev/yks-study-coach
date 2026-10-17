@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { bookInventory, bookStudyLogs, bookTopicMappings, coachAlerts, InsertUser, planAdherenceReports, sourceSwitches, studentProfiles, studyPlanSessions, studyPlans, topicProgress, topicStudyLogs, userMockExams, userResourceBooks, users, yksTopics } from "../drizzle/schema";
 import type { CoachingStyle, GradeLevel, TargetScoreType } from "../shared/onboarding";
@@ -474,9 +474,17 @@ export async function getStudyCalendar(userId: number) {
   return { plans, sessions, logs };
 }
 
-export async function saveStudyPlan(userId: number, input: { title: string; weekStart: Date; weekEnd: Date; summary: string; source?: "ai" | "manual"; sessions: Array<{ sessionDate: Date; title: string; subject: string; topic: string; kind: string; plannedMinutes: number; targetQuestions?: number; targetPages?: string | null; targetTests?: string | null }> }) {
+export async function saveStudyPlan(userId: number, input: { title: string; weekStart: Date; weekEnd: Date; summary: string; source?: "ai" | "manual"; replacePrevious?: boolean; sessions: Array<{ sessionDate: Date; title: string; subject: string; topic: string; kind: string; plannedMinutes: number; targetQuestions?: number; targetPages?: string | null; targetTests?: string | null }> }) {
   const db = await getDb();
   if (!db) return undefined;
+  // Aynı hafta için plan yeniden oluşturulduysa: önceki aynı başlıklı planların henüz yapılmamış
+  // oturumları kaldırılır (tamamlanan/atlanan oturumlar ve geçmişi korunur) — üst üste binmesin.
+  if (input.replacePrevious) {
+    const dayStart = new Date(input.weekStart); dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(input.weekStart); dayEnd.setHours(23, 59, 59, 999);
+    const previous = await db.select({ id: studyPlans.id }).from(studyPlans).where(and(eq(studyPlans.userId, userId), eq(studyPlans.title, input.title), gte(studyPlans.weekStart, dayStart), lt(studyPlans.weekStart, dayEnd)));
+    if (previous.length) await db.delete(studyPlanSessions).where(and(eq(studyPlanSessions.userId, userId), eq(studyPlanSessions.status, "planned"), inArray(studyPlanSessions.planId, previous.map((plan) => plan.id))));
+  }
   const planResult = await db.insert(studyPlans).values({ userId, title: input.title, weekStart: input.weekStart, weekEnd: input.weekEnd, summary: input.summary, source: input.source ?? "ai" });
   const planId = Number(planResult[0].insertId);
   if (input.sessions.length) await db.insert(studyPlanSessions).values(input.sessions.map((session) => ({ ...session, userId, planId, targetPages: session.targetPages ?? null, targetTests: session.targetTests ?? null })));

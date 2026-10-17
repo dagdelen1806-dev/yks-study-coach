@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeFreeSlots, describeWeekForPlan, findClassConflict, freeMinutes, fromMinutes, placeSessions, validateSchedule, weekdayOf, type ClassBlock } from "../shared/classSchedule";
+import { computeFreeSlots, describeWeekForPlan, findClassConflict, freeMinutes, fromMinutes, placeSessions, placeVariableSessions, validateSchedule, weekdayOf, type ClassBlock } from "../shared/classSchedule";
 import { generateDailyFocusPlan } from "../shared/focusPlan";
 
 // 2026-10-19 bir Pazartesi.
@@ -37,6 +37,15 @@ describe("ders programı — boş zaman", () => {
 
   it("oturumları aralıklara molayla yerleştirir, sığmayanı atlar", () => {
     expect(placeSessions([{ start: 600, end: 700 }, { start: 800, end: 840 }], 4, 40, 10).map(fromMinutes)).toEqual(["10:00", "10:50", "13:20"]);
+  });
+
+  it("AI planının farklı uzunluktaki oturumlarını sırayla boş zamana koyar, okul saatine asla", () => {
+    // Pazartesi okul 16:10'da biter (+30 dk), dershane 18:00–20:00 (+30 dk).
+    const course: ClassBlock = { source: "course", dayOfWeek: 1, startTime: "18:00", endTime: "20:00", subject: "Matematik", label: "Dershane" };
+    const slots = computeFreeSlots([...mondaySchool, course], monday, { from: "16:00" });
+    const starts = placeVariableSessions(slots, [60, 45, 30, 200], 10);
+    expect(starts.map((start) => (start === null ? null : fromMinutes(start)))).toEqual(["16:40", "20:30", "21:25", null]);
+    for (const [index, start] of starts.entries()) if (start !== null) expect(findClassConflict([...mondaySchool, course], monday, start, [60, 45, 30][index])).toBeNull();
   });
 
   it("çakışmayı bulur", () => {

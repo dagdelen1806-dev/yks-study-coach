@@ -812,7 +812,7 @@ var featureUsageLogs = mysqlTable("feature_usage_logs", {
 }));
 
 // server/db.ts
-import { and, desc, eq, gte, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 
 // shared/planAdherence.ts
@@ -1755,6 +1755,14 @@ async function getStudyCalendar(userId) {
 async function saveStudyPlan(userId, input) {
   const db = await getDb();
   if (!db) return void 0;
+  if (input.replacePrevious) {
+    const dayStart = new Date(input.weekStart);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(input.weekStart);
+    dayEnd.setHours(23, 59, 59, 999);
+    const previous = await db.select({ id: studyPlans.id }).from(studyPlans).where(and(eq(studyPlans.userId, userId), eq(studyPlans.title, input.title), gte(studyPlans.weekStart, dayStart), lt(studyPlans.weekStart, dayEnd)));
+    if (previous.length) await db.delete(studyPlanSessions).where(and(eq(studyPlanSessions.userId, userId), eq(studyPlanSessions.status, "planned"), inArray(studyPlanSessions.planId, previous.map((plan) => plan.id))));
+  }
   const planResult = await db.insert(studyPlans).values({ userId, title: input.title, weekStart: input.weekStart, weekEnd: input.weekEnd, summary: input.summary, source: input.source ?? "ai" });
   const planId = Number(planResult[0].insertId);
   if (input.sessions.length) await db.insert(studyPlanSessions).values(input.sessions.map((session) => ({ ...session, userId, planId, targetPages: session.targetPages ?? null, targetTests: session.targetTests ?? null })));
@@ -2457,7 +2465,7 @@ function registerLocalAuthRoutes(app2) {
 }
 
 // server/notes/attachmentStorage.ts
-import { and as and2, eq as eq4, inArray, isNull as isNull2, lt as lt2, sql as sql2 } from "drizzle-orm";
+import { and as and2, eq as eq4, inArray as inArray2, isNull as isNull2, lt as lt2, sql as sql2 } from "drizzle-orm";
 
 // server/notes/config.ts
 var notesConfig = {
@@ -2559,7 +2567,7 @@ var databaseAttachmentStorage = {
     const db = await requireDb();
     await db.update(noteAttachments).set({ noteId: null }).where(and2(eq4(noteAttachments.userId, userId), eq4(noteAttachments.noteId, noteId)));
     if (referencedIds.length) {
-      await db.update(noteAttachments).set({ noteId }).where(and2(eq4(noteAttachments.userId, userId), inArray(noteAttachments.id, referencedIds)));
+      await db.update(noteAttachments).set({ noteId }).where(and2(eq4(noteAttachments.userId, userId), inArray2(noteAttachments.id, referencedIds)));
     }
   },
   async deleteForNote(userId, noteId) {
@@ -3722,7 +3730,7 @@ import { TRPCError as TRPCError2 } from "@trpc/server";
 import { z as z3 } from "zod";
 
 // server/bookContent/bookContentDb.ts
-import { and as and5, eq as eq7, inArray as inArray2, isNull as isNull3 } from "drizzle-orm";
+import { and as and5, eq as eq7, inArray as inArray3, isNull as isNull3 } from "drizzle-orm";
 
 // server/bookContent/config.ts
 var bookContentConfig = {
@@ -4170,7 +4178,7 @@ async function userOwnsBook(userId, bookId) {
 async function replaceBookContents(userId, bookId, subject, items, source) {
   const db = await requireDb2();
   const topicIds = Array.from(new Set(items.map((item) => item.topicId).filter((id2) => id2 !== null)));
-  const validTopics = topicIds.length ? await db.select().from(yksTopics).where(inArray2(yksTopics.id, topicIds)) : [];
+  const validTopics = topicIds.length ? await db.select().from(yksTopics).where(inArray3(yksTopics.id, topicIds)) : [];
   const topicById = new Map(validTopics.map((row) => [row.id, row]));
   const unknown = topicIds.filter((id2) => !topicById.has(id2));
   if (unknown.length) throw new Error("Ge\xE7ersiz m\xFCfredat konusu se\xE7ildi. Sayfay\u0131 yenileyip tekrar dener misin?");
@@ -4219,7 +4227,7 @@ async function getBookContents(userId, bookId) {
   const db = await requireDb2();
   const rows = await db.select().from(userBookContents).where(and5(eq7(userBookContents.userId, userId), eq7(userBookContents.bookId, bookId))).orderBy(userBookContents.sortOrder);
   const topicIds = Array.from(new Set(rows.map((row) => row.topicId).filter((id2) => id2 !== null)));
-  const topics = topicIds.length ? await db.select({ id: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject, unit: yksTopics.unit }).from(yksTopics).where(inArray2(yksTopics.id, topicIds)) : [];
+  const topics = topicIds.length ? await db.select({ id: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject, unit: yksTopics.unit }).from(yksTopics).where(inArray3(yksTopics.id, topicIds)) : [];
   const topicById = new Map(topics.map((row) => [row.id, row]));
   return rows.map((row) => ({ ...row, mappingConfidence: Number(row.mappingConfidence), topic: row.topicId !== null ? topicById.get(row.topicId) ?? null : null }));
 }
@@ -4228,9 +4236,9 @@ async function getBookContentSummaries(userId) {
   const activeBooks = (await db.select({ bookId: bookInventory.bookId }).from(bookInventory).where(and5(eq7(bookInventory.userId, userId), isNull3(bookInventory.removedAt)))).map((row) => row.bookId);
   if (activeBooks.length === 0) return [];
   const [contentRows, logs, customBooks] = await Promise.all([
-    db.select({ bookId: userBookContents.bookId, topicId: userBookContents.topicId, unitNumber: userBookContents.unitNumber, unitTitle: userBookContents.unitTitle, pageStart: userBookContents.pageStart }).from(userBookContents).where(and5(eq7(userBookContents.userId, userId), inArray2(userBookContents.bookId, activeBooks))).orderBy(userBookContents.sortOrder),
-    db.select({ bookId: bookStudyLogs.bookId, pageStart: bookStudyLogs.pageStart, pageEnd: bookStudyLogs.pageEnd, questions: bookStudyLogs.questions, correct: bookStudyLogs.correct }).from(bookStudyLogs).where(and5(eq7(bookStudyLogs.userId, userId), inArray2(bookStudyLogs.bookId, activeBooks))),
-    db.select({ bookId: userResourceBooks.bookId, pageCount: userResourceBooks.pageCount }).from(userResourceBooks).where(and5(eq7(userResourceBooks.userId, userId), inArray2(userResourceBooks.bookId, activeBooks)))
+    db.select({ bookId: userBookContents.bookId, topicId: userBookContents.topicId, unitNumber: userBookContents.unitNumber, unitTitle: userBookContents.unitTitle, pageStart: userBookContents.pageStart }).from(userBookContents).where(and5(eq7(userBookContents.userId, userId), inArray3(userBookContents.bookId, activeBooks))).orderBy(userBookContents.sortOrder),
+    db.select({ bookId: bookStudyLogs.bookId, pageStart: bookStudyLogs.pageStart, pageEnd: bookStudyLogs.pageEnd, questions: bookStudyLogs.questions, correct: bookStudyLogs.correct }).from(bookStudyLogs).where(and5(eq7(bookStudyLogs.userId, userId), inArray3(bookStudyLogs.bookId, activeBooks))),
+    db.select({ bookId: userResourceBooks.bookId, pageCount: userResourceBooks.pageCount }).from(userResourceBooks).where(and5(eq7(userResourceBooks.userId, userId), inArray3(userResourceBooks.bookId, activeBooks)))
   ]);
   const pageCountByBook = new Map(customBooks.map((row) => [row.bookId, row.pageCount]));
   return activeBooks.map((bookId) => {
@@ -4257,9 +4265,9 @@ async function getWeakTopicBookRecommendations(userId) {
   const activeBooks = (await db.select({ bookId: bookInventory.bookId }).from(bookInventory).where(and5(eq7(bookInventory.userId, userId), isNull3(bookInventory.removedAt)))).map((row) => row.bookId);
   if (activeBooks.length === 0) return [];
   const [contentRows, logs, planned] = await Promise.all([
-    db.select().from(userBookContents).where(and5(eq7(userBookContents.userId, userId), eq7(userBookContents.mappingStatus, "confirmed"), inArray2(userBookContents.bookId, activeBooks), inArray2(userBookContents.topicId, weakTopics.map((topic) => topic.topicId)))),
-    db.select({ bookId: bookStudyLogs.bookId, pageStart: bookStudyLogs.pageStart, pageEnd: bookStudyLogs.pageEnd }).from(bookStudyLogs).where(and5(eq7(bookStudyLogs.userId, userId), inArray2(bookStudyLogs.bookId, activeBooks))),
-    db.select({ bookId: studyPlanSessions.sourceBookId, targetPages: studyPlanSessions.targetPages }).from(studyPlanSessions).where(and5(eq7(studyPlanSessions.userId, userId), eq7(studyPlanSessions.status, "planned"), inArray2(studyPlanSessions.sourceBookId, activeBooks)))
+    db.select().from(userBookContents).where(and5(eq7(userBookContents.userId, userId), eq7(userBookContents.mappingStatus, "confirmed"), inArray3(userBookContents.bookId, activeBooks), inArray3(userBookContents.topicId, weakTopics.map((topic) => topic.topicId)))),
+    db.select({ bookId: bookStudyLogs.bookId, pageStart: bookStudyLogs.pageStart, pageEnd: bookStudyLogs.pageEnd }).from(bookStudyLogs).where(and5(eq7(bookStudyLogs.userId, userId), inArray3(bookStudyLogs.bookId, activeBooks))),
+    db.select({ bookId: studyPlanSessions.sourceBookId, targetPages: studyPlanSessions.targetPages }).from(studyPlanSessions).where(and5(eq7(studyPlanSessions.userId, userId), eq7(studyPlanSessions.status, "planned"), inArray3(studyPlanSessions.sourceBookId, activeBooks)))
   ]);
   const donePages = {};
   for (const log of logs) if (log.pageStart !== null) (donePages[log.bookId] ??= []).push({ pageStart: log.pageStart, pageEnd: log.pageEnd ?? log.pageStart });
@@ -5998,7 +6006,7 @@ async function runNoteAi(action, plainText, invoke = invokeLLM) {
 }
 
 // server/notes/notesDb.ts
-import { and as and7, desc as desc3, eq as eq9, gte as gte5, inArray as inArray3, isNotNull, isNull as isNull4, like, lt as lt4, lte as lte3, ne, or, sql as sql4 } from "drizzle-orm";
+import { and as and7, desc as desc3, eq as eq9, gte as gte5, inArray as inArray4, isNotNull, isNull as isNull4, like, lt as lt4, lte as lte3, ne, or, sql as sql4 } from "drizzle-orm";
 
 // shared/noteContent.ts
 var BLOCK_TYPES = /* @__PURE__ */ new Set(["paragraph", "heading", "listItem", "taskItem", "blockquote", "formula", "noteImage", "voiceClip", "drawing", "horizontalRule"]);
@@ -6168,9 +6176,9 @@ async function describeLinks(db, userId, rows) {
   const bookIds = Array.from(new Set(rows.map((row) => row.bookId).filter((id2) => Boolean(id2))));
   const numeric = bookIds.filter((id2) => /^\d+$/.test(id2)).map(Number);
   const [topics, custom, catalog] = await Promise.all([
-    topicIds.length ? db.select({ id: yksTopics.id, topic: yksTopics.topic, unit: yksTopics.unit }).from(yksTopics).where(inArray3(yksTopics.id, topicIds)) : Promise.resolve([]),
-    bookIds.length ? db.select({ bookId: userResourceBooks.bookId, title: userResourceBooks.title }).from(userResourceBooks).where(and7(eq9(userResourceBooks.userId, userId), inArray3(userResourceBooks.bookId, bookIds))) : Promise.resolve([]),
-    numeric.length ? db.select({ id: catalogBooks.id, name: catalogBooks.name }).from(catalogBooks).where(inArray3(catalogBooks.id, numeric)) : Promise.resolve([])
+    topicIds.length ? db.select({ id: yksTopics.id, topic: yksTopics.topic, unit: yksTopics.unit }).from(yksTopics).where(inArray4(yksTopics.id, topicIds)) : Promise.resolve([]),
+    bookIds.length ? db.select({ bookId: userResourceBooks.bookId, title: userResourceBooks.title }).from(userResourceBooks).where(and7(eq9(userResourceBooks.userId, userId), inArray4(userResourceBooks.bookId, bookIds))) : Promise.resolve([]),
+    numeric.length ? db.select({ id: catalogBooks.id, name: catalogBooks.name }).from(catalogBooks).where(inArray4(catalogBooks.id, numeric)) : Promise.resolve([])
   ]);
   const topicById = new Map(topics.map((row) => [row.id, row]));
   const bookTitle = new Map([...custom.map((row) => [row.bookId, row.title]), ...catalog.map((row) => [String(row.id), row.name])]);
@@ -6215,8 +6223,8 @@ async function keywordCondition(db, userId, q) {
     like(notes.subject, term),
     sql4`EXISTS (SELECT 1 FROM ${noteTags} WHERE ${noteTags.noteId} = ${notes.id} AND ${noteTags.tag} LIKE ${term})`
   ];
-  if (topics.length) conditions.push(inArray3(notes.topicId, topics.map((row) => row.id)));
-  if (books.length) conditions.push(inArray3(notes.bookId, books.map((row) => row.bookId)));
+  if (topics.length) conditions.push(inArray4(notes.topicId, topics.map((row) => row.id)));
+  if (books.length) conditions.push(inArray4(notes.bookId, books.map((row) => row.bookId)));
   return or(...conditions);
 }
 async function listNotes(userId, filters) {
@@ -6271,7 +6279,7 @@ async function listNotes(userId, filters) {
   const page = rows.slice(0, limit);
   const ids = page.map((row) => row.id);
   const [tags, links] = await Promise.all([
-    ids.length ? db.select({ noteId: noteTags.noteId, tag: noteTags.tag }).from(noteTags).where(and7(eq9(noteTags.userId, userId), inArray3(noteTags.noteId, ids))) : Promise.resolve([]),
+    ids.length ? db.select({ noteId: noteTags.noteId, tag: noteTags.tag }).from(noteTags).where(and7(eq9(noteTags.userId, userId), inArray4(noteTags.noteId, ids))) : Promise.resolve([]),
     describeLinks(db, userId, page)
   ]);
   const last = page[page.length - 1];
@@ -7218,7 +7226,7 @@ import { TRPCError as TRPCError7 } from "@trpc/server";
 import { z as z8 } from "zod";
 
 // server/resourceCatalog/catalogQueries.ts
-import { and as and9, asc as asc3, desc as desc5, eq as eq12, inArray as inArray4, isNull as isNull6, like as like2, sql as sql6 } from "drizzle-orm";
+import { and as and9, asc as asc3, desc as desc5, eq as eq12, inArray as inArray5, isNull as isNull6, like as like2, sql as sql6 } from "drizzle-orm";
 import { drizzle as drizzle2 } from "drizzle-orm/mysql2";
 var _db2 = null;
 async function getDb2() {
@@ -7251,14 +7259,14 @@ async function listCatalogBooks(filters, page) {
     const topicRows = await db.select({ bookId: bookCurriculumTopics.bookId }).from(bookCurriculumTopics).innerJoin(yksTopics, eq12(bookCurriculumTopics.topicId, yksTopics.id)).where(eq12(yksTopics.topic, filters.topic));
     bookIdsForTopic = topicRows.map((r) => r.bookId);
     if (bookIdsForTopic.length === 0) return { items: [], total: 0 };
-    conditions.push(inArray4(catalogBooks.id, bookIdsForTopic));
+    conditions.push(inArray5(catalogBooks.id, bookIdsForTopic));
   }
   const where = and9(...conditions);
   const [{ count: count3 }] = await db.select({ count: sql6`count(*)` }).from(catalogBooks).where(where);
   let rows = await db.select().from(catalogBooks).where(where).orderBy(desc5(catalogBooks.createdAt)).limit(pageSize).offset(offset);
   if (filters.minPrice !== void 0 || filters.maxPrice !== void 0) {
     const ids = rows.map((r) => r.id);
-    const offerRows2 = ids.length ? await db.select().from(bookOffers).where(inArray4(bookOffers.bookId, ids)) : [];
+    const offerRows2 = ids.length ? await db.select().from(bookOffers).where(inArray5(bookOffers.bookId, ids)) : [];
     const bestPriceByBook = /* @__PURE__ */ new Map();
     for (const offer of offerRows2) {
       if (offer.price === null) continue;
@@ -7275,10 +7283,10 @@ async function listCatalogBooks(filters, page) {
     });
   }
   const publisherIds = Array.from(new Set(rows.map((r) => r.publisherId).filter((id2) => id2 !== null)));
-  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray4(publishers.id, publisherIds)) : [];
+  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray5(publishers.id, publisherIds)) : [];
   const publisherNameById = new Map(publisherRows.map((p) => [p.id, p.name]));
   const bookIds = rows.map((r) => r.id);
-  const offerRows = bookIds.length ? await db.select().from(bookOffers).where(inArray4(bookOffers.bookId, bookIds)) : [];
+  const offerRows = bookIds.length ? await db.select().from(bookOffers).where(inArray5(bookOffers.bookId, bookIds)) : [];
   const offerByBook = /* @__PURE__ */ new Map();
   for (const offer of offerRows) {
     if (!offerByBook.has(offer.bookId)) offerByBook.set(offer.bookId, { price: offer.price !== null ? Number(offer.price) : null, productUrl: offer.productUrl });
@@ -7315,7 +7323,7 @@ async function listCatalogBooksForAdmin(filters, page) {
   const rowsQuery = db.select().from(catalogBooks).orderBy(desc5(catalogBooks.createdAt)).limit(pageSize).offset(offset);
   const rows = await (where ? rowsQuery.where(where) : rowsQuery);
   const publisherIds = Array.from(new Set(rows.map((r) => r.publisherId).filter((id2) => id2 !== null)));
-  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray4(publishers.id, publisherIds)) : [];
+  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray5(publishers.id, publisherIds)) : [];
   const publisherNameById = new Map(publisherRows.map((p) => [p.id, p.name]));
   const items = rows.map((row) => ({
     id: row.id,
@@ -7371,7 +7379,7 @@ async function listCatalogBooksForRecommendation(subject) {
   if (subject) conditions.push(eq12(catalogBooks.subject, subject));
   const rows = await db.select().from(catalogBooks).where(and9(...conditions));
   const bookIds = rows.map((r) => r.id);
-  const topicRows = bookIds.length ? await db.select({ bookId: bookCurriculumTopics.bookId, topic: yksTopics.topic }).from(bookCurriculumTopics).innerJoin(yksTopics, eq12(bookCurriculumTopics.topicId, yksTopics.id)).where(inArray4(bookCurriculumTopics.bookId, bookIds)) : [];
+  const topicRows = bookIds.length ? await db.select({ bookId: bookCurriculumTopics.bookId, topic: yksTopics.topic }).from(bookCurriculumTopics).innerJoin(yksTopics, eq12(bookCurriculumTopics.topicId, yksTopics.id)).where(inArray5(bookCurriculumTopics.bookId, bookIds)) : [];
   const topicsByBook = /* @__PURE__ */ new Map();
   for (const row of topicRows) {
     const list = topicsByBook.get(row.bookId) ?? [];
@@ -7398,11 +7406,11 @@ async function listMyLibraryCatalogBooks(userId) {
   const numericIds = Array.from(new Set(inventoryRows.map((row) => row.bookId).filter((id2) => /^\d+$/.test(id2)).map(Number)));
   if (numericIds.length === 0) return [];
   const [books, topicRows] = await Promise.all([
-    db.select().from(catalogBooks).where(inArray4(catalogBooks.id, numericIds)),
-    db.select({ bookId: bookCurriculumTopics.bookId, topicId: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject, isVerified: bookCurriculumTopics.isVerified, confidence: bookCurriculumTopics.confidence }).from(bookCurriculumTopics).innerJoin(yksTopics, eq12(bookCurriculumTopics.topicId, yksTopics.id)).where(inArray4(bookCurriculumTopics.bookId, numericIds))
+    db.select().from(catalogBooks).where(inArray5(catalogBooks.id, numericIds)),
+    db.select({ bookId: bookCurriculumTopics.bookId, topicId: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject, isVerified: bookCurriculumTopics.isVerified, confidence: bookCurriculumTopics.confidence }).from(bookCurriculumTopics).innerJoin(yksTopics, eq12(bookCurriculumTopics.topicId, yksTopics.id)).where(inArray5(bookCurriculumTopics.bookId, numericIds))
   ]);
   const publisherIds = Array.from(new Set(books.map((b) => b.publisherId).filter((id2) => id2 !== null)));
-  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray4(publishers.id, publisherIds)) : [];
+  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray5(publishers.id, publisherIds)) : [];
   const publisherNameById = new Map(publisherRows.map((p) => [p.id, p.name]));
   const topicsByBook = /* @__PURE__ */ new Map();
   for (const row of topicRows) {
@@ -7560,7 +7568,7 @@ import { TRPCError as TRPCError6 } from "@trpc/server";
 import { z as z7 } from "zod";
 
 // server/resourceCatalog/catalogDb.ts
-import { and as and10, eq as eq13, inArray as inArray5 } from "drizzle-orm";
+import { and as and10, eq as eq13, inArray as inArray6 } from "drizzle-orm";
 import { drizzle as drizzle3 } from "drizzle-orm/mysql2";
 var _db3 = null;
 async function getDb3() {
@@ -8459,7 +8467,7 @@ var adminUsageRouter = router({
 import { z as z16 } from "zod";
 
 // server/admin/adminUserDb.ts
-import { and as and13, count as count2, desc as desc6, eq as eq16, gte as gte10, inArray as inArray6, isNull as isNull7, like as like3, lt as lt7, or as or2, sql as sql8 } from "drizzle-orm";
+import { and as and13, count as count2, desc as desc6, eq as eq16, gte as gte10, inArray as inArray7, isNull as isNull7, like as like3, lt as lt7, or as or2, sql as sql8 } from "drizzle-orm";
 
 // server/admin/progressService.ts
 import { and as and12, eq as eq15, gte as gte9 } from "drizzle-orm";
@@ -8591,9 +8599,9 @@ async function listUsersForAdminPaginated(filters) {
   const pageRows = await (whereClause ? pageQuery.where(whereClause) : pageQuery);
   const ids = pageRows.map((row) => row.id);
   const [topicAgg, examAgg, studyAgg] = ids.length ? await Promise.all([
-    db.select({ userId: topicProgress.userId, avgProgress: sql8`avg(${topicProgress.progress})`, topicCount: sql8`count(*)` }).from(topicProgress).where(inArray6(topicProgress.userId, ids)).groupBy(topicProgress.userId),
-    db.select({ userId: userMockExams.userId, examCount: sql8`count(*)`, latestNet: sql8`max(${userMockExams.net})` }).from(userMockExams).where(inArray6(userMockExams.userId, ids)).groupBy(userMockExams.userId),
-    db.select({ userId: topicStudyLogs.userId, totalMinutes: sql8`sum(${topicStudyLogs.minutes})` }).from(topicStudyLogs).where(inArray6(topicStudyLogs.userId, ids)).groupBy(topicStudyLogs.userId)
+    db.select({ userId: topicProgress.userId, avgProgress: sql8`avg(${topicProgress.progress})`, topicCount: sql8`count(*)` }).from(topicProgress).where(inArray7(topicProgress.userId, ids)).groupBy(topicProgress.userId),
+    db.select({ userId: userMockExams.userId, examCount: sql8`count(*)`, latestNet: sql8`max(${userMockExams.net})` }).from(userMockExams).where(inArray7(userMockExams.userId, ids)).groupBy(userMockExams.userId),
+    db.select({ userId: topicStudyLogs.userId, totalMinutes: sql8`sum(${topicStudyLogs.minutes})` }).from(topicStudyLogs).where(inArray7(topicStudyLogs.userId, ids)).groupBy(topicStudyLogs.userId)
   ]) : [[], [], []];
   const topicMap = new Map(topicAgg.map((row) => [row.userId, row]));
   const examMap = new Map(examAgg.map((row) => [row.userId, row]));
@@ -8679,8 +8687,8 @@ async function getUserDetailForAdmin(userId) {
   const bookIds = bookContents.map((book) => book.bookId);
   const numericIds = bookIds.filter((id2) => /^\d+$/.test(id2)).map(Number);
   const [customTitles, catalogTitles] = bookIds.length ? await Promise.all([
-    db.select({ bookId: userResourceBooks.bookId, title: userResourceBooks.title }).from(userResourceBooks).where(and13(eq16(userResourceBooks.userId, userId), inArray6(userResourceBooks.bookId, bookIds))),
-    numericIds.length ? db.select({ id: catalogBooks.id, name: catalogBooks.name }).from(catalogBooks).where(inArray6(catalogBooks.id, numericIds)) : Promise.resolve([])
+    db.select({ bookId: userResourceBooks.bookId, title: userResourceBooks.title }).from(userResourceBooks).where(and13(eq16(userResourceBooks.userId, userId), inArray7(userResourceBooks.bookId, bookIds))),
+    numericIds.length ? db.select({ id: catalogBooks.id, name: catalogBooks.name }).from(catalogBooks).where(inArray7(catalogBooks.id, numericIds)) : Promise.resolve([])
   ]) : [[], []];
   const titleById = new Map([...customTitles.map((row) => [row.bookId, row.title]), ...catalogTitles.map((row) => [String(row.id), row.name])]);
   const bookContentsWithTitles = bookContents.map((book) => ({ ...book, title: titleById.get(book.bookId) ?? null }));
@@ -8994,7 +9002,7 @@ var appRouter = router({
   }),
   calendar: router({
     snapshot: protectedProcedure.query(({ ctx }) => getStudyCalendar(ctx.user.id)),
-    savePlan: protectedProcedure.input(z17.object({ title: z17.string().max(180), weekStart: z17.string(), weekEnd: z17.string(), summary: z17.string().max(2e3), source: z17.enum(["ai", "manual"]).optional(), sessions: z17.array(z17.object({ sessionDate: z17.string(), title: z17.string().max(180), subject: z17.string().max(80), topic: z17.string().max(180), kind: z17.string().max(40), plannedMinutes: z17.number().int().min(0).max(1440), targetQuestions: z17.number().int().min(0).optional(), targetPages: z17.string().max(80).nullable().optional(), targetTests: z17.string().max(80).nullable().optional() })).max(100) })).mutation(({ ctx, input }) => saveStudyPlan(ctx.user.id, { ...input, weekStart: new Date(input.weekStart), weekEnd: new Date(input.weekEnd), sessions: input.sessions.map((session) => ({ ...session, sessionDate: new Date(session.sessionDate) })) })),
+    savePlan: protectedProcedure.input(z17.object({ title: z17.string().max(180), weekStart: z17.string(), weekEnd: z17.string(), summary: z17.string().max(2e3), source: z17.enum(["ai", "manual"]).optional(), replacePrevious: z17.boolean().optional(), sessions: z17.array(z17.object({ sessionDate: z17.string(), title: z17.string().max(180), subject: z17.string().max(80), topic: z17.string().max(180), kind: z17.string().max(40), plannedMinutes: z17.number().int().min(0).max(1440), targetQuestions: z17.number().int().min(0).optional(), targetPages: z17.string().max(80).nullable().optional(), targetTests: z17.string().max(80).nullable().optional() })).max(100) })).mutation(({ ctx, input }) => saveStudyPlan(ctx.user.id, { ...input, weekStart: new Date(input.weekStart), weekEnd: new Date(input.weekEnd), sessions: input.sessions.map((session) => ({ ...session, sessionDate: new Date(session.sessionDate) })) })),
     completeSession: protectedProcedure.input(z17.object({ sessionId: z17.number().int(), actualMinutes: z17.number().int().min(0).max(1440), actualQuestions: z17.number().int().min(0).max(5e3), correct: z17.number().int().min(0).max(5e3), wrong: z17.number().int().min(0).max(5e3), blank: z17.number().int().min(0).max(5e3), actualPages: z17.number().int().min(0).max(5e3).optional(), note: z17.string().max(1e3).optional() })).mutation(({ ctx, input }) => completeStudySession(ctx.user.id, input)),
     coachSnapshot: protectedProcedure.input(z17.object({ periodStart: z17.string(), periodEnd: z17.string() })).query(async ({ ctx, input }) => {
       const { sessions, averageAccuracy } = await getPlanAdherenceInputs(ctx.user.id, new Date(input.periodStart), new Date(input.periodEnd));

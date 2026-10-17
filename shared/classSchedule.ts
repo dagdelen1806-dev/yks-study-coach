@@ -119,6 +119,27 @@ export function placeSessions(slots: FreeSlot[], count: number, sessionMinutes: 
   return starts;
 }
 
+/**
+ * Farklı uzunluktaki oturumları (ör. AI planının bir günü) sırasıyla boş aralıklara, aralarında
+ * `breakMinutes` mola ile yerleştirir. Sığmayan oturum için null (takvime saatsiz/çakışan
+ * eklenmez; öğrenciye söylenir).
+ */
+export function placeVariableSessions(slots: FreeSlot[], durations: number[], breakMinutes: number): Array<number | null> {
+  let slotIndex = 0;
+  let cursor = slots[0]?.start ?? 0;
+  return durations.map((duration) => {
+    for (let index = slotIndex; index < slots.length; index++) {
+      const start = index === slotIndex ? Math.max(cursor, slots[index].start) : slots[index].start;
+      if (start + duration <= slots[index].end) {
+        slotIndex = index;
+        cursor = start + duration + breakMinutes;
+        return start;
+      }
+    }
+    return null;
+  });
+}
+
 /** Verilen saat aralığı o günün bir ders bloğuyla çakışıyorsa o blok (oturum eklerken uyarı için). */
 export function findClassConflict(blocks: ClassBlock[], date: Date, startMinutes: number, durationMinutes: number): ClassBlock | null {
   const end = startMinutes + durationMinutes;
