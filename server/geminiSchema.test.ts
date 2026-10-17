@@ -14,7 +14,7 @@ describe("toGeminiSchema", () => {
     expect(toGeminiSchema(schema)).toEqual({
       type: "object",
       properties: {
-        days: { type: "array", minItems: 7, items: { type: "object", properties: { targetPages: { type: "string", nullable: true }, kind: { type: "string", enum: ["Soru", "Tekrar"] } }, required: ["kind"] } },
+        days: { type: "array", items: { type: "object", properties: { targetPages: { type: "string", nullable: true }, kind: { type: "string", enum: ["Soru", "Tekrar"] } }, required: ["kind"] } },
       },
       required: ["days"],
     });

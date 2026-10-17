@@ -297,12 +297,16 @@ const errorForStatus =(status: number, detail: string) => {
  * "INVALID_ARGUMENT" (400) ile reddedilir ve istek gevşek json_object moduna düşer (alan
  * kaybı + ikinci çağrı gecikmesi). Şema Gemini'ye giderken bu biçime çevrilir.
  */
+// Sayı/uzunluk kısıtları da (minItems/maxItems vb.) iç içe dizilerde reddedilebiliyor; bunlar
+// zaten prompt'ta yazılı ve yanıt normalleştirilirken uygulanıyor.
+const GEMINI_UNSUPPORTED_SCHEMA_KEYS = new Set(["additionalProperties", "$schema", "strict", "minItems", "maxItems", "minimum", "maximum", "minLength", "maxLength", "pattern", "format"]);
+
 export function toGeminiSchema(schema: unknown): unknown {
   if (Array.isArray(schema)) return schema.map(toGeminiSchema);
   if (!schema || typeof schema !== "object") return schema;
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(schema as Record<string, unknown>)) {
-    if (key === "additionalProperties" || key === "$schema" || key === "strict") continue;
+    if (GEMINI_UNSUPPORTED_SCHEMA_KEYS.has(key)) continue;
     if (key === "type" && Array.isArray(value)) {
       const types = value.filter((type) => type !== "null");
       result.type = types[0] ?? "string";
@@ -521,22 +525,25 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
 
   let response = await send(payload);
 
-  // Sağlayıcı reasoning_effort'u reddederse (400) onsuz bir kez daha dene.
-  if (response.status === 400 && "reasoning_effort" in payload) {
-    console.warn("[LLM] reasoning_effort rejected (400), retrying without it");
-    delete payload.reasoning_effort;
-    response = await send(payload);
-  }
-
   // Bazı OpenAI uyumlu sağlayıcılar (ör. Gemini) katı `json_schema` biçimini ya da
-  // şemadaki bazı yapıları (["string","null"] birleşik tipleri) kabul etmez ve 400 döner.
-  // Bu durumda bir kez `json_object` moduna geçilir; şema talimat olarak verilir.
+  // şemadaki bazı yapıları kabul etmez ve 400 döner. Bu durumda bir kez `json_object`
+  // moduna geçilir; şema talimat olarak verilir. (reasoning_effort korunur: asıl sebep
+  // genellikle şemadır, onu düşürmek yanıtı dakikalarca yavaşlatır.)
+  let lastPayload: Record<string, unknown> = payload;
   const format = payload.response_format as { type?: string; json_schema?: { schema?: unknown } } | undefined;
   if (response.status === 400 && format?.type === "json_schema") {
     const firstError = await response.text().catch(() => "");
     console.warn(`[LLM] json_schema rejected (400), retrying with json_object: ${firstError.slice(0, 800).replace(/\b(sk-[A-Za-z0-9_*.\-]{4,}|AIza[0-9A-Za-z_\-]{10,})/g, "[redacted]")}`);
-    const schemaHint = { role: "system", content: `Yanıtı YALNIZCA şu JSON şemasına uyan geçerli bir JSON nesnesi olarak ver (açıklama, kod bloğu yok): ${JSON.stringify(format.json_schema?.schema ?? {})}` };
-    response = await send({ ...payload, messages: [schemaHint, ...(payload.messages as unknown[])], response_format: { type: "json_object" } });
+    const schemaHint = { role: "system", content: `Yanıtı YALNIZCA şu JSON şemasına uyan geçerli bir JSON nesnesi olarak ver; alan adlarını aynen kullan (açıklama, kod bloğu yok): ${JSON.stringify(format.json_schema?.schema ?? {})}` };
+    lastPayload = { ...payload, messages: [schemaHint, ...(payload.messages as unknown[])], response_format: { type: "json_object" } };
+    response = await send(lastPayload);
+  }
+
+  // Sağlayıcı reasoning_effort'u da reddederse (400) onsuz bir kez daha dene.
+  if (response.status === 400 && "reasoning_effort" in lastPayload) {
+    console.warn("[LLM] still 400 with reasoning_effort, retrying without it");
+    const { reasoning_effort: _dropped, ...withoutEffort } = lastPayload;
+    response = await send(withoutEffort);
   }
 
   if (!response.ok) {

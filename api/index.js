@@ -3508,12 +3508,13 @@ var errorForStatus = (status, detail) => {
   const safeDetail = detail.replace(/\b(sk-[A-Za-z0-9_*.\-]{4,}|AIza[0-9A-Za-z_\-]{10,}|Bearer\s+\S+)/g, "[redacted]");
   return new LlmUnavailableError(reason, `LLM invoke failed: ${status} \u2013 ${safeDetail.slice(0, 500)}`, status);
 };
+var GEMINI_UNSUPPORTED_SCHEMA_KEYS = /* @__PURE__ */ new Set(["additionalProperties", "$schema", "strict", "minItems", "maxItems", "minimum", "maximum", "minLength", "maxLength", "pattern", "format"]);
 function toGeminiSchema(schema) {
   if (Array.isArray(schema)) return schema.map(toGeminiSchema);
   if (!schema || typeof schema !== "object") return schema;
   const result = {};
   for (const [key, value] of Object.entries(schema)) {
-    if (key === "additionalProperties" || key === "$schema" || key === "strict") continue;
+    if (GEMINI_UNSUPPORTED_SCHEMA_KEYS.has(key)) continue;
     if (key === "type" && Array.isArray(value)) {
       const types = value.filter((type) => type !== "null");
       result.type = types[0] ?? "string";
@@ -3670,17 +3671,19 @@ async function invokeLLM(params) {
     }
   };
   let response = await send(payload);
-  if (response.status === 400 && "reasoning_effort" in payload) {
-    console.warn("[LLM] reasoning_effort rejected (400), retrying without it");
-    delete payload.reasoning_effort;
-    response = await send(payload);
-  }
+  let lastPayload = payload;
   const format = payload.response_format;
   if (response.status === 400 && format?.type === "json_schema") {
     const firstError = await response.text().catch(() => "");
     console.warn(`[LLM] json_schema rejected (400), retrying with json_object: ${firstError.slice(0, 800).replace(/\b(sk-[A-Za-z0-9_*.\-]{4,}|AIza[0-9A-Za-z_\-]{10,})/g, "[redacted]")}`);
-    const schemaHint = { role: "system", content: `Yan\u0131t\u0131 YALNIZCA \u015Fu JSON \u015Femas\u0131na uyan ge\xE7erli bir JSON nesnesi olarak ver (a\xE7\u0131klama, kod blo\u011Fu yok): ${JSON.stringify(format.json_schema?.schema ?? {})}` };
-    response = await send({ ...payload, messages: [schemaHint, ...payload.messages], response_format: { type: "json_object" } });
+    const schemaHint = { role: "system", content: `Yan\u0131t\u0131 YALNIZCA \u015Fu JSON \u015Femas\u0131na uyan ge\xE7erli bir JSON nesnesi olarak ver; alan adlar\u0131n\u0131 aynen kullan (a\xE7\u0131klama, kod blo\u011Fu yok): ${JSON.stringify(format.json_schema?.schema ?? {})}` };
+    lastPayload = { ...payload, messages: [schemaHint, ...payload.messages], response_format: { type: "json_object" } };
+    response = await send(lastPayload);
+  }
+  if (response.status === 400 && "reasoning_effort" in lastPayload) {
+    console.warn("[LLM] still 400 with reasoning_effort, retrying without it");
+    const { reasoning_effort: _dropped, ...withoutEffort } = lastPayload;
+    response = await send(withoutEffort);
   }
   if (!response.ok) {
     throw errorForStatus(response.status, await response.text().catch(() => ""));
@@ -7247,55 +7250,75 @@ var classScheduleRouter = router({
 
 // server/studyPlan/normalizeAiPlan.ts
 var KINDS = ["\xD6\u011Frenme", "Soru", "Tekrar", "Deneme analizi"];
-var text2 = (value, max) => typeof value === "string" ? value.trim().slice(0, max) : "";
+var isObj = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+var pick = (source, keys) => {
+  for (const key of keys) if (source[key] !== void 0 && source[key] !== null && source[key] !== "") return source[key];
+  return void 0;
+};
+var text2 = (value, max) => {
+  if (typeof value === "string") return value.trim().slice(0, max);
+  if (Array.isArray(value)) return value.filter((item) => typeof item === "string").join(" ").trim().slice(0, max);
+  return "";
+};
 var optionalText = (value, max) => text2(value, max) || null;
 var positiveInt = (value, min, max) => {
-  const number = Math.round(Number(value));
+  const number = Math.round(typeof value === "string" ? Number.parseInt(value, 10) : Number(value));
   return Number.isFinite(number) && number > 0 ? Math.min(max, Math.max(min, number)) : null;
 };
+var kindOf = (value) => {
+  const raw = text2(value, 40).toLocaleLowerCase("tr-TR");
+  if (KINDS.includes(text2(value, 40))) return text2(value, 40);
+  if (raw.includes("\xF6\u011Fren") || raw.includes("konu anlat")) return "\xD6\u011Frenme";
+  if (raw.includes("tekrar")) return "Tekrar";
+  if (raw.includes("deneme")) return "Deneme analizi";
+  return "Soru";
+};
+var SESSION_LIST_KEYS = ["sessions", "activities", "tasks", "items", "blocks", "oturumlar"];
+var DAY_LIST_KEYS = ["days", "weeklyPlan", "plan", "schedule", "gunler"];
 function normalizeAiPlan(raw, fallback) {
-  if (!raw || typeof raw !== "object") return fallback;
-  const plan = raw;
-  const days = (Array.isArray(plan.days) ? plan.days : []).slice(0, 7).flatMap((value) => {
-    if (!value || typeof value !== "object") return [];
-    const day = value;
-    const sessions = (Array.isArray(day.sessions) ? day.sessions : []).slice(0, 6).flatMap((item) => {
-      if (!item || typeof item !== "object") return [];
-      const session = item;
-      const subject = text2(session.subject, 80);
-      const topic = text2(session.topic, 180);
-      const minutes = positiveInt(session.minutes, 10, 240);
+  if (!isObj(raw)) return fallback;
+  const dayList = pick(raw, DAY_LIST_KEYS);
+  const days = (Array.isArray(dayList) ? dayList : []).slice(0, 7).flatMap((value) => {
+    if (!isObj(value)) return [];
+    const sessionList = pick(value, SESSION_LIST_KEYS);
+    const sessions = (Array.isArray(sessionList) ? sessionList : []).slice(0, 6).flatMap((item) => {
+      if (!isObj(item)) return [];
+      const subject = text2(pick(item, ["subject", "ders", "lesson", "course"]), 80);
+      const topic = text2(pick(item, ["topic", "konu", "unit"]), 180) || text2(pick(item, ["title", "name"]), 180);
+      const minutes = positiveInt(pick(item, ["minutes", "duration", "durationMinutes", "plannedMinutes", "dakika", "sure"]), 10, 240);
       if (!subject || !topic || !minutes) return [];
-      const kind = KINDS.includes(session.kind) ? session.kind : "Soru";
+      const targetQuestions = positiveInt(pick(item, ["targetQuestions", "questionCount", "questions"]), 1, 500);
       return [{
-        title: text2(session.title, 180) || `${subject} \xB7 ${topic}`,
+        title: text2(pick(item, ["title", "name", "activity", "task"]), 180) || `${subject} \xB7 ${topic}`,
         subject,
         topic,
         minutes,
-        kind,
-        rationale: text2(session.rationale, 600),
-        ...text2(session.bookId, 120) ? { bookId: text2(session.bookId, 120) } : {},
-        ...text2(session.bookTitle, 180) ? { bookTitle: text2(session.bookTitle, 180) } : {},
-        ...positiveInt(session.targetQuestions, 1, 500) ? { targetQuestions: positiveInt(session.targetQuestions, 1, 500) } : {},
-        targetPages: optionalText(session.targetPages, 80),
-        targetTests: optionalText(session.targetTests, 80)
+        kind: kindOf(pick(item, ["kind", "type", "tur", "category"])),
+        rationale: text2(pick(item, ["rationale", "reason", "description", "note", "aciklama"]), 600),
+        ...text2(item.bookId, 120) ? { bookId: text2(item.bookId, 120) } : {},
+        ...text2(item.bookTitle, 180) ? { bookTitle: text2(item.bookTitle, 180) } : {},
+        ...targetQuestions ? { targetQuestions } : {},
+        targetPages: optionalText(item.targetPages, 80),
+        targetTests: optionalText(item.targetTests, 80)
       }];
     });
     if (!sessions.length) return [];
-    return [{ day: text2(day.day, 20), date: text2(day.date, 10), totalMinutes: sessions.reduce((sum, session) => sum + session.minutes, 0), sessions }];
+    return [{ day: text2(pick(value, ["day", "dayName", "gun", "name"]), 20), date: text2(pick(value, ["date", "tarih"]), 10), totalMinutes: sessions.reduce((sum, session) => sum + session.minutes, 0), sessions }];
   });
   if (!days.length) return fallback;
-  const focus = (Array.isArray(plan.focus) ? plan.focus : []).flatMap((item) => {
-    if (!item || typeof item !== "object") return [];
-    const entry = item;
-    return text2(entry.topic, 180) && text2(entry.subject, 80) ? [{ topic: text2(entry.topic, 180), subject: text2(entry.subject, 80), reason: text2(entry.reason, 400) }] : [];
+  const focusList = pick(raw, ["focus", "priorities", "focusTopics"]);
+  const focus = (Array.isArray(focusList) ? focusList : []).flatMap((item) => {
+    if (!isObj(item)) return [];
+    const topic = text2(pick(item, ["topic", "konu"]), 180);
+    const subject = text2(pick(item, ["subject", "ders"]), 80);
+    return topic && subject ? [{ topic, subject, reason: text2(pick(item, ["reason", "rationale", "neden"]), 400) }] : [];
   });
   return {
     ...fallback,
-    summary: text2(plan.summary, 2e3) || fallback.summary,
+    summary: text2(pick(raw, ["summary", "weeklyGoal", "overview", "ozet"]), 2e3) || fallback.summary,
     focus,
     days,
-    coachNote: text2(plan.coachNote, 1e3) || fallback.coachNote
+    coachNote: text2(pick(raw, ["coachNote", "coachNotes", "notes", "tips"]), 1e3) || fallback.coachNote
   };
 }
 

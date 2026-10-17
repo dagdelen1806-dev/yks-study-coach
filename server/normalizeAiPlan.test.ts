@@ -24,6 +24,20 @@ describe("normalizeAiPlan", () => {
     expect(normalizeAiPlan({ plan: { days: [] } }, fallback)).toBe(fallback);
   });
 
+  it("modelin farklı alan adlarını da tanır (Gemini json_object yanıtı)", () => {
+    const plan = normalizeAiPlan({
+      weeklyGoal: "Problemler ve paragrafta ilerle",
+      totalPlannedMinutes: 300,
+      days: [{ dayName: "Cumartesi", date: "2026-10-17", activities: [{ subject: "Matematik", topic: "Problemler", duration: "45 dk", type: "Soru çözümü", description: "20 soru" }] }],
+      coachNotes: ["Yanlışlarını yaz.", "Süre tut."],
+    }, fallback);
+    expect(plan).not.toBe(fallback);
+    expect(plan.summary).toBe("Problemler ve paragrafta ilerle");
+    expect(plan.coachNote).toBe("Yanlışlarını yaz. Süre tut.");
+    expect(plan.days[0]).toMatchObject({ day: "Cumartesi", date: "2026-10-17", totalMinutes: 45 });
+    expect(plan.days[0].sessions[0]).toMatchObject({ subject: "Matematik", topic: "Problemler", minutes: 45, kind: "Soru", rationale: "20 soru" });
+  });
+
   it("geçerli yanıtı korur ve en fazla 7 gün alır", () => {
     const day = { day: "Gün", date: "", totalMinutes: 40, sessions: [{ title: "t", subject: "Kimya", topic: "Mol", minutes: 40, kind: "Tekrar", rationale: "r" }] };
     const plan = normalizeAiPlan({ summary: "Özet", focus: [{ topic: "Mol", subject: "Kimya", reason: "zayıf" }], days: Array(9).fill(day), coachNote: "Not" }, fallback);
