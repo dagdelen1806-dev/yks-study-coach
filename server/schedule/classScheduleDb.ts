@@ -31,18 +31,15 @@ export async function getClassSchedule(userId: number): Promise<ClassSchedule> {
 }
 
 /**
- * AI haftalık plan için bu haftanın (Pzt–Paz) gün gün boş zamanı ve okulda işlenen YKS
- * dersleri. Programı olmayan öğrenci için null (prompt değişmez).
+ * AI haftalık plan için planın başladığı günden (bugün, öğrencinin yerel tarihi) itibaren 7 günün
+ * boş zamanı ve okulda işlenen YKS dersleri. Programı olmayan öğrenci için null (prompt değişmez).
  */
-export async function getPlanScheduleContext(userId: number, now = new Date()): Promise<string | null> {
+export async function getPlanScheduleContext(userId: number, startDate: Date): Promise<string | null> {
   const db = await getDb();
   if (!db) return null;
   const [profile] = await db.select({ start: studentProfiles.preferredStudyStartTime }).from(studentProfiles).where(eq(studentProfiles.userId, userId)).limit(1);
   const { blocks } = await getClassSchedule(userId);
-  const monday = new Date(now);
-  monday.setHours(12, 0, 0, 0);
-  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
-  return describeWeekForPlan(blocks, monday, profile?.start && isValidTime(profile.start) ? profile.start : "16:00");
+  return describeWeekForPlan(blocks, startDate, profile?.start && isValidTime(profile.start) ? profile.start : "16:00");
 }
 
 /** Tüm programı tek seferde değiştirir (tek haftalık program küçük; parça parça güncellemeye gerek yok). */

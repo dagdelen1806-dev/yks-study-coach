@@ -91,8 +91,8 @@ describe("AI haftalık plan bağlamı", () => {
   it("gün gün boş dakikayı ve yalnızca YKS derslerini yazar", () => {
     const text = describeWeekForPlan(mondaySchool, monday, "16:00")!;
     const [mondayLine, tuesdayLine] = text.split("\n");
-    expect(mondayLine).toBe("Pazartesi: boş zaman 410 dk (16:40–23:30); okulda/dershanede işlenen dersler: Fizik, Matematik");
+    expect(mondayLine).toBe("Pazartesi (2026-10-19): boş zaman 410 dk (16:40–23:30); okulda/dershanede işlenen dersler: Fizik, Matematik");
     expect(mondayLine).not.toContain("Rehberlik");
-    expect(tuesdayLine).toBe("Salı: boş zaman 450 dk (16:00–23:30)");
+    expect(tuesdayLine).toBe("Salı (2026-10-20): boş zaman 450 dk (16:00–23:30)");
   });
 });

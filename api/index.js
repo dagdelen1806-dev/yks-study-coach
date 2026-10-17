@@ -854,7 +854,11 @@ function calculatePlanAdherence(sessions, averageAccuracy = 0) {
 
 // shared/calendarLogic.ts
 function rescheduleOverdueSessions(sessions, today, tomorrow, now) {
-  return sessions.filter((session) => session.sessionDate < today).map((session) => ({ id: session.id, sessionDate: tomorrow, rescheduledFrom: session.sessionDate, rescheduledAt: now }));
+  return sessions.filter((session) => session.sessionDate < today).map((session) => {
+    const sessionDate = new Date(tomorrow);
+    sessionDate.setHours(session.sessionDate.getHours(), session.sessionDate.getMinutes(), 0, 0);
+    return { id: session.id, sessionDate, rescheduledFrom: session.sessionDate, rescheduledAt: now };
+  });
 }
 function buildSessionCompletion(session, input, completedAt) {
   return {
@@ -1756,11 +1760,7 @@ async function saveStudyPlan(userId, input) {
   const db = await getDb();
   if (!db) return void 0;
   if (input.replacePrevious) {
-    const dayStart = new Date(input.weekStart);
-    dayStart.setHours(0, 0, 0, 0);
-    const dayEnd = new Date(input.weekStart);
-    dayEnd.setHours(23, 59, 59, 999);
-    const previous = await db.select({ id: studyPlans.id }).from(studyPlans).where(and(eq(studyPlans.userId, userId), eq(studyPlans.title, input.title), gte(studyPlans.weekStart, dayStart), lt(studyPlans.weekStart, dayEnd)));
+    const previous = await db.select({ id: studyPlans.id }).from(studyPlans).where(and(eq(studyPlans.userId, userId), eq(studyPlans.title, input.title)));
     if (previous.length) await db.delete(studyPlanSessions).where(and(eq(studyPlanSessions.userId, userId), eq(studyPlanSessions.status, "planned"), inArray(studyPlanSessions.planId, previous.map((plan) => plan.id))));
   }
   const planResult = await db.insert(studyPlans).values({ userId, title: input.title, weekStart: input.weekStart, weekEnd: input.weekEnd, summary: input.summary, source: input.source ?? "ai" });
@@ -3508,6 +3508,22 @@ var errorForStatus = (status, detail) => {
   const safeDetail = detail.replace(/\b(sk-[A-Za-z0-9_*.\-]{4,}|AIza[0-9A-Za-z_\-]{10,}|Bearer\s+\S+)/g, "[redacted]");
   return new LlmUnavailableError(reason, `LLM invoke failed: ${status} \u2013 ${safeDetail.slice(0, 500)}`, status);
 };
+function toGeminiSchema(schema) {
+  if (Array.isArray(schema)) return schema.map(toGeminiSchema);
+  if (!schema || typeof schema !== "object") return schema;
+  const result = {};
+  for (const [key, value] of Object.entries(schema)) {
+    if (key === "additionalProperties" || key === "$schema" || key === "strict") continue;
+    if (key === "type" && Array.isArray(value)) {
+      const types = value.filter((type) => type !== "null");
+      result.type = types[0] ?? "string";
+      if (types.length < value.length) result.nullable = true;
+      continue;
+    }
+    result[key] = key === "properties" && value && typeof value === "object" && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).map(([name, child]) => [name, toGeminiSchema(child)])) : toGeminiSchema(value);
+  }
+  return result;
+}
 var normalizeResponseFormat = ({
   responseFormat,
   response_format,
@@ -3626,7 +3642,7 @@ async function invokeLLM(params) {
   if (reasoning) {
     payload.reasoning = reasoning;
   }
-  if (reasoningEffort && /^gemini-2\.5/.test(String(payload.model))) {
+  if (reasoningEffort && /^gemini-(?!1\.|2\.0)/.test(String(payload.model))) {
     payload.reasoning_effort = reasoningEffort;
   }
   const normalizedResponseFormat = normalizeResponseFormat({
@@ -3635,8 +3651,9 @@ async function invokeLLM(params) {
     outputSchema,
     output_schema
   });
+  const isGemini = target.baseUrl.includes("generativelanguage.googleapis.com");
   if (normalizedResponseFormat) {
-    payload.response_format = normalizedResponseFormat;
+    payload.response_format = isGemini && normalizedResponseFormat.type === "json_schema" ? { type: "json_schema", json_schema: { name: normalizedResponseFormat.json_schema.name, schema: toGeminiSchema(normalizedResponseFormat.json_schema.schema) } } : normalizedResponseFormat;
   }
   const send = async (body) => {
     try {
@@ -3661,7 +3678,7 @@ async function invokeLLM(params) {
   const format = payload.response_format;
   if (response.status === 400 && format?.type === "json_schema") {
     const firstError = await response.text().catch(() => "");
-    console.warn(`[LLM] json_schema rejected (400), retrying with json_object: ${firstError.slice(0, 200).replace(/\b(sk-[A-Za-z0-9_*.\-]{4,}|AIza[0-9A-Za-z_\-]{10,})/g, "[redacted]")}`);
+    console.warn(`[LLM] json_schema rejected (400), retrying with json_object: ${firstError.slice(0, 800).replace(/\b(sk-[A-Za-z0-9_*.\-]{4,}|AIza[0-9A-Za-z_\-]{10,})/g, "[redacted]")}`);
     const schemaHint = { role: "system", content: `Yan\u0131t\u0131 YALNIZCA \u015Fu JSON \u015Femas\u0131na uyan ge\xE7erli bir JSON nesnesi olarak ver (a\xE7\u0131klama, kod blo\u011Fu yok): ${JSON.stringify(format.json_schema?.schema ?? {})}` };
     response = await send({ ...payload, messages: [schemaHint, ...payload.messages], response_format: { type: "json_object" } });
   }
@@ -7156,7 +7173,8 @@ function describeWeekForPlan(blocks, weekStart, from) {
     const slots = computeFreeSlots(blocks, date, { from });
     const subjects = Array.from(new Set(blocksOn(blocks, date).filter(isYksBlock).map((block) => block.subject)));
     const slotText = slots.filter((slot) => slot.end - slot.start >= 30).map((slot) => `${fromMinutes(slot.start)}\u2013${fromMinutes(slot.end)}`).join(", ") || "yok";
-    lines.push(`${DAY_LABELS[weekdayOf(date) - 1]}: bo\u015F zaman ${freeMinutes(slots)} dk (${slotText})${subjects.length ? `; okulda/dershanede i\u015Flenen dersler: ${subjects.join(", ")}` : ""}`);
+    const isoDate2 = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    lines.push(`${DAY_LABELS[weekdayOf(date) - 1]} (${isoDate2}): bo\u015F zaman ${freeMinutes(slots)} dk (${slotText})${subjects.length ? `; okulda/dershanede i\u015Flenen dersler: ${subjects.join(", ")}` : ""}`);
   }
   return lines.join("\n");
 }
@@ -7181,15 +7199,12 @@ async function getClassSchedule(userId) {
   const rows = await db.select({ source: classScheduleBlocks.source, dayOfWeek: classScheduleBlocks.dayOfWeek, startTime: classScheduleBlocks.startTime, endTime: classScheduleBlocks.endTime, subject: classScheduleBlocks.subject, label: classScheduleBlocks.label }).from(classScheduleBlocks).where(eq11(classScheduleBlocks.userId, userId)).orderBy(asc2(classScheduleBlocks.dayOfWeek), asc2(classScheduleBlocks.startTime));
   return { periods: parsePeriods(profile?.schoolPeriodsJson), blocks: rows };
 }
-async function getPlanScheduleContext(userId, now = /* @__PURE__ */ new Date()) {
+async function getPlanScheduleContext(userId, startDate) {
   const db = await getDb();
   if (!db) return null;
   const [profile] = await db.select({ start: studentProfiles.preferredStudyStartTime }).from(studentProfiles).where(eq11(studentProfiles.userId, userId)).limit(1);
   const { blocks } = await getClassSchedule(userId);
-  const monday = new Date(now);
-  monday.setHours(12, 0, 0, 0);
-  monday.setDate(monday.getDate() - (monday.getDay() + 6) % 7);
-  return describeWeekForPlan(blocks, monday, profile?.start && isValidTime(profile.start) ? profile.start : "16:00");
+  return describeWeekForPlan(blocks, startDate, profile?.start && isValidTime(profile.start) ? profile.start : "16:00");
 }
 async function saveClassSchedule(userId, schedule) {
   const problem = validateSchedule(schedule);
@@ -8848,6 +8863,8 @@ var planInput = z17.object({
     mappings: z17.array(z17.object({ topic: z17.string(), pageStart: z17.number().optional(), pageEnd: z17.number().optional(), testStart: z17.number().optional(), testEnd: z17.number().optional() })).max(50).optional()
   })).max(30).default([]),
   availableMinutes: z17.number().min(120).max(2400).default(600),
+  // Öğrencinin yerel "bugün"ü (YYYY-MM-DD): plan bugünden başlayan 7 günü kapsar.
+  startDate: z17.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   goal: z17.string().max(120).default("YKS 2027"),
   // Onboarding'den gelen koçluk bağlamı — tamamen isteğe bağlı, eski
   // istemciler (veya onboarding'i henüz tamamlamamış kullanıcılar) bu alanı
@@ -9098,12 +9115,17 @@ var appRouter = router({
 
 \xD6\u011Frencinin Soru Defteri (kendi kaydetti\u011Fi, hen\xFCz \xF6\u011Frenemedi\u011Fi sorular \u2014 bu konulara k\u0131sa "Tekrar" oturumlar\u0131 ekle, \xF6\u011Frenciyi etiketleme):
 ${notebookSignal}` : "";
-      const scheduleSignal = ctx.user ? await getPlanScheduleContext(ctx.user.id).catch(() => null) : null;
+      const planStart = input.startDate ? /* @__PURE__ */ new Date(`${input.startDate}T12:00:00Z`) : /* @__PURE__ */ new Date();
+      const planDays = Array.from({ length: 7 }, (_, offset) => {
+        const date = new Date(planStart.getTime() + offset * 864e5);
+        return `${DAY_LABELS[weekdayOf(date) - 1]} ${date.toISOString().slice(0, 10)}`;
+      });
+      const scheduleSignal = ctx.user ? await getPlanScheduleContext(ctx.user.id, planStart).catch(() => null) : null;
       const scheduleContext = scheduleSignal ? `
 
 \xD6\u011Frencinin okul/dershane program\u0131na g\xF6re bu haftan\u0131n bo\u015F zaman\u0131 (oturumlar\u0131 yaln\u0131zca bu aral\u0131klara ve her g\xFCn\xFCn bo\u015F dakikas\u0131n\u0131 a\u015Fmayacak \u015Fekilde planla; 23:30'dan sonra oturum koyma; o g\xFCn okulda i\u015Flenen YKS derslerine ak\u015Fam k\u0131sa bir peki\u015Ftirme oturumu eklemek iyi olur):
 ${scheduleSignal}` : "";
-      const prompt = `Bir YKS \xF6\u011Frencisi i\xE7in 7 g\xFCnl\xFCk uygulanabilir \xE7al\u0131\u015Fma program\u0131 olu\u015Ftur. Hedef: ${input.goal}. Haftal\u0131k toplam s\xFCre: ${input.availableMinutes} dakika. \xD6ncelik, zay\u0131f konular ve son deneme performans\u0131 olsun. Zay\u0131f konular\u0131 tamamen yok sayma; orta konulara peki\u015Ftirme, iyi konulara koruma oturumu ekle. Her g\xFCn toplam 60-150 dakika ve 2-4 oturum planla. T\xFCrk\xE7e yan\u0131t \xFCret. Ki\u015Fisel raftaki kitaplar\u0131 m\xFCmk\xFCn oldu\u011Funca ilgili zay\u0131f konu oturumlar\u0131na ba\u011Fla. Bir kitab\u0131n mappings alan\u0131nda ilgili konu varsa targetPages alan\u0131na ger\xE7ek sayfa aral\u0131\u011F\u0131n\u0131 ve targetTests alan\u0131na ger\xE7ek test aral\u0131\u011F\u0131n\u0131 yaz; e\u015Fle\u015Ftirme yoksa uydurma aral\u0131k verme, bo\u015F metin ("") b\u0131rak. Soru oturumlar\u0131nda ger\xE7ek\xE7i g\xFCnl\xFCk soru hedefi yaz.
+      const prompt = `Bir YKS \xF6\u011Frencisi i\xE7in 7 g\xFCnl\xFCk uygulanabilir \xE7al\u0131\u015Fma program\u0131 olu\u015Ftur. Plan bug\xFCnden ba\u015Flar; days dizisi s\u0131ras\u0131yla \u015Fu 7 g\xFCn olsun ve her g\xFCn\xFCn day alan\u0131na g\xFCn ad\u0131n\u0131, date alan\u0131na YYYY-MM-DD tarihini yaz: ${planDays.join(", ")}. Hedef: ${input.goal}. Haftal\u0131k toplam s\xFCre: ${input.availableMinutes} dakika. \xD6ncelik, zay\u0131f konular ve son deneme performans\u0131 olsun. Zay\u0131f konular\u0131 tamamen yok sayma; orta konulara peki\u015Ftirme, iyi konulara koruma oturumu ekle. Her g\xFCn toplam 60-150 dakika ve 2-4 oturum planla. T\xFCrk\xE7e yan\u0131t \xFCret. Ki\u015Fisel raftaki kitaplar\u0131 m\xFCmk\xFCn oldu\u011Funca ilgili zay\u0131f konu oturumlar\u0131na ba\u011Fla. Bir kitab\u0131n mappings alan\u0131nda ilgili konu varsa targetPages alan\u0131na ger\xE7ek sayfa aral\u0131\u011F\u0131n\u0131 ve targetTests alan\u0131na ger\xE7ek test aral\u0131\u011F\u0131n\u0131 yaz; e\u015Fle\u015Ftirme yoksa uydurma aral\u0131k verme, bo\u015F metin ("") b\u0131rak. Soru oturumlar\u0131nda ger\xE7ek\xE7i g\xFCnl\xFCk soru hedefi yaz.
 
 Zay\u0131f/orta/iyi konu verisi:
 ${JSON.stringify(input.topics)}
@@ -9145,7 +9167,10 @@ ${JSON.stringify(input.books)}${targetContext}${coachingContext}${notebookContex
         const content = response.choices[0]?.message?.content;
         const jsonText = typeof content === "string" ? content : content?.map((part) => part.type === "text" ? part.text : "").join("");
         if (!jsonText) return fallbackPlan;
-        return normalizeAiPlan(JSON.parse(jsonText), fallbackPlan);
+        const parsed = JSON.parse(jsonText);
+        const normalized = normalizeAiPlan(parsed, fallbackPlan);
+        if (normalized === fallbackPlan) console.warn("[AI Plan] Unusable AI response, using fallback; keys:", parsed && typeof parsed === "object" ? Object.keys(parsed).join(",") : typeof parsed);
+        return normalized;
       } catch (error) {
         console.warn("[AI Plan] Falling back to deterministic plan:", error);
         return fallbackPlan;

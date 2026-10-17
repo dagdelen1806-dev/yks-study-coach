@@ -156,7 +156,8 @@ export function describeWeekForPlan(blocks: ClassBlock[], weekStart: Date, from:
     const slots = computeFreeSlots(blocks, date, { from });
     const subjects = Array.from(new Set(blocksOn(blocks, date).filter(isYksBlock).map((block) => block.subject as string)));
     const slotText = slots.filter((slot) => slot.end - slot.start >= 30).map((slot) => `${fromMinutes(slot.start)}–${fromMinutes(slot.end)}`).join(", ") || "yok";
-    lines.push(`${DAY_LABELS[weekdayOf(date) - 1]}: boş zaman ${freeMinutes(slots)} dk (${slotText})${subjects.length ? `; okulda/dershanede işlenen dersler: ${subjects.join(", ")}` : ""}`);
+    const isoDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    lines.push(`${DAY_LABELS[weekdayOf(date) - 1]} (${isoDate}): boş zaman ${freeMinutes(slots)} dk (${slotText})${subjects.length ? `; okulda/dershanede işlenen dersler: ${subjects.join(", ")}` : ""}`);
   }
   return lines.join("\n");
 }

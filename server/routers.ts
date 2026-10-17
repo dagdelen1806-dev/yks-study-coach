@@ -21,6 +21,7 @@ import { getNotebookPlanSignal } from "./notes/questionsDb";
 import { classScheduleRouter } from "./routers/classSchedule";
 import { getPlanScheduleContext } from "./schedule/classScheduleDb";
 import { normalizeAiPlan } from "./studyPlan/normalizeAiPlan";
+import { DAY_LABELS, weekdayOf } from "../shared/classSchedule";
 import { resourceCatalogRouter } from "./routers/resourceCatalog";
 import { onboardingRouter } from "./routers/onboarding";
 import { subscriptionRouter } from "./routers/subscription";
@@ -48,6 +49,8 @@ const planInput = z.object({
     id: z.string(), title: z.string(), subject: z.string(), exam: z.enum(["TYT", "AYT"]), level: z.enum(["Kolay", "Orta", "Zor"]), pageCount: z.number().optional(), totalQuestions: z.number().optional(), accuracy: z.number().optional(), activeDays: z.number().optional(), mappings: z.array(z.object({ topic: z.string(), pageStart: z.number().optional(), pageEnd: z.number().optional(), testStart: z.number().optional(), testEnd: z.number().optional() })).max(50).optional(),
   })).max(30).default([]),
   availableMinutes: z.number().min(120).max(2400).default(600),
+  // Öğrencinin yerel "bugün"ü (YYYY-MM-DD): plan bugünden başlayan 7 günü kapsar.
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   goal: z.string().max(120).default("YKS 2027"),
   // Onboarding'den gelen koçluk bağlamı — tamamen isteğe bağlı, eski
   // istemciler (veya onboarding'i henüz tamamlamamış kullanıcılar) bu alanı
@@ -323,11 +326,13 @@ export const appRouter = router({
         ? `\n\nÖğrencinin Soru Defteri (kendi kaydettiği, henüz öğrenemediği sorular — bu konulara kısa "Tekrar" oturumları ekle, öğrenciyi etiketleme):\n${notebookSignal}`
         : "";
       // Ders programım: okul/dershane saatleri dışındaki gerçek boş zaman ve o gün okulda işlenen dersler.
-      const scheduleSignal = ctx.user ? await getPlanScheduleContext(ctx.user.id).catch(() => null) : null;
+      const planStart = input.startDate ? new Date(`${input.startDate}T12:00:00Z`) : new Date();
+      const planDays = Array.from({ length: 7 }, (_, offset) => { const date = new Date(planStart.getTime() + offset * 86400000); return `${DAY_LABELS[weekdayOf(date) - 1]} ${date.toISOString().slice(0, 10)}`; });
+      const scheduleSignal = ctx.user ? await getPlanScheduleContext(ctx.user.id, planStart).catch(() => null) : null;
       const scheduleContext = scheduleSignal
         ? `\n\nÖğrencinin okul/dershane programına göre bu haftanın boş zamanı (oturumları yalnızca bu aralıklara ve her günün boş dakikasını aşmayacak şekilde planla; 23:30'dan sonra oturum koyma; o gün okulda işlenen YKS derslerine akşam kısa bir pekiştirme oturumu eklemek iyi olur):\n${scheduleSignal}`
         : "";
-      const prompt = `Bir YKS öğrencisi için 7 günlük uygulanabilir çalışma programı oluştur. Hedef: ${input.goal}. Haftalık toplam süre: ${input.availableMinutes} dakika. Öncelik, zayıf konular ve son deneme performansı olsun. Zayıf konuları tamamen yok sayma; orta konulara pekiştirme, iyi konulara koruma oturumu ekle. Her gün toplam 60-150 dakika ve 2-4 oturum planla. Türkçe yanıt üret. Kişisel raftaki kitapları mümkün olduğunca ilgili zayıf konu oturumlarına bağla. Bir kitabın mappings alanında ilgili konu varsa targetPages alanına gerçek sayfa aralığını ve targetTests alanına gerçek test aralığını yaz; eşleştirme yoksa uydurma aralık verme, boş metin ("") bırak. Soru oturumlarında gerçekçi günlük soru hedefi yaz.\n\nZayıf/orta/iyi konu verisi:\n${JSON.stringify(input.topics)}\n\nÖncelikli zayıf konular:\n${JSON.stringify(weakTopics)}\n\nSon denemeler:\n${JSON.stringify(recentExams)}\n\nKişisel raf ve çözüm durumu:\n${JSON.stringify(input.books)}${targetContext}${coachingContext}${notebookContext}${scheduleContext}`;
+      const prompt = `Bir YKS öğrencisi için 7 günlük uygulanabilir çalışma programı oluştur. Plan bugünden başlar; days dizisi sırasıyla şu 7 gün olsun ve her günün day alanına gün adını, date alanına YYYY-MM-DD tarihini yaz: ${planDays.join(", ")}. Hedef: ${input.goal}. Haftalık toplam süre: ${input.availableMinutes} dakika. Öncelik, zayıf konular ve son deneme performansı olsun. Zayıf konuları tamamen yok sayma; orta konulara pekiştirme, iyi konulara koruma oturumu ekle. Her gün toplam 60-150 dakika ve 2-4 oturum planla. Türkçe yanıt üret. Kişisel raftaki kitapları mümkün olduğunca ilgili zayıf konu oturumlarına bağla. Bir kitabın mappings alanında ilgili konu varsa targetPages alanına gerçek sayfa aralığını ve targetTests alanına gerçek test aralığını yaz; eşleştirme yoksa uydurma aralık verme, boş metin ("") bırak. Soru oturumlarında gerçekçi günlük soru hedefi yaz.\n\nZayıf/orta/iyi konu verisi:\n${JSON.stringify(input.topics)}\n\nÖncelikli zayıf konular:\n${JSON.stringify(weakTopics)}\n\nSon denemeler:\n${JSON.stringify(recentExams)}\n\nKişisel raf ve çözüm durumu:\n${JSON.stringify(input.books)}${targetContext}${coachingContext}${notebookContext}${scheduleContext}`;
       try {
         const response = await invokeLLM({
           reasoningEffort: "low",
@@ -357,7 +362,10 @@ export const appRouter = router({
         const content = response.choices[0]?.message?.content;
         const jsonText = typeof content === "string" ? content : content?.map((part) => part.type === "text" ? part.text : "").join("");
         if (!jsonText) return fallbackPlan;
-        return normalizeAiPlan(JSON.parse(jsonText), fallbackPlan);
+        const parsed = JSON.parse(jsonText);
+        const normalized = normalizeAiPlan(parsed, fallbackPlan);
+        if (normalized === fallbackPlan) console.warn("[AI Plan] Unusable AI response, using fallback; keys:", parsed && typeof parsed === "object" ? Object.keys(parsed).join(",") : typeof parsed);
+        return normalized;
       } catch (error) {
         console.warn("[AI Plan] Falling back to deterministic plan:", error);
         return fallbackPlan;

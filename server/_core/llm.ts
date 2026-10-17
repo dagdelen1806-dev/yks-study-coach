@@ -69,7 +69,7 @@ export type InvokeParams = {
   model?: string;
   thinking?: Record<string, unknown>;
   reasoning?: Record<string, unknown>;
-  /** Uzun yapılandırılmış çıktılarda gecikmeyi düşürmek için; yalnızca Gemini 2.5 modellerine gönderilir. */
+  /** Uzun yapılandırılmış çıktılarda gecikmeyi düşürmek için; yalnızca Gemini 2.5+ modellerine gönderilir. */
   reasoningEffort?: "low" | "medium" | "high";
 };
 
@@ -291,6 +291,32 @@ const errorForStatus =(status: number, detail: string) => {
   return new LlmUnavailableError(reason, `LLM invoke failed: ${status} – ${safeDetail.slice(0, 500)}`, status);
 };
 
+/**
+ * Gemini'nin OpenAI uyumlu ucu JSON şemasının yalnızca OpenAPI alt kümesini kabul eder:
+ * `additionalProperties`, `strict`, `$schema` ve ["string","null"] gibi birleşik tipler
+ * "INVALID_ARGUMENT" (400) ile reddedilir ve istek gevşek json_object moduna düşer (alan
+ * kaybı + ikinci çağrı gecikmesi). Şema Gemini'ye giderken bu biçime çevrilir.
+ */
+export function toGeminiSchema(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(toGeminiSchema);
+  if (!schema || typeof schema !== "object") return schema;
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(schema as Record<string, unknown>)) {
+    if (key === "additionalProperties" || key === "$schema" || key === "strict") continue;
+    if (key === "type" && Array.isArray(value)) {
+      const types = value.filter((type) => type !== "null");
+      result.type = types[0] ?? "string";
+      if (types.length < value.length) result.nullable = true;
+      continue;
+    }
+    // `properties` altındaki anahtarlar alan adıdır (ör. "strict" adlı bir alan), şema anahtar kelimesi değil.
+    result[key] = key === "properties" && value && typeof value === "object" && !Array.isArray(value)
+      ? Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([name, child]) => [name, toGeminiSchema(child)]))
+      : toGeminiSchema(value);
+  }
+  return result;
+}
+
 const normalizeResponseFormat = ({
   responseFormat,
   response_format,
@@ -459,8 +485,8 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   if (reasoning) {
     payload.reasoning = reasoning;
   }
-  // Gemini 2.5 varsayılan olarak uzun "düşünür"; OpenAI modelleri bu alanı tanımayabilir.
-  if (reasoningEffort && /^gemini-2\.5/.test(String(payload.model))) {
+  // Gemini 2.5+ varsayılan olarak uzun "düşünür"; OpenAI modelleri ve eski Gemini'ler bu alanı tanımayabilir.
+  if (reasoningEffort && /^gemini-(?!1\.|2\.0)/.test(String(payload.model))) {
     payload.reasoning_effort = reasoningEffort;
   }
 
@@ -471,8 +497,11 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     output_schema,
   });
 
+  const isGemini = target.baseUrl.includes("generativelanguage.googleapis.com");
   if (normalizedResponseFormat) {
-    payload.response_format = normalizedResponseFormat;
+    payload.response_format = isGemini && normalizedResponseFormat.type === "json_schema"
+      ? { type: "json_schema", json_schema: { name: normalizedResponseFormat.json_schema.name, schema: toGeminiSchema(normalizedResponseFormat.json_schema.schema) } }
+      : normalizedResponseFormat;
   }
 
   const send = async (body: Record<string, unknown>) => {
@@ -505,7 +534,7 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   const format = payload.response_format as { type?: string; json_schema?: { schema?: unknown } } | undefined;
   if (response.status === 400 && format?.type === "json_schema") {
     const firstError = await response.text().catch(() => "");
-    console.warn(`[LLM] json_schema rejected (400), retrying with json_object: ${firstError.slice(0, 200).replace(/\b(sk-[A-Za-z0-9_*.\-]{4,}|AIza[0-9A-Za-z_\-]{10,})/g, "[redacted]")}`);
+    console.warn(`[LLM] json_schema rejected (400), retrying with json_object: ${firstError.slice(0, 800).replace(/\b(sk-[A-Za-z0-9_*.\-]{4,}|AIza[0-9A-Za-z_\-]{10,})/g, "[redacted]")}`);
     const schemaHint = { role: "system", content: `Yanıtı YALNIZCA şu JSON şemasına uyan geçerli bir JSON nesnesi olarak ver (açıklama, kod bloğu yok): ${JSON.stringify(format.json_schema?.schema ?? {})}` };
     response = await send({ ...payload, messages: [schemaHint, ...(payload.messages as unknown[])], response_format: { type: "json_object" } });
   }

@@ -14,7 +14,13 @@ describe("rescheduleOverdueSessions", () => {
     ];
     const result = rescheduleOverdueSessions(sessions, today, tomorrow, now);
     expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({ id: 1, sessionDate: tomorrow, rescheduledFrom: sessions[0].sessionDate });
+    expect(result[0]).toMatchObject({ id: 1, rescheduledFrom: sessions[0].sessionDate });
+    expect(result[0].sessionDate.toISOString()).toBe("2026-09-19T12:00:00.000Z");
+  });
+
+  it("keeps the session's time of day instead of moving it to midnight", () => {
+    const [moved] = rescheduleOverdueSessions([{ id: 4, sessionDate: new Date("2026-09-15T13:40:00Z") }], today, tomorrow, now);
+    expect(moved.sessionDate.toISOString()).toBe("2026-09-19T13:40:00.000Z");
   });
 
   it("is idempotent: re-running against the already-rescheduled state produces no further moves", () => {

@@ -477,12 +477,11 @@ export async function getStudyCalendar(userId: number) {
 export async function saveStudyPlan(userId: number, input: { title: string; weekStart: Date; weekEnd: Date; summary: string; source?: "ai" | "manual"; replacePrevious?: boolean; sessions: Array<{ sessionDate: Date; title: string; subject: string; topic: string; kind: string; plannedMinutes: number; targetQuestions?: number; targetPages?: string | null; targetTests?: string | null }> }) {
   const db = await getDb();
   if (!db) return undefined;
-  // Aynı hafta için plan yeniden oluşturulduysa: önceki aynı başlıklı planların henüz yapılmamış
-  // oturumları kaldırılır (tamamlanan/atlanan oturumlar ve geçmişi korunur) — üst üste binmesin.
+  // Plan yeniden oluşturulduysa: önceki aynı başlıklı planların henüz yapılmamış oturumları
+  // kaldırılır — yeni plan onların yerini alır; yoksa geçmiş günlerdekiler "gecikmiş" diye
+  // yarına taşınıp yeni planın üstüne binerdi. Tamamlanan/atlanan oturumlar ve geçmiş korunur.
   if (input.replacePrevious) {
-    const dayStart = new Date(input.weekStart); dayStart.setHours(0, 0, 0, 0);
-    const dayEnd = new Date(input.weekStart); dayEnd.setHours(23, 59, 59, 999);
-    const previous = await db.select({ id: studyPlans.id }).from(studyPlans).where(and(eq(studyPlans.userId, userId), eq(studyPlans.title, input.title), gte(studyPlans.weekStart, dayStart), lt(studyPlans.weekStart, dayEnd)));
+    const previous = await db.select({ id: studyPlans.id }).from(studyPlans).where(and(eq(studyPlans.userId, userId), eq(studyPlans.title, input.title)));
     if (previous.length) await db.delete(studyPlanSessions).where(and(eq(studyPlanSessions.userId, userId), eq(studyPlanSessions.status, "planned"), inArray(studyPlanSessions.planId, previous.map((plan) => plan.id))));
   }
   const planResult = await db.insert(studyPlans).values({ userId, title: input.title, weekStart: input.weekStart, weekEnd: input.weekEnd, summary: input.summary, source: input.source ?? "ai" });
