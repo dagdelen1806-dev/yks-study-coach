@@ -1,5 +1,6 @@
 import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
+import { drizzle, type MySql2Database } from "drizzle-orm/mysql2";
+import mysql from "mysql2/promise";
 import { bookInventory, bookStudyLogs, bookTopicMappings, coachAlerts, InsertUser, planAdherenceReports, sourceSwitches, studentProfiles, studyPlanSessions, studyPlans, topicProgress, topicStudyLogs, userMockExams, userResourceBooks, users, yksTopics } from "../drizzle/schema";
 import type { CoachingStyle, GradeLevel, TargetScoreType } from "../shared/onboarding";
 import { calculatePlanAdherence, dedupeAlerts, type AdherenceSession } from "../shared/planAdherence";
@@ -11,13 +12,30 @@ import { topicSeeds, type ExamType, type TopicStatus } from "../shared/yksData";
 import { toLocalDateKey } from "../shared/dates";
 import { NOTEBOOK_REVIEW_TASK_KIND } from "../shared/questionNotebook";
 
-let _db: ReturnType<typeof drizzle> | null = null;
+let _db: MySql2Database | null = null;
+
+/**
+ * Railway MySQL'e herkese açık proxy üzerinden bağlanılıyor ve Vercel fonksiyon örnekleri
+ * istekler arasında canlı kalıyor. Varsayılan havuz boştaki bağlantıları süresiz tutar;
+ * proxy bunları sessizce kapatınca bir sonraki sorgu "Got timeout reading communication
+ * packets" / ETIMEDOUT ile düşer. Bu yüzden: keep-alive açık, boştaki bağlantı proxy'den
+ * önce (30 sn) kapatılır, sunucusuz ortama uygun küçük havuz, bağlantı kurmaya daha uzun süre.
+ */
+export const DB_POOL_OPTIONS = {
+  connectionLimit: 5,
+  maxIdle: 2,
+  idleTimeout: 30_000,
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 10_000,
+  connectTimeout: 20_000,
+  waitForConnections: true,
+} as const;
 
 // Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      _db = drizzle(process.env.DATABASE_URL);
+      _db = drizzle({ client: mysql.createPool({ uri: process.env.DATABASE_URL, ...DB_POOL_OPTIONS }) });
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;
