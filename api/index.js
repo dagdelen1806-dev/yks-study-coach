@@ -9189,14 +9189,21 @@ ${JSON.stringify(input.books)}${targetContext}${coachingContext}${notebookContex
         });
         const content = response.choices[0]?.message?.content;
         const jsonText = typeof content === "string" ? content : content?.map((part) => part.type === "text" ? part.text : "").join("");
-        if (!jsonText) return fallbackPlan;
-        const parsed = JSON.parse(jsonText);
+        const parsed = jsonText ? JSON.parse(jsonText) : null;
         const normalized = normalizeAiPlan(parsed, fallbackPlan);
-        if (normalized === fallbackPlan) console.warn("[AI Plan] Unusable AI response, using fallback; keys:", parsed && typeof parsed === "object" ? Object.keys(parsed).join(",") : typeof parsed);
+        if (normalized === fallbackPlan) {
+          console.warn("[AI Plan] Unusable AI response; keys:", parsed && typeof parsed === "object" ? Object.keys(parsed).join(",") : typeof parsed);
+          throw new TRPCError9({ code: "INTERNAL_SERVER_ERROR", message: "AI plan\u0131 okunamad\u0131. Tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi." });
+        }
         return normalized;
       } catch (error) {
-        console.warn("[AI Plan] Falling back to deterministic plan:", error);
-        return fallbackPlan;
+        if (error instanceof TRPCError9) throw error;
+        console.warn("[AI Plan] LLM failed:", error);
+        const quota = error instanceof LlmUnavailableError && error.reason === "quota";
+        throw new TRPCError9({
+          code: quota ? "TOO_MANY_REQUESTS" : "INTERNAL_SERVER_ERROR",
+          message: quota ? "Yapay zek\xE2 servisinin kotas\u0131 \u015Fu an dolu; AI plan\u0131n\u0131 birka\xE7 saat sonra tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi." : "AI plan\u0131 \u015Fu an haz\u0131rlanamad\u0131; biraz sonra tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi."
+        });
       }
     })
   }),

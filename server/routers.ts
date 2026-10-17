@@ -8,7 +8,7 @@ import { checkRateLimit } from "./_core/rateLimit";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
 import { protectedProcedure, metredFeatureProcedure } from "./_core/trpc";
-import { invokeLLM, llmUnavailableMessage } from "./_core/llm";
+import { LlmUnavailableError, invokeLLM, llmUnavailableMessage } from "./_core/llm";
 import { validateDataUrl } from "./_core/fileValidation";
 import { z } from "zod";
 import { addBookStudyLog, addBookToInventory, addSourceSwitch, addTopicStudyLog, addUserMockExams, addUserResourceBooks, completeStudySession, getBookInventory, getBookStudyLogs, getBookTopicMappings, getCoachAlerts, getPlanAdherenceInputs, getSourceSwitches, getStudyCalendar, getUserMockExams, getUserResourceBooks, logCompletedRoutineSession, markCoachAlertRead, removeBookFromInventory, savePlanAdherence, saveStudyPlan, upsertBookTopicMapping } from "./db";
@@ -361,14 +361,25 @@ export const appRouter = router({
         });
         const content = response.choices[0]?.message?.content;
         const jsonText = typeof content === "string" ? content : content?.map((part) => part.type === "text" ? part.text : "").join("");
-        if (!jsonText) return fallbackPlan;
-        const parsed = JSON.parse(jsonText);
+        const parsed = jsonText ? JSON.parse(jsonText) : null;
         const normalized = normalizeAiPlan(parsed, fallbackPlan);
-        if (normalized === fallbackPlan) console.warn("[AI Plan] Unusable AI response, using fallback; keys:", parsed && typeof parsed === "object" ? Object.keys(parsed).join(",") : typeof parsed);
+        if (normalized === fallbackPlan) {
+          console.warn("[AI Plan] Unusable AI response; keys:", parsed && typeof parsed === "object" ? Object.keys(parsed).join(",") : typeof parsed);
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "AI planı okunamadı. Tekrar dener misin? Bu deneme hakkından düşmedi." });
+        }
         return normalized;
       } catch (error) {
-        console.warn("[AI Plan] Falling back to deterministic plan:", error);
-        return fallbackPlan;
+        // Herkese aynı hazır planı "AI planı" diye göstermek yerine dürüst hata: hak düşmez
+        // (metredFeatureProcedure yalnızca başarıda sayar), takvime sahte plan yazılmaz.
+        if (error instanceof TRPCError) throw error;
+        console.warn("[AI Plan] LLM failed:", error);
+        const quota = error instanceof LlmUnavailableError && error.reason === "quota";
+        throw new TRPCError({
+          code: quota ? "TOO_MANY_REQUESTS" : "INTERNAL_SERVER_ERROR",
+          message: quota
+            ? "Yapay zekâ servisinin kotası şu an dolu; AI planını birkaç saat sonra tekrar dener misin? Bu deneme hakkından düşmedi."
+            : "AI planı şu an hazırlanamadı; biraz sonra tekrar dener misin? Bu deneme hakkından düşmedi.",
+        });
       }
     }),
   }),
