@@ -1,4 +1,6 @@
-export type WeakTopicInput = { subject: string; topic: string; progress: number };
+import { placeSessions, type FreeSlot } from "./classSchedule";
+
+export type WeakTopicInput ={ subject: string; topic: string; progress: number };
 export type LibraryBookInput = { subject: string; title: string };
 
 export type GeneratedFocusSession = {
@@ -28,14 +30,20 @@ export const FOCUS_BREAK_MINUTES = 10;
  * saat kaçta başlarsın" tercihi), her blok gerçek bir saat dilimi alır —
  * `FOCUS_BREAK_MINUTES` aralarla art arda dizilir — ki Takvim ve Pusula Odak
  * "şu an hangi konu hazır" bilgisini gerçek saatten türetebilsin.
+ *
+ * `freeSlots` de verilirse (Ders programım'dan hesaplanan boş aralıklar, bkz.
+ * shared/classSchedule.ts computeFreeSlots), bloklar art arda dizilmek yerine
+ * yalnızca bu aralıklara yerleşir; sığmayan oturum üretilmez.
  */
 export function generateDailyFocusPlan(
   dailyStudyMinutes: number,
   weakTopics: WeakTopicInput[],
   libraryBooks: LibraryBookInput[],
-  scheduleStart?: { date: Date; startTime: string }
+  scheduleStart?: { date: Date; startTime: string; freeSlots?: FreeSlot[] }
 ): GeneratedFocusSession[] {
-  const sessionCount = Math.max(1, Math.round(dailyStudyMinutes / FOCUS_SESSION_MINUTES));
+  const targetCount = Math.max(1, Math.round(dailyStudyMinutes / FOCUS_SESSION_MINUTES));
+  const slotStarts = scheduleStart?.freeSlots ? placeSessions(scheduleStart.freeSlots, targetCount, FOCUS_SESSION_MINUTES, FOCUS_BREAK_MINUTES) : null;
+  const sessionCount = slotStarts ? slotStarts.length : targetCount;
   const sortedWeakTopics = [...weakTopics].sort((a, b) => a.progress - b.progress);
   const pool: Array<{ subject: string; topic: string }> =
     sortedWeakTopics.length > 0
@@ -55,7 +63,12 @@ export function generateDailyFocusPlan(
   return Array.from({ length: sessionCount }, (_, index) => {
     const item = pool[index % pool.length];
     const session: GeneratedFocusSession = { title: `${item.subject} · ${item.topic}`, subject: item.subject, topic: item.topic, kind: "Odak", plannedMinutes: FOCUS_SESSION_MINUTES };
-    if (dayStart) {
+    if (slotStarts && scheduleStart) {
+      const startsAt = new Date(scheduleStart.date);
+      startsAt.setHours(0, slotStarts[index], 0, 0);
+      session.startsAt = startsAt.toISOString();
+      session.endsAt = new Date(startsAt.getTime() + FOCUS_SESSION_MINUTES * 60000).toISOString();
+    } else if (dayStart) {
       const offsetMinutes = index * (FOCUS_SESSION_MINUTES + FOCUS_BREAK_MINUTES);
       const startsAt = new Date(dayStart.getTime() + offsetMinutes * 60000);
       const endsAt = new Date(startsAt.getTime() + FOCUS_SESSION_MINUTES * 60000);

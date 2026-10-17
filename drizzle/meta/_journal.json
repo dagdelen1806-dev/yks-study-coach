@@ -141,6 +141,13 @@
       "when": 1792240485952,
       "tag": "0019_question_ai_solution",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "5",
+      "when": 1792256640186,
+      "tag": "0020_class_schedule",
+      "breakpoints": true
     }
   ]
 }

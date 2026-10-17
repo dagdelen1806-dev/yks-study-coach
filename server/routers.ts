@@ -18,6 +18,8 @@ import { bookContentRouter } from "./routers/bookContent";
 import { notesRouter } from "./routers/notes";
 import { questionsRouter } from "./routers/questions";
 import { getNotebookPlanSignal } from "./notes/questionsDb";
+import { classScheduleRouter } from "./routers/classSchedule";
+import { getPlanScheduleContext } from "./schedule/classScheduleDb";
 import { resourceCatalogRouter } from "./routers/resourceCatalog";
 import { onboardingRouter } from "./routers/onboarding";
 import { subscriptionRouter } from "./routers/subscription";
@@ -319,7 +321,12 @@ export const appRouter = router({
       const notebookContext = notebookSignal
         ? `\n\nÖğrencinin Soru Defteri (kendi kaydettiği, henüz öğrenemediği sorular — bu konulara kısa "Tekrar" oturumları ekle, öğrenciyi etiketleme):\n${notebookSignal}`
         : "";
-      const prompt = `Bir YKS öğrencisi için 7 günlük uygulanabilir çalışma programı oluştur. Hedef: ${input.goal}. Haftalık toplam süre: ${input.availableMinutes} dakika. Öncelik, zayıf konular ve son deneme performansı olsun. Zayıf konuları tamamen yok sayma; orta konulara pekiştirme, iyi konulara koruma oturumu ekle. Her gün toplam 60-150 dakika ve 2-4 oturum planla. Türkçe yanıt üret. Kişisel raftaki kitapları mümkün olduğunca ilgili zayıf konu oturumlarına bağla. Bir kitabın mappings alanında ilgili konu varsa targetPages alanına gerçek sayfa aralığını ve targetTests alanına gerçek test aralığını yaz; eşleştirme yoksa uydurma aralık verme, null bırak. Soru oturumlarında gerçekçi günlük soru hedefi yaz.\n\nZayıf/orta/iyi konu verisi:\n${JSON.stringify(input.topics)}\n\nÖncelikli zayıf konular:\n${JSON.stringify(weakTopics)}\n\nSon denemeler:\n${JSON.stringify(recentExams)}\n\nKişisel raf ve çözüm durumu:\n${JSON.stringify(input.books)}${targetContext}${coachingContext}${notebookContext}`;
+      // Ders programım: okul/dershane saatleri dışındaki gerçek boş zaman ve o gün okulda işlenen dersler.
+      const scheduleSignal = ctx.user ? await getPlanScheduleContext(ctx.user.id).catch(() => null) : null;
+      const scheduleContext = scheduleSignal
+        ? `\n\nÖğrencinin okul/dershane programına göre bu haftanın boş zamanı (oturumları yalnızca bu aralıklara ve her günün boş dakikasını aşmayacak şekilde planla; 23:30'dan sonra oturum koyma; o gün okulda işlenen YKS derslerine akşam kısa bir pekiştirme oturumu eklemek iyi olur):\n${scheduleSignal}`
+        : "";
+      const prompt = `Bir YKS öğrencisi için 7 günlük uygulanabilir çalışma programı oluştur. Hedef: ${input.goal}. Haftalık toplam süre: ${input.availableMinutes} dakika. Öncelik, zayıf konular ve son deneme performansı olsun. Zayıf konuları tamamen yok sayma; orta konulara pekiştirme, iyi konulara koruma oturumu ekle. Her gün toplam 60-150 dakika ve 2-4 oturum planla. Türkçe yanıt üret. Kişisel raftaki kitapları mümkün olduğunca ilgili zayıf konu oturumlarına bağla. Bir kitabın mappings alanında ilgili konu varsa targetPages alanına gerçek sayfa aralığını ve targetTests alanına gerçek test aralığını yaz; eşleştirme yoksa uydurma aralık verme, null bırak. Soru oturumlarında gerçekçi günlük soru hedefi yaz.\n\nZayıf/orta/iyi konu verisi:\n${JSON.stringify(input.topics)}\n\nÖncelikli zayıf konular:\n${JSON.stringify(weakTopics)}\n\nSon denemeler:\n${JSON.stringify(recentExams)}\n\nKişisel raf ve çözüm durumu:\n${JSON.stringify(input.books)}${targetContext}${coachingContext}${notebookContext}${scheduleContext}`;
       try {
         const response = await invokeLLM({
           messages: [
@@ -392,6 +399,7 @@ export const appRouter = router({
   bookContent: bookContentRouter,
   notes: notesRouter,
   questions: questionsRouter,
+  classSchedule: classScheduleRouter,
   catalog: resourceCatalogRouter,
   onboarding: onboardingRouter,
   subscription: subscriptionRouter,

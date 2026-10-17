@@ -395,6 +395,23 @@ export const studyPlanSessions = mysqlTable("study_plan_sessions", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+// Ders programım: okul/dershane/özel ders blokları — tek haftalık, her hafta tekrar eder
+// (bkz. shared/classSchedule.ts). subject null = YKS dışı ders: takvimde gri, meşgul
+// zaman sayılır ama plana ve analizlere girmez. Kayıt tüm programı birlikte değiştirir.
+export const classScheduleBlocks = mysqlTable("class_schedule_blocks", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  source: mysqlEnum("source", ["school", "course", "tutor", "other"]).default("school").notNull(),
+  dayOfWeek: int("dayOfWeek").notNull(),
+  startTime: varchar("startTime", { length: 5 }).notNull(),
+  endTime: varchar("endTime", { length: 5 }).notNull(),
+  subject: varchar("subject", { length: 80 }),
+  label: varchar("label", { length: 80 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  userDayIdx: index("class_schedule_blocks_user_day_idx").on(table.userId, table.dayOfWeek),
+}));
+
 export const topicStudyLogs = mysqlTable("topic_study_logs", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),
@@ -483,6 +500,8 @@ export const studentProfiles = mysqlTable("student_profiles", {
   // günlük planının gerçek saat dilimlerini (16:00–16:40, 16:50–17:30...)
   // buradan türetir (bkz. shared/focusPlan.ts generateDailyFocusPlan).
   preferredStudyStartTime: varchar("preferredStudyStartTime", { length: 5 }),
+  // Ders programım'daki okul ders saatleri ([{start,end}], "HH:mm") — tablo düzenleyicinin satırları.
+  schoolPeriodsJson: text("schoolPeriodsJson"),
   availableStudyDaysJson: text("availableStudyDaysJson"),
   preferredStudyTimesJson: text("preferredStudyTimesJson"),
   preferredStudyMethodsJson: text("preferredStudyMethodsJson"),
