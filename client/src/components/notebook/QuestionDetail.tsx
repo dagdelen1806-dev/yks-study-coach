@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { AiSolutionSteps, useAiSolve } from "./AiSolution";
 import NoteImageDialog from "./NoteImageDialog";
 import { Chip } from "./QuestionCapture";
+import SimilarQuestion from "./SimilarQuestion";
 import VoiceRecorder from "./VoiceRecorder";
 import { attachmentUrl, formatDuration } from "./nodes";
 import { useCurriculumTopics } from "./useNotebookData";
@@ -154,6 +155,8 @@ export default function QuestionDetail({ id, onClose, onReview }: { id: number; 
               </div>
             )}
           </div>
+
+          <SimilarQuestion id={data.id} hasPhoto={Boolean(data.questionImageId)} />
 
           <div className="grid gap-2 sm:grid-cols-2">
             <label className="block text-[12px]"><span className="form-label">Ders</span>

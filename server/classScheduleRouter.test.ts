@@ -18,6 +18,14 @@ vi.mock("./schedule/classScheduleDb", async (importOriginal) => {
   };
 });
 
+vi.mock("./subscriptions/entitlementService", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./subscriptions/entitlementService")>()),
+  assertUsageAvailable: vi.fn(async () => undefined),
+  recordFeatureUsage: vi.fn(async () => undefined),
+}));
+const aiInvoke = vi.fn();
+vi.mock("./_core/llm", async (importOriginal) => ({ ...(await importOriginal<typeof import("./_core/llm")>()), invokeLLM: (...args: unknown[]) => aiInvoke(...args) }));
+
 const { appRouter } = await import("./routers");
 import type { TrpcContext } from "./_core/context";
 
@@ -45,5 +53,16 @@ describe("classSchedule router", () => {
     await expect(caller.classSchedule.save({ periods: [], blocks: [{ ...fizik, subject: "Astroloji" as never }] })).rejects.toThrow();
     await expect(caller.classSchedule.save({ periods: [], blocks: [{ ...fizik, dayOfWeek: 8 }] })).rejects.toThrow();
     await expect(caller.classSchedule.save({ periods: [], blocks: [fizik, { ...fizik, startTime: "09:00", endTime: "09:40", label: "Kimya", subject: "Kimya" }] })).rejects.toThrow(/çakışıyor/);
+  });
+
+  it("reads a schedule photo without saving it, and explains a failed read", async () => {
+    aiInvoke.mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify({ periods: [{ start: "08:30", end: "09:10" }], lessons: [{ day: 1, period: 1, code: "FİZF4", name: "FİZİK", subject: "Fizik" }] }) } }] });
+    const caller = callerFor(makeUser(5));
+    const result = await caller.classSchedule.importPhoto({ dataUrl: "data:image/jpeg;base64,AAAA" });
+    expect(result.blocks).toEqual([fizik]);
+    expect(calls).toEqual([]);
+    aiInvoke.mockResolvedValueOnce({ choices: [{ message: { content: "{}" } }] });
+    await expect(caller.classSchedule.importPhoto({ dataUrl: "data:image/jpeg;base64,AAAA" })).rejects.toThrow(/okuyamadım/);
+    await expect(caller.classSchedule.importPhoto({ dataUrl: "data:text/html;base64,AAAA" })).rejects.toThrow();
   });
 });

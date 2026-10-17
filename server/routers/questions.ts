@@ -7,6 +7,7 @@ import { AttachmentError, getAttachmentStorage } from "../notes/attachmentStorag
 import { NoteError } from "../notes/notesDb";
 import { suggestQuestionDetails } from "../notes/questionAi";
 import { solveQuestion } from "../notes/questionSolver";
+import { generateSimilarQuestion } from "../notes/similarQuestion";
 import { addReviewTask, createQuestion, deleteQuestion, finishReviewSession, getErrorMap, getQuestion, getQuestionIdByNote, getReviewSummary, getSolveContext, getSubjectSummary, listQuestions, moveNoteToSubject, recordAttempt, saveAiSolution, updateQuestion } from "../notes/questionsDb";
 import { PlanTaskError } from "../studyPlan/planTasks";
 import { ATTEMPT_RESULT_KEYS, DIFFICULTY_KEYS, ERROR_TYPE_KEYS, HINT_LEVELS } from "../../shared/questionNotebook";
@@ -21,6 +22,18 @@ async function userFacing<T>(work: () => Promise<T>): Promise<T> {
 }
 
 const id = z.number().int().positive();
+
+/** AI'a gidecek kart: öğrencinin kendi kartı + (varsa) kendi soru fotoğrafı; ikisi de yoksa anlaşılır hata. */
+async function loadQuestionForAi(userId: number, questionId: number) {
+  const context = await getSolveContext(userId, questionId);
+  let imageDataUrl: string | null = null;
+  if (context.questionImageId) {
+    const attachment = await getAttachmentStorage().get(userId, context.questionImageId);
+    if (attachment?.kind === "image") imageDataUrl = `data:${attachment.mimeType};base64,${attachment.data.toString("base64")}`;
+  }
+  if (!imageDataUrl && !context.ocrText?.trim()) throw new NoteError("Bu kartta soru fotoğrafı yok.");
+  return { context, imageDataUrl };
+}
 const subjectScope = z.string().max(80).nullable().optional();
 const optionalId = id.nullable().optional();
 const fields = {
@@ -96,13 +109,7 @@ export const questionsRouter = router({
   solve: metredFeatureProcedure("NOTE_AI")
     .input(z.object({ id }))
     .mutation(({ ctx, input }) => userFacing(async () => {
-      const context = await getSolveContext(ctx.user!.id, input.id);
-      let imageDataUrl: string | null = null;
-      if (context.questionImageId) {
-        const attachment = await getAttachmentStorage().get(ctx.user!.id, context.questionImageId);
-        if (attachment?.kind === "image") imageDataUrl = `data:${attachment.mimeType};base64,${attachment.data.toString("base64")}`;
-      }
-      if (!imageDataUrl && !context.ocrText?.trim()) throw new NoteError("Bu kartta çözülecek bir soru fotoğrafı yok.");
+      const { context, imageDataUrl } = await loadQuestionForAi(ctx.user!.id, input.id);
       let solution;
       try {
         solution = await solveQuestion({ imageDataUrl, ocrText: context.ocrText, stuckPoint: context.stuckPoint, subject: context.subject, topic: context.topic });
@@ -111,6 +118,19 @@ export const questionsRouter = router({
         throw new NoteError(llmUnavailableMessage(error) ?? "Çözüm şu an hazırlanamadı. Biraz sonra tekrar dene.");
       }
       return saveAiSolution(ctx.user!.id, input.id, solution);
+    })),
+
+  // 🔁 Benzer soru: aynı yöntemi ölçen yeni 5 şıklı alıştırma; kaydedilmez, her üretim AI not hakkından sayılır.
+  similar: metredFeatureProcedure("NOTE_AI")
+    .input(z.object({ id }))
+    .mutation(({ ctx, input }) => userFacing(async () => {
+      const { context, imageDataUrl } = await loadQuestionForAi(ctx.user!.id, input.id);
+      try {
+        return await generateSimilarQuestion({ imageDataUrl, ocrText: context.ocrText, stuckPoint: context.stuckPoint, subject: context.subject, topic: context.topic, solution: context.aiSolution });
+      } catch (error) {
+        console.warn("[Questions] similar failed:", error instanceof Error ? error.message : error);
+        throw new NoteError(llmUnavailableMessage(error) ?? "Benzer soru şu an hazırlanamadı. Biraz sonra tekrar dene.");
+      }
     })),
 
   // ✨ Öner: fotoğrafı okur, müfredattan konu + zorluk + olası hata türü önerir (fotoğraf okuma kotasından sayılır).

@@ -1,0 +1,61 @@
+import { invokeLLM } from "../_core/llm";
+import { parseSimilarQuestion, type AiSolution, type SimilarQuestion } from "../../shared/questionNotebook";
+import { subjectGuidance, type SolveInput } from "./questionSolver";
+
+/**
+ * 🔁 Benzer soru: kartdaki soruyla AYNI kazanımı/yöntemi ölçen ama sayıları ve bağlamı farklı,
+ * YKS biçiminde 5 şıklı yeni bir alıştırma sorusu üretir. Öğrenci yöntemi gerçekten öğrendi mi,
+ * kopyalamadan dener. Kayıtlı AI çözümü varsa yöntem oradan alınır. Yalnızca öğrenci isteyince çağrılır.
+ */
+export async function generateSimilarQuestion(input: SolveInput & { solution: AiSolution | null }, invoke: typeof invokeLLM = invokeLLM): Promise<SimilarQuestion> {
+  const questionText = input.ocrText?.trim();
+  if (!input.imageDataUrl && !questionText) throw new Error("Benzer soru için kartta soru fotoğrafı olmalı.");
+  const system = [
+    "Bir YKS öğrencisinin çözemediği soruya BENZER yeni bir alıştırma sorusu yazıyorsun (Türkçe).",
+    `Ders: ${input.subject ?? "belirtilmemiş"}${input.topic ? ` · Konu: ${input.topic}` : ""}.`,
+    "Kurallar:",
+    "- Aynı kazanımı ve aynı çözüm yöntemini ölçsün; sayılar, isimler ve bağlam FARKLI olsun. Orijinal soruyu kopyalama.",
+    "- Zorluk orijinale yakın olsun; YKS (ÖSYM) üslubunda, tek doğru cevaplı, 5 şıklı (A–E).",
+    "- question: soru metni (matematiği düz yazıyla, ör. x^2, √, π). Şekil gerekiyorsa şekli kelimelerle eksiksiz tarif et.",
+    "- options: tam 5 şık, harfsiz (yalnızca şık içeriği). Çeldiriciler tipik öğrenci hatalarından gelsin.",
+    "- answer: doğru şıkkın harfi (A, B, C, D ya da E). Cevabı yazmadan önce soruyu kendin çözüp doğrula.",
+    `- steps: 2–6 adım çözüm; work = işlem, why = neden. ${subjectGuidance(input.subject)}`,
+    "- hint: cevabı ele vermeyen tek cümle ipucu.",
+  ].join("\n");
+  const userText = [
+    questionText ? `Orijinal soru (OCR, hatalı olabilir; görsel varsa görsel esastır):\n${questionText.slice(0, 4000)}` : null,
+    input.solution ? `Orijinal sorunun çözüm yöntemi: ${input.solution.method}\n${input.solution.steps.map((step, index) => `${index + 1}) ${step.work}`).join("\n")}` : null,
+    input.stuckPoint?.trim() ? `Öğrencinin takıldığı yer: "${input.stuckPoint.trim().slice(0, 1000)}" — yeni soru bu adımı da çalıştırsın.` : null,
+  ].filter(Boolean).join("\n\n") || "Orijinal soruyu görselden oku ve ona benzer yeni bir soru yaz.";
+  const response = await invoke({
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: input.imageDataUrl ? [{ type: "text" as const, text: userText }, { type: "image_url" as const, image_url: { url: input.imageDataUrl, detail: "high" as const } }] : userText },
+    ],
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "similar_question",
+        strict: true,
+        schema: {
+          type: "object",
+          properties: {
+            question: { type: "string" },
+            options: { type: "array", items: { type: "string" } },
+            answer: { type: "string", enum: ["A", "B", "C", "D", "E"] },
+            steps: { type: "array", items: { type: "object", properties: { work: { type: "string" }, why: { type: "string" } }, required: ["work", "why"], additionalProperties: false } },
+            hint: { type: "string" },
+          },
+          required: ["question", "options", "answer", "steps", "hint"],
+          additionalProperties: false,
+        },
+      },
+    },
+  });
+  const raw = response.choices[0]?.message?.content;
+  const jsonText = typeof raw === "string" ? raw : raw?.map((part) => (part.type === "text" ? part.text : "")).join("");
+  if (!jsonText) throw new Error("AI yanıtı boş döndü.");
+  const similar = parseSimilarQuestion(jsonText.replace(/```json|```/g, "").trim());
+  if (!similar) throw new Error("Benzer soru okunamadı.");
+  return similar;
+}

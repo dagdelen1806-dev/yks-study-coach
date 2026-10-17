@@ -16,28 +16,37 @@ import {
   type ClassPeriod,
   type ScheduleSource,
 } from "@shared/classSchedule";
-import { CalendarClock, Loader2, Plus, Trash2, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { CalendarClock, Camera, Loader2, Plus, Trash2, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { compressImage } from "../books/imageCompression";
 
 // Ders programım: okul programı gün × ders saati tablosu (fotoğraftaki okul çizelgesi gibi)
 // + dershane/özel ders blokları. Kaydet tüm programı birlikte değiştirir.
 
 type Cell = { subject: string | null; label: string } | null;
 const SCHOOL_DAYS = [1, 2, 3, 4, 5, 6];
-const encode = (cell: Cell) => (cell ? `${cell.subject ? "y" : "n"}:${cell.label}` : "");
+// Seçim değeri dersi ve etiketi ayrı taşır ("y:Biyoloji|Htde Biyoloji (Seçmeli-2)"): fotoğraftan
+// okunan özel etiketler korunur ve YKS dersi etiketten bağımsız kalır.
+const encode = (cell: Cell) => (cell ? `${cell.subject ? "y" : "n"}:${cell.subject ?? ""}|${cell.label}` : "");
 const decode = (value: string): Cell => {
   if (!value) return null;
-  const label = value.slice(2);
-  return { subject: value.startsWith("y:") ? label : null, label };
+  const separator = value.indexOf("|");
+  const subject = value.slice(2, separator);
+  const label = value.slice(separator + 1);
+  return { subject: value.startsWith("y:") && subject ? subject : null, label: label || subject };
 };
+const STANDARD_VALUES = new Set([...YKS_SUBJECTS.map((subject) => encode({ subject, label: subject })), ...NON_YKS_PRESETS.map((label) => encode({ subject: null, label }))]);
 
-function SubjectOptions() {
+/** Ders seçenekleri; hücrede listede olmayan bir etiket varsa (ör. fotoğraftan okunan seçmeli ders) o da seçenek olur. */
+function SubjectOptions({ current }: { current?: Cell }) {
+  const extra = current && !STANDARD_VALUES.has(encode(current)) ? current : null;
   return (
     <>
       <option value="">—</option>
-      <optgroup label="YKS dersleri">{YKS_SUBJECTS.map((subject) => <option key={subject} value={`y:${subject}`}>{subject}</option>)}</optgroup>
-      <optgroup label="YKS dışı (gri, plana girmez)">{NON_YKS_PRESETS.map((label) => <option key={label} value={`n:${label}`}>{label}</option>)}</optgroup>
+      {extra && <option value={encode(extra)}>{extra.label}{extra.subject && extra.subject !== extra.label ? ` (${extra.subject})` : ""}</option>}
+      <optgroup label="YKS dersleri">{YKS_SUBJECTS.map((subject) => <option key={subject} value={encode({ subject, label: subject })}>{subject}</option>)}</optgroup>
+      <optgroup label="YKS dışı (gri, plana girmez)">{NON_YKS_PRESETS.map((label) => <option key={label} value={encode({ subject: null, label })}>{label}</option>)}</optgroup>
     </>
   );
 }
@@ -55,7 +64,41 @@ export default function ClassScheduleEditor({ onClose }: { onClose: () => void }
   const [showSaturday, setShowSaturday] = useState(false);
   const [activeDay, setActiveDay] = useState(1);
   const [loaded, setLoaded] = useState(false);
-  const [draft, setDraft] = useState({ source: "course" as ScheduleSource, dayOfWeek: 6, startTime: "09:00", endTime: "12:00", value: "y:Matematik" });
+  const [draft, setDraft] = useState({ source: "course" as ScheduleSource, dayOfWeek: 6, startTime: "09:00", endTime: "12:00", value: encode({ subject: "Matematik", label: "Matematik" }) });
+  const photoInput = useRef<HTMLInputElement>(null);
+  const [preparingPhoto, setPreparingPhoto] = useState(false);
+  // 📷 Fotoğraftan aktar: okunan okul programı tabloya dolar (kaydedilmez); dershane blokları korunur.
+  const importPhoto = trpc.classSchedule.importPhoto.useMutation({
+    onSuccess: (result) => {
+      const grid: Cell[][] = result.periods.map(() => SCHOOL_DAYS.map(() => null));
+      const sunday: ClassBlock[] = [];
+      for (const block of result.blocks) {
+        const row = result.periods.findIndex((period) => period.start === block.startTime && period.end === block.endTime);
+        if (row >= 0 && block.dayOfWeek <= 6) grid[row][block.dayOfWeek - 1] = { subject: block.subject, label: block.label };
+        else sunday.push(block);
+      }
+      setPeriods(result.periods);
+      setCells(grid);
+      setExtras((items) => [...items.filter((block) => block.source !== "school"), ...sunday]);
+      setShowSaturday(grid.some((row) => row[5] !== null));
+      toast.success(`Fotoğraftan ${result.blocks.length} ders saati okundu${result.skipped ? ` (${result.skipped} hücre okunamadı)` : ""}. Tabloyu kontrol et, gerekiyorsa düzelt ve "Programı kaydet"e bas.`);
+    },
+    onError: (error) => toast.error(error.message || "Program fotoğraftan okunamadı."),
+  });
+  const onPhoto = async (file: File | undefined) => {
+    if (!file) return;
+    setPreparingPhoto(true);
+    try {
+      const image = await compressImage(file, { maxDimension: 2200, maxBytes: 2_500_000 });
+      importPhoto.mutate({ dataUrl: image.dataUrl });
+    } catch {
+      toast.error("Fotoğraf hazırlanamadı; başka bir fotoğrafla dener misin?");
+    } finally {
+      setPreparingPhoto(false);
+      if (photoInput.current) photoInput.current.value = "";
+    }
+  };
+  const reading = preparingPhoto || importPhoto.isPending;
 
   // Sunucudaki programı tabloya aç: ders saatine oturan okul blokları hücreye, diğerleri ek bloklara.
   useEffect(() => {
@@ -117,6 +160,16 @@ export default function ClassScheduleEditor({ onClose }: { onClose: () => void }
 
       {schedule.isLoading ? <div className="mt-6 flex items-center gap-2 text-[13px] text-ink-3"><Loader2 size={15} className="animate-spin" /> Programın yükleniyor…</div> : (
         <>
+          <div className="mt-5 flex flex-col gap-3 rounded-xl border border-dashed border-brand/30 bg-brand-soft/40 p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-[12px] leading-5 text-ink-3">
+              <div className="font-semibold text-ink-2">📷 Okulun program çizelgesi elinde mi?</div>
+              Fotoğrafını çek, tablo kendiliğinden dolsun; sonra kontrol edip kaydet. Fotoğraf okunması için yapay zekâya gönderilir, öğretmen adları kaydedilmez.
+            </div>
+            <input ref={photoInput} type="file" accept="image/*" className="hidden" onChange={(event) => onPhoto(event.target.files?.[0])} />
+            <Button onClick={() => photoInput.current?.click()} disabled={reading} className="shrink-0 rounded-xl bg-ink text-[12px] text-white">
+              {reading ? <><Loader2 size={14} className="mr-1.5 animate-spin" /> Okunuyor…</> : <><Camera size={14} className="mr-1.5" /> Fotoğraftan aktar</>}
+            </Button>
+          </div>
           <div className="mt-5 flex flex-wrap items-center justify-between gap-2">
             <div className="text-[13px] font-semibold text-ink-2">Okul programı <span className="font-normal text-ink-4">· {filled} ders saati dolu</span></div>
             <label className="flex items-center gap-2 text-[12px] text-ink-3"><input type="checkbox" checked={showSaturday} onChange={(event) => setShowSaturday(event.target.checked)} /> Cumartesi de okul var</label>
@@ -156,7 +209,7 @@ export default function ClassScheduleEditor({ onClose }: { onClose: () => void }
                       return (
                         <td key={day} className={`px-1 py-1.5 ${day === activeDay ? "" : "hidden md:table-cell"}`}>
                           <select aria-label={`${DAY_LABELS[day - 1]} ${row + 1}. ders`} value={encode(cell)} onChange={(event) => setCell(row, day, decode(event.target.value))} className={`h-9 w-full rounded-lg border px-1 text-[12px] ${!cell ? "border-dashed border-rule text-ink-4" : cell.subject ? "border-brand/30 bg-brand-soft font-semibold text-brand" : "border-rule bg-paper text-ink-4"}`}>
-                            <SubjectOptions />
+                            <SubjectOptions current={cell} />
                           </select>
                         </td>
                       );

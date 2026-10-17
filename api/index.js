@@ -814,6 +814,7 @@ var featureUsageLogs = mysqlTable("feature_usage_logs", {
 // server/db.ts
 import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
+import mysql from "mysql2/promise";
 
 // shared/planAdherence.ts
 var cap = (value) => Math.max(0, Math.min(100, Math.round(value)));
@@ -1439,13 +1440,41 @@ function parseAiSolution(raw) {
   if (!steps.length) return null;
   return { method: clip(input.method, 400), steps, answer: clip(input.answer, 400), check: clip(input.check, 600), hint: clip(input.hint, 400) };
 }
+var OPTION_LETTERS = ["A", "B", "C", "D", "E"];
+function parseSimilarQuestion(raw) {
+  let value = raw;
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (!value || typeof value !== "object") return null;
+  const input = value;
+  const question = clip(input.question, 3e3);
+  const options = (Array.isArray(input.options) ? input.options : []).slice(0, 5).map((option) => clip(option, 400).replace(/^[A-Ea-e][).:-]\s*/, ""));
+  const answer = clip(input.answer, 5).toUpperCase().charAt(0);
+  if (!question || options.length !== 5 || options.some((option) => !option) || !OPTION_LETTERS.includes(answer)) return null;
+  const steps = (Array.isArray(input.steps) ? input.steps : []).map((step) => step && typeof step === "object" ? { work: clip(step.work, 600), why: clip(step.why, 600) } : null).filter((step) => Boolean(step && (step.work || step.why))).slice(0, 10);
+  return { question, options, answer, steps, hint: clip(input.hint, 400) };
+}
 
 // server/db.ts
 var _db = null;
+var DB_POOL_OPTIONS = {
+  connectionLimit: 5,
+  maxIdle: 2,
+  idleTimeout: 3e4,
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 1e4,
+  connectTimeout: 2e4,
+  waitForConnections: true
+};
 async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      _db = drizzle(process.env.DATABASE_URL);
+      _db = drizzle({ client: mysql.createPool({ uri: process.env.DATABASE_URL, ...DB_POOL_OPTIONS }) });
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;
@@ -6702,6 +6731,62 @@ ${questionText.slice(0, 4e3)}` : null,
   return solution;
 }
 
+// server/notes/similarQuestion.ts
+async function generateSimilarQuestion(input, invoke = invokeLLM) {
+  const questionText = input.ocrText?.trim();
+  if (!input.imageDataUrl && !questionText) throw new Error("Benzer soru i\xE7in kartta soru foto\u011Fraf\u0131 olmal\u0131.");
+  const system = [
+    "Bir YKS \xF6\u011Frencisinin \xE7\xF6zemedi\u011Fi soruya BENZER yeni bir al\u0131\u015Ft\u0131rma sorusu yaz\u0131yorsun (T\xFCrk\xE7e).",
+    `Ders: ${input.subject ?? "belirtilmemi\u015F"}${input.topic ? ` \xB7 Konu: ${input.topic}` : ""}.`,
+    "Kurallar:",
+    "- Ayn\u0131 kazan\u0131m\u0131 ve ayn\u0131 \xE7\xF6z\xFCm y\xF6ntemini \xF6l\xE7s\xFCn; say\u0131lar, isimler ve ba\u011Flam FARKLI olsun. Orijinal soruyu kopyalama.",
+    "- Zorluk orijinale yak\u0131n olsun; YKS (\xD6SYM) \xFCslubunda, tek do\u011Fru cevapl\u0131, 5 \u015F\u0131kl\u0131 (A\u2013E).",
+    "- question: soru metni (matemati\u011Fi d\xFCz yaz\u0131yla, \xF6r. x^2, \u221A, \u03C0). \u015Eekil gerekiyorsa \u015Fekli kelimelerle eksiksiz tarif et.",
+    "- options: tam 5 \u015F\u0131k, harfsiz (yaln\u0131zca \u015F\u0131k i\xE7eri\u011Fi). \xC7eldiriciler tipik \xF6\u011Frenci hatalar\u0131ndan gelsin.",
+    "- answer: do\u011Fru \u015F\u0131kk\u0131n harfi (A, B, C, D ya da E). Cevab\u0131 yazmadan \xF6nce soruyu kendin \xE7\xF6z\xFCp do\u011Frula.",
+    `- steps: 2\u20136 ad\u0131m \xE7\xF6z\xFCm; work = i\u015Flem, why = neden. ${subjectGuidance(input.subject)}`,
+    "- hint: cevab\u0131 ele vermeyen tek c\xFCmle ipucu."
+  ].join("\n");
+  const userText = [
+    questionText ? `Orijinal soru (OCR, hatal\u0131 olabilir; g\xF6rsel varsa g\xF6rsel esast\u0131r):
+${questionText.slice(0, 4e3)}` : null,
+    input.solution ? `Orijinal sorunun \xE7\xF6z\xFCm y\xF6ntemi: ${input.solution.method}
+${input.solution.steps.map((step, index2) => `${index2 + 1}) ${step.work}`).join("\n")}` : null,
+    input.stuckPoint?.trim() ? `\xD6\u011Frencinin tak\u0131ld\u0131\u011F\u0131 yer: "${input.stuckPoint.trim().slice(0, 1e3)}" \u2014 yeni soru bu ad\u0131m\u0131 da \xE7al\u0131\u015Ft\u0131rs\u0131n.` : null
+  ].filter(Boolean).join("\n\n") || "Orijinal soruyu g\xF6rselden oku ve ona benzer yeni bir soru yaz.";
+  const response = await invoke({
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: input.imageDataUrl ? [{ type: "text", text: userText }, { type: "image_url", image_url: { url: input.imageDataUrl, detail: "high" } }] : userText }
+    ],
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "similar_question",
+        strict: true,
+        schema: {
+          type: "object",
+          properties: {
+            question: { type: "string" },
+            options: { type: "array", items: { type: "string" } },
+            answer: { type: "string", enum: ["A", "B", "C", "D", "E"] },
+            steps: { type: "array", items: { type: "object", properties: { work: { type: "string" }, why: { type: "string" } }, required: ["work", "why"], additionalProperties: false } },
+            hint: { type: "string" }
+          },
+          required: ["question", "options", "answer", "steps", "hint"],
+          additionalProperties: false
+        }
+      }
+    }
+  });
+  const raw = response.choices[0]?.message?.content;
+  const jsonText = typeof raw === "string" ? raw : raw?.map((part) => part.type === "text" ? part.text : "").join("");
+  if (!jsonText) throw new Error("AI yan\u0131t\u0131 bo\u015F d\xF6nd\xFC.");
+  const similar = parseSimilarQuestion(jsonText.replace(/```json|```/g, "").trim());
+  if (!similar) throw new Error("Benzer soru okunamad\u0131.");
+  return similar;
+}
+
 // server/notes/questionsDb.ts
 import { and as and8, asc, desc as desc4, eq as eq10, gte as gte6, isNotNull as isNotNull2, isNull as isNull5, lt as lt5, lte as lte4, ne as ne2, sql as sql5 } from "drizzle-orm";
 async function requireDb4() {
@@ -6857,9 +6942,9 @@ async function getQuestion(userId, id2) {
 }
 async function getSolveContext(userId, id2) {
   const db = await requireDb4();
-  const [row] = await db.select({ questionImageId: notebookQuestions.questionImageId, stuckPoint: notebookQuestions.stuckPoint, subject: notebookQuestions.subject, topic: yksTopics.topic, content: notes.content }).from(notebookQuestions).innerJoin(notes, eq10(notes.id, notebookQuestions.noteId)).leftJoin(yksTopics, eq10(yksTopics.id, notebookQuestions.topicId)).where(and8(eq10(notebookQuestions.id, id2), eq10(notebookQuestions.userId, userId))).limit(1);
+  const [row] = await db.select({ questionImageId: notebookQuestions.questionImageId, stuckPoint: notebookQuestions.stuckPoint, subject: notebookQuestions.subject, topic: yksTopics.topic, content: notes.content, aiSolution: notebookQuestions.aiSolution }).from(notebookQuestions).innerJoin(notes, eq10(notes.id, notebookQuestions.noteId)).leftJoin(yksTopics, eq10(yksTopics.id, notebookQuestions.topicId)).where(and8(eq10(notebookQuestions.id, id2), eq10(notebookQuestions.userId, userId))).limit(1);
   if (!row) throw new NoteError("Soru bulunamad\u0131.");
-  return { questionImageId: row.questionImageId, ocrText: ocrTextOf(row.content, row.questionImageId), stuckPoint: row.stuckPoint, subject: row.subject, topic: row.topic };
+  return { questionImageId: row.questionImageId, ocrText: ocrTextOf(row.content, row.questionImageId), stuckPoint: row.stuckPoint, subject: row.subject, topic: row.topic, aiSolution: parseAiSolution(row.aiSolution) };
 }
 async function saveAiSolution(userId, id2, solution) {
   const db = await requireDb4();
@@ -7009,6 +7094,16 @@ async function userFacing2(work) {
   }
 }
 var id = z5.number().int().positive();
+async function loadQuestionForAi(userId, questionId) {
+  const context = await getSolveContext(userId, questionId);
+  let imageDataUrl = null;
+  if (context.questionImageId) {
+    const attachment = await getAttachmentStorage().get(userId, context.questionImageId);
+    if (attachment?.kind === "image") imageDataUrl = `data:${attachment.mimeType};base64,${attachment.data.toString("base64")}`;
+  }
+  if (!imageDataUrl && !context.ocrText?.trim()) throw new NoteError("Bu kartta soru foto\u011Fraf\u0131 yok.");
+  return { context, imageDataUrl };
+}
 var subjectScope = z5.string().max(80).nullable().optional();
 var optionalId2 = id.nullable().optional();
 var fields = {
@@ -7058,13 +7153,7 @@ var questionsRouter = router({
   // ✨ Adım adım çöz: kartı AI ile çözer ve karta kaydeder (AI not araçları kotasından sayılır).
   // İstemci kayıtlı çözümü `get` ile zaten alır; bu uç yalnızca ilk çözüm ya da "Yeniden çöz" için çağrılır.
   solve: metredFeatureProcedure("NOTE_AI").input(z5.object({ id })).mutation(({ ctx, input }) => userFacing2(async () => {
-    const context = await getSolveContext(ctx.user.id, input.id);
-    let imageDataUrl = null;
-    if (context.questionImageId) {
-      const attachment = await getAttachmentStorage().get(ctx.user.id, context.questionImageId);
-      if (attachment?.kind === "image") imageDataUrl = `data:${attachment.mimeType};base64,${attachment.data.toString("base64")}`;
-    }
-    if (!imageDataUrl && !context.ocrText?.trim()) throw new NoteError("Bu kartta \xE7\xF6z\xFClecek bir soru foto\u011Fraf\u0131 yok.");
+    const { context, imageDataUrl } = await loadQuestionForAi(ctx.user.id, input.id);
     let solution;
     try {
       solution = await solveQuestion({ imageDataUrl, ocrText: context.ocrText, stuckPoint: context.stuckPoint, subject: context.subject, topic: context.topic });
@@ -7073,6 +7162,16 @@ var questionsRouter = router({
       throw new NoteError(llmUnavailableMessage(error) ?? "\xC7\xF6z\xFCm \u015Fu an haz\u0131rlanamad\u0131. Biraz sonra tekrar dene.");
     }
     return saveAiSolution(ctx.user.id, input.id, solution);
+  })),
+  // 🔁 Benzer soru: aynı yöntemi ölçen yeni 5 şıklı alıştırma; kaydedilmez, her üretim AI not hakkından sayılır.
+  similar: metredFeatureProcedure("NOTE_AI").input(z5.object({ id })).mutation(({ ctx, input }) => userFacing2(async () => {
+    const { context, imageDataUrl } = await loadQuestionForAi(ctx.user.id, input.id);
+    try {
+      return await generateSimilarQuestion({ imageDataUrl, ocrText: context.ocrText, stuckPoint: context.stuckPoint, subject: context.subject, topic: context.topic, solution: context.aiSolution });
+    } catch (error) {
+      console.warn("[Questions] similar failed:", error instanceof Error ? error.message : error);
+      throw new NoteError(llmUnavailableMessage(error) ?? "Benzer soru \u015Fu an haz\u0131rlanamad\u0131. Biraz sonra tekrar dene.");
+    }
   })),
   // ✨ Öner: fotoğrafı okur, müfredattan konu + zorluk + olası hata türü önerir (fotoğraf okuma kotasından sayılır).
   suggest: metredFeatureProcedure("NOTE_OCR").input(z5.object({ attachmentId: optionalId2, stuckPoint: z5.string().max(4e3).nullable().optional() })).mutation(({ ctx, input }) => userFacing2(async () => {
@@ -7224,6 +7323,107 @@ async function saveClassSchedule(userId, schedule) {
   return getClassSchedule(userId);
 }
 
+// server/schedule/scheduleImport.ts
+function classifyLesson(name) {
+  const value = name.toLocaleUpperCase("tr-TR");
+  const rules = [
+    [/D[İI]N K[ÜU]LT[ÜU]R|AHLAK|YABANCI D[İI]L|[İI]NG[İI]L[İI]ZCE|ALMANCA|FRANSIZCA|REHBERL[İI]K|BEDEN|SPOR|G[ÖO]RSEL SANAT|M[ÜU]Z[İI]K|SA[ĞG]LIK B[İI]LG|TRAF[İI]K|PEYGAMBER|KUR.?AN|H[İI]TABET|PROJE/, null],
+    [/GEOMETR[İI]/, "Geometri"],
+    [/MATEMAT[İI]K/, "Matematik"],
+    [/F[İI]Z[İI]K/, "Fizik"],
+    [/K[İI]MYA/, "Kimya"],
+    [/B[İI]YOLOJ[İI]/, "Biyoloji"],
+    [/EDEB[İI]YAT/, "Edebiyat"],
+    [/T[ÜU]RK D[İI]L[İI]|T[ÜU]RK[ÇC]E/, "T\xFCrk\xE7e"],
+    [/TAR[İI]H|[İI]NKILAP/, "Tarih"],
+    [/CO[ĞG]RAFYA/, "Co\u011Frafya"],
+    [/FELSEFE|MANTIK|PS[İI]KOLOJ[İI]|SOSYOLOJ[İI]/, "Felsefe"]
+  ];
+  for (const [pattern, subject] of rules) if (pattern.test(value)) return { known: true, subject };
+  return { known: false, subject: null };
+}
+function lessonLabel(name, code, subject) {
+  const cleaned = name.replace(/_/g, " ").replace(/\s+/g, " ").trim();
+  if (!cleaned) return subject ?? (code.trim() || "Ders");
+  const titled = cleaned.toLocaleLowerCase("tr-TR").split(" ").map((word) => {
+    const index2 = word.search(/[a-zçğıöşü]/);
+    return index2 < 0 ? word : word.slice(0, index2) + word[index2].toLocaleUpperCase("tr-TR") + word.slice(index2 + 1);
+  }).join(" ");
+  return titled.slice(0, 80);
+}
+var normalizeTime = (value) => {
+  const match = /^(\d{1,2})[:.](\d{2})$/.exec(String(value ?? "").trim());
+  if (!match) return null;
+  const time2 = `${match[1].padStart(2, "0")}:${match[2]}`;
+  return isValidTime(time2) ? time2 : null;
+};
+function parseScheduleImport(raw) {
+  const value = raw && typeof raw === "object" ? raw : {};
+  const periods = (Array.isArray(value.periods) ? value.periods : []).flatMap((item) => {
+    const period = item;
+    const start = normalizeTime(period?.start);
+    const end = normalizeTime(period?.end);
+    return start && end && toMinutes(start) < toMinutes(end) ? [{ start, end }] : [];
+  }).slice(0, 12);
+  let skipped = 0;
+  const seen = /* @__PURE__ */ new Set();
+  const blocks = [];
+  for (const item of Array.isArray(value.lessons) ? value.lessons : []) {
+    const lesson = item ?? {};
+    const day = Number(lesson.day);
+    const periodIndex = Number(lesson.period) - 1;
+    const period = periods[periodIndex];
+    const key = `${day}-${periodIndex}`;
+    if (!Number.isInteger(day) || day < 1 || day > 7 || !period || seen.has(key)) {
+      skipped += 1;
+      continue;
+    }
+    const name = String(lesson.name ?? "").slice(0, 120);
+    const code = String(lesson.code ?? "").slice(0, 20);
+    if (!name.trim() && !code.trim()) {
+      skipped += 1;
+      continue;
+    }
+    seen.add(key);
+    const byName = classifyLesson(name || code);
+    const fromModel = YKS_SUBJECTS.includes(lesson.subject) ? lesson.subject : null;
+    const subject = byName.known ? byName.subject : fromModel;
+    blocks.push({ source: "school", dayOfWeek: day, startTime: period.start, endTime: period.end, subject, label: subject && !/SE[ÇC]MEL[İI]|HTDE/i.test(name) ? subject : lessonLabel(name, code, subject) });
+  }
+  return { periods, blocks, skipped };
+}
+var SCHEMA = {
+  type: "object",
+  properties: {
+    periods: { type: "array", items: { type: "object", properties: { start: { type: "string" }, end: { type: "string" } }, required: ["start", "end"], additionalProperties: false } },
+    lessons: { type: "array", items: { type: "object", properties: { day: { type: "integer" }, period: { type: "integer" }, code: { type: "string" }, name: { type: "string" }, subject: { type: "string" } }, required: ["day", "period", "code", "name", "subject"], additionalProperties: false } }
+  },
+  required: ["periods", "lessons"],
+  additionalProperties: false
+};
+async function readScheduleFromImage(dataUrl, invoke = invokeLLM) {
+  const response = await invoke({
+    messages: [
+      {
+        role: "system",
+        content: `Sen T\xFCrk lise/dershane haftal\u0131k ders program\u0131 okuyucususun. Yaln\u0131zca g\xF6rselde g\xF6r\xFCleni \xE7\u0131kar, uydurma.
+- periods: ders saatleri s\u0131ras\u0131yla (1. ders, 2. ders...), ba\u015Flang\u0131\xE7/biti\u015F "SS:dd".
+- lessons: dolu her h\xFCcre i\xE7in bir kay\u0131t. day: 1=Pazartesi \u2026 7=Pazar. period: ders saatinin s\u0131ra numaras\u0131 (1'den ba\u015Flar).
+- code: h\xFCcredeki k\u0131saltma (\xF6r. F\u0130ZF4). name: dersin tam ad\u0131 \u2014 program\u0131n alt\u0131ndaki ders listesinden (Ders \u2192 Dersin Ad\u0131) bul; liste yoksa k\u0131saltmadan anla.
+- subject: dersin YKS kar\u015F\u0131l\u0131\u011F\u0131, yaln\u0131zca \u015Fu listeden biri: ${YKS_SUBJECTS.join(", ")}. YKS'de olmayan dersler (din k\xFClt\xFCr\xFC, yabanc\u0131 dil, rehberlik, beden e\u011Fitimi, sanat, m\xFCzik, se\xE7meli ahlak vb.) i\xE7in "YKS d\u0131\u015F\u0131" yaz.
+\xD6\u011Fretmen adlar\u0131n\u0131 yazma.`
+      },
+      { role: "user", content: [{ type: "text", text: "Bu haftal\u0131k ders program\u0131n\u0131 oku." }, { type: "image_url", image_url: { url: dataUrl, detail: "high" } }] }
+    ],
+    response_format: { type: "json_schema", json_schema: { name: "class_schedule", strict: true, schema: SCHEMA } }
+  });
+  const content = response.choices[0]?.message?.content;
+  const text3 = typeof content === "string" ? content : content?.map((part) => part.type === "text" ? part.text : "").join("") ?? "";
+  const result = parseScheduleImport(JSON.parse(text3.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "") || "{}"));
+  if (!result.periods.length || !result.blocks.length) throw new Error("Programdan ders saati ya da ders okunamad\u0131.");
+  return result;
+}
+
 // server/routers/classSchedule.ts
 var time = z6.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Saat SS:dd bi\xE7iminde olmal\u0131.");
 var classScheduleRouter = router({
@@ -7244,6 +7444,16 @@ var classScheduleRouter = router({
     } catch (error) {
       if (error instanceof ScheduleError) throw new TRPCError5({ code: "BAD_REQUEST", message: error.message });
       throw error;
+    }
+  }),
+  // 📷 Fotoğraftan aktar: program okunur ama KAYDEDİLMEZ; düzenleyiciye dolar, öğrenci kontrol edip kaydeder.
+  // Kota: fotoğraf okuma (NOTE_OCR); yalnızca başarılı okumada sayılır.
+  importPhoto: metredFeatureProcedure("NOTE_OCR").input(z6.object({ dataUrl: z6.string().max(12e6).regex(/^data:image\/(jpeg|png|webp);base64,/, "Foto\u011Fraf JPEG, PNG ya da WEBP olmal\u0131.") })).mutation(async ({ input }) => {
+    try {
+      return await readScheduleFromImage(input.dataUrl);
+    } catch (error) {
+      console.warn("[Class Schedule] Photo import failed:", error);
+      throw new TRPCError5({ code: "BAD_REQUEST", message: llmUnavailableMessage(error) ?? "Program\u0131 foto\u011Fraftan okuyamad\u0131m. Tablonun tamam\u0131 g\xF6r\xFCnecek \u015Fekilde, d\xFCz ve net bir foto\u011Frafla tekrar dener misin? \u0130stersen tabloya elle de girebilirsin." });
     }
   })
 });
@@ -9264,7 +9474,7 @@ async function createContext(opts) {
 }
 
 // server/resourceCatalog/difficulty/aiClassifier.ts
-var SCHEMA = {
+var SCHEMA2 = {
   type: "object",
   properties: {
     difficulty_label: { type: "string", enum: ["easy", "medium", "hard"] },
@@ -9305,7 +9515,7 @@ Kategori: ${input.category ?? "bilinmiyor"}
 A\xE7\u0131klama: ${input.description ?? "yok"}`
           }
         ],
-        response_format: { type: "json_schema", json_schema: { name: "book_difficulty", strict: true, schema: SCHEMA } }
+        response_format: { type: "json_schema", json_schema: { name: "book_difficulty", strict: true, schema: SCHEMA2 } }
       });
       const content = response.choices[0]?.message?.content;
       const jsonText = typeof content === "string" ? content : content?.map((part) => part.type === "text" ? part.text : "").join("");

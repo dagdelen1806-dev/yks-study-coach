@@ -3,7 +3,8 @@ import type { AiSolution } from "@shared/questionNotebook";
 import { useState } from "react";
 import { toast } from "sonner";
 
-const SOLVE_CONSENT_KEY = "pusula:question-solve-consent";
+/** Soru fotoğrafını AI'a gönderme onayı (adım adım çözüm ve benzer soru aynı veriyi gönderir). */
+export const SOLVE_CONSENT_KEY = "pusula:question-solve-consent";
 
 /**
  * ✨ Adım adım çöz: AI çözümünü ister. İlk kullanımda öğrenciye neyin AI'a

@@ -148,6 +148,15 @@ describe("questions router — ✨ step-by-step solve", () => {
     expect(calls.some((call) => call.fn === "saveAiSolution")).toBe(false);
   });
 
+  it("generates a similar question only for the student's own card, without saving it", async () => {
+    aiInvoke.mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify({ question: "4x + 3 = 27 ise x?", options: ["4", "5", "6", "7", "8"], answer: "C", steps: [{ work: "4x = 24", why: "" }], hint: "" }) } }] });
+    const result = await callerFor(makeUser(1)).questions.similar({ id: 3 });
+    expect(result.answer).toBe("C");
+    expect(calls.map((call) => call.fn)).toEqual(["getSolveContext"]);
+    await expect(callerFor(makeUser(2)).questions.similar({ id: 3 })).rejects.toThrow();
+    expect(aiInvoke).toHaveBeenCalledTimes(1);
+  });
+
   it("passes the hint level of a review attempt through", async () => {
     await callerFor(makeUser(1)).questions.attempt({ id: 3, result: "solved", sawSolution: false, hintLevel: 1 });
     expect(calls[0]).toMatchObject({ fn: "recordAttempt", userId: 1, args: [3, { hintLevel: 1 }] });
