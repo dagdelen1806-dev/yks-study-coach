@@ -2,7 +2,7 @@ import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { drizzle, type MySql2Database } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
 import { bookInventory, bookStudyLogs, bookTopicMappings, coachAlerts, InsertUser, planAdherenceReports, sourceSwitches, studentProfiles, studyPlanSessions, studyPlans, topicProgress, topicStudyLogs, userMockExams, userResourceBooks, users, yksTopics } from "../drizzle/schema";
-import type { CoachingStyle, GradeLevel, TargetScoreType } from "../shared/onboarding";
+import type { AvatarStyle, CoachingStyle, GradeLevel, TargetScoreType } from "../shared/onboarding";
 import { calculatePlanAdherence, dedupeAlerts, type AdherenceSession } from "../shared/planAdherence";
 import { rescheduleOverdueSessions, buildSessionCompletion } from "../shared/calendarLogic";
 import { normalizeIsbn } from "../shared/bookIdentity";
@@ -127,6 +127,7 @@ export type StudentProfileView = {
   onboardingCompleted: boolean;
   onboardingStep: number;
   preferredName: string | null;
+  avatarStyle: AvatarStyle | null;
   gradeLevel: GradeLevel | null;
   examYear: number | null;
   targetScoreType: TargetScoreType | null;
@@ -158,6 +159,7 @@ export type StudentProfileView = {
 
 export type StudentProfilePatch = Partial<{
   preferredName: string | null;
+  avatarStyle: AvatarStyle | null;
   gradeLevel: GradeLevel | null;
   examYear: number | null;
   targetScoreType: TargetScoreType | null;
@@ -199,6 +201,7 @@ const defaultStudentProfileView: StudentProfileView = {
   onboardingCompleted: false,
   onboardingStep: 0,
   preferredName: null,
+  avatarStyle: null,
   gradeLevel: null,
   examYear: null,
   targetScoreType: null,
@@ -231,6 +234,7 @@ const toStudentProfileView = (row: typeof studentProfiles.$inferSelect): Student
   onboardingCompleted: row.onboardingCompleted === 1,
   onboardingStep: row.onboardingStep,
   preferredName: row.preferredName,
+  avatarStyle: row.avatarStyle,
   gradeLevel: row.gradeLevel,
   examYear: row.examYear,
   targetScoreType: row.targetScoreType,
@@ -302,6 +306,16 @@ export async function upsertStudentProfileStep(userId: number, step: number, pat
     await db.insert(studentProfiles).values({ userId, onboardingStep: nextStep, ...rowValues });
   }
 
+  return getStudentProfile(userId);
+}
+
+/** Yalnızca avatar seçimini yazar (onboarding adımını ilerletmez). */
+export async function setStudentAvatarStyle(userId: number, avatarStyle: AvatarStyle | null): Promise<StudentProfileView> {
+  const db = await getDb();
+  if (!db) return { ...defaultStudentProfileView, avatarStyle };
+  const existing = await db.select({ id: studentProfiles.id }).from(studentProfiles).where(eq(studentProfiles.userId, userId)).limit(1);
+  if (existing[0]) await db.update(studentProfiles).set({ avatarStyle }).where(eq(studentProfiles.id, existing[0].id));
+  else await db.insert(studentProfiles).values({ userId, avatarStyle });
   return getStudentProfile(userId);
 }
 

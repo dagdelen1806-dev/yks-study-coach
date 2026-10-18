@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
+  AVATAR_STYLES,
   COACHING_EXPECTATIONS,
   COACHING_STYLES,
   emptyOnboardingDraft,
@@ -14,7 +15,7 @@ import {
   TOTAL_ONBOARDING_STEPS,
   validateOnboardingStep,
 } from "@shared/onboarding";
-import { completeOnboarding, getStudentProfile, upsertStudentProfileStep, type StudentProfilePatch } from "../db";
+import { completeOnboarding, getStudentProfile, setStudentAvatarStyle, upsertStudentProfileStep, type StudentProfilePatch } from "../db";
 import { protectedProcedure, router } from "../_core/trpc";
 
 // Enum-shaped fields accept "" alongside the real enum values: the client
@@ -26,6 +27,7 @@ const enumOrBlank = <T extends readonly [string, ...string[]]>(values: T) => z.u
 
 const draftSchema = z.object({
   preferredName: z.string().trim().max(120).optional(),
+  avatarStyle: enumOrBlank(AVATAR_STYLES).optional(),
   gradeLevel: enumOrBlank(GRADE_LEVELS).optional(),
   examYear: z.string().max(4).optional(),
   targetScoreType: enumOrBlank(TARGET_SCORE_TYPES).optional(),
@@ -62,6 +64,7 @@ const saveStepInput = z.object({
 function draftToPatch(data: z.infer<typeof draftSchema>): StudentProfilePatch {
   const patch: StudentProfilePatch = {};
   if (data.preferredName !== undefined) patch.preferredName = data.preferredName || null;
+  if (data.avatarStyle !== undefined) patch.avatarStyle = data.avatarStyle || null;
   if (data.gradeLevel !== undefined) patch.gradeLevel = data.gradeLevel || null;
   if (data.examYear !== undefined) patch.examYear = data.examYear ? Number(data.examYear) : null;
   if (data.targetScoreType !== undefined) patch.targetScoreType = data.targetScoreType || null;
@@ -114,4 +117,9 @@ export const onboardingRouter = router({
   }),
 
   complete: protectedProcedure.mutation(({ ctx }) => completeOnboarding(ctx.user.id)),
+
+  // Genel Bakış'taki tek tıkla avatar seçimi (null = nötr tasarım).
+  setAvatar: protectedProcedure
+    .input(z.object({ avatarStyle: z.enum(AVATAR_STYLES).nullable() }))
+    .mutation(({ ctx, input }) => setStudentAvatarStyle(ctx.user.id, input.avatarStyle)),
 });

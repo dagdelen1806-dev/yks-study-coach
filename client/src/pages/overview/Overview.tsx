@@ -3,7 +3,9 @@ import { trpc } from "@/lib/trpc";
 import { useNotebook } from "@/components/notebook/NotebookProvider";
 import { ReviewDueNotes } from "@/components/notebook/NotebookSection";
 import Illustration, { ILLUSTRATIONS, useIllustrationAvailable } from "@/components/app/Illustration";
-import { TARGET_SCORE_TYPE_LABELS } from "@shared/onboarding";
+import { AvatarPicker, StudentAvatar } from "@/components/app/Avatar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { TARGET_SCORE_TYPE_LABELS, type AvatarStyle } from "@shared/onboarding";
 import { NOTEBOOK_REVIEW_TASK_KIND } from "@shared/questionNotebook";
 import { palette } from "@shared/palette";
 import { getStatusFromProgress, statusMeta } from "@shared/yksData";
@@ -158,7 +160,13 @@ export default function Overview({ topics, exams, onSection, onStartSession, onE
   const profile = trpc.onboarding.get.useQuery(undefined, { enabled: Boolean(user), retry: false }).data;
   const calendar = trpc.calendar.snapshot.useQuery(undefined, { enabled: Boolean(user), retry: false });
   const review = trpc.questions.summary.useQuery(undefined, { enabled: Boolean(user), retry: false });
-  const landscapeAvailable = useIllustrationAvailable(ILLUSTRATIONS.motivationLandscape);
+  const utils = trpc.useUtils();
+  const setAvatar = trpc.onboarding.setAvatar.useMutation({ onSuccess: (next) => utils.onboarding.get.setData(undefined, next) });
+  // Misafir demosu kız tasarımıyla gösterilir (demo öğrenci "Ece").
+  const avatarStyle: AvatarStyle | null = user ? profile?.avatarStyle ?? null : "girl";
+  const summitAvailable = useIllustrationAvailable(ILLUSTRATIONS.summit);
+  const coverAvailable = useIllustrationAvailable(ILLUSTRATIONS.heroGirl);
+  const coverDesign = avatarStyle === "girl" && coverAvailable;
   const [netExam, setNetExam] = useState<ExamKind>("TYT");
   const [masteryExam, setMasteryExam] = useState<ExamKind>("TYT");
 
@@ -248,16 +256,36 @@ export default function Overview({ topics, exams, onSection, onStartSession, onE
   return (
     <div className="grid gap-5 animate-page-in xl:grid-cols-[minmax(0,1fr)_300px]">
       <div className="min-w-0 space-y-5">
-        {/* Karşılama: öğrenciyi tanıyan koç. */}
-        <section className="coach-hero p-5 sm:p-7">
-          <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
-            <div className="hidden shrink-0 sm:block">
-              <div className="relative flex h-[104px] w-[104px] items-center justify-center overflow-hidden rounded-full border-4 border-white bg-brand text-[34px] font-extrabold text-white shadow-[var(--shadow-card)]">
-                {name.charAt(0).toLocaleUpperCase("tr-TR")}
-                <Illustration src={ILLUSTRATIONS.coachAvatar} className="absolute inset-0 h-full w-full bg-brand-soft object-cover" />
-              </div>
+        {/* Karşılama: öğrenciyi tanıyan koç. İki ayrı tasarım:
+            - Kız avatarı: üstte tam genişlik kapak manzarası (zirveye bakan öğrenci), avatar kapağın üstüne biner.
+            - Erkek avatarı / nötr: sağ kenarda bayraklı zirve; metin soldaki yumuşak geçişin üstünde. */}
+        <section className={`coach-hero ${coverDesign ? "" : "p-5 sm:p-7"}`}>
+          {coverDesign ? (
+            <div className="relative h-[130px] sm:h-[176px]" aria-hidden="true">
+              <Illustration src={ILLUSTRATIONS.heroGirl} className="h-full w-full object-cover object-[50%_12%]" />
+              <div className="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-[#eaf4f1] to-transparent" />
             </div>
-            <div className="min-w-0 flex-1">
+          ) : (
+            <div className="pointer-events-none absolute inset-y-0 right-0 hidden w-[230px] lg:block" aria-hidden="true">
+              <Illustration src={ILLUSTRATIONS.summit} className="h-full w-full object-cover object-top" />
+              <div className="absolute inset-0 bg-gradient-to-r from-[#eaf4f1] to-transparent" />
+            </div>
+          )}
+          <div className={coverDesign ? "px-5 pb-5 sm:px-7 sm:pb-7" : ""}>
+          <div className={`relative flex flex-col gap-5 sm:flex-row sm:items-start ${coverDesign ? "-mt-10 sm:-mt-14" : "lg:max-w-[calc(100%-180px)]"}`}>
+            <div className={`shrink-0 flex-col items-center gap-2 ${coverDesign ? "flex items-start sm:items-center" : "hidden sm:flex"}`}>
+              <StudentAvatar style={avatarStyle} name={name} size={coverDesign ? 112 : 104} className="border-4 border-white shadow-[var(--shadow-card)]" />
+              {user && (
+                <Popover>
+                  <PopoverTrigger asChild><button className="text-[11px] font-semibold text-brand hover:text-brand-strong">{avatarStyle ? "Avatarı değiştir" : "Avatarını seç"}</button></PopoverTrigger>
+                  <PopoverContent align="start" className="w-auto rounded-2xl p-4">
+                    <p className="mb-3 text-[13px] font-bold text-ink">Avatarını seç</p>
+                    <AvatarPicker value={avatarStyle ?? ""} onChange={(next) => setAvatar.mutate({ avatarStyle: next || null })} />
+                  </PopoverContent>
+                </Popover>
+              )}
+            </div>
+            <div className={`min-w-0 flex-1 ${coverDesign ? "sm:pt-16" : ""}`}>
               <h1 className="font-display text-[26px] font-extrabold leading-tight text-ink sm:text-[30px]">{greetingFor(now.getHours())} {name}!</h1>
               <div className="mt-2 max-w-[68ch] space-y-1.5 text-[14.5px] leading-6 text-ink-2">
                 <p>{targetSchool ? `${targetSchool} hedefin için attığın her bilinçli adım seni hedefine biraz daha yaklaştırıyor.` : "YKS hedefin için attığın her bilinçli adım seni hedefine biraz daha yaklaştırıyor."}</p>
@@ -266,7 +294,7 @@ export default function Overview({ topics, exams, onSection, onStartSession, onE
               <p className="mt-3 text-[14.5px] font-bold text-brand-strong">Hazırsan başlayalım {name}! Bugün nereden başlamak istersin?</p>
             </div>
           </div>
-          <div className="mt-5 grid gap-2.5 md:grid-cols-3">
+          <div className="relative mt-5 grid gap-2.5 md:grid-cols-3">
             <button onClick={startNext} className="flex min-h-[52px] items-center gap-3 rounded-xl bg-brand px-4 text-left text-[14.5px] font-bold text-white shadow-[var(--shadow-card)] transition hover:bg-brand-strong">
               <Play size={18} className="shrink-0" /> <span className="flex-1">{nextSession ? "Bugünkü planıma başla" : "Serbest oturum başlat"}</span><ArrowRight size={16} />
             </button>
@@ -276,6 +304,7 @@ export default function Overview({ topics, exams, onSection, onStartSession, onE
             <button onClick={() => onSection("calendar")} className="flex min-h-[52px] items-center gap-3 rounded-xl border border-rule bg-white px-4 text-left text-[14.5px] font-semibold text-ink transition hover:border-brand/40">
               <ListChecks size={18} className="shrink-0 text-brand" /> <span className="flex-1">Tüm görevleri gör</span><ChevronRight size={16} className="text-ink-4" />
             </button>
+          </div>
           </div>
         </section>
 
@@ -457,11 +486,12 @@ export default function Overview({ topics, exams, onSection, onStartSession, onE
           </ul>
         </section>
 
-        {landscapeAvailable && (
+        {/* Zirve kartı kız tasarımında; erkek/nötr tasarımda aynı görsel zaten karşılama alanında. */}
+        {avatarStyle === "girl" && summitAvailable && (
           <section className="relative overflow-hidden rounded-2xl sm:col-span-2 xl:col-span-1">
-            <Illustration src={ILLUSTRATIONS.motivationLandscape} className="h-[190px] w-full object-cover" />
-            <div className="absolute inset-0 bg-gradient-to-r from-black/45 to-transparent" />
-            <p className="absolute left-5 top-5 max-w-[60%] text-[20px] font-bold leading-snug text-white">Küçük adımlar büyük hedeflere götürür.</p>
+            <Illustration src={ILLUSTRATIONS.summit} className="h-[210px] w-full object-cover object-[50%_20%]" />
+            <div className="absolute inset-0 bg-gradient-to-t from-[#0f3d3b]/75 via-transparent to-transparent" />
+            <p className="absolute bottom-4 left-5 right-5 text-[18px] font-bold leading-snug text-white">Küçük adımlar büyük hedeflere götürür.</p>
           </section>
         )}
       </aside>

@@ -1,3 +1,4 @@
+import { AvatarPicker } from "@/components/app/Avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
@@ -94,6 +95,9 @@ function StepIdentity({ draft, errors, update }: { draft: OnboardingDraft; error
     <div className="space-y-6">
       <Field label="Sana nasıl hitap edelim?" required error={errors.preferredName} htmlFor="onboarding-name">
         <Input id="onboarding-name" value={draft.preferredName} onChange={(e) => update("preferredName", e.target.value)} placeholder="Örn. Ece" maxLength={120} aria-invalid={Boolean(errors.preferredName)} />
+      </Field>
+      <Field label="Avatarını seç" hint="Ana sayfadaki karşılama tasarımı buna göre değişir. İstersen boş bırakabilirsin." htmlFor="onboarding-avatar">
+        <AvatarPicker id="onboarding-avatar" value={draft.avatarStyle} onChange={(next) => update("avatarStyle", next)} />
       </Field>
       <Field label="Sınıf düzeyin" hint="Sana uygun konu haritasını hazırlamamız için gerekli." required error={errors.gradeLevel} htmlFor="onboarding-grade">
         <ChipGroup id="onboarding-grade" options={GRADE_LEVELS} labels={GRADE_LEVEL_LABELS} value={draft.gradeLevel ? [draft.gradeLevel] : []} onChange={(next) => update("gradeLevel", (next[0] ?? "") as OnboardingDraft["gradeLevel"])} />
@@ -234,6 +238,7 @@ function profileToDraft(profile: OnboardingProfile, fallbackName?: string | null
   if (!profile) return { ...emptyOnboardingDraft(), preferredName: fallbackName?.split(" ")[0] ?? "" };
   return {
     preferredName: profile.preferredName ?? fallbackName?.split(" ")[0] ?? "",
+    avatarStyle: profile.avatarStyle ?? "",
     gradeLevel: profile.gradeLevel ?? "",
     examYear: profile.examYear ? String(profile.examYear) : "",
     targetScoreType: profile.targetScoreType ?? "",
@@ -267,7 +272,7 @@ function profileToDraft(profile: OnboardingProfile, fallbackName?: string | null
 function pickStepFields(step: number, draft: OnboardingDraft): Partial<OnboardingDraft> {
   switch (step) {
     case 0:
-      return { preferredName: draft.preferredName, gradeLevel: draft.gradeLevel, examYear: draft.examYear, targetScoreType: draft.targetScoreType };
+      return { preferredName: draft.preferredName, avatarStyle: draft.avatarStyle, gradeLevel: draft.gradeLevel, examYear: draft.examYear, targetScoreType: draft.targetScoreType };
     case 1:
       return { currentTytNet: draft.currentTytNet, currentAytNet: draft.currentAytNet, mockExamFrequency: draft.mockExamFrequency, strongSubjects: draft.strongSubjects, weakSubjects: draft.weakSubjects, hasPriorStudyPlan: draft.hasPriorStudyPlan };
     case 2:

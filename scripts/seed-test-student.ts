@@ -4,14 +4,15 @@
  * Yalnızca @ornek.com / @test.local hesaplarında çalışır; önce o hesabın bu tablolardaki
  * verisini siler (yeniden çalıştırılabilir).
  *
- * Kullanım (repo kökünden): npx tsx --env-file=.env scripts/seed-test-student.ts ece.ay@ornek.com
+ * Kullanım (repo kökünden): npx tsx --env-file=.env scripts/seed-test-student.ts ece.ay@ornek.com [Ad] [girl|boy]
  */
 import { and, eq, inArray } from "drizzle-orm";
 import { addTopicStudyLog, addUserMockExams, completeOnboarding, completeStudySession, getDb, getStudyCalendar, getTopicCatalog, saveStudyPlan, upsertStudentProfileStep, upsertTopicProgress } from "../server/db";
 import { studyPlanSessions, studyPlans, topicProgress, topicStudyLogs, userMockExams, users, coachAlerts } from "../drizzle/schema";
 
-const email = process.argv[2];
+const [email, preferredName = "Ece", avatarArg] = process.argv.slice(2);
 if (!email || !/@(ornek\.com|test\.local)$/.test(email)) throw new Error("Yalnızca @ornek.com / @test.local deneme hesapları");
+const avatarStyle = avatarArg === "girl" || avatarArg === "boy" ? avatarArg : null;
 
 const at = (daysFromToday: number, hour = 12, minute = 0) => { const date = new Date(); date.setDate(date.getDate() + daysFromToday); date.setHours(hour, minute, 0, 0); return date; };
 
@@ -32,7 +33,7 @@ async function main() {
   await db.delete(coachAlerts).where(eq(coachAlerts.userId, userId));
 
   // Profil: hedef ve günlük süre.
-  await upsertStudentProfileStep(userId, 1, { preferredName: "Ece", examYear: 2027, targetScoreType: "SAY", targetUniversity: "Hacettepe Üniversitesi", targetDepartment: "Bilgisayar Mühendisliği", targetRanking: "25000", dailyStudyDuration: 120, preferredStudyStartTime: "17:00", mainGoal: "Bilgisayar mühendisi olmak" });
+  await upsertStudentProfileStep(userId, 1, { preferredName, avatarStyle, examYear: 2027, targetScoreType: "SAY", targetUniversity: "Hacettepe Üniversitesi", targetDepartment: "Bilgisayar Mühendisliği", targetRanking: "25000", dailyStudyDuration: 120, preferredStudyStartTime: "17:00", mainGoal: "Bilgisayar mühendisi olmak" });
   await completeOnboarding(userId);
 
   // Denemeler: 6 TYT, 3 AYT; yavaş ama gerçekçi bir yükseliş.

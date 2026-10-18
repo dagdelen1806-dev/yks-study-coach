@@ -1,12 +1,14 @@
 # İllüstrasyonlar
 
-Arayüz bu dosyaları arar; dosya yoksa o alan görselsiz çizilir (hata vermez).
-Dosya adını değiştirmeden buraya koyman yeterli, kod değişikliği gerekmez.
+Arayüz bu dosyaları kullanır; bir dosya yoksa o alan görselsiz çizilir (hata vermez).
+Kaynak (büyük, düzenlenmemiş) görseller `docs/design/illustrations/` altında durur;
+buraya yalnızca küçültülmüş sürümler konur, çünkü bu klasör sitede yayınlanır.
 
-| Dosya | Nerede | Önerilen ölçü |
-|---|---|---|
-| `coach-avatar.png` | Genel Bakış karşılama alanı, solda yuvarlak avatar | 512×512, şeffaf arka plan |
-| `motivation-landscape.jpg` | Genel Bakış sağ sütun, en alttaki motivasyon kartı | 960×600 (yatay) |
-| `sidebar-mountains.png` | Sol menünün altı, dağ silueti | 520×240, şeffaf arka plan |
+| Dosya | Nerede |
+|---|---|
+| `avatar-girl.webp`, `avatar-boy.webp` | Öğrencinin seçtiği avatar: karşılama alanı ve üst çubuk (512×512) |
+| `hero-girl.jpg` | Kız avatarlı karşılama alanının arka planı (geniş manzara) |
+| `summit.png` | Bayraklı zirve: kenar çubuğu, erkek/nötr karşılama alanı, motivasyon kartı |
 
-Görseller dekoratiftir; üstlerine yazı basılmaz (metinler arayüzden gelir).
+İleride erkek avatar için de geniş bir manzara gelirse `hero-boy.jpg` adıyla eklenip
+`client/src/components/app/Illustration.tsx` içindeki listeye yazılabilir.

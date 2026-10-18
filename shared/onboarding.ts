@@ -5,6 +5,11 @@
 // round-trip, the same way `shared/topicStatus.ts` / `shared/planTargets.ts`
 // back both sides of existing features.
 
+/** Arayüz avatarı ve karşılama illüstrasyonu. Öğrenci seçer; addan tahmin edilmez. Seçilmemişse nötr tasarım. */
+export const AVATAR_STYLES = ["girl", "boy"] as const;
+export type AvatarStyle = (typeof AVATAR_STYLES)[number];
+export const AVATAR_STYLE_LABELS: Record<AvatarStyle, string> = { girl: "Kız avatarı", boy: "Erkek avatarı" };
+
 export const GRADE_LEVELS = ["9", "10", "11", "12", "mezun"] as const;
 export type GradeLevel = (typeof GRADE_LEVELS)[number];
 export const GRADE_LEVEL_LABELS: Record<GradeLevel, string> = {
@@ -99,6 +104,7 @@ export const TOTAL_ONBOARDING_STEPS = ONBOARDING_STEP_META.length;
  * `onboarding` router. */
 export type OnboardingDraft = {
   preferredName: string;
+  avatarStyle: AvatarStyle | "";
   gradeLevel: GradeLevel | "";
   examYear: string;
   targetScoreType: TargetScoreType | "";
@@ -129,6 +135,7 @@ export type OnboardingDraft = {
 
 export const emptyOnboardingDraft = (): OnboardingDraft => ({
   preferredName: "",
+  avatarStyle: "",
   gradeLevel: "",
   examYear: "",
   targetScoreType: "",

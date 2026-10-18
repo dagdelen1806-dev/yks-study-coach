@@ -5,6 +5,7 @@ const defaultView: StudentProfileView = {
   onboardingCompleted: false,
   onboardingStep: 0,
   preferredName: null,
+  avatarStyle: null,
   gradeLevel: null,
   examYear: null,
   targetScoreType: null,
@@ -42,6 +43,11 @@ vi.mock("./db", async (importOriginal) => {
     upsertStudentProfileStep: vi.fn(async (userId: number, step: number, patch: StudentProfilePatch) => {
       const existing = store.get(userId) ?? { ...defaultView };
       const next: StudentProfileView = { ...existing, ...patch, onboardingStep: Math.max(step + 1, existing.onboardingStep) } as StudentProfileView;
+      store.set(userId, next);
+      return next;
+    }),
+    setStudentAvatarStyle: vi.fn(async (userId: number, avatarStyle: StudentProfileView["avatarStyle"]) => {
+      const next = { ...(store.get(userId) ?? { ...defaultView }), avatarStyle };
       store.set(userId, next);
       return next;
     }),
@@ -122,6 +128,24 @@ describe("onboarding router", () => {
     const caller = callerFor(1);
     const result = await caller.onboarding.saveStep({ step: 4, data: { coachingStyle: "dengeli" }, complete: true });
     expect(result.onboardingCompleted).toBe(true);
+  });
+
+  it("avatar seçimi yalnızca kendi profiline yazılır, kaldırılabilir ve onboarding adımını ilerletmez", async () => {
+    const caller = callerFor(1);
+    expect((await caller.onboarding.setAvatar({ avatarStyle: "boy" })).avatarStyle).toBe("boy");
+    expect((await callerFor(2).onboarding.get()).avatarStyle).toBeNull();
+    const cleared = await caller.onboarding.setAvatar({ avatarStyle: null });
+    expect(cleared.avatarStyle).toBeNull();
+    expect(cleared.onboardingStep).toBe(0);
+    await expect(caller.onboarding.setAvatar({ avatarStyle: "robot" as never })).rejects.toBeDefined();
+    await expect(anonymousCaller().onboarding.setAvatar({ avatarStyle: "girl" })).rejects.toBeDefined();
+  });
+
+  it("adım 0'da avatar seçimi kaydedilir; boş bırakmak seçimi kaldırır", async () => {
+    const caller = callerFor(1);
+    const base = { preferredName: "Ece", gradeLevel: "12" as const, examYear: "2027", targetScoreType: "SAY" as const };
+    expect((await caller.onboarding.saveStep({ step: 0, data: { ...base, avatarStyle: "girl" } })).avatarStyle).toBe("girl");
+    expect((await caller.onboarding.saveStep({ step: 0, data: { ...base, avatarStyle: "" } })).avatarStyle).toBeNull();
   });
 
   it("bir kullanıcının onboarding verisi başka bir kullanıcıya sızmaz", async () => {

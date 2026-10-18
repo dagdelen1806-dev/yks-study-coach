@@ -6,12 +6,13 @@ import { useEffect, useState } from "react";
  * çizilmez; yerleşim görselsiz de tamam görünecek şekilde tasarlandı.
  */
 export const ILLUSTRATIONS = {
-  /** Genel Bakış karşılama alanı, öğrenci avatarı (kare, şeffaf arka plan). */
-  coachAvatar: "/illustrations/coach-avatar.png",
-  /** Genel Bakış sağ sütun alt kartı, manzara (yatay). */
-  motivationLandscape: "/illustrations/motivation-landscape.jpg",
-  /** Kenar çubuğunun altı, dağ silueti (yatay, şeffaf arka plan). */
-  sidebarMountains: "/illustrations/sidebar-mountains.png",
+  /** Avatarlar (512×512, yuvarlak çerçeveye göre kırpılmış). */
+  avatarGirl: "/illustrations/avatar-girl.webp",
+  avatarBoy: "/illustrations/avatar-boy.webp",
+  /** Kız avatarlı karşılama alanının arka planı: zirveye bakan öğrenci (geniş manzara). */
+  heroGirl: "/illustrations/hero-girl.jpg",
+  /** Bayraklı zirve (dikey, nötr figür): kenar çubuğu, erkek/nötr karşılama ve motivasyon kartı. */
+  summit: "/illustrations/summit.png",
 } as const;
 
 export default function Illustration({ src, className, alt = "" }: { src: string; className?: string; alt?: string }) {

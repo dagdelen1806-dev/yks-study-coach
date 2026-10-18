@@ -475,6 +475,8 @@ export const studentProfiles = mysqlTable("student_profiles", {
 
   // 1) Kullanıcı tanımlama
   preferredName: varchar("preferredName", { length: 120 }),
+  // Arayüz avatarı (öğrencinin seçimi; boşsa nötr tasarım). Bkz. shared/onboarding.ts AVATAR_STYLES.
+  avatarStyle: mysqlEnum("avatarStyle", ["girl", "boy"]),
   gradeLevel: mysqlEnum("gradeLevel", ["9", "10", "11", "12", "mezun"]),
   examYear: int("examYear"),
   targetScoreType: mysqlEnum("targetScoreType", ["SAY", "EA", "SOZ", "DIL", "TYT", "belirsiz"]),
