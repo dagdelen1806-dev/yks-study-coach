@@ -143,7 +143,7 @@ export default function QuestionsPanel() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 rounded-3xl bg-ink p-5 text-white sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 rounded-3xl bg-brand-strong p-5 text-white sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="text-[16px] font-semibold">📷 Takıldığın soruyu yakala</div>
           <p className="mt-0.5 text-[13px] text-white/70">Fotoğrafla, nerede takıldığını söyle — defterin onu 1, 3, 7, 14 ve 30 gün sonra yeniden karşına çıkarsın.</p>

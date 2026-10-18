@@ -142,7 +142,7 @@ export default function DrawingEditor({ initial, onSave, onCancel }: { initial: 
         </svg>
         <div className="mt-4 flex justify-end gap-2">
           <button onClick={onCancel} className="h-10 rounded-xl border border-ink/10 px-4 text-[13px] font-semibold text-ink-3">Vazgeç</button>
-          <button onClick={() => onSave(strokes)} disabled={!strokes.length} className="h-10 rounded-xl bg-ink px-4 text-[13px] font-semibold text-white disabled:opacity-40">Nota ekle</button>
+          <button onClick={() => onSave(strokes)} disabled={!strokes.length} className="h-10 rounded-xl bg-brand hover:bg-brand-strong px-4 text-[13px] font-semibold text-white disabled:opacity-40">Nota ekle</button>
         </div>
       </div>
     </div>

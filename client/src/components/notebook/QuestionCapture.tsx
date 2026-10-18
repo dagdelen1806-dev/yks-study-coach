@@ -184,7 +184,7 @@ export default function QuestionCapture({ prefill, onClose, onSaved }: { prefill
 
         <div className="mt-5 flex justify-end gap-2">
           <button onClick={onClose} className="h-11 rounded-xl border border-ink/10 px-4 text-[13px] font-semibold text-ink-3">Vazgeç</button>
-          <button onClick={() => void save()} disabled={!canSave || create.isPending} className="flex h-11 items-center gap-2 rounded-xl bg-ink px-5 text-[14px] font-semibold text-white disabled:opacity-40">{create.isPending && <Loader2 size={15} className="animate-spin" />} Defterime kaydet</button>
+          <button onClick={() => void save()} disabled={!canSave || create.isPending} className="flex h-11 items-center gap-2 rounded-xl bg-brand hover:bg-brand-strong px-5 text-[14px] font-semibold text-white disabled:opacity-40">{create.isPending && <Loader2 size={15} className="animate-spin" />} Defterime kaydet</button>
         </div>
       </div>
 

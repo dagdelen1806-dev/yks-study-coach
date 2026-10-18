@@ -43,7 +43,7 @@ export default function SubjectNotebook({ subject, counts }: { subject: string |
         </div>
         {!general && (
           <div className="flex gap-2">
-            <button onClick={() => notebook.captureQuestion({ subject })} className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-ink px-4 text-[13px] font-semibold text-white sm:flex-none"><Camera size={16} /> Soru ekle</button>
+            <button onClick={() => notebook.captureQuestion({ subject })} className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-brand hover:bg-brand-strong px-4 text-[13px] font-semibold text-white sm:flex-none"><Camera size={16} /> Soru ekle</button>
             <button onClick={() => setShowNew(true)} className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-ink/10 px-4 text-[13px] font-semibold text-ink-2 sm:flex-none"><SquarePen size={16} /> Not ekle</button>
           </div>
         )}

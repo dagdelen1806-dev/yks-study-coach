@@ -65,7 +65,7 @@ export default function FormulaEditor({ initial, onSave, onCancel }: { initial: 
         <div className="mt-3 text-[12px] text-ink-3">Örnekler: {EXAMPLES.map((example) => <button key={example} onClick={() => setLatex(example)} className="mr-2 font-mono text-brand underline-offset-2 hover:underline">{example}</button>)}</div>
         <div className="mt-5 flex justify-end gap-2">
           <button onClick={onCancel} className="h-10 rounded-xl border border-ink/10 px-4 text-[13px] font-semibold text-ink-3">Vazgeç</button>
-          <button onClick={() => onSave(latex.trim())} disabled={!latex.trim()} className="h-10 rounded-xl bg-ink px-4 text-[13px] font-semibold text-white disabled:opacity-40">Kaydet</button>
+          <button onClick={() => onSave(latex.trim())} disabled={!latex.trim()} className="h-10 rounded-xl bg-brand hover:bg-brand-strong px-4 text-[13px] font-semibold text-white disabled:opacity-40">Kaydet</button>
         </div>
       </div>
     </div>

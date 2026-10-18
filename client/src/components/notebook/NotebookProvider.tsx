@@ -51,7 +51,7 @@ export function NotebookProvider({ enabled, children }: { enabled: boolean; chil
           <button onClick={() => captureQuestion()} className="flex h-14 items-center gap-2 rounded-full border border-ink/10 bg-white px-4 text-[14px] font-semibold text-ink shadow-float transition hover:scale-[1.03]" aria-label="Çözemediğin soruyu ekle">
             <Camera size={18} className="text-brand" /> Soru
           </button>
-          <button onClick={() => open()} className="flex h-14 items-center gap-2 rounded-full bg-ink px-5 text-[14px] font-semibold text-white shadow-float transition hover:scale-[1.03]" aria-label="Hızlı not al">
+          <button onClick={() => open()} className="flex h-14 items-center gap-2 rounded-full bg-brand hover:bg-brand-strong px-5 text-[14px] font-semibold text-white shadow-float transition hover:scale-[1.03]" aria-label="Hızlı not al">
             <Zap size={18} className="text-[#f5d90a]" /> Hızlı Not
           </button>
         </div>

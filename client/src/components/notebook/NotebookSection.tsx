@@ -45,7 +45,7 @@ export default function NotebookSection() {
   const tabButton = (value: NotebookTab, label: React.ReactNode, badge?: { total: number; due: number }) => {
     const active = tabKey(value) === activeKey;
     return (
-      <button key={tabKey(value)} role="tab" aria-selected={active} onClick={() => selectTab(value)} className={`flex h-10 shrink-0 items-center gap-1.5 rounded-xl px-3.5 text-[13px] font-semibold transition ${active ? "bg-ink text-white shadow-sm" : "bg-white text-ink-2 hover:bg-paper"}`}>
+      <button key={tabKey(value)} role="tab" aria-selected={active} onClick={() => selectTab(value)} className={`flex h-10 shrink-0 items-center gap-1.5 rounded-xl px-3.5 text-[13px] font-semibold transition ${active ? "bg-brand text-white shadow-sm" : "bg-white text-ink-2 hover:bg-paper"}`}>
         {label}
         {badge && badge.total > 0 && <span className={`rounded-full px-1.5 text-[11px] ${active ? "bg-white/20" : "bg-paper text-ink-3"}`}>{badge.total}</span>}
         {badge && badge.due > 0 && <span className="h-2 w-2 rounded-full bg-success" aria-label={`${badge.due} soru tekrar bekliyor`} />}
@@ -137,7 +137,7 @@ function AllNotebook() {
             <button key={key} role="tab" aria-selected={tab === key} onClick={() => selectTab(key)} className={`h-10 flex-1 rounded-xl px-5 text-[14px] font-semibold sm:flex-none ${tab === key ? "bg-white text-ink shadow-sm" : "text-ink-3"}`}>{label}</button>
           ))}
         </div>
-        {tab === "notes" && <button onClick={() => setShowNew(true)} className="flex h-11 shrink-0 items-center justify-center gap-2 rounded-2xl bg-ink px-5 text-[14px] font-semibold text-white shadow-lg"><Plus size={17} /> Yeni Not</button>}
+        {tab === "notes" && <button onClick={() => setShowNew(true)} className="flex h-11 shrink-0 items-center justify-center gap-2 rounded-2xl bg-brand hover:bg-brand-strong px-5 text-[14px] font-semibold text-white shadow-lg"><Plus size={17} /> Yeni Not</button>}
       </div>
 
       {tab === "questions" ? <QuestionsPanel /> : (<>
@@ -146,7 +146,7 @@ function AllNotebook() {
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-warn-fill/40 bg-warn-soft px-4 py-3 text-[13px] text-warn">
           <span className="flex items-center gap-2"><CloudOff size={15} /> {unsynced.length} not bu cihazda saklandı ama henüz hesabına kaydedilmedi.</span>
           <span className="flex gap-2">
-            <button onClick={() => void syncAll()} disabled={syncing} className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50">{syncing ? "Eşitleniyor…" : "Şimdi eşitle"}</button>
+            <button onClick={() => void syncAll()} disabled={syncing} className="rounded-lg bg-brand hover:bg-brand-strong px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50">{syncing ? "Eşitleniyor…" : "Şimdi eşitle"}</button>
             <button onClick={() => notebook.open({ draftClientId: unsynced[0].payload.clientId })} className="px-2 text-[12px] font-semibold">Aç</button>
           </span>
         </div>
@@ -203,7 +203,7 @@ function AllNotebook() {
           <div className="text-[34px]" aria-hidden>📒</div>
           <p className="mt-2 text-[14px] font-semibold text-ink">{hasFilters || range !== "all" ? "Bu filtrelerle not yok." : "Henüz not almadın."}</p>
           <p className="mt-1 text-[13px] text-ink-3">Ders çalışırken aklına geleni hemen yaz ya da mikrofona söyle.</p>
-          <button onClick={() => setShowNew(true)} className="mt-4 h-10 rounded-xl bg-ink px-4 text-[13px] font-semibold text-white">+ Yeni Not</button>
+          <button onClick={() => setShowNew(true)} className="mt-4 h-10 rounded-xl bg-brand hover:bg-brand-strong px-4 text-[13px] font-semibold text-white">+ Yeni Not</button>
         </div>
       ) : view === "timeline" ? (
         <NoteTimeline notes={notes} onOpen={(id) => notebook.open({ noteId: id })} />

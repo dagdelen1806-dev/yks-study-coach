@@ -147,7 +147,7 @@ export default function VoiceRecorder({ onDone, onClose, offerKeepAudio = true }
               {phase === "recording"
                 ? <button onClick={pause} className="flex h-11 items-center gap-1.5 rounded-xl border border-ink/10 px-4 text-[13px] font-semibold text-ink-2"><Pause size={15} /> Duraklat</button>
                 : <button onClick={resume} className="flex h-11 items-center gap-1.5 rounded-xl border border-ink/10 px-4 text-[13px] font-semibold text-ink-2"><Play size={15} /> Devam et</button>}
-              <button onClick={finish} disabled={seconds < 1} className="flex h-11 items-center gap-1.5 rounded-xl bg-ink px-4 text-[13px] font-semibold text-white disabled:opacity-40"><Square size={14} /> Bitir</button>
+              <button onClick={finish} disabled={seconds < 1} className="flex h-11 items-center gap-1.5 rounded-xl bg-brand hover:bg-brand-strong px-4 text-[13px] font-semibold text-white disabled:opacity-40"><Square size={14} /> Bitir</button>
             </div>
             <button onClick={cancel} className="mt-3 text-[12px] font-semibold text-ink-3">Kaydı iptal et</button>
           </div>
@@ -174,7 +174,7 @@ export default function VoiceRecorder({ onDone, onClose, offerKeepAudio = true }
             <div className="mt-3 min-h-[80px] rounded-xl bg-paper p-3 text-[14px] text-ink">{dictation || "…"}</div>
             <div className="mt-4 flex justify-end gap-2">
               <button onClick={() => { recognition.current?.stop(); setPhase("idle"); }} className="h-10 rounded-xl border border-ink/10 px-4 text-[13px] font-semibold text-ink-3">Vazgeç</button>
-              <button onClick={() => { recognition.current?.stop(); if (dictation.trim()) onDone({ text: dictation.trim(), attachmentId: null, durationSec: 0 }); }} disabled={!dictation.trim()} className="h-10 rounded-xl bg-ink px-4 text-[13px] font-semibold text-white disabled:opacity-40">Nota ekle</button>
+              <button onClick={() => { recognition.current?.stop(); if (dictation.trim()) onDone({ text: dictation.trim(), attachmentId: null, durationSec: 0 }); }} disabled={!dictation.trim()} className="h-10 rounded-xl bg-brand hover:bg-brand-strong px-4 text-[13px] font-semibold text-white disabled:opacity-40">Nota ekle</button>
             </div>
           </div>
         )}

@@ -242,7 +242,7 @@ export function BookDetailDialog({ book, onClose }: { book: ScannerBook; onClose
           <div className="mt-5">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-1.5 text-[13px] font-semibold text-danger"><Target size={14} /> Zayıf konularınla eşleşenler</div>
-              {bookRecs.length > 1 && <button disabled={addToPlan.isPending} onClick={planAll} className="h-8 rounded-lg bg-ink px-3 text-[12px] font-semibold text-white disabled:opacity-50">Zayıf konularımı bu kitaptan çalış</button>}
+              {bookRecs.length > 1 && <button disabled={addToPlan.isPending} onClick={planAll} className="h-8 rounded-lg bg-brand hover:bg-brand-strong px-3 text-[12px] font-semibold text-white disabled:opacity-50">Zayıf konularımı bu kitaptan çalış</button>}
             </div>
             <div className="mt-2 space-y-2">{bookRecs.map((rec) => <RecommendationRow key={recoKey(rec)} rec={rec} bookTitle={book.title} />)}</div>
           </div>

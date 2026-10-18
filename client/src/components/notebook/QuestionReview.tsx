@@ -175,7 +175,7 @@ export default function QuestionReview({ questionIds, subject, onClose }: { ques
               <p className="mt-2 text-[16px] font-semibold text-ink">{results.length} sorudan {solved} tanesini çözdün.</p>
               <p className="mt-1 text-[13px] text-ink-3">Çözemediklerin yarın yeniden karşına çıkacak; kendi başına (en fazla ipucuyla) çözdüklerin bir sonraki basamağa geçti.</p>
               {finished.taskCompleted && <p className="mt-3 inline-block rounded-full bg-success-soft px-3 py-1 text-[12px] font-semibold text-success">✓ Bugünün defter görevi tamamlandı</p>}
-              <div className="mt-6"><button onClick={onClose} className="h-11 rounded-xl bg-ink px-6 text-[14px] font-semibold text-white">Kapat</button></div>
+              <div className="mt-6"><button onClick={onClose} className="h-11 rounded-xl bg-brand hover:bg-brand-strong px-6 text-[14px] font-semibold text-white">Kapat</button></div>
             </div>
           )}
         </div>

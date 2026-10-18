@@ -63,7 +63,7 @@ function BookCard({ book, owned, onToggleLibrary, togglePending }: { book: { id:
       <button
         onClick={onToggleLibrary}
         disabled={togglePending}
-        className={`inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-[12px] font-semibold transition disabled:opacity-60 ${owned ? "bg-success-soft text-success hover:bg-success-soft" : "bg-ink text-white hover:opacity-90"}`}
+        className={`inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-[12px] font-semibold transition disabled:opacity-60 ${owned ? "bg-success-soft text-success hover:bg-success-soft" : "bg-brand text-white hover:bg-brand-strong"}`}
       >
         {owned ? <BookmarkCheck size={14} /> : <BookmarkPlus size={14} />}
         {owned ? "Kütüphanemde" : "Kütüphaneme ekle"}

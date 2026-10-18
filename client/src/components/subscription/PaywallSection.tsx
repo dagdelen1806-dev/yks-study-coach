@@ -6,16 +6,12 @@ import { useEntitlement } from "@/hooks/useEntitlement";
 import { trpc } from "@/lib/trpc";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import PlanComparison, { premiumHighlights } from "./PlanComparison";
 
 const formatPrice = (minorUnits: number, currency: string) => `${(minorUnits / 100).toLocaleString("tr-TR", { minimumFractionDigits: 0, maximumFractionDigits: 2 })} ${currency === "TRY" ? "₺" : currency}`;
 
-const BENEFITS = [
-  "AI destekli haftalık çalışma planı (sınırsız)",
-  "PDF/fotoğraftan deneme sonucu aktarımı (sınırsız)",
-  "Gelişmiş performans analizleri ve raporlar",
-  "Kaynak Kataloğu'ndan kişiselleştirilmiş öneriler",
-  "Öncelikli destek",
-];
+// Premium kartındaki maddeler sunucunun uyguladığı gerçek kotalardan üretilir (elle "sınırsız" yazılmaz).
+const BENEFITS = premiumHighlights();
 
 /**
  * Production-quality Paywall (spec §26/§48/§49): plan kartları,
@@ -78,13 +74,13 @@ export default function PaywallSection() {
           </div>
           <div className="mt-5 flex flex-wrap gap-2">
             {entitlement.cancelAtPeriodEnd ? (
-              <Button onClick={() => resumeMutation.mutate()} disabled={resumeMutation.isPending} className="h-10 rounded-xl bg-ink px-4 text-[13px] font-semibold text-white">{resumeMutation.isPending ? "İşleniyor..." : "Aboneliği sürdür"}</Button>
+              <Button onClick={() => resumeMutation.mutate()} disabled={resumeMutation.isPending} className="h-10 rounded-xl bg-brand hover:bg-brand-strong px-4 text-[13px] font-semibold text-white">{resumeMutation.isPending ? "İşleniyor..." : "Aboneliği sürdür"}</Button>
             ) : (
               <Button onClick={() => cancelMutation.mutate({ immediate: false })} disabled={cancelMutation.isPending} variant="outline" className="h-10 rounded-xl border-ink/10 px-4 text-[13px] font-semibold text-ink-3">{cancelMutation.isPending ? "İşleniyor..." : "Aboneliği iptal et (dönem sonunda)"}</Button>
             )}
           </div>
         </Card>
-        <Card className="soft-card p-6"><div className="eyebrow">Neler dahil</div><div className="mt-3 space-y-2">{BENEFITS.map((benefit) => <div key={benefit} className="flex items-start gap-2 text-[13px] text-ink-2"><Check size={14} className="mt-0.5 shrink-0 text-success" /> {benefit}</div>)}</div></Card>
+        <PlanComparison current="premium" />
       </div>
     );
   }
@@ -130,6 +126,8 @@ export default function PaywallSection() {
         </Button>
         <p className="mt-3 text-center text-[12px] leading-4 text-ink-4">Devam ederek kullanım koşullarını kabul etmiş olursun. İstediğin an iptal edebilirsin, iptal dönem sonuna kadar erişimini etkilemez.</p>
       </Card>
+
+      <PlanComparison current="free" />
 
       <div className="text-center">
         {!showRestore ? (

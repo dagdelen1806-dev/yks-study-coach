@@ -516,7 +516,7 @@ export default function BookContentScanner({ book, onClose, onSaved, onAddAnothe
                 {source === "manual" && <button onClick={() => setRows((current) => { const lastUnit = current[current.length - 1]?.unitNumber ?? 0; const unitNumber = lastUnit + 1; return [...current, { key: nextKey(), unitNumber, unitTitle: "", contentType: "topic_test", label: "Test 1", testNumber: 1, title: "", pageStart: null, pageEnd: null, topicId: null, method: "manual", confidence: 1, tier: "manual", confirmed: true }]; })} className="inline-flex h-9 items-center gap-1 rounded-xl border border-ink/10 px-3 text-[12px] font-semibold text-ink-2 hover:bg-paper"><Plus size={13} /> Ünite ekle</button>}
                 <button onClick={() => { setStep("pages"); setRows([]); }} className="h-9 rounded-xl px-3 text-[12px] font-semibold text-ink-3 hover:text-ink-2">Geri</button>
               </div>
-              <button onClick={submit} disabled={save.isPending} className="h-10 rounded-xl bg-ink px-4 text-[13px] font-semibold text-white disabled:opacity-50">{save.isPending ? "Kaydediliyor…" : "Kütüphaneye kaydet"}</button>
+              <button onClick={submit} disabled={save.isPending} className="h-10 rounded-xl bg-brand hover:bg-brand-strong px-4 text-[13px] font-semibold text-white disabled:opacity-50">{save.isPending ? "Kaydediliyor…" : "Kütüphaneye kaydet"}</button>
             </div>
             {unmatched > 0 && pendingConfirm === 0 && <p className="mt-2 text-[12px] text-ink-4">Konusu seçilmeyen {unmatched} satır da kaydedilir, ancak zayıf konu önerilerinde kullanılmaz.</p>}
             {report && <ReadingReport report={report} />}

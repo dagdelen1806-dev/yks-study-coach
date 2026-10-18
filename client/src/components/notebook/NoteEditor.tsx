@@ -341,7 +341,7 @@ function NoteEditorBody({ initial, startWith, onClose }: { initial: { payload: N
           {showSuggestion && (
             <div className="mx-4 mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-warn-soft px-3 py-2 text-[13px] text-warn">
               <span>Bu konuyu tekrar etmen gerektiğini yazmışsın. Çalışma planına ekleyelim mi?</span>
-              <span className="flex gap-2"><button onClick={() => setTaskDialog(true)} className="rounded-lg bg-ink px-2.5 py-1 text-[12px] font-semibold text-white">Plana ekle</button><button onClick={() => setSuggestionDismissed(true)} className="px-1 text-[12px] font-semibold">Hayır</button></span>
+              <span className="flex gap-2"><button onClick={() => setTaskDialog(true)} className="rounded-lg bg-brand hover:bg-brand-strong px-2.5 py-1 text-[12px] font-semibold text-white">Plana ekle</button><button onClick={() => setSuggestionDismissed(true)} className="px-1 text-[12px] font-semibold">Hayır</button></span>
             </div>
           )}
           {aiPending && <div className="mx-4 mt-3 flex items-center gap-2 rounded-xl bg-violet-soft px-3 py-2 text-[13px] text-violet"><Loader2 size={14} className="animate-spin" /> ✨ {NOTE_AI_ACTIONS[aiPending].menu}…</div>}

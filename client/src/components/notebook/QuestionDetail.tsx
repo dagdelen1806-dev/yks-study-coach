@@ -197,7 +197,7 @@ export default function QuestionDetail({ id, onClose, onReview }: { id: number; 
 
         <div className="flex items-center justify-between gap-2 border-t border-ink/[0.07] px-4 py-3">
           <button onClick={() => void destroy()} disabled={remove.isPending} className="flex h-10 items-center gap-1.5 rounded-xl px-3 text-[13px] font-semibold text-danger hover:bg-danger-soft"><Trash2 size={14} /> Sil</button>
-          <button onClick={() => void save()} disabled={!dirty || update.isPending} className="flex h-10 items-center gap-2 rounded-xl bg-ink px-5 text-[13px] font-semibold text-white disabled:opacity-40">{update.isPending && <Loader2 size={14} className="animate-spin" />} Kaydet</button>
+          <button onClick={() => void save()} disabled={!dirty || update.isPending} className="flex h-10 items-center gap-2 rounded-xl bg-brand hover:bg-brand-strong px-5 text-[13px] font-semibold text-white disabled:opacity-40">{update.isPending && <Loader2 size={14} className="animate-spin" />} Kaydet</button>
         </div>
       </div>
 
