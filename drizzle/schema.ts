@@ -386,6 +386,9 @@ export const studyPlanSessions = mysqlTable("study_plan_sessions", {
   rescheduledFrom: timestamp("rescheduledFrom"),
   rescheduledAt: timestamp("rescheduledAt"),
   rescheduleCount: int("rescheduleCount").default(0).notNull(),
+  // Kurum öğretmeninin atadığı görev (bkz. organization_*); öğrencinin kendi görevlerinde boş.
+  assignedByUserId: int("assignedByUserId"),
+  assignedOrgId: int("assignedOrgId"),
   completedAt: timestamp("completedAt"),
   actualMinutes: int("actualMinutes"),
   actualQuestions: int("actualQuestions"),
@@ -412,6 +415,109 @@ export const classScheduleBlocks = mysqlTable("class_schedule_blocks", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => ({
   userDayIdx: index("class_schedule_blocks_user_day_idx").on(table.userId, table.dayOfWeek),
+}));
+
+// =============================================================================
+// Kurum Paneli: dershaneler, kendi öğrencilerinin (öğrencinin onayıyla) verisini izler.
+// Öğrenci verisi tabloları değişmez; kurum erişimi yalnızca üyelik + atama tablolarından
+// türetilir (bkz. server/org/orgAccess.ts).
+// =============================================================================
+
+export const organizations = mysqlTable("organizations", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 160 }).notNull(),
+  slug: varchar("slug", { length: 80 }).notNull().unique(),
+  status: mysqlEnum("status", ["active", "suspended"]).default("active").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const organizationMembers = mysqlTable("organization_members", {
+  id: int("id").autoincrement().primaryKey(),
+  orgId: int("orgId").notNull(),
+  userId: int("userId").notNull(),
+  role: mysqlEnum("role", ["owner", "admin", "coordinator", "teacher", "student"]).notNull(),
+  status: mysqlEnum("status", ["active", "left", "removed"]).default("active").notNull(),
+  // Öğrencinin "kurumun verilerimi görmesine izin veriyorum" onayı (personelde boş).
+  consentAt: timestamp("consentAt"),
+  joinedAt: timestamp("joinedAt").defaultNow().notNull(),
+  leftAt: timestamp("leftAt"),
+  invitedBy: int("invitedBy"),
+}, (table) => ({
+  orgUserUnique: uniqueIndex("organization_members_org_user_unique").on(table.orgId, table.userId),
+  userStatusIdx: index("organization_members_user_status_idx").on(table.userId, table.status),
+}));
+
+export const organizationInvitations = mysqlTable("organization_invitations", {
+  id: int("id").autoincrement().primaryKey(),
+  orgId: int("orgId").notNull(),
+  role: mysqlEnum("role", ["admin", "coordinator", "teacher", "student"]).notNull(),
+  // Kodun kendisi saklanmaz; yalnızca sha256 özeti (kod oluşturulurken bir kez gösterilir).
+  codeHash: varchar("codeHash", { length: 64 }).notNull().unique(),
+  note: varchar("note", { length: 160 }),
+  expiresAt: timestamp("expiresAt").notNull(),
+  maxUses: int("maxUses").default(1).notNull(),
+  usedCount: int("usedCount").default(0).notNull(),
+  createdBy: int("createdBy").notNull(),
+  revokedAt: timestamp("revokedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  orgIdx: index("organization_invitations_org_idx").on(table.orgId),
+}));
+
+export const organizationClasses = mysqlTable("organization_classes", {
+  id: int("id").autoincrement().primaryKey(),
+  orgId: int("orgId").notNull(),
+  name: varchar("name", { length: 80 }).notNull(),
+  gradeLevel: varchar("gradeLevel", { length: 20 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  orgIdx: index("organization_classes_org_idx").on(table.orgId),
+}));
+
+export const classStudents = mysqlTable("class_students", {
+  id: int("id").autoincrement().primaryKey(),
+  classId: int("classId").notNull(),
+  studentUserId: int("studentUserId").notNull(),
+}, (table) => ({
+  classStudentUnique: uniqueIndex("class_students_class_student_unique").on(table.classId, table.studentUserId),
+}));
+
+export const teacherAssignments = mysqlTable("teacher_assignments", {
+  id: int("id").autoincrement().primaryKey(),
+  orgId: int("orgId").notNull(),
+  teacherUserId: int("teacherUserId").notNull(),
+  studentUserId: int("studentUserId").notNull(),
+  active: int("active").default(1).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  pairUnique: uniqueIndex("teacher_assignments_pair_unique").on(table.orgId, table.teacherUserId, table.studentUserId),
+}));
+
+export const counselingNotes = mysqlTable("counseling_notes", {
+  id: int("id").autoincrement().primaryKey(),
+  orgId: int("orgId").notNull(),
+  studentUserId: int("studentUserId").notNull(),
+  authorUserId: int("authorUserId").notNull(),
+  body: text("body").notNull(),
+  // staff: yalnızca kurum personeli görür; student: öğrenciye geri bildirim olarak gösterilir.
+  visibility: mysqlEnum("visibility", ["staff", "student"]).default("staff").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  orgStudentIdx: index("counseling_notes_org_student_idx").on(table.orgId, table.studentUserId),
+}));
+
+export const organizationAuditLogs = mysqlTable("organization_audit_logs", {
+  id: int("id").autoincrement().primaryKey(),
+  orgId: int("orgId").notNull(),
+  actorUserId: int("actorUserId").notNull(),
+  action: varchar("action", { length: 60 }).notNull(),
+  targetType: varchar("targetType", { length: 40 }),
+  targetId: int("targetId"),
+  metadataJson: text("metadataJson"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  orgCreatedIdx: index("organization_audit_logs_org_created_idx").on(table.orgId, table.createdAt),
 }));
 
 // Okuma kitapları (YKS dışı, gece okuması alışkanlığı): okunan sayfalar kitabın ilerlemesine eklenir.
