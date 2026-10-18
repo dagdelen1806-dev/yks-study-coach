@@ -6,7 +6,7 @@ vi.stubEnv("LLM_API_URL", "https://generativelanguage.googleapis.com/v1beta/open
 vi.stubEnv("LLM_MODEL", "gemini-3.8-flash");
 const { transcribeAudioBuffer } = await import("./_core/voiceTranscription");
 
-const okReply = (text: string) => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "düşünce", thought: true }, { text }] } }] }), { status: 200, headers: { "content-type": "application/json" } });
+const okReply = (text: string, hasSpeech = true) => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "düşünce", thought: true }, { text: JSON.stringify({ hasSpeech, text }) }] } }] }), { status: 200, headers: { "content-type": "application/json" } });
 
 describe("transcribeAudioBuffer on Gemini", () => {
   it("sends the audio inline to generateContent and returns the spoken text only", async () => {
@@ -19,6 +19,14 @@ describe("transcribeAudioBuffer on Gemini", () => {
     const body = JSON.parse(String(init.body));
     expect(body.contents[0].parts[1].inline_data).toEqual({ mime_type: "audio/webm", data: Buffer.from("fake-audio").toString("base64") });
     expect(url).not.toContain("audio/transcriptions");
+  });
+
+  it("returns no text when the model says there is no speech, even if it wrote something", async () => {
+    const fetchImpl = vi.fn(async () => okReply("Özne yüklem ilişkisi.", false));
+    const result = await transcribeAudioBuffer(Buffer.from("beep"), "audio/webm", { prompt: "Türkçe bir YKS öğrencisinin ders notu." }, fetchImpl as unknown as typeof fetch);
+    expect(result).toMatchObject({ text: "" });
+    // Whisper'ın bağlam ipucu Gemini'ye gönderilmez (uydurmayı tetikliyordu).
+    expect(String((fetchImpl.mock.calls[0] as unknown as [string, RequestInit])[1].body)).not.toContain("YKS öğrencisinin ders notu");
   });
 
   it("reports a provider error without leaking the key", async () => {

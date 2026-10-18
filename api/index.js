@@ -6508,18 +6508,20 @@ var EXTENSIONS = {
 async function transcribeWithGemini(audio, mimeType, key, model, options, fetchImpl = fetch) {
   const language = options.language === "tr" || !options.language ? "T\xFCrk\xE7e" : options.language;
   const instruction = [
-    `Bu ses kayd\u0131n\u0131 ${language} olarak kelimesi kelimesine yaz\u0131ya d\xF6k.`,
-    "Yaln\u0131zca konu\u015Fulan metni d\xF6nd\xFCr: a\xE7\u0131klama, ba\u015Fl\u0131k, zaman damgas\u0131 ya da t\u0131rnak ekleme.",
-    "Matematik ifadelerini d\xFCz yaz\u0131yla yaz (\xF6r. x kare \u2192 x^2). Anla\u015F\u0131lmayan k\u0131sm\u0131 uydurma, atla.",
-    "Kay\u0131tta konu\u015Fma yoksa bo\u015F yan\u0131t ver.",
-    options.prompt ? `Ba\u011Flam: ${options.prompt}` : ""
-  ].filter(Boolean).join(" ");
+    `Bu ses kayd\u0131n\u0131 dinle. \u0130\xE7inde anla\u015F\u0131l\u0131r ${language} konu\u015Fma varsa kelimesi kelimesine yaz\u0131ya d\xF6k.`,
+    "Yaln\u0131zca ger\xE7ekten duydu\u011Fun s\xF6zleri yaz; tahmin etme, tamamlama, \xF6zetleme. Matematik ifadelerini d\xFCz yaz\u0131yla yaz (\xF6r. x kare \u2192 x^2).",
+    "Kay\u0131tta konu\u015Fma yoksa (sessizlik, g\xFCr\xFClt\xFC, m\xFCzik, bip sesi) hasSpeech=false ve text bo\u015F olsun."
+  ].join(" ");
   const response = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
     method: "POST",
     headers: { "content-type": "application/json", "x-goog-api-key": key },
     body: JSON.stringify({
       contents: [{ role: "user", parts: [{ text: instruction }, { inline_data: { mime_type: mimeType, data: audio.toString("base64") } }] }],
-      generationConfig: { temperature: 0 }
+      generationConfig: {
+        temperature: 0,
+        responseMimeType: "application/json",
+        responseSchema: { type: "OBJECT", properties: { hasSpeech: { type: "BOOLEAN" }, text: { type: "STRING" } }, required: ["hasSpeech", "text"] }
+      }
     })
   });
   if (!response.ok) {
@@ -6528,7 +6530,14 @@ async function transcribeWithGemini(audio, mimeType, key, model, options, fetchI
   }
   const result = await response.json();
   const parts = result.candidates?.[0]?.content?.parts ?? [];
-  const text3 = parts.filter((part) => !part.thought && typeof part.text === "string").map((part) => part.text).join("").trim();
+  const raw = parts.filter((part) => !part.thought && typeof part.text === "string").map((part) => part.text).join("").trim();
+  let parsed;
+  try {
+    parsed = JSON.parse(raw.replace(/^```(?:json)?\s*|\s*```$/g, ""));
+  } catch {
+    return { error: "Invalid transcription response", code: "SERVICE_ERROR" };
+  }
+  const text3 = parsed.hasSpeech === true && typeof parsed.text === "string" ? parsed.text.trim() : "";
   return { task: "transcribe", language: options.language, text: text3 };
 }
 async function transcribeAudioBuffer(audio, mimeType, options = {}, fetchImpl = fetch) {
