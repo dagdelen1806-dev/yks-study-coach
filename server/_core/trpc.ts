@@ -5,6 +5,7 @@ import superjson from "superjson";
 import { RateLimitExceededError, checkRateLimit } from "./rateLimit";
 import { PremiumRequiredError, UsageLimitExceededError, assertUsageAvailable, hasEntitlement, recordFeatureUsage } from "../subscriptions/entitlementService";
 import type { TrpcContext } from "./context";
+import { findOrgCreditSource, recordOrgCredit } from "../org/orgCredits";
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
@@ -104,7 +105,10 @@ export function metredFeatureProcedure(feature: FeatureKey, rateLimit: { maxRequ
         if (error instanceof RateLimitExceededError) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: RATE_LIMITED_ERR_MSG });
         throw error;
       }
-      try {
+      // Kuruma bağlı öğrencide işlem önce kurumun AI kredi havuzundan karşılanır;
+      // havuz yoksa/bittiyse öğrencinin kendi kotası (aşağıdaki kontrol) geçerlidir.
+      const orgCredit = await findOrgCreditSource(ctx.user.id, feature).catch(() => null);
+      if (!orgCredit) try {
         await assertUsageAvailable(ctx.user.id, feature);
       } catch (error) {
         if (error instanceof PremiumRequiredError) throw new TRPCError({ code: "FORBIDDEN", message: PREMIUM_REQUIRED_ERR_MSG });
@@ -115,7 +119,7 @@ export function metredFeatureProcedure(feature: FeatureKey, rateLimit: { maxRequ
       // sayılır (spec §50/§51) — `next()` bir hata ile reddederse (örn.
       // LLM çağrısı patlarsa) buraya hiç gelinmez, kota yanlışlıkla tüketilmez.
       const result = await next({ ctx });
-      if (result.ok) await recordFeatureUsage(ctx.user.id, feature);
+      if (result.ok) await (orgCredit ? recordOrgCredit(orgCredit, ctx.user.id, feature) : recordFeatureUsage(ctx.user.id, feature));
       return result;
     })
   );

@@ -183,6 +183,13 @@
       "when": 1792347527811,
       "tag": "0025_org_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "5",
+      "when": 1792349359447,
+      "tag": "0026_org_membership_kvkk",
+      "breakpoints": true
     }
   ]
 }

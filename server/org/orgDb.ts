@@ -16,7 +16,7 @@ import {
   userMockExams,
   users,
 } from "../../drizzle/schema";
-import type { InvitableRole, OrgKind, OrgRole, StudentSignals } from "../../shared/org";
+import { membershipState, type InvitableRole, type MembershipState, type OrgKind, type OrgPlan, type OrgRole, type StudentSignals } from "../../shared/org";
 import { getDb } from "../db";
 
 // Kurum Paneli veri katmanı. Her sorgu orgId ile kapsamlıdır; yetki kararı orgAccess.ts'te verilir.
@@ -31,27 +31,32 @@ async function requireDb() {
 
 // --- Üyelik -----------------------------------------------------------------
 
-export type Membership = { orgId: number; orgName: string; role: OrgRole };
+/** `state`: kurumun üyelik süresi (paket bitişi); süresi dolan kurumda panel salt okunur olur. */
+export type Membership = { orgId: number; orgName: string; role: OrgRole; state?: MembershipState };
+
+const membershipColumns = { orgId: organizationMembers.orgId, orgName: organizations.name, role: organizationMembers.role, membershipStartsAt: organizations.membershipStartsAt, membershipEndsAt: organizations.membershipEndsAt };
+const toMembership = (row: { orgId: number; orgName: string; role: OrgRole; membershipStartsAt: Date | null; membershipEndsAt: Date | null }): Membership => ({ orgId: row.orgId, orgName: row.orgName, role: row.role, state: membershipState(row) });
 
 /** Aktif kurumdaki aktif üyelik (askıya alınmış kurum = üyelik yok sayılır). */
 export async function getActiveMembership(userId: number, orgId: number): Promise<Membership | null> {
   const db = await requireDb();
   const [row] = await db
-    .select({ orgId: organizationMembers.orgId, orgName: organizations.name, role: organizationMembers.role })
+    .select(membershipColumns)
     .from(organizationMembers)
     .innerJoin(organizations, eq(organizations.id, organizationMembers.orgId))
     .where(and(eq(organizationMembers.userId, userId), eq(organizationMembers.orgId, orgId), eq(organizationMembers.status, "active"), eq(organizations.status, "active")))
     .limit(1);
-  return row ?? null;
+  return row ? toMembership(row) : null;
 }
 
-export async function listMyMemberships(userId: number): Promise<Membership[]> {
+export async function listMyMemberships(userId: number): Promise<Array<Membership & { kvkkVersion?: number | null; consentAt?: Date | null }>> {
   const db = await requireDb();
-  return db
-    .select({ orgId: organizationMembers.orgId, orgName: organizations.name, role: organizationMembers.role })
+  const rows = await db
+    .select({ ...membershipColumns, kvkkVersion: organizationMembers.kvkkVersion, consentAt: organizationMembers.consentAt })
     .from(organizationMembers)
     .innerJoin(organizations, eq(organizations.id, organizationMembers.orgId))
     .where(and(eq(organizationMembers.userId, userId), eq(organizationMembers.status, "active"), eq(organizations.status, "active")));
+  return rows.map((row) => ({ ...toMembership(row), kvkkVersion: row.kvkkVersion, consentAt: row.consentAt }));
 }
 
 export async function hasActiveAssignment(orgId: number, teacherUserId: number, studentUserId: number): Promise<boolean> {
@@ -143,21 +148,22 @@ export async function revokeInvitation(orgId: number, id: number): Promise<boole
 
 export async function findInvitationByHash(codeHash: string) {
   const db = await requireDb();
-  const [row] = await db.select({ id: organizationInvitations.id, orgId: organizationInvitations.orgId, orgName: organizations.name, orgStatus: organizations.status, role: organizationInvitations.role, expiresAt: organizationInvitations.expiresAt, maxUses: organizationInvitations.maxUses, usedCount: organizationInvitations.usedCount, revokedAt: organizationInvitations.revokedAt, createdBy: organizationInvitations.createdBy, subject: organizationInvitations.subject })
+  const [row] = await db.select({ id: organizationInvitations.id, orgId: organizationInvitations.orgId, orgName: organizations.name, orgStatus: organizations.status, role: organizationInvitations.role, expiresAt: organizationInvitations.expiresAt, maxUses: organizationInvitations.maxUses, usedCount: organizationInvitations.usedCount, revokedAt: organizationInvitations.revokedAt, createdBy: organizationInvitations.createdBy, subject: organizationInvitations.subject, membershipStartsAt: organizations.membershipStartsAt, membershipEndsAt: organizations.membershipEndsAt })
     .from(organizationInvitations).innerJoin(organizations, eq(organizations.id, organizationInvitations.orgId))
     .where(eq(organizationInvitations.codeHash, codeHash)).limit(1);
   return row ?? null;
 }
 
 /** Daveti kullanır: üyeliği açar (eskiden ayrılmışsa yeniden etkinleştirir) ve kullanım sayısını artırır. */
-export async function acceptInvitation(input: { invitationId: number; orgId: number; userId: number; role: InvitableRole; invitedBy: number; subject?: string | null }): Promise<void> {
+export async function acceptInvitation(input: { invitationId: number; orgId: number; userId: number; role: InvitableRole; invitedBy: number; subject?: string | null; kvkkVersion?: number | null }): Promise<void> {
   const db = await requireDb();
   const now = new Date();
   const consentAt = input.role === "student" ? now : null;
   const subject = input.role === "student" ? null : input.subject ?? null;
+  const kvkkVersion = input.role === "student" ? input.kvkkVersion ?? null : null;
   const [existing] = await db.select({ id: organizationMembers.id }).from(organizationMembers).where(and(eq(organizationMembers.orgId, input.orgId), eq(organizationMembers.userId, input.userId))).limit(1);
-  if (existing) await db.update(organizationMembers).set({ role: input.role, status: "active", consentAt, subject, joinedAt: now, leftAt: null, invitedBy: input.invitedBy }).where(eq(organizationMembers.id, existing.id));
-  else await db.insert(organizationMembers).values({ orgId: input.orgId, userId: input.userId, role: input.role, status: "active", consentAt, subject, joinedAt: now, invitedBy: input.invitedBy });
+  if (existing) await db.update(organizationMembers).set({ role: input.role, status: "active", consentAt, subject, kvkkVersion, joinedAt: now, leftAt: null, invitedBy: input.invitedBy }).where(eq(organizationMembers.id, existing.id));
+  else await db.insert(organizationMembers).values({ orgId: input.orgId, userId: input.userId, role: input.role, status: "active", consentAt, subject, kvkkVersion, joinedAt: now, invitedBy: input.invitedBy });
   await db.update(organizationInvitations).set({ usedCount: sql`${organizationInvitations.usedCount} + 1` }).where(eq(organizationInvitations.id, input.invitationId));
 }
 
@@ -320,8 +326,36 @@ export type OrganizationProfile = { name: string; kind: OrgKind; city: string | 
 
 export async function getOrganization(orgId: number) {
   const db = await requireDb();
-  const [row] = await db.select({ id: organizations.id, name: organizations.name, slug: organizations.slug, kind: organizations.kind, city: organizations.city, district: organizations.district, address: organizations.address, phone: organizations.phone, contactEmail: organizations.contactEmail, createdAt: organizations.createdAt }).from(organizations).where(eq(organizations.id, orgId)).limit(1);
+  const [row] = await db.select({
+    id: organizations.id, name: organizations.name, slug: organizations.slug, kind: organizations.kind, city: organizations.city, district: organizations.district, address: organizations.address, phone: organizations.phone, contactEmail: organizations.contactEmail, createdAt: organizations.createdAt,
+    plan: organizations.plan, membershipStartsAt: organizations.membershipStartsAt, membershipEndsAt: organizations.membershipEndsAt, aiCreditsMonthly: organizations.aiCreditsMonthly, perStudentCreditCap: organizations.perStudentCreditCap,
+    kvkkNotice: organizations.kvkkNotice, kvkkConsent: organizations.kvkkConsent, kvkkVersion: organizations.kvkkVersion, kvkkUpdatedAt: organizations.kvkkUpdatedAt,
+  }).from(organizations).where(eq(organizations.id, orgId)).limit(1);
   return row ?? null;
+}
+
+/** Platform yöneticisi: paket, süre ve aylık AI kredisi. */
+export async function updateOrgMembership(orgId: number, input: { plan: OrgPlan; membershipStartsAt: Date | null; membershipEndsAt: Date | null; aiCreditsMonthly: number }): Promise<void> {
+  const db = await requireDb();
+  await db.update(organizations).set(input).where(eq(organizations.id, orgId));
+}
+
+export async function setPerStudentCreditCap(orgId: number, cap: number | null): Promise<void> {
+  const db = await requireDb();
+  await db.update(organizations).set({ perStudentCreditCap: cap }).where(eq(organizations.id, orgId));
+}
+
+/** KVKK metinlerini kaydeder (null = platform şablonuna dön) ve sürümü bir artırır; yeni katılanlar yeni sürümü onaylar. */
+export async function updateKvkk(orgId: number, notice: string | null, consent: string | null): Promise<void> {
+  const db = await requireDb();
+  await db.update(organizations).set({ kvkkNotice: notice, kvkkConsent: consent, kvkkVersion: sql`${organizations.kvkkVersion} + 1`, kvkkUpdatedAt: new Date() }).where(eq(organizations.id, orgId));
+}
+
+/** Öğrencilerin onayladığı KVKK sürümleri (Ayarlar → KVKK özetinde). */
+export async function listStudentKvkkVersions(orgId: number): Promise<Array<number | null>> {
+  const db = await requireDb();
+  const rows = await db.select({ kvkkVersion: organizationMembers.kvkkVersion }).from(organizationMembers).where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.role, "student"), eq(organizationMembers.status, "active")));
+  return rows.map((row) => row.kvkkVersion);
 }
 
 export async function updateOrganization(orgId: number, profile: OrganizationProfile): Promise<void> {
@@ -337,7 +371,7 @@ export async function createOrganization(name: string, slug: string) {
 
 export async function listOrganizations() {
   const db = await requireDb();
-  const rows = await db.select({ id: organizations.id, name: organizations.name, slug: organizations.slug, status: organizations.status, createdAt: organizations.createdAt }).from(organizations).orderBy(desc(organizations.createdAt));
+  const rows = await db.select({ id: organizations.id, name: organizations.name, slug: organizations.slug, status: organizations.status, createdAt: organizations.createdAt, plan: organizations.plan, membershipStartsAt: organizations.membershipStartsAt, membershipEndsAt: organizations.membershipEndsAt, aiCreditsMonthly: organizations.aiCreditsMonthly }).from(organizations).orderBy(desc(organizations.createdAt));
   const counts = rows.length ? await db.select({ orgId: organizationMembers.orgId, role: organizationMembers.role, count: sql<number>`COUNT(*)` }).from(organizationMembers).where(and(inArray(organizationMembers.orgId, rows.map((row) => row.id)), eq(organizationMembers.status, "active"))).groupBy(organizationMembers.orgId, organizationMembers.role) : [];
   return rows.map((row) => ({ ...row, students: Number(counts.find((count) => count.orgId === row.id && count.role === "student")?.count ?? 0), staff: counts.filter((count) => count.orgId === row.id && count.role !== "student").reduce((sum, count) => sum + Number(count.count), 0) }));
 }

@@ -435,8 +435,33 @@ export const organizations = mysqlTable("organizations", {
   address: varchar("address", { length: 300 }),
   phone: varchar("phone", { length: 40 }),
   contactEmail: varchar("contactEmail", { length: 160 }),
+  // Üyelik (platform yöneticisi tanımlar): paket, süre ve aylık AI kredi havuzu.
+  plan: mysqlEnum("plan", ["trial", "standard", "pro"]).default("trial").notNull(),
+  membershipStartsAt: timestamp("membershipStartsAt"),
+  membershipEndsAt: timestamp("membershipEndsAt"),
+  aiCreditsMonthly: int("aiCreditsMonthly").default(0).notNull(),
+  // Kurum yöneticisinin öğrenci başına aylık üst sınırı (boş = sınırsız).
+  perStudentCreditCap: int("perStudentCreditCap"),
+  // KVKK: boşsa platform şablonu kullanılır; her düzenlemede sürüm artar.
+  kvkkNotice: text("kvkkNotice"),
+  kvkkConsent: text("kvkkConsent"),
+  kvkkVersion: int("kvkkVersion").default(1).notNull(),
+  kvkkUpdatedAt: timestamp("kvkkUpdatedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
+
+// Kurum AI kredi havuzundan yapılan harcamalar (append-only; ay toplamı SUM ile).
+export const organizationCreditUsage = mysqlTable("organization_credit_usage", {
+  id: int("id").autoincrement().primaryKey(),
+  orgId: int("orgId").notNull(),
+  userId: int("userId").notNull(),
+  featureKey: varchar("featureKey", { length: 60 }).notNull(),
+  credits: int("credits").notNull(),
+  usedAt: timestamp("usedAt").defaultNow().notNull(),
+}, (table) => ({
+  orgUsedIdx: index("organization_credit_usage_org_used_idx").on(table.orgId, table.usedAt),
+  orgUserUsedIdx: index("organization_credit_usage_org_user_used_idx").on(table.orgId, table.userId, table.usedAt),
+}));
 
 export const organizationMembers = mysqlTable("organization_members", {
   id: int("id").autoincrement().primaryKey(),
@@ -451,6 +476,8 @@ export const organizationMembers = mysqlTable("organization_members", {
   invitedBy: int("invitedBy"),
   // Personelin branşı (ör. Matematik); öğrencide boş.
   subject: varchar("subject", { length: 60 }),
+  // Öğrencinin onayladığı KVKK metin sürümü (organizations.kvkkVersion).
+  kvkkVersion: int("kvkkVersion"),
 }, (table) => ({
   orgUserUnique: uniqueIndex("organization_members_org_user_unique").on(table.orgId, table.userId),
   userStatusIdx: index("organization_members_user_status_idx").on(table.userId, table.status),

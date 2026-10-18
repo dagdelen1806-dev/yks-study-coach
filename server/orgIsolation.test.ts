@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import type { User } from "../drizzle/schema";
-import { canAssignRole, canInviteRole, generateInviteCode, invitationProblem, normalizeInviteCode, summarizeStudent } from "../shared/org";
+import { canAssignRole, canInviteRole, creditDecision, creditPeriodStart, generateInviteCode, invitationProblem, membershipState, normalizeInviteCode, summarizeStudent } from "../shared/org";
+import { DEFAULT_KVKK_NOTICE, renderKvkk } from "../shared/kvkk";
 
 // --- Bellek içi kurum veri katmanı (gerçek yetki katmanı ve router bunun üstünde çalışır) ---
 type Member = { orgId: number; userId: number; role: "owner" | "admin" | "coordinator" | "teacher" | "student"; status: "active" | "left" | "removed" };
 const store = {
-  orgs: [] as Array<{ id: number; name: string; status: "active" | "suspended" }>,
+  orgs: [] as Array<{ id: number; name: string; status: "active" | "suspended"; kvkkVersion?: number; membershipStartsAt?: Date | null; membershipEndsAt?: Date | null; address?: string | null; contactEmail?: string | null; phone?: string | null; kvkkNotice?: string | null; kvkkConsent?: string | null }>,
   members: [] as Member[],
   assignments: [] as Array<{ orgId: number; teacherUserId: number; studentUserId: number; active: number }>,
   invitations: [] as Array<{ id: number; orgId: number; orgName: string; orgStatus: "active" | "suspended"; role: "admin" | "coordinator" | "teacher" | "student"; codeHash: string; expiresAt: Date; maxUses: number; usedCount: number; revokedAt: Date | null; createdBy: number; note: string | null; createdAt: Date }>,
@@ -21,7 +22,7 @@ vi.mock("./org/orgDb", async (importOriginal) => {
   const original = await importOriginal<typeof import("./org/orgDb")>();
   return {
     ...original,
-    getActiveMembership: vi.fn(async (userId: number, orgId: number) => { const m = active(orgId, userId); return m ? { orgId, orgName: store.orgs.find((o) => o.id === orgId)!.name, role: m.role } : null; }),
+    getActiveMembership: vi.fn(async (userId: number, orgId: number) => { const m = active(orgId, userId); const org = store.orgs.find((o) => o.id === orgId)!; return m ? { orgId, orgName: org.name, role: m.role, state: membershipState({ membershipStartsAt: org.membershipStartsAt ?? null, membershipEndsAt: org.membershipEndsAt ?? null }) } : null; }),
     listMyMemberships: vi.fn(async (userId: number) => store.members.filter((m) => m.userId === userId && active(m.orgId, userId)).map((m) => ({ orgId: m.orgId, orgName: store.orgs.find((o) => o.id === m.orgId)!.name, role: m.role }))),
     hasActiveAssignment: vi.fn(async (orgId: number, teacherUserId: number, studentUserId: number) => store.assignments.some((a) => a.orgId === orgId && a.teacherUserId === teacherUserId && a.studentUserId === studentUserId && a.active === 1)),
     isActiveStudent: vi.fn(async (orgId: number, userId: number) => active(orgId, userId)?.role === "student"),
@@ -34,12 +35,12 @@ vi.mock("./org/orgDb", async (importOriginal) => {
     createInvitation: vi.fn(async (input: { orgId: number; role: "student"; codeHash: string; note: string | null; expiresAt: Date; maxUses: number; createdBy: number }) => { const id = store.invitations.length + 1; store.invitations.push({ id, ...input, orgName: store.orgs.find((o) => o.id === input.orgId)!.name, orgStatus: "active", usedCount: 0, revokedAt: null, createdAt: new Date() }); return id; }),
     listInvitations: vi.fn(async (orgId: number) => store.invitations.filter((i) => i.orgId === orgId)),
     revokeInvitation: vi.fn(async (orgId: number, id: number) => { const i = store.invitations.find((x) => x.orgId === orgId && x.id === id); if (i) i.revokedAt = new Date(); return Boolean(i); }),
-    findInvitationByHash: vi.fn(async (hash: string) => store.invitations.find((i) => i.codeHash === hash) ?? null),
+    findInvitationByHash: vi.fn(async (hash: string) => { const i = store.invitations.find((x) => x.codeHash === hash); const org = i && store.orgs.find((o) => o.id === i.orgId); return i ? { ...i, membershipStartsAt: org?.membershipStartsAt ?? null, membershipEndsAt: org?.membershipEndsAt ?? null } : null; }),
     acceptInvitation: vi.fn(async (input: { invitationId: number; orgId: number; userId: number; role: Member["role"] }) => { const existing = store.members.find((m) => m.orgId === input.orgId && m.userId === input.userId); if (existing) { existing.status = "active"; existing.role = input.role; } else store.members.push({ orgId: input.orgId, userId: input.userId, role: input.role, status: "active" }); store.invitations.find((i) => i.id === input.invitationId)!.usedCount++; }),
     listClasses: vi.fn(async () => []),
     createClass: vi.fn(async () => 1),
     updateClass: vi.fn(async () => true),
-    getOrganization: vi.fn(async (orgId: number) => store.orgs.find((o) => o.id === orgId) ?? null),
+    getOrganization: vi.fn(async (orgId: number) => { const org = store.orgs.find((o) => o.id === orgId); return org ? { address: null, contactEmail: null, phone: null, kvkkNotice: null, kvkkConsent: null, kvkkVersion: 1, ...org } : null; }),
     updateOrganization: vi.fn(async () => undefined),
     setMemberSubject: vi.fn(async () => true),
     listAssignments: vi.fn(async (orgId: number) => store.assignments.filter((a) => a.orgId === orgId && a.active === 1)),
@@ -111,15 +112,15 @@ describe("kurum izolasyonu (docs/kurumsal.md §5)", () => {
 
   it("4) iptal edilmiş, süresi geçmiş ya da tükenmiş davet kabul edilmez; kullanılmış kod tekrar işlemez", async () => {
     const { code } = await as(10).org.invitations.create({ orgId: 1, role: "student", maxUses: 1 });
-    await as(50).org.join({ code, consent: true });
-    await expect(as(51).org.join({ code, consent: true })).rejects.toThrow(/kullanım sınırına/);
+    await as(50).org.join({ code, consent: true, kvkkVersion: 1 });
+    await expect(as(51).org.join({ code, consent: true, kvkkVersion: 1 })).rejects.toThrow(/kullanım sınırına/);
     const second = await as(10).org.invitations.create({ orgId: 1, role: "student" });
     await as(10).org.invitations.revoke({ orgId: 1, invitationId: second.id });
-    await expect(as(52).org.join({ code: second.code, consent: true })).rejects.toThrow(/iptal/);
+    await expect(as(52).org.join({ code: second.code, consent: true, kvkkVersion: 1 })).rejects.toThrow(/iptal/);
     const third = await as(10).org.invitations.create({ orgId: 1, role: "student" });
     store.invitations.find((i) => i.id === third.id)!.expiresAt = new Date(Date.now() - 1000);
-    await expect(as(53).org.join({ code: third.code, consent: true })).rejects.toThrow(/süresi/);
-    await expect(as(54).org.join({ code: "ABCD-EFGH", consent: true })).rejects.toThrow(/bulunamadı/);
+    await expect(as(53).org.join({ code: third.code, consent: true, kvkkVersion: 1 })).rejects.toThrow(/süresi/);
+    await expect(as(54).org.join({ code: "ABCD-EFGH", consent: true, kvkkVersion: 1 })).rejects.toThrow(/bulunamadı/);
     expect(store.invitations.every((i) => i.codeHash.length === 64 && !i.codeHash.includes("-"))).toBe(true);
   });
 
@@ -156,7 +157,7 @@ describe("kurum izolasyonu (docs/kurumsal.md §5)", () => {
 
   it("9) kritik işlemler denetim kaydı üretir", async () => {
     const { code } = await as(10).org.invitations.create({ orgId: 1, role: "student" });
-    await as(60).org.join({ code, consent: true });
+    await as(60).org.join({ code, consent: true, kvkkVersion: 1 });
     await as(11).org.tasks.assign({ orgId: 1, studentUserId: 20, date: "2026-10-20", time: "17:00", subject: "Matematik", topic: "Problemler", kind: "Soru çözümü", minutes: 40 });
     await as(11).org.notes.create({ orgId: 1, studentUserId: 20, body: "not", visibility: "staff" });
     await as(60).org.leave({ orgId: 1 });
@@ -177,9 +178,9 @@ describe("kurum kuralları", () => {
   it("öğrenci açık onay olmadan katılamaz ve aynı anda tek kuruma bağlı olur", async () => {
     const { code } = await as(30).org.invitations.create({ orgId: 2, role: "student", maxUses: 5 });
     await expect(as(20).org.join({ code, consent: false as never })).rejects.toThrow();
-    await expect(as(20).org.join({ code, consent: true })).rejects.toThrow(/şu anki kurumundan ayrıl/);
+    await expect(as(20).org.join({ code, consent: true, kvkkVersion: 1 })).rejects.toThrow(/şu anki kurumundan ayrıl/);
     await as(20).org.leave({ orgId: 1 });
-    await expect(as(20).org.join({ code, consent: true })).resolves.toMatchObject({ orgId: 2, role: "student" });
+    await expect(as(20).org.join({ code, consent: true, kvkkVersion: 1 })).resolves.toMatchObject({ orgId: 2, role: "student" });
   });
 
   it("rol ve davet yetki tabloları", () => {
@@ -213,9 +214,49 @@ describe("kurum kuralları", () => {
     const student = await as(10).org.invitations.create({ orgId: 1, role: "student", subject: "Kimya" });
     expect(createInvitation).toHaveBeenNthCalledWith(1, expect.objectContaining({ role: "teacher", subject: "Kimya" }));
     expect(createInvitation).toHaveBeenNthCalledWith(2, expect.objectContaining({ role: "student", subject: null }));
-    await as(50).org.join({ code: teacher.code, consent: true });
+    await as(50).org.join({ code: teacher.code, consent: true, kvkkVersion: 1 });
     expect(acceptInvitation).toHaveBeenLastCalledWith(expect.objectContaining({ userId: 50, role: "teacher", subject: "Kimya" }));
     expect(student.code).toMatch(/-/);
+  });
+
+  it("KVKK: öğrenci kurumun güncel metin sürümünü onaylamadan katılamaz; önizleme metni kurum adıyla döner", async () => {
+    store.orgs[1].kvkkVersion = 3;
+    const { code } = await as(30).org.invitations.create({ orgId: 2, role: "student", maxUses: 5 });
+    const preview = await as(60).org.previewInvitation({ code });
+    expect(preview.kvkk).toMatchObject({ version: 3, isCustom: false });
+    expect(preview.kvkk!.notice).toContain("B Dershanesi");
+    await expect(as(60).org.join({ code, consent: true })).rejects.toThrow(/KVKK/);
+    await expect(as(60).org.join({ code, consent: true, kvkkVersion: 2 })).rejects.toThrow(/KVKK/);
+    await expect(as(60).org.join({ code, consent: true, kvkkVersion: 3 })).resolves.toMatchObject({ orgId: 2 });
+    expect(acceptInvitation).toHaveBeenLastCalledWith(expect.objectContaining({ userId: 60, kvkkVersion: 3 }));
+  });
+
+  it("üyelik süresi dolan kurum: panel okunur ama değişiklik yapılamaz, yeni katılım alınmaz", async () => {
+    const { code } = await as(10).org.invitations.create({ orgId: 1, role: "student", maxUses: 5 });
+    store.orgs[0].membershipEndsAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+    await expect(as(10).org.overview({ orgId: 1 })).resolves.toBeTruthy();
+    await expect(as(10).org.classes.create({ orgId: 1, name: "12-C" })).rejects.toThrow(/süresi doldu/);
+    await expect(as(11).org.notes.create({ orgId: 1, studentUserId: 20, body: "Not", visibility: "staff" })).rejects.toThrow(/süresi doldu/);
+    await expect(as(61).org.previewInvitation({ code })).rejects.toThrow(/süresi dolmuş/);
+    await expect(as(61).org.join({ code, consent: true, kvkkVersion: 1 })).rejects.toThrow(/süresi dolmuş/);
+  });
+
+  it("kredi havuzu kararı, üyelik durumu ve KVKK şablonu", () => {
+    expect(creditDecision({ monthly: 0, usedByOrg: 0, cap: null, usedByStudent: 0, cost: 2 })).toEqual({ ok: false, reason: "no_pool" });
+    expect(creditDecision({ monthly: 100, usedByOrg: 99, cap: null, usedByStudent: 0, cost: 2 })).toEqual({ ok: false, reason: "pool_empty" });
+    expect(creditDecision({ monthly: 100, usedByOrg: 98, cap: null, usedByStudent: 50, cost: 2 })).toEqual({ ok: true });
+    expect(creditDecision({ monthly: 100, usedByOrg: 10, cap: 10, usedByStudent: 9, cost: 2 })).toEqual({ ok: false, reason: "student_cap" });
+    const now = new Date("2026-10-18T12:00:00");
+    expect(membershipState({ membershipStartsAt: null, membershipEndsAt: null }, now)).toBe("active");
+    expect(membershipState({ membershipStartsAt: null, membershipEndsAt: new Date("2026-10-18T00:00:00") }, now)).toBe("active");
+    expect(membershipState({ membershipStartsAt: null, membershipEndsAt: new Date("2026-10-17T00:00:00") }, now)).toBe("expired");
+    expect(membershipState({ membershipStartsAt: new Date("2026-10-20"), membershipEndsAt: null }, now)).toBe("not_started");
+    expect(creditPeriodStart(now)).toEqual(new Date(2026, 9, 1));
+    const text = renderKvkk(DEFAULT_KVKK_NOTICE, { name: "Örnek Kurs", address: "Atatürk Cd. 1", district: "Çankaya", city: "Ankara", contactEmail: "kvkk@ornek.com", phone: null });
+    expect(text).toContain("Örnek Kurs");
+    expect(text).toContain("Atatürk Cd. 1, Çankaya, Ankara");
+    expect(text).toContain("kvkk@ornek.com");
+    expect(text).not.toMatch(/\{\{/);
   });
 
   it("davet kodu biçimi ve normalizasyonu", () => {

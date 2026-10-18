@@ -1,3 +1,4 @@
+import type { FeatureKey } from "./entitlements";
 import { calculatePlanAdherence, type AdherenceSession } from "./planAdherence";
 
 // Kurum Paneli: roller, davet kodu ve öğrenci özeti kuralları. Saf fonksiyonlar (sunucu ve test).
@@ -79,6 +80,57 @@ export type StudentSignals = {
   weakTopicCount: number;
   lastSignedIn: Date | null;
 };
+
+// --- Kurum üyeliği (paket + süre) ve AI kredi havuzu --------------------------
+
+export const ORG_PLANS = ["trial", "standard", "pro"] as const;
+export type OrgPlan = (typeof ORG_PLANS)[number];
+export const ORG_PLAN_LABELS: Record<OrgPlan, string> = { trial: "Deneme", standard: "Standart", pro: "Pro" };
+/** Platform yöneticisinin kurum oluştururken / paketi değiştirirken önerilen aylık AI kredisi (elle değiştirilebilir). */
+export const ORG_PLAN_DEFAULT_CREDITS: Record<OrgPlan, number> = { trial: 500, standard: 5000, pro: 20000 };
+
+/** Bir AI işleminin kurum havuzundan düşürdüğü kredi (maliyeti yüksek işlem = daha çok kredi). */
+export const ORG_CREDIT_COSTS: Partial<Record<FeatureKey, number>> = {
+  NOTE_VOICE: 1,
+  NOTE_OCR: 2,
+  NOTE_AI: 2,
+  OCR_EXAM_IMPORT: 3,
+  OCR_BOOK_IMPORT: 3,
+  AI_STUDY_PLAN: 5,
+};
+export const ORG_CREDIT_FEATURE_LABELS: Partial<Record<FeatureKey, string>> = {
+  NOTE_VOICE: "Sesli not",
+  NOTE_OCR: "Fotoğraftan metin",
+  NOTE_AI: "Soru çözümü ve AI araçları",
+  OCR_EXAM_IMPORT: "Belgeden deneme aktarımı",
+  OCR_BOOK_IMPORT: "Kitap/kaynak okuma",
+  AI_STUDY_PLAN: "AI çalışma planı",
+};
+
+export type MembershipState = "active" | "not_started" | "expired";
+/** Kurum üyeliğinin bugünkü durumu; tarih girilmemişse süresiz sayılır. Bitiş günü dahil (gün sonuna kadar). */
+export function membershipState(org: { membershipStartsAt: Date | string | null; membershipEndsAt: Date | string | null }, now = new Date()): MembershipState {
+  if (org.membershipStartsAt && new Date(org.membershipStartsAt).getTime() > now.getTime()) return "not_started";
+  if (org.membershipEndsAt) {
+    const end = new Date(org.membershipEndsAt); end.setHours(23, 59, 59, 999);
+    if (end.getTime() < now.getTime()) return "expired";
+  }
+  return "active";
+}
+
+/** Kredi dönemi: içinde bulunulan takvim ayı (her ayın ilk günü yenilenir). */
+export function creditPeriodStart(now = new Date()): Date {
+  return new Date(now.getFullYear(), now.getMonth(), 1);
+}
+
+export type CreditDecision = { ok: true } | { ok: false; reason: "no_pool" | "pool_empty" | "student_cap" };
+/** İşlem kurum havuzundan karşılanabilir mi? Karşılanamazsa öğrencinin kendi kotası devreye girer. */
+export function creditDecision(input: { monthly: number; usedByOrg: number; cap: number | null; usedByStudent: number; cost: number }): CreditDecision {
+  if (input.monthly <= 0) return { ok: false, reason: "no_pool" };
+  if (input.usedByOrg + input.cost > input.monthly) return { ok: false, reason: "pool_empty" };
+  if (input.cap !== null && input.usedByStudent + input.cost > input.cap) return { ok: false, reason: "student_cap" };
+  return { ok: true };
+}
 
 export const RISK_RULES = { inactiveDays: 7, lowAdherence: 40, netDrop: 5 } as const;
 export type RiskKey = "inactive" | "low_adherence" | "net_drop";

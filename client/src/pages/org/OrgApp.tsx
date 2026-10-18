@@ -1,6 +1,6 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
-import { ROLE_LABELS, isStaffRole, type OrgRole } from "@shared/org";
+import { ROLE_LABELS, isStaffRole, type MembershipState, type OrgRole } from "@shared/org";
 import { Building2, ClipboardList, GraduationCap, LayoutDashboard, LogOut, Mail, Menu, School, Settings, Users, X } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useLocation } from "wouter";
@@ -15,7 +15,7 @@ const OrgInvitations = lazy(() => import("./OrgManage").then((module) => ({ defa
 const OrgAudit = lazy(() => import("./OrgManage").then((module) => ({ default: module.OrgAudit })));
 const OrgSettings = lazy(() => import("./OrgSettings"));
 
-export type OrgScope = { orgId: number; orgName: string; role: OrgRole };
+export type OrgScope = { orgId: number; orgName: string; role: OrgRole; state?: MembershipState };
 
 const NAV: Array<{ key: OrgSection; label: string; icon: typeof Users; minRole?: "coordinator" | "admin" }> = [
   { key: "dashboard", label: "Kurum Paneli", icon: LayoutDashboard },
@@ -110,6 +110,11 @@ export default function OrgApp() {
           <div className="topbar-actions"><span className="demo-chip"><Building2 size={12} /> {ROLE_LABELS[scope.role]}</span></div>
         </header>
         <div className="content-wrap">
+          {scope.state && scope.state !== "active" && (
+            <div className="mb-5 rounded-2xl border border-danger/30 bg-danger-soft/60 px-4 py-3 text-[13px] font-semibold text-danger" role="status">
+              {scope.state === "expired" ? "Kurum üyeliğinin süresi doldu. Panel salt okunur: verileri görebilirsin ama değişiklik yapamazsın; öğrencilerin AI işlemleri kendi kotalarından yürür. Yenilemek için Pusula ile iletişime geç." : "Kurum üyeliği henüz başlamadı; başlangıç tarihine kadar panel salt okunur."}
+            </div>
+          )}
           <Suspense fallback={<div className="flex min-h-[40vh] items-center justify-center"><span className="h-7 w-7 animate-spin rounded-full border-2 border-brand border-t-transparent" /></div>}>
             {route.section === "dashboard" && <OrgDashboard scope={scope} />}
             {route.section === "students" && <OrgStudents scope={scope} />}

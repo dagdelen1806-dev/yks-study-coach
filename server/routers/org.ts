@@ -2,7 +2,8 @@ import { TRPCError } from "@trpc/server";
 import { createHash, randomInt } from "node:crypto";
 import { z } from "zod";
 import { findClassConflict, toMinutes } from "../../shared/classSchedule";
-import { CLASS_GRADES, CLASS_TRACKS, INVITABLE_ROLES, ORG_KINDS, ORG_ROLES, canAssignRole, canInviteRole, generateInviteCode, hasRole, invitationProblem, isStaffRole, normalizeInviteCode, seesAllStudents, summarizeStudent, type RiskKey, type StudentSummary } from "../../shared/org";
+import { effectiveKvkk } from "../../shared/kvkk";
+import { CLASS_GRADES, CLASS_TRACKS, INVITABLE_ROLES, ORG_KINDS, ORG_PLANS, ORG_PLAN_DEFAULT_CREDITS, ORG_ROLES, membershipState, canAssignRole, canInviteRole, generateInviteCode, hasRole, invitationProblem, isStaffRole, normalizeInviteCode, seesAllStudents, summarizeStudent, type RiskKey, type StudentSummary } from "../../shared/org";
 import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 import { getStudentProfile, getUserMockExams, getUserTopicProgress } from "../db";
 import { audit, assertCanViewStudent, orgProcedure, type OrgContext } from "../org/orgAccess";
@@ -36,12 +37,17 @@ import {
   setClassStudents,
   setMemberRole,
   setMemberSubject,
+  setPerStudentCreditCap,
+  listStudentKvkkVersions,
+  updateKvkk,
+  updateOrgMembership,
   setOrganizationStatus,
   setTeacherStudents,
   updateClass,
   updateOrganization,
 } from "../org/orgDb";
 import { getClassSchedule } from "../schedule/classScheduleDb";
+import { creditsUsedThisMonth, orgCreditReport } from "../org/orgCredits";
 
 const id = z.number().int().positive();
 const hashCode = (code: string) => createHash("sha256").update(normalizeInviteCode(code)).digest("hex");
@@ -172,7 +178,30 @@ export const orgRouter = router({
     get: orgProcedure("teacher").query(async ({ ctx }) => {
       const org = await getOrganization(ctx.membership.orgId);
       if (!org) throw new TRPCError({ code: "NOT_FOUND", message: "Kurum bulunamadı." });
-      return org;
+      return { ...org, membershipState: membershipState(org), kvkk: effectiveKvkk(org) };
+    }),
+    /** Kurum yöneticisi: öğrenci başına aylık AI kredi üst sınırı (null = sınırsız). */
+    setCreditCap: orgProcedure("admin").input(z.object({ cap: z.number().int().min(1).max(1_000_000).nullable() })).mutation(async ({ ctx, input }) => {
+      await setPerStudentCreditCap(ctx.membership.orgId, input.cap);
+      await audit(ctx, "org.credit_cap", { type: "organization", id: ctx.membership.orgId }, { cap: input.cap });
+      return { ok: true };
+    }),
+    credits: orgProcedure("coordinator").query(async ({ ctx }) => {
+      const org = await getOrganization(ctx.membership.orgId);
+      if (!org) throw new TRPCError({ code: "NOT_FOUND", message: "Kurum bulunamadı." });
+      const report = await orgCreditReport(ctx.membership.orgId);
+      return { monthly: org.aiCreditsMonthly, cap: org.perStudentCreditCap, remaining: Math.max(0, org.aiCreditsMonthly - report.used), ...report };
+    }),
+    /** KVKK metinleri: boş gönderilen metin platform şablonuna döner. Her kayıtta sürüm artar. */
+    updateKvkk: orgProcedure("admin").input(z.object({ notice: z.string().trim().max(20000).nullable(), consent: z.string().trim().max(5000).nullable() })).mutation(async ({ ctx, input }) => {
+      await updateKvkk(ctx.membership.orgId, input.notice || null, input.consent || null);
+      await audit(ctx, "org.kvkk", { type: "organization", id: ctx.membership.orgId }, { custom: Boolean(input.notice || input.consent) });
+      return { ok: true };
+    }),
+    kvkkStatus: orgProcedure("coordinator").query(async ({ ctx }) => {
+      const [org, versions] = await Promise.all([getOrganization(ctx.membership.orgId), listStudentKvkkVersions(ctx.membership.orgId)]);
+      const current = org?.kvkkVersion ?? 1;
+      return { current, students: versions.length, onCurrent: versions.filter((version) => version === current).length, onOlder: versions.filter((version) => version !== null && version !== current).length, missing: versions.filter((version) => version === null).length };
     }),
     update: orgProcedure("admin")
       .input(z.object({ name: z.string().trim().min(2).max(160), kind: z.enum(ORG_KINDS), city: optionalText(80), district: optionalText(80), address: optionalText(300), phone: optionalText(40), contactEmail: z.union([z.literal(""), z.string().trim().email("Geçerli bir e-posta yaz.").max(160)]).optional().transform((value) => value || null) }))
@@ -311,17 +340,27 @@ export const orgRouter = router({
     const invitation = await findInvitationByHash(hashCode(input.code));
     const problem = !invitation || invitation.orgStatus !== "active" ? "Davet kodu bulunamadı." : invitationProblem(invitation);
     if (problem) throw new TRPCError({ code: "BAD_REQUEST", message: problem });
-    return { orgName: invitation!.orgName, role: invitation!.role };
+    if (membershipState(invitation!) === "expired") throw new TRPCError({ code: "BAD_REQUEST", message: "Bu kurumun üyelik süresi dolmuş; yeni katılım alınmıyor." });
+    const org = invitation!.role === "student" ? await getOrganization(invitation!.orgId) : null;
+    return { orgName: invitation!.orgName, role: invitation!.role, kvkk: org ? effectiveKvkk(org) : null };
   }),
-  join: protectedProcedure.input(z.object({ code: z.string().trim().min(4).max(20), consent: z.literal(true) })).mutation(({ ctx, input }) => userFacing(async () => {
+  join: protectedProcedure.input(z.object({ code: z.string().trim().min(4).max(20), consent: z.literal(true), kvkkVersion: z.number().int().positive().optional() })).mutation(({ ctx, input }) => userFacing(async () => {
     const invitation = await findInvitationByHash(hashCode(input.code));
     const problem = !invitation || invitation.orgStatus !== "active" ? "Davet kodu bulunamadı." : invitationProblem(invitation);
     if (problem) throw new OrgError(problem);
+    if (membershipState(invitation!) === "expired") throw new OrgError("Bu kurumun üyelik süresi dolmuş; yeni katılım alınmıyor.");
+    // Öğrenci, kurumun GÜNCEL KVKK metnini onaylamış olmalı (onay anında metin değiştiyse yeniden okutulur).
+    let kvkkVersion: number | null = null;
+    if (invitation!.role === "student") {
+      const org = await getOrganization(invitation!.orgId);
+      kvkkVersion = org?.kvkkVersion ?? 1;
+      if (input.kvkkVersion !== kvkkVersion) throw new OrgError("Kurumun KVKK metni güncellendi; lütfen metni yeniden okuyup onayla.");
+    }
     const memberships = await listMyMemberships(ctx.user.id);
     if (memberships.some((row) => row.orgId === invitation!.orgId)) throw new OrgError("Bu kuruma zaten bağlısın.");
     // Öğrenci aynı anda tek kuruma bağlı olur.
     if (invitation!.role === "student" && memberships.some((row) => row.role === "student")) throw new OrgError("Önce şu anki kurumundan ayrılman gerekiyor.");
-    await acceptInvitation({ invitationId: invitation!.id, orgId: invitation!.orgId, userId: ctx.user.id, role: invitation!.role, invitedBy: invitation!.createdBy, subject: invitation!.subject });
+    await acceptInvitation({ invitationId: invitation!.id, orgId: invitation!.orgId, userId: ctx.user.id, role: invitation!.role, invitedBy: invitation!.createdBy, subject: invitation!.subject, kvkkVersion });
     await audit({ user: { id: ctx.user.id }, membership: { orgId: invitation!.orgId, orgName: invitation!.orgName, role: invitation!.role } }, "member.join", { type: "user", id: ctx.user.id }, { role: invitation!.role });
     return { orgId: invitation!.orgId, orgName: invitation!.orgName, role: invitation!.role };
   })),
@@ -335,11 +374,28 @@ export const orgRouter = router({
     return { ok: true };
   }),
   myFeedback: protectedProcedure.query(({ ctx }) => listStudentFeedback(ctx.user.id)),
+  /** Üyenin bağlı olduğu kurumun KVKK metinleri ve kendi onayladığı sürüm ("Kurumum"). */
+  myKvkk: protectedProcedure.input(z.object({ orgId: id })).query(async ({ ctx, input }) => {
+    const membership = (await listMyMemberships(ctx.user.id)).find((row) => row.orgId === input.orgId);
+    const org = membership ? await getOrganization(input.orgId) : null;
+    if (!membership || !org) throw new TRPCError({ code: "NOT_FOUND", message: "Kurum bulunamadı." });
+    return { ...effectiveKvkk(org), acceptedVersion: membership.kvkkVersion ?? null, consentAt: membership.consentAt ?? null };
+  }),
 });
 
 /** Platform admini: kurum oluşturma (+ ilk sahip davet kodu), listeleme, askıya alma. */
 export const adminOrgsRouter = router({
-  list: adminProcedure.query(() => listOrganizations()),
+  list: adminProcedure.query(async () => {
+    const orgs = await listOrganizations();
+    const used = await creditsUsedThisMonth(orgs.map((org) => org.id));
+    return orgs.map((org) => ({ ...org, membershipState: membershipState(org), creditsUsed: used.get(org.id) ?? 0 }));
+  }),
+  setMembership: adminProcedure.input(z.object({ orgId: id, plan: z.enum(ORG_PLANS), startsAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), endsAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), aiCreditsMonthly: z.number().int().min(0).max(10_000_000) })).mutation(async ({ input }) => {
+    if (input.startsAt && input.endsAt && input.endsAt < input.startsAt) throw new TRPCError({ code: "BAD_REQUEST", message: "Bitiş tarihi başlangıçtan önce olamaz." });
+    const day = (value: string | null) => (value ? new Date(`${value}T00:00:00`) : null);
+    await updateOrgMembership(input.orgId, { plan: input.plan, membershipStartsAt: day(input.startsAt), membershipEndsAt: day(input.endsAt), aiCreditsMonthly: input.aiCreditsMonthly });
+    return { ok: true };
+  }),
   create: adminProcedure.input(z.object({ name: z.string().trim().min(2).max(160), slug: z.string().trim().regex(/^[a-z0-9-]{3,80}$/, "Kısa ad küçük harf, rakam ve tire içermeli.") })).mutation(({ ctx, input }) => userFacing(async () => {
     let orgId: number;
     try {
@@ -349,6 +405,7 @@ export const adminOrgsRouter = router({
       throw error;
     }
     // İlk kurum yöneticisi için tek kullanımlık davet (yönetici rolü ancak platform admininden gelir).
+    await updateOrgMembership(orgId, { plan: "trial", membershipStartsAt: new Date(), membershipEndsAt: new Date(Date.now() + 30 * DAY), aiCreditsMonthly: ORG_PLAN_DEFAULT_CREDITS.trial });
     const code = generateInviteCode((max) => randomInt(max));
     await createInvitation({ orgId, role: "admin", codeHash: hashCode(code), note: "Kurum yöneticisi daveti", expiresAt: new Date(Date.now() + 30 * DAY), maxUses: 1, createdBy: ctx.user.id });
     return { orgId, adminCode: code };

@@ -12,7 +12,7 @@ import { randomBytes, scryptSync } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { getDb } from "../server/db";
 import { parseIdentifier } from "../server/_core/loginIdentifier";
-import { classStudents, counselingNotes, organizationAuditLogs, organizationClasses, organizationInvitations, organizationMembers, organizations, studentProfiles, teacherAssignments, topicStudyLogs, users } from "../drizzle/schema";
+import { classStudents, counselingNotes, organizationCreditUsage, organizationAuditLogs, organizationClasses, organizationInvitations, organizationMembers, organizations, studentProfiles, teacherAssignments, topicStudyLogs, users } from "../drizzle/schema";
 
 const SLUG = "test-dershanesi";
 const PASSWORD = "test1234";
@@ -54,11 +54,11 @@ async function main() {
   if (old) {
     const classIds = (await db.select({ id: organizationClasses.id }).from(organizationClasses).where(eq(organizationClasses.orgId, old.id))).map((row) => row.id);
     if (classIds.length) await db.delete(classStudents).where(inArray(classStudents.classId, classIds));
-    for (const table of [organizationClasses, teacherAssignments, counselingNotes, organizationInvitations, organizationAuditLogs, organizationMembers]) await db.delete(table).where(eq(table.orgId, old.id));
+    for (const table of [organizationClasses, teacherAssignments, counselingNotes, organizationInvitations, organizationAuditLogs, organizationMembers, organizationCreditUsage]) await db.delete(table).where(eq(table.orgId, old.id));
     await db.delete(organizations).where(eq(organizations.id, old.id));
   }
 
-  const orgResult = await db.insert(organizations).values({ name: "Test Dershanesi", slug: SLUG });
+  const orgResult = await db.insert(organizations).values({ name: "Test Dershanesi", slug: SLUG, plan: "standard", membershipStartsAt: new Date(), membershipEndsAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), aiCreditsMonthly: 5000, city: "Ankara", district: "Çankaya", contactEmail: "kvkk@test.local" });
   const orgId = Number(orgResult[0].insertId);
 
   const staffIds: Record<string, number> = {};
@@ -74,7 +74,7 @@ async function main() {
     studentIds.push(userId);
     console.log(`Öğrenci verisi: ${student.email}`);
     execFileSync("npx", ["tsx", "--env-file=.env", "scripts/seed-test-student.ts", student.email, student.name, student.avatar], { stdio: "inherit", shell: true });
-    await db.insert(organizationMembers).values({ orgId, userId, role: "student", status: "active", consentAt: new Date(), invitedBy: staffIds["kurum.admin@test.local"] });
+    await db.insert(organizationMembers).values({ orgId, userId, role: "student", status: "active", consentAt: new Date(), kvkkVersion: 1, invitedBy: staffIds["kurum.admin@test.local"] });
   }
   // Emir: son haftada hiç çalışmamış → "7 gündür etkinlik yok" riski.
   const riskId = studentIds[5];
@@ -96,6 +96,10 @@ async function main() {
     { orgId, studentUserId: studentIds[0], authorUserId: murat, body: "Paragraf netlerin çok iyi gidiyor, aynen devam! Bu hafta problemlere biraz daha ağırlık verelim.", visibility: "student" },
     { orgId, studentUserId: riskId, authorUserId: ayse, body: "Bir haftadır uygulamaya giriş yok; veliyle görüşülecek.", visibility: "staff" },
   ]);
+
+  // Bu ay kurum kredisinden yapılmış örnek AI işlemleri (Ayarlar → Üyelik ve krediler).
+  const usage = [[0, "NOTE_AI", 2, 14], [0, "NOTE_VOICE", 1, 9], [1, "AI_STUDY_PLAN", 5, 3], [2, "OCR_BOOK_IMPORT", 3, 4], [3, "NOTE_AI", 2, 6]] as const;
+  await db.insert(organizationCreditUsage).values(usage.flatMap(([index, featureKey, credits, times]) => Array.from({ length: times }, () => ({ orgId, userId: studentIds[index], featureKey, credits }))));
 
   console.log(`\nKurum hazır (id ${orgId}). Şifre: ${PASSWORD}`);
   console.log(`  Yönetici: ${staff[0].email}\n  Öğretmenler: ${staff[1].email} (12-A), ${staff[2].email} (12-B)\n  Öğrenciler: ${students.map((student) => student.email).join(", ")}`);

@@ -1,15 +1,19 @@
 import { trpc } from "@/lib/trpc";
 import { EmptyNote, PageHeader, Panel, Segmented, primaryButton, secondaryButton } from "@/components/app/kit";
-import { CLASS_GRADES, CLASS_TRACKS, CLASS_TRACK_LABELS, ORG_KINDS, ORG_KIND_LABELS, ROLE_LABELS, ROLE_PERMISSIONS, TEACHER_SUBJECTS, hasRole, isStaffRole, type OrgKind } from "@shared/org";
-import { Building2, Check, Copy, Pencil, Plus, School, ShieldCheck, Trash2, UserPlus, Users, X } from "lucide-react";
+import { CLASS_GRADES, CLASS_TRACKS, CLASS_TRACK_LABELS, ORG_CREDIT_COSTS, ORG_CREDIT_FEATURE_LABELS, ORG_KINDS, ORG_KIND_LABELS, ORG_PLAN_LABELS, ROLE_LABELS, ROLE_PERMISSIONS, TEACHER_SUBJECTS, hasRole, isStaffRole, type OrgKind } from "@shared/org";
+import { DEFAULT_KVKK_CONSENT, DEFAULT_KVKK_NOTICE, KVKK_PLACEHOLDERS } from "@shared/kvkk";
+import type { FeatureKey } from "@shared/entitlements";
+import { Building2, Check, Copy, FileText, Pencil, Plus, RotateCcw, School, ShieldCheck, Sparkles, Trash2, UserPlus, Users, Wallet, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import type { OrgScope } from "./OrgApp";
 import { Initials, relativeTime } from "./orgShared";
 
-type Tab = "org" | "teachers" | "classes" | "roles";
+type Tab = "org" | "membership" | "kvkk" | "teachers" | "classes" | "roles";
 const TABS: Array<{ value: Tab; label: string }> = [
   { value: "org", label: "Kurum bilgileri" },
+  { value: "membership", label: "Üyelik ve krediler" },
+  { value: "kvkk", label: "KVKK metinleri" },
   { value: "teachers", label: "Öğretmen tanımlama" },
   { value: "classes", label: "Sınıf tanımlama" },
   { value: "roles", label: "Roller ve yetkiler" },
@@ -25,6 +29,8 @@ export default function OrgSettings({ scope }: { scope: OrgScope }) {
       <PageHeader eyebrow={scope.orgName} title="Ayarlar" description="Kurumun bilgilerini, öğretmenlerini ve sınıflarını buradan tanımla. Öğrenciler kuruma yalnızca kendi onaylarıyla, davet koduyla katılır." />
       <div className="overflow-x-auto"><Segmented value={tab} options={TABS} onChange={setTab} label="Ayar bölümleri" /></div>
       {tab === "org" && <OrgProfileSettings scope={scope} />}
+      {tab === "membership" && <MembershipSettings scope={scope} />}
+      {tab === "kvkk" && <KvkkSettings scope={scope} />}
       {tab === "teachers" && <TeacherSettings scope={scope} />}
       {tab === "classes" && <ClassSettings scope={scope} />}
       {tab === "roles" && <RoleSettings />}
@@ -58,6 +64,119 @@ function OrgProfileSettings({ scope }: { scope: OrgScope }) {
       <p className="mt-3 text-[12px] text-ink-4">Kurum kısa adı: {org.data.slug} · Oluşturulma: {new Date(org.data.createdAt).toLocaleDateString("tr-TR")}</p>
       {canEdit && <button onClick={() => save.mutate({ orgId: scope.orgId, ...form })} disabled={save.isPending || form.name.trim().length < 2} className={`${primaryButton} mt-4 self-start`}><Check size={16} /> {save.isPending ? "Kaydediliyor…" : "Kaydet"}</button>}
     </Panel>
+  );
+}
+
+const formatDay = (value: string | Date | null | undefined) => (value ? new Date(value).toLocaleDateString("tr-TR", { day: "numeric", month: "long", year: "numeric" }) : "Süresiz");
+
+function MembershipSettings({ scope }: { scope: OrgScope }) {
+  const utils = trpc.useUtils();
+  const isAdmin = hasRole(scope.role, "admin");
+  const org = trpc.org.settings.get.useQuery({ orgId: scope.orgId }, { retry: false });
+  const credits = trpc.org.settings.credits.useQuery({ orgId: scope.orgId }, { retry: false });
+  const [cap, setCap] = useState("");
+  useEffect(() => { if (credits.data) setCap(credits.data.cap ? String(credits.data.cap) : ""); }, [credits.data?.cap]);
+  const saveCap = trpc.org.settings.setCreditCap.useMutation({ onSuccess: () => { toast.success("Öğrenci sınırı kaydedildi."); utils.org.settings.credits.invalidate(); }, onError: (error) => toast.error(error.message) });
+
+  if (!org.data || !credits.data) return <EmptyNote>Yükleniyor…</EmptyNote>;
+  const state = org.data.membershipState;
+  const daysLeft = org.data.membershipEndsAt ? Math.ceil((new Date(org.data.membershipEndsAt).getTime() - Date.now()) / 86_400_000) : null;
+  const percent = credits.data.monthly ? Math.min(100, Math.round((credits.data.used / credits.data.monthly) * 100)) : 0;
+  const nextReset = new Date(new Date(credits.data.periodStart).getFullYear(), new Date(credits.data.periodStart).getMonth() + 1, 1);
+
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-4 md:grid-cols-3">
+        <section className="soft-card p-5">
+          <p className="flex items-center gap-2 text-[13px] font-semibold text-ink-3"><Sparkles size={16} className="text-brand" /> Paket</p>
+          <p className="mt-2 text-[24px] font-extrabold text-ink">{ORG_PLAN_LABELS[org.data.plan]}</p>
+          <span className={`mt-2 inline-block rounded-full px-2 py-0.5 text-[11px] font-bold ${state === "active" ? "bg-success-soft text-success" : "bg-danger-soft text-danger"}`}>{state === "active" ? "Aktif" : state === "expired" ? "Süresi doldu" : "Henüz başlamadı"}</span>
+        </section>
+        <section className="soft-card p-5">
+          <p className="text-[13px] font-semibold text-ink-3">Üyelik süresi</p>
+          <p className="mt-2 text-[15px] font-bold text-ink">{formatDay(org.data.membershipStartsAt)} → {formatDay(org.data.membershipEndsAt)}</p>
+          <p className="mt-1 text-[12px] text-ink-3">{daysLeft === null ? "Bitiş tarihi tanımlı değil." : daysLeft >= 0 ? `${daysLeft} gün kaldı.` : "Süre doldu: panel salt okunur, öğrencilerin AI işlemleri kendi kotalarından yürür."}</p>
+        </section>
+        <section className="soft-card p-5">
+          <p className="flex items-center gap-2 text-[13px] font-semibold text-ink-3"><Wallet size={16} className="text-brand" /> Bu ay kalan AI kredisi</p>
+          <p className="mt-2 text-[24px] font-extrabold text-ink">{credits.data.remaining.toLocaleString("tr-TR")} <span className="text-[13px] font-semibold text-ink-3">/ {credits.data.monthly.toLocaleString("tr-TR")}</span></p>
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-paper"><div className={`h-full rounded-full ${percent >= 90 ? "bg-danger" : "bg-brand"}`} style={{ width: `${percent}%` }} /></div>
+          <p className="mt-1 text-[12px] text-ink-3">{nextReset.toLocaleDateString("tr-TR", { day: "numeric", month: "long" })} tarihinde yenilenir.</p>
+        </section>
+      </div>
+      <p className="text-[12px] text-ink-3">Paket, süre ve aylık kredi Pusula platform yöneticisi tarafından tanımlanır. Değişiklik için bizimle iletişime geçin.</p>
+
+      <div className="grid gap-5 lg:grid-cols-2">
+        <Panel icon={<Wallet size={18} />} title="Kredi nasıl harcanır?" subtitle="Kuruma bağlı öğrencilerin AI işlemleri önce kurum havuzundan düşer; havuz biterse öğrencinin kendi hakkı kullanılır.">
+          <ul className="divide-y divide-rule text-[13px]">
+            {(Object.keys(ORG_CREDIT_COSTS) as FeatureKey[]).map((feature) => {
+              const row = credits.data!.byFeature.find((item) => item.featureKey === feature);
+              return <li key={feature} className="flex items-center justify-between gap-3 py-2"><span className="text-ink-2">{ORG_CREDIT_FEATURE_LABELS[feature]} <span className="text-ink-4">· {ORG_CREDIT_COSTS[feature]} kredi</span></span><span className="font-semibold text-ink">{row ? `${row.uses} işlem · ${row.credits} kredi` : "—"}</span></li>;
+            })}
+          </ul>
+        </Panel>
+        <Panel icon={<Users size={18} />} title="En çok kredi kullanan öğrenciler" subtitle="Bu ay">
+          {credits.data.byStudent.length === 0 ? <EmptyNote>Bu ay henüz kredi kullanılmadı.</EmptyNote> : (
+            <ul className="divide-y divide-rule text-[13px]">{credits.data.byStudent.map((row) => <li key={row.userId} className="flex items-center justify-between gap-3 py-2"><span className="flex items-center gap-2"><Initials name={row.name} size={26} /><span className="font-semibold text-ink">{row.name}</span></span><span className="text-ink-2">{row.uses} işlem · <strong className="text-ink">{row.credits}</strong> kredi</span></li>)}</ul>
+          )}
+          <div className="mt-4 border-t border-rule pt-4">
+            <label className="block"><span className="form-label">Öğrenci başına aylık üst sınır (kredi)</span>
+              <div className="flex gap-2"><input type="number" min={1} value={cap} onChange={(event) => setCap(event.target.value)} disabled={!isAdmin} placeholder="Sınırsız" className="form-input flex-1" /><button onClick={() => saveCap.mutate({ orgId: scope.orgId, cap: cap ? Math.max(1, Math.round(Number(cap))) : null })} disabled={!isAdmin || saveCap.isPending} className={secondaryButton}>Kaydet</button></div>
+            </label>
+            <p className="mt-1 text-[12px] text-ink-3">Bir öğrencinin havuzu tek başına tüketmesini önler. Boş bırakırsan sınır yok.</p>
+          </div>
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+function KvkkSettings({ scope }: { scope: OrgScope }) {
+  const utils = trpc.useUtils();
+  const isAdmin = hasRole(scope.role, "admin");
+  const org = trpc.org.settings.get.useQuery({ orgId: scope.orgId }, { retry: false });
+  const status = trpc.org.settings.kvkkStatus.useQuery({ orgId: scope.orgId }, { retry: false });
+  const [editing, setEditing] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [consent, setConsent] = useState("");
+  const save = trpc.org.settings.updateKvkk.useMutation({
+    onSuccess: () => { toast.success("KVKK metinleri kaydedildi; yeni katılan öğrenciler bu sürümü onaylayacak."); setEditing(false); utils.org.settings.get.invalidate(); utils.org.settings.kvkkStatus.invalidate(); },
+    onError: (error) => toast.error(error.message),
+  });
+  if (!org.data) return <EmptyNote>Yükleniyor…</EmptyNote>;
+  const kvkk = org.data.kvkk;
+  const startEditing = () => { setNotice(org.data!.kvkkNotice || DEFAULT_KVKK_NOTICE); setConsent(org.data!.kvkkConsent || DEFAULT_KVKK_CONSENT); setEditing(true); };
+
+  return (
+    <div className="space-y-5">
+      <section className="soft-card flex flex-wrap items-center gap-x-6 gap-y-2 p-4 text-[13px]">
+        <span className="font-semibold text-ink">Sürüm {kvkk.version} · {kvkk.isCustom ? "Kurumun kendi metni" : "Pusula hazır şablonu"}</span>
+        {org.data.kvkkUpdatedAt && <span className="text-ink-3">Son güncelleme: {new Date(org.data.kvkkUpdatedAt).toLocaleDateString("tr-TR")}</span>}
+        {status.data && <span className="text-ink-3">Güncel sürümü onaylayan: {status.data.onCurrent} / {status.data.students} öğrenci{status.data.onOlder ? ` · eski sürümde: ${status.data.onOlder}` : ""}{status.data.missing ? ` · onay kaydı olmayan: ${status.data.missing}` : ""}</span>}
+      </section>
+      <p className="text-[12px] leading-5 text-ink-3">Hazır şablon KVKK m.10 aydınlatma başlıklarını izler ve kurum adı, adres, e-posta, telefon alanları Kurum bilgileri&apos;nden otomatik dolar. Hukuki görüş değildir; kurumunuzun hukuk danışmanıyla gözden geçirmenizi öneririz. Öğrenci kuruma katılırken iki metni de okur, aydınlatma metnini okuduğunu ve açık rızasını ayrı ayrı onaylar; onayladığı sürüm kaydedilir.</p>
+
+      {!editing ? (
+        <>
+          <Panel icon={<FileText size={18} />} title="Aydınlatma metni (öğrencinin göreceği hâli)" action={isAdmin ? <button onClick={startEditing} className={secondaryButton}><Pencil size={14} /> Düzenle</button> : undefined}>
+            <div className="max-h-[420px] overflow-y-auto whitespace-pre-line rounded-xl border border-rule bg-paper/40 p-4 text-[13px] leading-6 text-ink-2">{kvkk.notice}</div>
+          </Panel>
+          <Panel icon={<ShieldCheck size={18} />} title="Açık rıza metni">
+            <div className="whitespace-pre-line rounded-xl border border-rule bg-paper/40 p-4 text-[13px] leading-6 text-ink-2">{kvkk.consent}</div>
+          </Panel>
+        </>
+      ) : (
+        <Panel icon={<Pencil size={18} />} title="KVKK metinlerini düzenle" subtitle={`Kullanabileceğin alanlar: ${KVKK_PLACEHOLDERS.map((key) => `{{${key}}}`).join(", ")}. Kaydedince sürüm ${kvkk.version + 1} olur.`}>
+          <label className="block"><span className="form-label">Aydınlatma metni</span><textarea value={notice} onChange={(event) => setNotice(event.target.value)} maxLength={20000} rows={16} className="form-input min-h-[320px] py-3 font-mono text-[12.5px] leading-5" /></label>
+          <label className="mt-3 block"><span className="form-label">Açık rıza metni</span><textarea value={consent} onChange={(event) => setConsent(event.target.value)} maxLength={5000} rows={6} className="form-input min-h-[140px] py-3 font-mono text-[12.5px] leading-5" /></label>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button onClick={() => save.mutate({ orgId: scope.orgId, notice: notice.trim() === DEFAULT_KVKK_NOTICE.trim() ? null : notice, consent: consent.trim() === DEFAULT_KVKK_CONSENT.trim() ? null : consent })} disabled={save.isPending || !notice.trim() || !consent.trim()} className={primaryButton}><Check size={16} /> {save.isPending ? "Kaydediliyor…" : "Kaydet"}</button>
+            <button onClick={() => { setNotice(DEFAULT_KVKK_NOTICE); setConsent(DEFAULT_KVKK_CONSENT); }} className={secondaryButton}><RotateCcw size={15} /> Hazır şablona dön</button>
+            <button onClick={() => setEditing(false)} className={secondaryButton}><X size={15} /> Vazgeç</button>
+          </div>
+        </Panel>
+      )}
+    </div>
   );
 }
 

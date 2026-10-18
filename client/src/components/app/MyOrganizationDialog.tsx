@@ -1,6 +1,6 @@
 import { trpc } from "@/lib/trpc";
 import { ROLE_LABELS, isStaffRole } from "@shared/org";
-import { Building2, Check, LogOut, X } from "lucide-react";
+import { Building2, Check, FileText, LogOut, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
@@ -21,9 +21,12 @@ export default function MyOrganizationDialog({ onClose }: { onClose: () => void 
   const [, setLocation] = useLocation();
   const memberships = trpc.org.mine.useQuery(undefined, { retry: false });
   const [code, setCode] = useState("");
-  const [preview, setPreview] = useState<{ orgName: string; role: string } | null>(null);
+  const [preview, setPreview] = useState<{ orgName: string; role: string; kvkk: { version: number; notice: string; consent: string } | null } | null>(null);
   const [consent, setConsent] = useState(false);
-  const check = trpc.org.previewInvitation.useMutation({ onSuccess: (result) => { setPreview(result); setConsent(false); }, onError: (error) => toast.error(error.message) });
+  const [noticeRead, setNoticeRead] = useState(false);
+  const [showKvkkFor, setShowKvkkFor] = useState<number | null>(null);
+  const myKvkk = trpc.org.myKvkk.useQuery({ orgId: showKvkkFor ?? 0 }, { enabled: showKvkkFor !== null, retry: false });
+  const check = trpc.org.previewInvitation.useMutation({ onSuccess: (result) => { setPreview(result); setConsent(false); setNoticeRead(false); }, onError: (error) => toast.error(error.message) });
   const join = trpc.org.join.useMutation({ onSuccess: (result) => { toast.success(`${result.orgName} kurumuna katıldın.`); setCode(""); setPreview(null); utils.org.mine.invalidate(); utils.org.myFeedback.invalidate(); if (result.role !== "student") setLocation("/kurum"); }, onError: (error) => toast.error(error.message) });
   const leave = trpc.org.leave.useMutation({ onSuccess: () => { toast.success("Kurumdan ayrıldın; verilerin artık kurumla paylaşılmıyor."); utils.org.mine.invalidate(); utils.org.myFeedback.invalidate(); }, onError: (error) => toast.error(error.message) });
   const studentOrgs = (memberships.data ?? []).filter((membership) => membership.role === "student");
@@ -43,6 +46,13 @@ export default function MyOrganizationDialog({ onClose }: { onClose: () => void 
             <p className="mt-2 text-[13px] leading-6 text-ink-2">Bu kurum, verdiğin onayla şunları görebiliyor:</p>
             <ul className="mt-1 space-y-1 text-[12.5px] text-ink-2">{SHARED_DATA.map((item) => <li key={item} className="flex gap-2"><Check size={14} className="mt-0.5 shrink-0 text-success" />{item}</li>)}</ul>
             <p className="mt-2 text-[12px] text-ink-3">{NOT_SHARED}</p>
+            <button onClick={() => setShowKvkkFor(showKvkkFor === membership.orgId ? null : membership.orgId)} className="mt-3 flex items-center gap-1.5 text-[12.5px] font-semibold text-brand hover:underline"><FileText size={14} /> {showKvkkFor === membership.orgId ? "KVKK metinlerini gizle" : "KVKK metinlerini gör"}</button>
+            {showKvkkFor === membership.orgId && myKvkk.data && (
+              <div className="mt-2 space-y-2">
+                <p className="text-[12px] text-ink-3">{myKvkk.data.acceptedVersion ? `Sürüm ${myKvkk.data.acceptedVersion} onaylandı${myKvkk.data.consentAt ? ` · ${new Date(myKvkk.data.consentAt).toLocaleDateString("tr-TR")}` : ""}` : "Bu üyelik KVKK sürüm kaydından önce açıldı."}{myKvkk.data.acceptedVersion && myKvkk.data.acceptedVersion !== myKvkk.data.version ? ` · Kurum metni güncellendi (sürüm ${myKvkk.data.version}).` : ""}</p>
+                <div className="max-h-[220px] overflow-y-auto whitespace-pre-line rounded-xl border border-rule bg-paper/50 p-3 text-[12px] leading-5 text-ink-2">{myKvkk.data.notice}{"\n\n"}{myKvkk.data.consent}</div>
+              </div>
+            )}
             <button onClick={() => { if (window.confirm(`${membership.orgName} kurumundan ayrılmak istediğine emin misin? Kurum verilerini artık göremez.`)) leave.mutate({ orgId: membership.orgId }); }} disabled={leave.isPending} className={`${secondaryButton} mt-3`}><LogOut size={15} /> Kurumdan ayrıl</button>
           </div>
         ))}
@@ -70,11 +80,17 @@ export default function MyOrganizationDialog({ onClose }: { onClose: () => void 
                   <p className="mt-3 text-[13px] text-ink-2">Katılırsan bu kurumun öğretmenleri şunları görebilir:</p>
                   <ul className="mt-1 space-y-1 text-[12.5px] text-ink-2">{SHARED_DATA.map((item) => <li key={item} className="flex gap-2"><Check size={14} className="mt-0.5 shrink-0 text-success" />{item}</li>)}</ul>
                   <p className="mt-2 text-[12px] text-ink-3">{NOT_SHARED} İstediğin zaman buradan ayrılabilirsin; ayrıldığın an erişim biter.</p>
+                  {preview.kvkk && <>
+                    <p className="mt-3 flex items-center gap-1.5 text-[12.5px] font-bold text-ink"><FileText size={14} /> KVKK Aydınlatma Metni</p>
+                    <div className="mt-1 max-h-[200px] overflow-y-auto whitespace-pre-line rounded-xl border border-rule bg-white p-3 text-[12px] leading-5 text-ink-2" tabIndex={0} aria-label="KVKK aydınlatma metni">{preview.kvkk.notice}</div>
+                    <label className="mt-2 flex items-start gap-2 text-[12.5px] font-semibold text-ink"><input type="checkbox" checked={noticeRead} onChange={(event) => setNoticeRead(event.target.checked)} className="mt-0.5 h-4 w-4 accent-[var(--brand)]" />Aydınlatma metnini okudum.</label>
+                    <div className="mt-3 whitespace-pre-line rounded-xl border border-rule bg-white p-3 text-[12px] leading-5 text-ink-2">{preview.kvkk.consent}</div>
+                  </>}
                 </>}
-                <label className="mt-3 flex items-start gap-2 text-[13px] font-semibold text-ink"><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} className="mt-0.5 h-4 w-4 accent-[var(--brand)]" />{preview.role === "student" ? "Bu verilerimin kurumla paylaşılmasına izin veriyorum." : "Bu kurumun personeli olarak katılıyorum."}</label>
+                <label className="mt-3 flex items-start gap-2 text-[13px] font-semibold text-ink"><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} className="mt-0.5 h-4 w-4 accent-[var(--brand)]" />{preview.role === "student" ? "Açık rıza metnini onaylıyor, verilerimin kurumla paylaşılmasına izin veriyorum." : "Bu kurumun personeli olarak katılıyorum."}</label>
                 <div className="mt-3 flex justify-end gap-2">
                   <button onClick={() => setPreview(null)} className={secondaryButton}>Vazgeç</button>
-                  <button onClick={() => join.mutate({ code: code.trim(), consent: true })} disabled={!consent || join.isPending} className={primaryButton}>{join.isPending ? "Katılınıyor…" : "Katıl"}</button>
+                  <button onClick={() => join.mutate({ code: code.trim(), consent: true, kvkkVersion: preview.kvkk?.version })} disabled={!consent || (Boolean(preview.kvkk) && !noticeRead) || join.isPending} className={primaryButton}>{join.isPending ? "Katılınıyor…" : "Katıl"}</button>
                 </div>
               </div>
             )}
