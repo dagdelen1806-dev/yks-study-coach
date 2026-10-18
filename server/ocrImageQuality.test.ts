@@ -65,6 +65,9 @@ describe("LLM availability errors", () => {
     expect(normalizeLlmSettings("https://generativelanguage.googleapis.com", "gpt-4o-mini", "AIzaXXX")).toEqual({ baseUrl: gemini, model: "gemini-2.5-flash" });
     expect(normalizeLlmSettings(gemini, "models/gemini-1.5-flash", "AIzaXXX")).toEqual({ baseUrl: gemini, model: "gemini-2.5-flash" });
     expect(normalizeLlmSettings("", "", "AIzaXXX")).toEqual({ baseUrl: gemini, model: "gemini-2.5-flash" });
+    expect(normalizeLlmSettings(gemini, "gemini-pro", "AIzaXXX").model).toBe("gemini-2.5-flash");
+    expect(normalizeLlmSettings(gemini, "gemini-pro-latest", "AIzaXXX").model).toBe("gemini-pro-latest");
+    expect(normalizeLlmSettings(gemini, "gemini-3.1-pro-preview", "AIzaXXX").model).toBe("gemini-3.1-pro-preview");
     expect(normalizeLlmSettings("", "", "sk-abc")).toEqual({ baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" });
     expect(normalizeLlmSettings("https://api.openai.com/v1/", "gpt-4.1-mini", "sk-abc")).toEqual({ baseUrl: "https://api.openai.com/v1", model: "gpt-4.1-mini" });
   });

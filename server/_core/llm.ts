@@ -250,7 +250,8 @@ export function normalizeLlmSettings(rawUrl: string, rawModel: string, key: stri
   if (baseUrl.includes("generativelanguage.googleapis.com")) {
     baseUrl = GEMINI_OPENAI_BASE_URL;
     // Gemini'de olmayan (gpt-…) ya da kullanımdan kalkmış (gemini-1.0/1.5, gemini-pro) model → güncel varsayılan.
-    if (!model.startsWith("gemini") || /^gemini-(1\.0|1\.5|pro($|-))/.test(model)) model = DEFAULT_GEMINI_MODEL;
+    // ("gemini-pro-latest" güncel Pro takma adıdır; yalnızca eski "gemini-pro" / "gemini-pro-vision" değiştirilir.)
+    if (!model.startsWith("gemini") || /^gemini-(1\.0|1\.5|pro(-vision)?$)/.test(model)) model = DEFAULT_GEMINI_MODEL;
   }
   return { baseUrl, model: model || DEFAULT_LLM_MODEL };
 }

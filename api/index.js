@@ -3507,7 +3507,7 @@ function normalizeLlmSettings(rawUrl, rawModel, key) {
   if (!baseUrl) baseUrl = geminiKey ? GEMINI_OPENAI_BASE_URL : DEFAULT_LLM_API_URL;
   if (baseUrl.includes("generativelanguage.googleapis.com")) {
     baseUrl = GEMINI_OPENAI_BASE_URL;
-    if (!model.startsWith("gemini") || /^gemini-(1\.0|1\.5|pro($|-))/.test(model)) model = DEFAULT_GEMINI_MODEL;
+    if (!model.startsWith("gemini") || /^gemini-(1\.0|1\.5|pro(-vision)?$)/.test(model)) model = DEFAULT_GEMINI_MODEL;
   }
   return { baseUrl, model: model || DEFAULT_LLM_MODEL };
 }
