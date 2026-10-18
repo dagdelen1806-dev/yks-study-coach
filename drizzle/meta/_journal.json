@@ -162,6 +162,13 @@
       "when": 1792309795361,
       "tag": "0022_avatar_style",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "5",
+      "when": 1792323433578,
+      "tag": "0023_reading_books",
+      "breakpoints": true
     }
   ]
 }

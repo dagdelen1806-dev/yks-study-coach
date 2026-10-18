@@ -414,6 +414,22 @@ export const classScheduleBlocks = mysqlTable("class_schedule_blocks", {
   userDayIdx: index("class_schedule_blocks_user_day_idx").on(table.userId, table.dayOfWeek),
 }));
 
+// Okuma kitapları (YKS dışı, gece okuması alışkanlığı): okunan sayfalar kitabın ilerlemesine eklenir.
+export const readingBooks = mysqlTable("reading_books", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  title: varchar("title", { length: 180 }).notNull(),
+  author: varchar("author", { length: 120 }),
+  totalPages: int("totalPages"),
+  pagesRead: int("pagesRead").default(0).notNull(),
+  status: mysqlEnum("status", ["reading", "finished"]).default("reading").notNull(),
+  finishedAt: timestamp("finishedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  userIdx: index("reading_books_user_idx").on(table.userId),
+}));
+
 export const topicStudyLogs = mysqlTable("topic_study_logs", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),

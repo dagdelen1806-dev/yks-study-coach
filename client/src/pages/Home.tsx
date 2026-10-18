@@ -58,7 +58,9 @@ import Illustration, { ILLUSTRATIONS } from "@/components/app/Illustration";
 import NotificationBell from "@/components/app/NotificationBell";
 import { StudentAvatar } from "@/components/app/Avatar";
 import Overview, { type FocusSessionSeed } from "@/pages/overview/Overview";
-import { PageHeader, Segmented, StatCard, primaryButton, secondaryButton } from "@/components/app/kit";
+import { Bar100, PageHeader, Segmented, StatCard, primaryButton, secondaryButton } from "@/components/app/kit";
+import ReadingBookDialog from "@/components/app/ReadingBookDialog";
+import { readingProgressLabel } from "@shared/reading";
 import { useLocation } from "wouter";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -430,7 +432,7 @@ function catalogLibraryBookToResourceBook(book: CatalogLibraryEntry): ResourceBo
     tone: "blue",
   };
 }
-function Resources({ topics, exams, onSection }: { topics: Topic[]; exams: MockExam[]; onSection: (section: DashboardSection) => void }) {
+function Resources({ topics, exams, onSection, addBookRequest = 0, onAddBookHandled }: { topics: Topic[]; exams: MockExam[]; onSection: (section: DashboardSection) => void; addBookRequest?: number; onAddBookHandled?: () => void }) {
   const { user } = useAuth();
   const [inventory, setInventory] = useState<string[]>(() => getStoredValue<string[]>(localStorageKeys.bookInventory, []));
   const [logs, setLogs] = useState<BookStudyLog[]>(() => getStoredValue<BookStudyLog[]>(localStorageKeys.bookLogs, []));
@@ -455,6 +457,8 @@ function Resources({ topics, exams, onSection }: { topics: Topic[]; exams: MockE
   // (bkz. components/books/AddBookWizard.tsx). OCR yalnızca öneri üretir;
   // öğrenci onaylamadan hiçbir şey kütüphaneye yazılmaz.
   const [showAddBook, setShowAddBook] = useState(false);
+  // Kenar çubuğundaki "Kaynak ekle": fotoğrafla kitap ekleme sihirbazını açar.
+  useEffect(() => { if (addBookRequest > 0) { setShowAddBook(true); onAddBookHandled?.(); } }, [addBookRequest]);
   // Kitap detayı (içindekiler + zayıf konu eşleşmeleri) — bkz. components/books/BookLibrary.tsx.
   const [openBook, setOpenBook] = useState<ScannerBook | null>(null);
   const savePhotoBookMutation = trpc.resources.importBooks.useMutation();
@@ -1064,7 +1068,13 @@ function RoutineHabitCard({ kind, icon: Icon, eyebrow, title, description, defau
   const [minutes, setMinutes] = useState("");
   const [amount, setAmount] = useState("");
   const [bookTitle, setBookTitle] = useState("");
-  const logRoutine = trpc.calendar.logRoutine.useMutation({ onSuccess: () => { utils.calendar.snapshot.invalidate(); toast.success("Kaydedildi; bugünkü rutin tamamlandı."); }, onError: () => toast.error("Kaydedilemedi, tekrar dener misin?") });
+  // Gece okuması: okuma listesinden kitap seçilir; okunan sayfalar o kitabın ilerlemesine eklenir.
+  const readingBooks = trpc.reading.list.useQuery(undefined, { enabled: Boolean(user) && Boolean(showBookTitle), retry: false });
+  const activeBooks = (readingBooks.data ?? []).filter((book) => book.status === "reading");
+  const [bookChoice, setBookChoice] = useState<string>("");
+  const [showReadingDialog, setShowReadingDialog] = useState(false);
+  const chosenBook = activeBooks.find((book) => String(book.id) === (bookChoice || String(activeBooks[0]?.id ?? "")));
+  const logRoutine = trpc.calendar.logRoutine.useMutation({ onSuccess: (result) => { utils.calendar.snapshot.invalidate(); utils.reading.list.invalidate(); toast.success(result?.readingBook?.justFinished ? `Tebrikler, "${result.readingBook.title}" bitti!` : "Kaydedildi; bugünkü rutin tamamlandı."); }, onError: () => toast.error("Kaydedilemedi, tekrar dener misin?") });
   const isDone = todaysSession?.status === "completed";
 
   const submit = () => {
@@ -1072,10 +1082,12 @@ function RoutineHabitCard({ kind, icon: Icon, eyebrow, title, description, defau
     if (!minutes.trim() || !Number.isFinite(parsedMinutes) || parsedMinutes <= 0) { toast.error("Gerçekte kaç dakika yaptığını gir."); return; }
     const mins = Math.round(parsedMinutes);
     const value = Math.max(0, Number(amount) || 0);
-    const topic = showBookTitle && bookTitle.trim() ? bookTitle.trim() : title;
-    const note = showBookTitle && bookTitle.trim() ? `${bookTitle.trim()} · ${value} ${amountUnit}.` : `${value} ${amountUnit}.`;
+    const linkedBook = showBookTitle && bookChoice !== "other" ? chosenBook : undefined;
+    const typedTitle = linkedBook ? linkedBook.title : bookTitle.trim();
+    const topic = showBookTitle && typedTitle ? typedTitle : title;
+    const note = showBookTitle && typedTitle ? `${typedTitle} · ${value} ${amountUnit}.` : `${value} ${amountUnit}.`;
     if (user) {
-      logRoutine.mutate({ title, subject: "Rutin", topic, kind, plannedMinutes: defaultMinutes, actualMinutes: mins, actualPages: isPages ? value : undefined, note });
+      logRoutine.mutate({ title, subject: "Rutin", topic, kind, plannedMinutes: defaultMinutes, actualMinutes: mins, actualPages: isPages ? value : undefined, note, ...(linkedBook ? { readingBookId: linkedBook.id } : {}) });
     } else {
       onLoggedLocal({ id: `routine-${kind}-${Date.now()}`, sessionDate: toLocalDateKey(), title, subject: "Rutin", topic, kind, plannedMinutes: defaultMinutes, status: "completed", actualMinutes: mins, actualPages: isPages ? value : undefined, note });
       toast.success("Kaydedildi (demo modu).");
@@ -1092,12 +1104,25 @@ function RoutineHabitCard({ kind, icon: Icon, eyebrow, title, description, defau
       <div className="mt-4 flex items-center gap-2 rounded-2xl bg-success-soft p-4 text-[13px] font-semibold text-success"><CheckCircle2 size={16} className="shrink-0" /> Bugün tamamlandı — {todaysSession?.actualMinutes ?? 0} dk{typeof todaysSession?.actualPages === "number" ? ` · ${todaysSession.actualPages} sayfa` : ""}</div>
     ) : (
       <div className="mt-4 grid grid-cols-2 gap-3">
-        {showBookTitle && <label className="col-span-2 text-[12px] font-semibold text-ink-3">Kitap adı (opsiyonel)<input value={bookTitle} onChange={(event) => setBookTitle(event.target.value)} placeholder="Şu an okuduğun kitap" className="mt-1 h-10 w-full rounded-xl border border-ink/10 px-3 text-[13px] text-ink-2" /></label>}
+        {showBookTitle && user && activeBooks.length > 0 && (
+          <div className="col-span-2">
+            <label className="text-[12px] font-semibold text-ink-3">Okuduğun kitap
+              <select value={bookChoice || String(activeBooks[0].id)} onChange={(event) => setBookChoice(event.target.value)} className="mt-1 h-10 w-full rounded-xl border border-ink/10 bg-white px-3 text-[13px] text-ink-2">
+                {activeBooks.map((book) => <option key={book.id} value={String(book.id)}>{book.title}{book.author ? ` — ${book.author}` : ""}</option>)}
+                <option value="other">Listede olmayan bir kitap</option>
+              </select>
+            </label>
+            {chosenBook && bookChoice !== "other" && <div className="mt-2"><div className="mb-1 flex justify-between text-[12px] text-ink-3"><span>İlerleme</span><span>{readingProgressLabel(chosenBook)}</span></div>{chosenBook.totalPages ? <Bar100 value={(chosenBook.pagesRead / chosenBook.totalPages) * 100} /> : null}</div>}
+          </div>
+        )}
+        {showBookTitle && (!user || activeBooks.length === 0 || bookChoice === "other") && <label className="col-span-2 text-[12px] font-semibold text-ink-3">Kitap adı (opsiyonel)<input value={bookTitle} onChange={(event) => setBookTitle(event.target.value)} placeholder="Şu an okuduğun kitap" className="mt-1 h-10 w-full rounded-xl border border-ink/10 px-3 text-[13px] text-ink-2" /></label>}
+        {showBookTitle && user && <button type="button" onClick={() => setShowReadingDialog(true)} className="col-span-2 -mt-1 justify-self-start text-[12px] font-semibold text-brand hover:text-brand-strong">+ Okuma kitabı ekle {activeBooks.length > 0 ? "/ listemi gör" : "(ilerlemen kitapta tutulsun)"}</button>}
         <label className="text-[12px] font-semibold text-ink-3">Süre (dk) · hedef: {defaultMinutes}<input type="number" min="1" value={minutes} onChange={(event) => setMinutes(event.target.value)} placeholder="Gerçekte kaç dk?" className="mt-1 h-10 w-full rounded-xl border border-ink/10 px-3 text-[13px] text-ink-2" /></label>
         <label className="text-[12px] font-semibold text-ink-3">{amountLabel}<input type="number" min="0" value={amount} onChange={(event) => setAmount(event.target.value)} className="mt-1 h-10 w-full rounded-xl border border-ink/10 px-3 text-[13px] text-ink-2" /></label>
         <Button onClick={submit} disabled={logRoutine.isPending} className="col-span-2 h-10 rounded-xl bg-pencil text-[12px] text-ink">{logRoutine.isPending ? "Kaydediliyor..." : "Bugün yaptım, kaydet"}</Button>
       </div>
     )}
+    {showReadingDialog && <ReadingBookDialog onClose={() => setShowReadingDialog(false)} onAdded={(book) => setBookChoice(String(book.id))} />}
   </Card>;
 }
 
@@ -1274,7 +1299,7 @@ function CalendarView({ topics, onSection, onStartFocusSession }: { topics: Topi
 }
 
 /** Masaüstünde sabit kenar çubuğu; `onClose` verilirse mobilde soldan kayan çekmece olarak aynısı. */
-function Sidebar({ section, onSection, userName, onStartSession, isAdmin, weakTopicCount, signedIn, onClose }: { section: DashboardSection; onSection: (section: DashboardSection) => void; userName?: string | null; onStartSession: () => void; isAdmin?: boolean; weakTopicCount: number; signedIn: boolean; onClose?: () => void }) {
+function Sidebar({ section, onSection, userName, onStartSession, onAddResource, onAddReadingBook, isAdmin, weakTopicCount, signedIn, onClose }: { section: DashboardSection; onSection: (section: DashboardSection) => void; userName?: string | null; onStartSession: () => void; onAddResource: () => void; onAddReadingBook: () => void; isAdmin?: boolean; weakTopicCount: number; signedIn: boolean; onClose?: () => void }) {
   const drawer = Boolean(onClose);
   useEffect(() => {
     if (!onClose) return;
@@ -1307,8 +1332,10 @@ function Sidebar({ section, onSection, userName, onStartSession, isAdmin, weakTo
         ); })}
       </nav>
       <div className="mt-6 space-y-0.5 border-t border-rule pt-6">
-        <button onClick={() => onSection("exams")} className="quick-nav"><Plus size={17} /> Deneme sonucu ekle</button>
         <button onClick={onStartSession} className="quick-nav"><Clock3 size={17} /> Odak oturumu başlat</button>
+        <button onClick={() => onSection("exams")} className="quick-nav"><Plus size={17} /> Deneme sonucu ekle</button>
+        <button onClick={onAddResource} className="quick-nav"><Camera size={17} /> Kaynak ekle</button>
+        <button onClick={onAddReadingBook} className="quick-nav"><BookOpen size={17} /> Okuma kitabı ekle</button>
       </div>
       <div className="sidebar-bottom pt-6">
         {signedIn ? (
@@ -1400,6 +1427,11 @@ export default function Home() {
 
   const navigate = (next: DashboardSection) => { setLocation(SECTION_PATHS[next]); setMobileMenu(false); window.scrollTo({ top: 0 }); };
   const startSession = (seed?: FocusSessionSeed) => { setFocusSeed(seed ?? null); setSession(true); };
+  // Kenar çubuğu: "Kaynak ekle" → Kaynaklar + fotoğrafla ekleme (girişsizse katalog); "Okuma kitabı ekle" → okuma listesi.
+  const [addBookRequest, setAddBookRequest] = useState(0);
+  const [showReadingDialog, setShowReadingDialog] = useState(false);
+  const addResource = () => { if (!user) { navigate("catalog"); return; } navigate("resources"); setAddBookRequest((value) => value + 1); };
+  const addReadingBook = () => { setMobileMenu(false); if (!user) { startLogin(); return; } setShowReadingDialog(true); };
   const displayName = user?.name || defaultDashboardUser.name;
 
   const isAdmin = user?.role === "admin";
@@ -1408,5 +1440,5 @@ export default function Home() {
   const section: DashboardSection = requested === "admin" && !isAdmin ? "overview" : requested;
   const weakTopicCount = topics.filter((item) => item.status === "Zayıf" && !item.insufficientData).length;
   const navSectionsForUser = isAdmin ? [...appNavSections, adminNavSection] : appNavSections;
-  return <NotebookProvider enabled={Boolean(user)}><div className="app-shell"><Sidebar section={section} onSection={navigate} userName={displayName} onStartSession={() => startSession()} isAdmin={isAdmin} weakTopicCount={weakTopicCount} signedIn={Boolean(user)} /><main className="app-main"><header className="topbar"><button onClick={() => setMobileMenu((value) => !value)} className="mobile-menu-button" aria-label="Menüyü aç"><Menu size={18} /></button><div className="topbar-context"><span className="topbar-title">{navSectionsForUser.find((item) => item.key === section)?.label}</span></div><div className="topbar-actions">{!user && <span className="demo-chip">Demo verisi</span>}{user && <NotificationBell />}{user ? <DropdownMenu><DropdownMenuTrigger asChild><button className="profile-button"><StudentAvatar style={profileQuery.data?.avatarStyle} name={profileQuery.data?.preferredName || getDisplayName(displayName)} size={36} /><span className="hidden text-[14px] font-semibold text-ink-2 md:block">{getDisplayName(displayName)}</span><ChevronDown size={14} className="hidden text-ink-4 md:block" /></button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={() => setShowProfileEdit(true)}><UserRound size={14} className="mr-2" /> Profili düzenle</DropdownMenuItem>{user.loginMethod?.startsWith("dev") && <DropdownMenuItem onClick={() => setShowPasswordChange(true)}><KeyRound size={14} className="mr-2" /> Şifre değiştir</DropdownMenuItem>}<DropdownMenuItem onClick={() => logout()}><LogOut size={14} className="mr-2" /> Çıkış yap</DropdownMenuItem></DropdownMenuContent></DropdownMenu> : <button onClick={() => startLogin()} className="h-9 rounded-[10px] bg-ink px-4 text-[14px] font-semibold text-surface hover:bg-ink-2">Giriş yap</button>}</div></header>{mobileMenu && <><div className="drawer-backdrop" onClick={() => setMobileMenu(false)} aria-hidden="true" /><Sidebar section={section} onSection={navigate} userName={displayName} onStartSession={() => { setMobileMenu(false); startSession(); }} isAdmin={isAdmin} weakTopicCount={weakTopicCount} signedIn={Boolean(user)} onClose={closeMobileMenu} /></>}<div className="content-wrap"><Suspense fallback={<SectionLoading />}>{section === "overview" && <Overview topics={topics} exams={exams} onSection={navigate} onStartSession={startSession} onEditProfile={() => setShowProfileEdit(true)} />}{section === "topics" && <TopicMap topics={topics} onSection={navigate} onStartSession={(seed) => startSession(seed)} />}{section === "exams" && <Exams topics={topics} exams={exams} setExams={setExams} setTopics={setTopics} persistExams={importExams.mutate} />}{section === "resources" && <Resources topics={topics} exams={exams} onSection={navigate} />}{section === "catalog" && <ResourceCatalogSection />}{section === "plan" && <AiPlan topics={topics} exams={exams} onSection={navigate} />}{section === "calendar" && <CalendarView topics={topics} onSection={navigate} onStartFocusSession={startSession} />}{section === "notebook" && (user ? <NotebookSection /> : <div className="soft-card p-8 text-center text-[14px] text-ink-3">Defteri kullanmak için giriş yapmalısın.</div>)}{section === "premium" && <PaywallSection />}{section === "admin" && isAdmin && <AdminPanel />}</Suspense><footer className="mt-12 flex flex-col gap-3 border-t border-ink/[0.06] py-6 text-[12px] text-ink-4 sm:flex-row sm:items-center sm:justify-between"><span>{footerDisclaimer}</span><span>Konu kapsamı ÖSYM ve MEB programlarına dayanır.</span></footer></div></main>{session && <FocusMode user={user} topics={topics} initialSession={focusSeed} onClose={() => { setSession(false); setFocusSeed(null); }} onGoToCalendar={() => { setSession(false); setFocusSeed(null); navigate("calendar"); }} />}{showPasswordChange && <ChangePasswordDialog onClose={() => setShowPasswordChange(false)} />}{showProfileEdit && <Dialog open onOpenChange={(open) => !open && setShowProfileEdit(false)}><DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl"><DialogTitle>Profilini güncelle</DialogTitle><DialogDescription>Onboarding sırasında verdiğin yanıtları buradan gözden geçirip güncelleyebilirsin.</DialogDescription><Suspense fallback={<SectionLoading />}><OnboardingFlow userName={displayName} startAtStep={0} onClose={() => setShowProfileEdit(false)} onComplete={() => setShowProfileEdit(false)} /></Suspense></DialogContent></Dialog>} </div></NotebookProvider>;
+  return <NotebookProvider enabled={Boolean(user)}><div className="app-shell"><Sidebar section={section} onSection={navigate} userName={displayName} onStartSession={() => startSession()} onAddResource={addResource} onAddReadingBook={addReadingBook} isAdmin={isAdmin} weakTopicCount={weakTopicCount} signedIn={Boolean(user)} /><main className="app-main"><header className="topbar"><button onClick={() => setMobileMenu((value) => !value)} className="mobile-menu-button" aria-label="Menüyü aç"><Menu size={18} /></button><div className="topbar-context"><span className="topbar-title">{navSectionsForUser.find((item) => item.key === section)?.label}</span></div><div className="topbar-actions">{!user && <span className="demo-chip">Demo verisi</span>}{user && <NotificationBell />}{user ? <DropdownMenu><DropdownMenuTrigger asChild><button className="profile-button"><StudentAvatar style={profileQuery.data?.avatarStyle} name={profileQuery.data?.preferredName || getDisplayName(displayName)} size={36} /><span className="hidden text-[14px] font-semibold text-ink-2 md:block">{getDisplayName(displayName)}</span><ChevronDown size={14} className="hidden text-ink-4 md:block" /></button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={() => setShowProfileEdit(true)}><UserRound size={14} className="mr-2" /> Profili düzenle</DropdownMenuItem>{user.loginMethod?.startsWith("dev") && <DropdownMenuItem onClick={() => setShowPasswordChange(true)}><KeyRound size={14} className="mr-2" /> Şifre değiştir</DropdownMenuItem>}<DropdownMenuItem onClick={() => logout()}><LogOut size={14} className="mr-2" /> Çıkış yap</DropdownMenuItem></DropdownMenuContent></DropdownMenu> : <button onClick={() => startLogin()} className="h-9 rounded-[10px] bg-ink px-4 text-[14px] font-semibold text-surface hover:bg-ink-2">Giriş yap</button>}</div></header>{mobileMenu && <><div className="drawer-backdrop" onClick={() => setMobileMenu(false)} aria-hidden="true" /><Sidebar section={section} onSection={navigate} userName={displayName} onStartSession={() => { setMobileMenu(false); startSession(); }} onAddResource={addResource} onAddReadingBook={addReadingBook} isAdmin={isAdmin} weakTopicCount={weakTopicCount} signedIn={Boolean(user)} onClose={closeMobileMenu} /></>}<div className="content-wrap"><Suspense fallback={<SectionLoading />}>{section === "overview" && <Overview topics={topics} exams={exams} onSection={navigate} onStartSession={startSession} onEditProfile={() => setShowProfileEdit(true)} />}{section === "topics" && <TopicMap topics={topics} onSection={navigate} onStartSession={(seed) => startSession(seed)} />}{section === "exams" && <Exams topics={topics} exams={exams} setExams={setExams} setTopics={setTopics} persistExams={importExams.mutate} />}{section === "resources" && <Resources topics={topics} exams={exams} onSection={navigate} addBookRequest={addBookRequest} onAddBookHandled={() => setAddBookRequest(0)} />}{section === "catalog" && <ResourceCatalogSection />}{section === "plan" && <AiPlan topics={topics} exams={exams} onSection={navigate} />}{section === "calendar" && <CalendarView topics={topics} onSection={navigate} onStartFocusSession={startSession} />}{section === "notebook" && (user ? <NotebookSection /> : <div className="soft-card p-8 text-center text-[14px] text-ink-3">Defteri kullanmak için giriş yapmalısın.</div>)}{section === "premium" && <PaywallSection />}{section === "admin" && isAdmin && <AdminPanel />}</Suspense><footer className="mt-12 flex flex-col gap-3 border-t border-ink/[0.06] py-6 text-[12px] text-ink-4 sm:flex-row sm:items-center sm:justify-between"><span>{footerDisclaimer}</span><span>Konu kapsamı ÖSYM ve MEB programlarına dayanır.</span></footer></div></main>{session && <FocusMode user={user} topics={topics} initialSession={focusSeed} onClose={() => { setSession(false); setFocusSeed(null); }} onGoToCalendar={() => { setSession(false); setFocusSeed(null); navigate("calendar"); }} />}{showReadingDialog && <ReadingBookDialog onClose={() => setShowReadingDialog(false)} />}{showPasswordChange && <ChangePasswordDialog onClose={() => setShowPasswordChange(false)} />}{showProfileEdit && <Dialog open onOpenChange={(open) => !open && setShowProfileEdit(false)}><DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl"><DialogTitle>Profilini güncelle</DialogTitle><DialogDescription>Onboarding sırasında verdiğin yanıtları buradan gözden geçirip güncelleyebilirsin.</DialogDescription><Suspense fallback={<SectionLoading />}><OnboardingFlow userName={displayName} startAtStep={0} onClose={() => setShowProfileEdit(false)} onComplete={() => setShowProfileEdit(false)} /></Suspense></DialogContent></Dialog>} </div></NotebookProvider>;
 }

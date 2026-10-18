@@ -19,6 +19,8 @@ import { notesRouter } from "./routers/notes";
 import { questionsRouter } from "./routers/questions";
 import { getNotebookPlanSignal } from "./notes/questionsDb";
 import { classScheduleRouter } from "./routers/classSchedule";
+import { readingRouter } from "./routers/reading";
+import { recordReadingPages } from "./reading/readingDb";
 import { getPlanScheduleContext } from "./schedule/classScheduleDb";
 import { normalizeAiPlan } from "./studyPlan/normalizeAiPlan";
 import { DAY_LABELS, weekdayOf } from "../shared/classSchedule";
@@ -303,7 +305,13 @@ export const appRouter = router({
     readCoachAlert: protectedProcedure.input(z.object({ alertId: z.number().int() })).mutation(({ ctx, input }) => markCoachAlertRead(ctx.user.id, input.alertId)),
     addFocusLog: protectedProcedure.input(z.object({ subject: z.string().max(80), topic: z.string().max(180), studyDate: z.string(), minutes: z.number().int().min(1).max(1440), questions: z.number().int().min(0).max(5000), correct: z.number().int().min(0).max(5000), wrong: z.number().int().min(0).max(5000), blank: z.number().int().min(0).max(5000), note: z.string().max(1000).optional() })).mutation(({ ctx, input }) => addTopicStudyLog(ctx.user.id, { ...input, studyDate: new Date(input.studyDate), note: input.note ?? null, sessionId: null })),
     // Paragraf pratiği / gece okuması gibi "şimdi yaptım" alışkanlık kayıtları.
-    logRoutine: protectedProcedure.input(z.object({ title: z.string().max(180), subject: z.string().max(80), topic: z.string().max(180), kind: z.string().max(40), plannedMinutes: z.number().int().min(0).max(1440), actualMinutes: z.number().int().min(0).max(1440), actualPages: z.number().int().min(0).max(5000).optional(), note: z.string().max(1000).optional() })).mutation(({ ctx, input }) => logCompletedRoutineSession(ctx.user.id, input)),
+    logRoutine: protectedProcedure.input(z.object({ title: z.string().max(180), subject: z.string().max(80), topic: z.string().max(180), kind: z.string().max(40), plannedMinutes: z.number().int().min(0).max(1440), actualMinutes: z.number().int().min(0).max(1440), actualPages: z.number().int().min(0).max(5000).optional(), note: z.string().max(1000).optional(), readingBookId: z.number().int().positive().optional() })).mutation(async ({ ctx, input }) => {
+      const { readingBookId, ...routine } = input;
+      const calendar = await logCompletedRoutineSession(ctx.user.id, routine);
+      // Gece okuması bir okuma kitabına bağlıysa okunan sayfalar kitabın ilerlemesine eklenir (yalnızca kendi kitabı).
+      const readingBook = readingBookId && input.actualPages ? await recordReadingPages(ctx.user.id, readingBookId, input.actualPages) : null;
+      return { calendar, readingBook };
+    }),
   }),
 
   aiPlan: router({
@@ -424,6 +432,7 @@ export const appRouter = router({
   notes: notesRouter,
   questions: questionsRouter,
   classSchedule: classScheduleRouter,
+  reading: readingRouter,
   catalog: resourceCatalogRouter,
   onboarding: onboardingRouter,
   subscription: subscriptionRouter,
