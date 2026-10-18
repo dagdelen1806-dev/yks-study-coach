@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import NoteImageDialog from "./NoteImageDialog";
 import VoiceRecorder from "./VoiceRecorder";
 import { newClientId } from "./drafts";
-import { attachmentUrl } from "./nodes";
+import { attachmentUrl } from "./media";
 import { useCurriculumTopics } from "./useNotebookData";
 
 export type QuestionPrefill = { subject?: string | null; topicId?: number | null; studySessionId?: number | null; bookId?: string | null };

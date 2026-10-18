@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/app/kit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -193,23 +194,15 @@ export default function ResourceCatalogSection() {
 
   return (
     <div className="space-y-7 animate-page-in">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <div className="eyebrow mb-2">Kaynak kataloğu · zorluk motoru</div>
-          <h1 className="page-heading">Yayıncı bağımsız, zorluk etiketli kaynak kataloğu.</h1>
-          <p className="page-subtitle">Sınav, ders ve zorluk seviyesine göre filtrele; performansına göre kişisel öneriler al.</p>
-        </div>
-        <span className="demo-chip"><BookOpen size={12} /> {list.data?.total ?? "…"} kaynak</span>
-      </div>
+      <PageHeader
+        eyebrow="Kaynak kataloğu · zorluk motoru"
+        title="Kaynak Kataloğu"
+        description="Yayıncıdan bağımsız, zorluk etiketli kaynakları sınav, zorluk ve türe göre ara; altta performansına göre kişisel öneriler var."
+        actions={<span className="demo-chip"><BookOpen size={12} /> {list.data?.total ?? "…"} kaynak</span>}
+      />
 
-      <section>
-        <div className="mb-3 text-[14px] font-semibold text-ink">Seviyene uygun kaynaklar</div>
-        <RecommendationPanel />
-      </section>
-
-      {isAdmin && <AdminReviewPanel />}
-
-      <section className="space-y-4">
+      {/* Önce arama ve liste: öğrenci çoğunlukla belirli bir kitabı arıyor; öneriler altta. */}
+      <section className="space-y-4" aria-label="Kaynak arama">
         <div className="flex flex-wrap items-center gap-2">
           <Input placeholder="Kaynak ara…" value={search} onChange={(e) => { setSearch(e.target.value); resetToFirstPage(); }} className="max-w-xs" />
           <Select value={exam} onValueChange={(v) => { setExam(v); resetToFirstPage(); }}>
@@ -262,6 +255,13 @@ export default function ResourceCatalogSection() {
           </div>
         )}
       </section>
+
+      <section>
+        <div className="mb-3 text-[15px] font-bold text-ink">Seviyene uygun kaynaklar</div>
+        <RecommendationPanel />
+      </section>
+
+      {isAdmin && <AdminReviewPanel />}
     </div>
   );
 }

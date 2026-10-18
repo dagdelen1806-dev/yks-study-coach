@@ -4,7 +4,9 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import OnboardingFlow from "@/components/onboarding/OnboardingFlow";
+import { lazy, Suspense } from "react";
+// Onboarding yalnızca yeni hesapta bir kez gerekir: ayrı parça.
+const OnboardingFlow = lazy(() => import("@/components/onboarding/OnboardingFlow"));
 import { DashboardLayoutSkeleton } from "@/components/DashboardLayoutSkeleton";
 import { trpc } from "@/lib/trpc";
 import { LOCAL_SIGNIN_REQUEST_EVENT, performLocalSignIn } from "@/const";
@@ -202,13 +204,15 @@ function AppGate() {
 
   if (user && onboarding.data && !onboarding.data.onboardingCompleted) {
     return (
-      <OnboardingFlow
-        userName={user.name}
-        onComplete={() => {
-          try { sessionStorage.setItem(postOnboardingNudgeKey, "1"); } catch {}
-          onboarding.refetch();
-        }}
-      />
+      <Suspense fallback={<DashboardLayoutSkeleton />}>
+        <OnboardingFlow
+          userName={user.name}
+          onComplete={() => {
+            try { sessionStorage.setItem(postOnboardingNudgeKey, "1"); } catch {}
+            onboarding.refetch();
+          }}
+        />
+      </Suspense>
     );
   }
 

@@ -10,7 +10,8 @@ import FormulaEditor, { renderLatex } from "./FormulaEditor";
 // Akıllı Defter'in özel blokları. İçerikte JSON olarak saklanır (bkz.
 // shared/noteContent.ts); burada editörde nasıl görüneceği tanımlıdır.
 
-export const attachmentUrl = (id: number) => `/api/notes/attachments/${id}`;
+import { attachmentUrl, formatDuration } from "./media";
+export { attachmentUrl, formatDuration };
 
 // Yeni eklenen formül/çizim bloğunun düzenleyicisi KENDİLİĞİNDEN açılır — ama yalnızca
 // bu oturumda az önce eklendiyse. (Boş bir blok kaydedilmişse, not her açıldığında
@@ -117,7 +118,6 @@ export const NoteImageNode = Node.create({
   addNodeView: () => ReactNodeViewRenderer(NoteImageView),
 });
 
-export const formatDuration = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(Math.round(seconds % 60)).padStart(2, "0")}`;
 
 function VoiceClipView(props: ReactNodeViewProps) {
   const attachmentId = props.node.attrs.attachmentId ? Number(props.node.attrs.attachmentId) : null;

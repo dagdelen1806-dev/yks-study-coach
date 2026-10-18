@@ -9,7 +9,7 @@ import NoteImageDialog from "./NoteImageDialog";
 import { Chip } from "./QuestionCapture";
 import SimilarQuestion from "./SimilarQuestion";
 import VoiceRecorder from "./VoiceRecorder";
-import { attachmentUrl, formatDuration } from "./nodes";
+import { attachmentUrl, formatDuration } from "./media";
 import { useCurriculumTopics } from "./useNotebookData";
 
 const RESULT_LABEL = { solved: "✅ Çözdü", partial: "🟡 Kısmen", failed: "❌ Çözemedi" } as const;

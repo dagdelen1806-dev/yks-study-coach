@@ -46,8 +46,11 @@ import {
   TrendingUp,
   Zap,
 } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
-import { Area, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis, Bar, BarChart } from "recharts";
+import { lazy, Suspense, useMemo, useState, type ReactNode } from "react";
+// Grafikler ayrı parça: sayfa grafik motorunu beklemeden çizilir.
+const NetTrendChart = lazy(() => import("./OverviewCharts").then((module) => ({ default: module.NetTrendChart })));
+const WeeklyStudyChart = lazy(() => import("./OverviewCharts").then((module) => ({ default: module.WeeklyStudyChart })));
+const ChartLoading = () => <div className="h-full animate-pulse rounded-xl bg-paper" aria-hidden="true" />;
 
 export type FocusSessionSeed = { sessionId?: number; subject: string; topic: string; plannedMinutes?: number; sessionDate?: string | Date };
 
@@ -260,17 +263,7 @@ export default function Overview({ topics, exams, onSection, onStartSession, onE
               <>
                 <p className="-mt-2 mb-2 text-[12px] text-ink-3">Son {netSeries.length} {netExam} denemesi · toplam net</p>
                 <div className="h-[220px]" role="img" aria-label={`${netExam} net gelişimi: ${netSeries.map((point) => `${point.label} ${point.net}`).join(", ")}`}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={netSeries} margin={{ top: 16, right: 12, bottom: 0, left: -18 }}>
-                      <defs><linearGradient id="netFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={palette.brand} stopOpacity={0.18} /><stop offset="100%" stopColor={palette.brand} stopOpacity={0} /></linearGradient></defs>
-                      <CartesianGrid stroke={palette.rule} vertical={false} />
-                      <XAxis dataKey="label" tick={{ fontSize: 11, fill: palette.ink3 }} axisLine={false} tickLine={false} />
-                      <YAxis tick={{ fontSize: 11, fill: palette.ink3 }} axisLine={false} tickLine={false} width={44} domain={[0, "auto"]} />
-                      <Tooltip formatter={(value: number) => [`${value} net`, "Net"]} labelFormatter={(label, payload) => payload?.[0]?.payload?.title || label} contentStyle={{ borderRadius: 12, border: `1px solid ${palette.rule}`, fontSize: 12 }} />
-                      <Area type="monotone" dataKey="net" stroke="none" fill="url(#netFill)" />
-                      <Line type="monotone" dataKey="net" stroke={palette.brand} strokeWidth={2.5} dot={{ r: 3.5, fill: "#fff", stroke: palette.brand, strokeWidth: 2 }} activeDot={{ r: 5 }} />
-                    </ComposedChart>
-                  </ResponsiveContainer>
+                  <Suspense fallback={<ChartLoading />}><NetTrendChart data={netSeries} /></Suspense>
                 </div>
               </>
             )}
@@ -284,16 +277,7 @@ export default function Overview({ topics, exams, onSection, onStartSession, onE
               <EmptyNote>Bu hafta henüz kayıtlı çalışma yok. Bir odak oturumunu bitirdiğinde süresi burada görünür.</EmptyNote>
             ) : (
               <div className="h-[220px]" role="img" aria-label={`Son 7 gün çalışma: ${week.bars.map((bar) => `${bar.day} ${bar.minutes} dakika`).join(", ")}`}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={week.bars} margin={{ top: 16, right: 4, bottom: 0, left: 0 }} barGap={3}>
-                    <CartesianGrid stroke={palette.rule} vertical={false} />
-                    <XAxis dataKey="day" tick={{ fontSize: 11, fill: palette.ink3 }} axisLine={false} tickLine={false} interval={0} />
-                    <YAxis tick={{ fontSize: 11, fill: palette.ink3 }} axisLine={false} tickLine={false} width={48} unit=" dk" allowDecimals={false} />
-                    <Tooltip formatter={(value: number, key) => [`${value} dk`, key === "goal" ? "Hedef" : "Senin süren"]} contentStyle={{ borderRadius: 12, border: `1px solid ${palette.rule}`, fontSize: 12 }} cursor={{ fill: palette.paper }} />
-                    <Bar dataKey="minutes" fill={palette.brand} radius={[5, 5, 0, 0]} maxBarSize={18} />
-                    {week.goal > 0 && <Bar dataKey="goal" fill={palette.rule} radius={[5, 5, 0, 0]} maxBarSize={18} />}
-                  </BarChart>
-                </ResponsiveContainer>
+                <Suspense fallback={<ChartLoading />}><WeeklyStudyChart data={week.bars} showGoal={week.goal > 0} /></Suspense>
               </div>
             )}
           </Panel>

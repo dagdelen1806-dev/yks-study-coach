@@ -1,14 +1,17 @@
 import { trpc } from "@/lib/trpc";
 import type { inferRouterOutputs } from "@trpc/server";
 import { BookOpen, Loader2, ScanLine, Target, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import type { AppRouter } from "../../../../server/routers";
-import BookContentScanner, { type ScannerBook } from "./BookContentScanner";
+import type { ScannerBook } from "./BookContentScanner";
 import { NoteCard } from "../notebook/NoteList";
 import { useNotebook } from "../notebook/NotebookProvider";
 import { toLocalDateKey } from "@shared/dates";
 import { palette } from "@shared/palette";
+
+// İçindekiler tarayıcısı yalnızca "içerik tara" denince yüklenir.
+const BookContentScanner = lazy(() => import("./BookContentScanner"));
 
 type Recommendation = inferRouterOutputs<AppRouter>["bookContent"]["recommendations"][number];
 type ContentRow = inferRouterOutputs<AppRouter>["bookContent"]["contents"][number];
@@ -217,7 +220,7 @@ export function BookDetailDialog({ book, onClose }: { book: ScannerBook; onClose
     if (added > 1) toast.success(`${added} kitap görevi plana eklendi.`);
   };
 
-  if (scanning) return <BookContentScanner book={book} onClose={() => setScanning(false)} />;
+  if (scanning) return <Suspense fallback={null}><BookContentScanner book={book} onClose={() => setScanning(false)} /></Suspense>;
 
   return (
     <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>

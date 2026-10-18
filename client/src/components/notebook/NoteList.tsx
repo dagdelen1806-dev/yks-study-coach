@@ -1,7 +1,7 @@
 import type { inferRouterOutputs } from "@trpc/server";
 import { Pin, Star } from "lucide-react";
 import type { AppRouter } from "../../../../server/routers";
-import { formatDuration } from "./nodes";
+import { formatDuration } from "./media";
 
 export type NoteSummary = inferRouterOutputs<AppRouter>["notes"]["list"]["items"][number];
 

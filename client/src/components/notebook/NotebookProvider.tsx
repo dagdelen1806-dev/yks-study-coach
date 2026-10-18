@@ -1,10 +1,14 @@
-import { Camera, Zap } from "lucide-react";
-import { createContext, useCallback, useContext, useState } from "react";
+import { Camera, Loader2, Zap } from "lucide-react";
+import { createContext, lazy, Suspense, useCallback, useContext, useState } from "react";
 import { toast } from "sonner";
-import NoteEditor, { type NotePrefill } from "./NoteEditor";
+import type { NotePrefill } from "./NoteEditor";
 import QuestionCapture, { type QuestionPrefill } from "./QuestionCapture";
 import QuestionDetail from "./QuestionDetail";
 import QuestionReview from "./QuestionReview";
+
+// Not düzenleyici (tiptap + KaTeX + çizim) büyük: yalnızca bir not açılınca yüklenir.
+const NoteEditor = lazy(() => import("./NoteEditor"));
+const EditorLoading = () => <div className="modal-backdrop" style={{ zIndex: 300 }} role="status" aria-label="Not açılıyor"><Loader2 className="animate-spin text-white" size={28} /></div>;
 
 type OpenOptions = { noteId?: number; draftClientId?: string; prefill?: NotePrefill };
 type NotebookApi = {
@@ -56,7 +60,7 @@ export function NotebookProvider({ enabled, children }: { enabled: boolean; chil
           </button>
         </div>
       )}
-      {current?.kind === "note" && <NoteEditor key={current.key} noteId={current.options.noteId} draftClientId={current.options.draftClientId} prefill={current.options.prefill} onClose={close} onReviewQuestion={(id) => startReview([id])} />}
+      {current?.kind === "note" && <Suspense fallback={<EditorLoading />}><NoteEditor key={current.key} noteId={current.options.noteId} draftClientId={current.options.draftClientId} prefill={current.options.prefill} onClose={close} onReviewQuestion={(id) => startReview([id])} /></Suspense>}
       {current?.kind === "capture" && <QuestionCapture key={current.key} prefill={current.prefill} onClose={close} />}
       {current?.kind === "question" && <QuestionDetail key={current.key} id={current.id} onClose={close} onReview={(id) => startReview([id])} />}
       {current?.kind === "review" && <QuestionReview key={current.key} questionIds={current.questionIds} subject={current.subject} onClose={close} />}

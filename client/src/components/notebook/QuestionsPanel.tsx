@@ -8,7 +8,7 @@ import type { AppRouter } from "../../../../server/routers";
 import MoveToSubject from "./MoveToSubject";
 import { useNotebook } from "./NotebookProvider";
 import { statusTone } from "./QuestionDetail";
-import { attachmentUrl } from "./nodes";
+import { attachmentUrl } from "./media";
 
 type QuestionItem = inferRouterOutputs<AppRouter>["questions"]["list"]["items"][number];
 

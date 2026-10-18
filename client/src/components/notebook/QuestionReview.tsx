@@ -4,7 +4,7 @@ import { Eye, Footprints, Lightbulb, Loader2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AiSolutionSteps, useAiSolve } from "./AiSolution";
-import { attachmentUrl } from "./nodes";
+import { attachmentUrl } from "./media";
 
 const RESULT_BUTTONS: Array<{ result: AttemptResult; label: string; className: string }> = [
   { result: "failed", label: "❌ Çözemedim", className: "border border-danger/30 bg-danger-soft text-danger" },

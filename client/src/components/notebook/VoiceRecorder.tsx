@@ -1,7 +1,7 @@
 import { trpc } from "@/lib/trpc";
 import { Loader2, Mic, Pause, Play, Square, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { formatDuration } from "./nodes";
+import { formatDuration } from "./media";
 
 const MAX_SECONDS = 600;
 

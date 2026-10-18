@@ -8,7 +8,11 @@ import App from "./App";
 import { startLogin } from "./const";
 import "./index.css";
 
-const queryClient = new QueryClient();
+// Bölümler arası geçişte aynı veriler (profil, takvim, denemeler…) her seferinde yeniden
+// çekilmesin: 30 sn taze sayılır. Kayıt/güncelleme işlemleri ilgili sorguyu zaten geçersiz kılar.
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { staleTime: 30_000, refetchOnWindowFocus: false, retry: 1 } },
+});
 
 const redirectToLoginIfUnauthorized = (error: unknown) => {
   if (!(error instanceof TRPCClientError)) return;
