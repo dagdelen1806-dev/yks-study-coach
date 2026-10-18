@@ -39,6 +39,7 @@ import {
   NotebookPen,
   PenLine,
   Play,
+  MessageSquareText,
   Quote,
   Sparkles,
   Target,
@@ -88,6 +89,25 @@ const ExamTabs = ({ value, onChange }: { value: ExamKind; onChange: (value: Exam
 // ---------------------------------------------------------------------------
 // Genel Bakış
 // ---------------------------------------------------------------------------
+
+/** Kurum öğretmeninin öğrenciye açık bıraktığı geri bildirimler (son 3). Kuruma bağlı değilse görünmez. */
+function TeacherFeedback() {
+  const feedback = trpc.org.myFeedback.useQuery(undefined, { retry: false, staleTime: 60_000 });
+  const items = (feedback.data ?? []).slice(0, 3);
+  if (!items.length) return null;
+  return (
+    <Panel icon={<MessageSquareText size={18} />} title="Öğretmeninden geri bildirim">
+      <ul className="space-y-3">
+        {items.map((item) => (
+          <li key={item.id} className="rounded-xl border border-rule bg-paper/50 p-3">
+            <p className="whitespace-pre-line text-[14px] leading-6 text-ink-2">{item.body}</p>
+            <p className="mt-1.5 text-[12px] text-ink-4">{item.authorName ?? "Öğretmen"} · {item.orgName} · {new Date(item.createdAt).toLocaleDateString("tr-TR", { day: "numeric", month: "long" })}</p>
+          </li>
+        ))}
+      </ul>
+    </Panel>
+  );
+}
 
 export default function Overview({ topics, exams, onSection, onStartSession, onEditProfile }: { topics: Topic[]; exams: MockExam[]; onSection: (section: DashboardSection) => void; onStartSession: (seed?: FocusSessionSeed) => void; onEditProfile: () => void }) {
   const { user } = useAuth();
@@ -253,6 +273,7 @@ export default function Overview({ topics, exams, onSection, onStartSession, onE
         </div>
 
         {user && <ReviewDueNotes />}
+        {user && <TeacherFeedback />}
 
         {/* Grafikler. */}
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">

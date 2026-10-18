@@ -5,8 +5,23 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { lazy, Suspense } from "react";
+import { useLocation } from "wouter";
 // Onboarding yalnızca yeni hesapta bir kez gerekir: ayrı parça.
 const OnboardingFlow = lazy(() => import("@/components/onboarding/OnboardingFlow"));
+// Kurum Paneli ayrı bir arayüz: yalnızca /kurum adreslerinde yüklenir.
+const OrgApp = lazy(() => import("./pages/org/OrgApp"));
+
+function OrgSignIn() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-paper p-6">
+      <div className="soft-card max-w-sm p-7 text-center">
+        <h1 className="text-[20px] font-extrabold text-ink">Kurum Paneli</h1>
+        <p className="mt-2 text-[14px] leading-6 text-ink-3">Kurumunun öğrencilerini izlemek için personel hesabınla giriş yap.</p>
+        <button onClick={() => window.dispatchEvent(new Event(LOCAL_SIGNIN_REQUEST_EVENT))} className="mt-5 h-10 rounded-xl bg-brand px-5 text-[13px] font-semibold text-white">Giriş yap</button>
+      </div>
+    </div>
+  );
+}
 import { DashboardLayoutSkeleton } from "@/components/DashboardLayoutSkeleton";
 import { trpc } from "@/lib/trpc";
 import { LOCAL_SIGNIN_REQUEST_EVENT, performLocalSignIn } from "@/const";
@@ -175,7 +190,14 @@ function useEmailVerificationResult(authLoading: boolean, signedIn: boolean) {
 function AppGate() {
   const { user, loading: authLoading, logout, refresh } = useAuth();
   const emailPending = Boolean(user) && needsEmailVerification(user!);
-  const onboarding = trpc.onboarding.get.useQuery(undefined, { enabled: Boolean(user) && !emailPending && user?.approvalStatus === "approved", retry: false });
+  const approvedUser = Boolean(user) && !emailPending && user?.approvalStatus === "approved";
+  const onboarding = trpc.onboarding.get.useQuery(undefined, { enabled: approvedUser, retry: false });
+  // Kurum Paneli: /kurum adresleri öğrenci uygulaması yerine kurum arayüzünü açar.
+  // Kurum personeli (öğrenci onboarding'i yapmamış) girişte doğrudan oraya gider.
+  const [location, setLocation] = useLocation();
+  const isOrgPath = location === "/kurum" || location.startsWith("/kurum/");
+  const memberships = trpc.org.mine.useQuery(undefined, { enabled: approvedUser, retry: false });
+  const isStaff = (memberships.data ?? []).some((membership) => membership.role !== "student");
   const [cacheReady, setCacheReady] = useState(false);
   useEmailVerificationResult(authLoading, Boolean(user));
 
@@ -200,7 +222,18 @@ function AppGate() {
     return <PendingApprovalScreen status={user.approvalStatus} onLogout={() => void logout()} />;
   }
 
-  if (user && (onboarding.isLoading || !onboarding.data)) return <DashboardLayoutSkeleton />;
+  if (isOrgPath) {
+    if (!user) return <OrgSignIn />;
+    return <Suspense fallback={<DashboardLayoutSkeleton />}><OrgApp /></Suspense>;
+  }
+
+  if (user && (onboarding.isLoading || !onboarding.data || memberships.isLoading)) return <DashboardLayoutSkeleton />;
+
+  // Öğrenci onboarding'ini yapmamış kurum personeli öğrenci anketine değil Kurum Paneli'ne gider.
+  if (user && isStaff && onboarding.data && !onboarding.data.onboardingCompleted) {
+    setTimeout(() => setLocation("/kurum", { replace: true }), 0);
+    return <DashboardLayoutSkeleton />;
+  }
 
   if (user && onboarding.data && !onboarding.data.onboardingCompleted) {
     return (
