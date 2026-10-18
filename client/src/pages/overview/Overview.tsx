@@ -1,0 +1,470 @@
+import { useAuth } from "@/_core/hooks/useAuth";
+import { trpc } from "@/lib/trpc";
+import { useNotebook } from "@/components/notebook/NotebookProvider";
+import { ReviewDueNotes } from "@/components/notebook/NotebookSection";
+import Illustration, { ILLUSTRATIONS, useIllustrationAvailable } from "@/components/app/Illustration";
+import { TARGET_SCORE_TYPE_LABELS } from "@shared/onboarding";
+import { NOTEBOOK_REVIEW_TASK_KIND } from "@shared/questionNotebook";
+import { palette } from "@shared/palette";
+import { getStatusFromProgress, statusMeta } from "@shared/yksData";
+import {
+  chartLabels,
+  dailyPlan,
+  formatExamDate,
+  formatMinutes,
+  getDisplayName,
+  motivationalLines,
+  netDeltaLabel,
+  subjectOrder,
+  toLocalDateKey,
+  weeklyBars,
+  weeklyGoalMinutes,
+  type DashboardSection,
+  type MockExam,
+  type Topic,
+} from "@shared/yksData";
+import {
+  ArrowRight,
+  BarChart3,
+  BookOpen,
+  CalendarDays,
+  Camera,
+  ChevronRight,
+  CircleCheck,
+  Clock3,
+  ListChecks,
+  NotebookPen,
+  PenLine,
+  Play,
+  Quote,
+  Sparkles,
+  Target,
+  Trophy,
+  TrendingUp,
+  Zap,
+} from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
+import { Area, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis, Bar, BarChart } from "recharts";
+
+export type FocusSessionSeed = { sessionId?: number; subject: string; topic: string; plannedMinutes?: number; sessionDate?: string | Date };
+
+type ExamKind = "TYT" | "AYT";
+type TodaySession = { id: string | number; subject: string; topic: string; kind?: string; plannedMinutes: number; targetQuestions: number | null; actualMinutes: number | null; actualQuestions: number | null; done: boolean; sessionDate?: string | Date };
+
+const greetingFor = (hour: number) => (hour < 5 ? "İyi geceler" : hour < 12 ? "Günaydın" : hour < 18 ? "İyi günler" : "İyi akşamlar");
+
+/** Bugünden (bugün boşsa dünden) geriye kesintisiz çalışılan gün sayısı. */
+const countStreak = (minutesByDay: Map<string, number>) => {
+  const cursor = new Date();
+  cursor.setHours(12, 0, 0, 0);
+  if (!(minutesByDay.get(toLocalDateKey(cursor)) ?? 0)) cursor.setDate(cursor.getDate() - 1);
+  let streak = 0;
+  while ((minutesByDay.get(toLocalDateKey(cursor)) ?? 0) > 0) { streak++; cursor.setDate(cursor.getDate() - 1); }
+  return streak;
+};
+
+/** Koç notu: sabit bir cümle değil, eldeki veriden çıkan tek öneri. */
+function buildCoachNote(latest: MockExam | undefined, previous: MockExam | undefined, weakTopic: Topic | undefined) {
+  if (latest && previous) {
+    const deltas = subjectOrder.map((subject) => ({ subject, delta: (latest.subjects[subject] ?? 0) - (previous.subjects[subject] ?? 0) }));
+    const best = [...deltas].sort((a, b) => b.delta - a.delta)[0];
+    const worst = [...deltas].sort((a, b) => a.delta - b.delta)[0];
+    if (worst.delta < 0) return `${worst.subject} son denemede ${Math.abs(worst.delta).toFixed(2)} net düştü. Bu hafta bir oturumu ${weakTopic && weakTopic.subject === worst.subject ? weakTopic.topic : worst.subject} tekrarına ayır.`;
+    if (best.delta > 0) return `${best.subject} ${best.delta.toFixed(2)} net arttı. ${weakTopic ? `Sıradaki adım: ${weakTopic.topic}.` : "Aynı ritmi koru."}`;
+  }
+  if (weakTopic) return `En zayıf konun ${weakTopic.topic} (${weakTopic.subject}). Bugünkü oturumu ona ayırmak en hızlı net kazancı.`;
+  if (!latest) return "İlk deneme sonucunu eklediğinde hangi derse öncelik vermen gerektiğini burada göreceksin.";
+  return "İkinci deneme sonucunu eklediğinde ders bazında değişimi burada göreceksin.";
+}
+
+// ---------------------------------------------------------------------------
+// Küçük yapı taşları (bu sayfanın kart dili; diğer sayfalar da aynı sınıfları kullanır)
+// ---------------------------------------------------------------------------
+
+function Panel({ icon, title, action, children, className = "" }: { icon: ReactNode; title: string; action?: ReactNode; children: ReactNode; className?: string }) {
+  return (
+    <section className={`soft-card flex flex-col p-5 ${className}`}>
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h2 className="flex items-center gap-2.5 text-[15px] font-bold text-ink"><span className="text-brand">{icon}</span>{title}</h2>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function LinkButton({ children, onClick }: { children: ReactNode; onClick: () => void }) {
+  return <button onClick={onClick} className="inline-flex items-center gap-1 text-[12px] font-semibold text-brand hover:text-brand-strong">{children} <ArrowRight size={13} /></button>;
+}
+
+function ExamTabs({ value, onChange }: { value: ExamKind; onChange: (value: ExamKind) => void }) {
+  return (
+    <div className="inline-flex rounded-full bg-paper p-1" role="tablist" aria-label="Sınav türü">
+      {(["TYT", "AYT"] as const).map((kind) => (
+        <button key={kind} role="tab" aria-selected={value === kind} onClick={() => onChange(kind)} className={`h-7 rounded-full px-3.5 text-[12px] font-bold transition ${value === kind ? "bg-brand text-white" : "text-ink-3 hover:text-ink"}`}>{kind}</button>
+      ))}
+    </div>
+  );
+}
+
+function Bar100({ value, color = palette.brand }: { value: number; color?: string }) {
+  return (
+    <div className="h-1.5 w-full overflow-hidden rounded-full bg-rule">
+      <div className="h-full rounded-full transition-[width] duration-500" style={{ width: `${Math.max(0, Math.min(100, value))}%`, backgroundColor: color }} />
+    </div>
+  );
+}
+
+function Ring({ value, size = 64, stroke = 7, color = palette.brand, children }: { value: number; size?: number; stroke?: number; color?: string; children?: ReactNode }) {
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const clamped = Math.max(0, Math.min(100, value));
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg width={size} height={size} className="-rotate-90" aria-hidden="true">
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={palette.rule} strokeWidth={stroke} />
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={circumference * (1 - clamped / 100)} />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center text-center">{children}</div>
+    </div>
+  );
+}
+
+function StatCard({ icon, label, value, unit, foot, progress, tone = "plain" }: { icon: ReactNode; label: string; value: string; unit?: string; foot: ReactNode; progress?: number; tone?: "plain" | "warm" }) {
+  return (
+    <div className={`soft-card flex flex-col p-4 ${tone === "warm" ? "border-[#f3dc9b] bg-pencil-soft/70" : ""}`}>
+      <div className="flex items-center gap-2.5 text-[13px] font-semibold text-ink-2"><span className={tone === "warm" ? "text-pencil-strong" : "text-brand"}>{icon}</span>{label}</div>
+      <p className="mt-3 flex flex-wrap items-baseline gap-x-1.5"><span className="metric-value">{value}</span>{unit && <span className="text-[15px] font-semibold text-ink-2">{unit}</span>}</p>
+      <div className="mt-auto pt-3">
+        {progress !== undefined && <div className="mb-2"><Bar100 value={progress} /></div>}
+        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-[12px] text-ink-3">{foot}</div>
+      </div>
+    </div>
+  );
+}
+
+function EmptyNote({ children }: { children: ReactNode }) {
+  return <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-rule-strong bg-paper/60 px-4 py-8 text-center text-[13px] leading-5 text-ink-3">{children}</div>;
+}
+
+// ---------------------------------------------------------------------------
+// Genel Bakış
+// ---------------------------------------------------------------------------
+
+export default function Overview({ topics, exams, onSection, onStartSession, onEditProfile }: { topics: Topic[]; exams: MockExam[]; onSection: (section: DashboardSection) => void; onStartSession: (seed?: FocusSessionSeed) => void; onEditProfile: () => void }) {
+  const { user } = useAuth();
+  const notebook = useNotebook();
+  const isGuest = !user;
+  const profile = trpc.onboarding.get.useQuery(undefined, { enabled: Boolean(user), retry: false }).data;
+  const calendar = trpc.calendar.snapshot.useQuery(undefined, { enabled: Boolean(user), retry: false });
+  const review = trpc.questions.summary.useQuery(undefined, { enabled: Boolean(user), retry: false });
+  const landscapeAvailable = useIllustrationAvailable(ILLUSTRATIONS.motivationLandscape);
+  const [netExam, setNetExam] = useState<ExamKind>("TYT");
+  const [masteryExam, setMasteryExam] = useState<ExamKind>("TYT");
+
+  const now = new Date();
+  const todayKey = toLocalDateKey(now);
+  const name = profile?.preferredName || (user ? getDisplayName(user.name) : "Ece");
+
+  // Bugünün oturumları: hesapta Takvim'deki gerçek plan, misafirde demo plan.
+  const sessions: TodaySession[] = isGuest
+    ? dailyPlan.map((item, index) => { const [topic] = item.title.split(" · "); return { id: `demo-${index}`, subject: item.meta.replace(/^(TYT|AYT) /, ""), topic, kind: item.title.split(" · ")[1], plannedMinutes: 40, targetQuestions: 20, actualMinutes: item.done ? 40 : null, actualQuestions: item.done ? 20 : null, done: item.done }; })
+    : (calendar.data?.sessions ?? [])
+        .filter((item) => item.status !== "skipped" && toLocalDateKey(item.sessionDate) === todayKey)
+        .sort((a, b) => new Date(a.sessionDate).getTime() - new Date(b.sessionDate).getTime())
+        .map((item) => ({ id: item.id, subject: item.subject, topic: item.topic, kind: item.kind, plannedMinutes: item.plannedMinutes, targetQuestions: item.targetQuestions, actualMinutes: item.actualMinutes, actualQuestions: item.actualQuestions, done: item.status === "completed", sessionDate: item.sessionDate }));
+  const doneCount = sessions.filter((item) => item.done).length;
+  const nextSession = sessions.find((item) => !item.done);
+  const plannedMinutes = sessions.reduce((sum, item) => sum + item.plannedMinutes, 0);
+  const doneMinutes = sessions.filter((item) => item.done).reduce((sum, item) => sum + (item.actualMinutes ?? item.plannedMinutes), 0);
+  const plannedQuestions = sessions.reduce((sum, item) => sum + (item.targetQuestions ?? 0), 0);
+  const doneQuestions = sessions.filter((item) => item.done).reduce((sum, item) => sum + (item.actualQuestions ?? 0), 0);
+  const dueReviews = review.data?.due ?? 0;
+
+  // Son 7 gün: hesapta konu çalışma günlüğü, misafirde demo çubuklar.
+  const week = useMemo(() => {
+    const days = Array.from({ length: 7 }, (_, index) => { const date = new Date(); date.setHours(12, 0, 0, 0); date.setDate(date.getDate() - (6 - index)); return date; });
+    const minutesByDay = new Map<string, number>();
+    if (isGuest) for (const date of days) minutesByDay.set(toLocalDateKey(date), weeklyBars.find((bar) => bar.day === chartLabels[(date.getDay() + 6) % 7])?.value ?? 0);
+    else for (const log of calendar.data?.logs ?? []) { const key = toLocalDateKey(log.studyDate); minutesByDay.set(key, (minutesByDay.get(key) ?? 0) + log.minutes); }
+    const dailyGoal = isGuest ? Math.round(weeklyGoalMinutes / 7) : profile?.dailyStudyDuration ?? 0;
+    const bars = days.map((date) => ({ key: toLocalDateKey(date), day: chartLabels[(date.getDay() + 6) % 7], minutes: minutesByDay.get(toLocalDateKey(date)) ?? 0, goal: dailyGoal }));
+    const total = bars.reduce((sum, bar) => sum + bar.minutes, 0);
+    return { bars, total, goal: dailyGoal * 7, streak: countStreak(minutesByDay), from: days[0], to: days[6] };
+  }, [isGuest, calendar.data?.logs, profile?.dailyStudyDuration]);
+
+  const weakTopic = topics.filter((item) => item.status === "Zayıf" && !item.insufficientData).sort((a, b) => a.progress - b.progress)[0];
+  // Karşılaştırma yalnızca aynı türden denemeyle (TYT ile AYT'nin netleri kıyaslanamaz).
+  const byDate = useMemo(() => exams.slice().sort((a, b) => b.date.localeCompare(a.date)), [exams]);
+  const latest = byDate[0];
+  const previous = latest ? byDate.find((exam) => exam !== latest && (exam.exam ?? "TYT") === (latest.exam ?? "TYT")) : undefined;
+  const netChange = latest && previous ? latest.net - previous.net : null;
+  const coachNote = buildCoachNote(latest, previous, weakTopic);
+
+  // Net gelişimi: seçilen sınav türünün denemeleri, eskiden yeniye.
+  const netSeries = useMemo(() => exams
+    .filter((exam) => (exam.exam ?? "TYT") === netExam)
+    .slice()
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(-10)
+    .map((exam) => ({ label: formatExamDate(exam.date), net: Number(exam.net.toFixed(2)), title: exam.title })), [exams, netExam]);
+
+  // Konu hâkimiyeti: ders bazında ortalama ilerleme; hiç güvenilir verisi olmayan ders "Veri yok".
+  const mastery = useMemo(() => {
+    const bySubject = new Map<string, Topic[]>();
+    for (const topic of topics.filter((item) => item.exam === masteryExam)) bySubject.set(topic.subject, [...(bySubject.get(topic.subject) ?? []), topic]);
+    return Array.from(bySubject, ([subject, items]) => {
+      const reliable = items.filter((item) => !item.insufficientData);
+      const value = reliable.length ? Math.round(reliable.reduce((sum, item) => sum + item.progress, 0) / reliable.length) : null;
+      return { subject, value, color: value === null ? palette.ruleStrong : statusMeta[getStatusFromProgress(value)].color };
+    });
+  }, [topics, masteryExam]);
+
+  // Son deneme analizi: konu detayı girilmişse doğru/yanlış/boş, yoksa ders netleri.
+  const analysis = useMemo(() => {
+    if (!latest) return null;
+    const details = latest.topicDetails ?? [];
+    const correct = details.reduce((sum, row) => sum + (row.correct ?? 0), 0);
+    const wrong = details.reduce((sum, row) => sum + (row.wrong ?? 0), 0);
+    const blank = details.reduce((sum, row) => sum + (row.blank ?? 0), 0);
+    const answered = correct + wrong + blank;
+    return { answered, correct, wrong, blank, rate: answered ? Math.round((correct / answered) * 100) : null };
+  }, [latest]);
+
+  const startNext = () => (nextSession?.kind === NOTEBOOK_REVIEW_TASK_KIND
+    ? notebook.startReview()
+    : onStartSession(nextSession ? { sessionId: typeof nextSession.id === "number" ? nextSession.id : undefined, subject: nextSession.subject, topic: nextSession.topic, plannedMinutes: nextSession.plannedMinutes, sessionDate: nextSession.sessionDate } : undefined));
+
+  const targetSchool = [profile?.targetUniversity, profile?.targetDepartment].filter(Boolean).join(" · ");
+  const scoreType = profile?.targetScoreType ? TARGET_SCORE_TYPE_LABELS[profile.targetScoreType] : null;
+  const quote = motivationalLines[now.getDate() % motivationalLines.length];
+
+  const planLine = sessions.length === 0
+    ? "Bugün için planlanmış bir görevin yok; Takvim'den ekleyebilir ya da AI Planım ile haftanı planlayabilirsin."
+    : doneCount === sessions.length
+      ? `Bugünkü ${sessions.length} görevinin hepsini bitirdin, harika gidiyorsun.`
+      : `Bugün planında ${sessions.length} görev var${doneCount ? `, ${doneCount} tanesi tamam` : ""}.${nextSession ? ` Sıradaki odak: ${nextSession.subject} · ${nextSession.topic}.` : ""}`;
+
+  return (
+    <div className="grid gap-5 animate-page-in xl:grid-cols-[minmax(0,1fr)_300px]">
+      <div className="min-w-0 space-y-5">
+        {/* Karşılama: öğrenciyi tanıyan koç. */}
+        <section className="coach-hero p-5 sm:p-7">
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
+            <div className="hidden shrink-0 sm:block">
+              <div className="relative flex h-[104px] w-[104px] items-center justify-center overflow-hidden rounded-full border-4 border-white bg-brand text-[34px] font-extrabold text-white shadow-[var(--shadow-card)]">
+                {name.charAt(0).toLocaleUpperCase("tr-TR")}
+                <Illustration src={ILLUSTRATIONS.coachAvatar} className="absolute inset-0 h-full w-full bg-brand-soft object-cover" />
+              </div>
+            </div>
+            <div className="min-w-0 flex-1">
+              <h1 className="font-display text-[26px] font-extrabold leading-tight text-ink sm:text-[30px]">{greetingFor(now.getHours())} {name}!</h1>
+              <div className="mt-2 max-w-[68ch] space-y-1.5 text-[14.5px] leading-6 text-ink-2">
+                <p>{targetSchool ? `${targetSchool} hedefin için attığın her bilinçli adım seni hedefine biraz daha yaklaştırıyor.` : "YKS hedefin için attığın her bilinçli adım seni hedefine biraz daha yaklaştırıyor."}</p>
+                <p>{planLine}{dueReviews > 0 ? ` Tekrar listende ${dueReviews} soru seni bekliyor.` : ""}</p>
+              </div>
+              <p className="mt-3 text-[14.5px] font-bold text-brand-strong">Hazırsan başlayalım {name}! Bugün nereden başlamak istersin?</p>
+            </div>
+          </div>
+          <div className="mt-5 grid gap-2.5 md:grid-cols-3">
+            <button onClick={startNext} className="flex min-h-[52px] items-center gap-3 rounded-xl bg-brand px-4 text-left text-[14.5px] font-bold text-white shadow-[var(--shadow-card)] transition hover:bg-brand-strong">
+              <Play size={18} className="shrink-0" /> <span className="flex-1">{nextSession ? "Bugünkü planıma başla" : "Serbest oturum başlat"}</span><ArrowRight size={16} />
+            </button>
+            <button onClick={() => (user ? notebook.startReview() : onSection("notebook"))} className="flex min-h-[52px] items-center gap-3 rounded-xl border border-rule bg-white px-4 text-left text-[14.5px] font-semibold text-ink transition hover:border-brand/40">
+              <BookOpen size={18} className="shrink-0 text-brand" /> <span className="flex-1">Tekrar listemden başla{dueReviews > 0 && <span className="ml-1.5 rounded-full bg-warn-soft px-2 py-0.5 text-[11px] font-bold text-warn">{dueReviews}</span>}</span><ChevronRight size={16} className="text-ink-4" />
+            </button>
+            <button onClick={() => onSection("calendar")} className="flex min-h-[52px] items-center gap-3 rounded-xl border border-rule bg-white px-4 text-left text-[14.5px] font-semibold text-ink transition hover:border-brand/40">
+              <ListChecks size={18} className="shrink-0 text-brand" /> <span className="flex-1">Tüm görevleri gör</span><ChevronRight size={16} className="text-ink-4" />
+            </button>
+          </div>
+        </section>
+
+        {/* Bugünün hedefleri + son deneme. */}
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
+          <StatCard icon={<Clock3 size={18} />} label="Bugünkü çalışma hedefi" value={formatMinutes(plannedMinutes)} progress={plannedMinutes ? (doneMinutes / plannedMinutes) * 100 : 0} foot={<><span>Planlanan süre</span><span>{doneMinutes} / {plannedMinutes} dk</span></>} />
+          <StatCard icon={<PenLine size={18} />} label="Bugünkü soru hedefi" value={String(plannedQuestions)} unit="soru" progress={plannedQuestions ? (doneQuestions / plannedQuestions) * 100 : 0} foot={<><span>{plannedQuestions ? "Planlanan" : "Görevlerde soru hedefi yok"}</span><span>{doneQuestions} / {plannedQuestions}</span></>} />
+          <StatCard icon={<ListChecks size={18} />} label="Bugünkü görev" value={String(sessions.length)} unit="görev" progress={sessions.length ? (doneCount / sessions.length) * 100 : 0} foot={<><span>Tamamlanan</span><span>{doneCount} / {sessions.length}</span></>} />
+          <StatCard tone="warm" icon={<Trophy size={18} />} label="Son deneme neti" value={latest ? latest.net.toFixed(2) : "—"} unit={latest ? "net" : undefined} foot={latest ? <><span>{latest.exam ?? "TYT"} · {formatExamDate(latest.date)}</span>{netChange !== null && <span className={`font-bold ${netChange >= 0 ? "text-success" : "text-danger"}`}>{netChange >= 0 ? "↑" : "↓"} {netDeltaLabel(netChange)}</span>}</> : <button onClick={() => onSection("exams")} className="font-semibold text-brand">İlk denemeni ekle →</button>} />
+        </div>
+
+        {user && <ReviewDueNotes />}
+
+        {/* Grafikler. */}
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+          <Panel icon={<TrendingUp size={18} />} title="Net gelişimin" action={<ExamTabs value={netExam} onChange={setNetExam} />}>
+            {netSeries.length === 0 ? (
+              <EmptyNote>{netExam} denemesi eklediğinde netlerinin gelişimi burada çizilir.<br /><button onClick={() => onSection("exams")} className="mt-2 font-semibold text-brand">Deneme ekle →</button></EmptyNote>
+            ) : (
+              <>
+                <p className="-mt-2 mb-2 text-[12px] text-ink-3">Son {netSeries.length} {netExam} denemesi · toplam net</p>
+                <div className="h-[220px]" role="img" aria-label={`${netExam} net gelişimi: ${netSeries.map((point) => `${point.label} ${point.net}`).join(", ")}`}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={netSeries} margin={{ top: 16, right: 12, bottom: 0, left: -18 }}>
+                      <defs><linearGradient id="netFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={palette.brand} stopOpacity={0.18} /><stop offset="100%" stopColor={palette.brand} stopOpacity={0} /></linearGradient></defs>
+                      <CartesianGrid stroke={palette.rule} vertical={false} />
+                      <XAxis dataKey="label" tick={{ fontSize: 11, fill: palette.ink3 }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fontSize: 11, fill: palette.ink3 }} axisLine={false} tickLine={false} width={44} domain={[0, "auto"]} />
+                      <Tooltip formatter={(value: number) => [`${value} net`, "Net"]} labelFormatter={(label, payload) => payload?.[0]?.payload?.title || label} contentStyle={{ borderRadius: 12, border: `1px solid ${palette.rule}`, fontSize: 12 }} />
+                      <Area type="monotone" dataKey="net" stroke="none" fill="url(#netFill)" />
+                      <Line type="monotone" dataKey="net" stroke={palette.brand} strokeWidth={2.5} dot={{ r: 3.5, fill: "#fff", stroke: palette.brand, strokeWidth: 2 }} activeDot={{ r: 5 }} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              </>
+            )}
+          </Panel>
+
+          <Panel icon={<BarChart3 size={18} />} title="Haftalık çalışma süren" action={week.goal > 0 ? <Ring value={(week.total / week.goal) * 100} size={52} stroke={6}><span className="text-[11px] font-extrabold text-brand">%{Math.round(Math.min(100, (week.total / week.goal) * 100))}</span></Ring> : undefined}>
+            <p className="-mt-2 mb-2 text-[12px] text-ink-3">
+              Son 7 gün · <strong className="font-bold text-ink">{week.total} dk</strong>{week.goal > 0 ? ` / ${week.goal} dk hedef` : " · günlük hedefini profilinden belirle"}{week.streak > 1 ? ` · ${week.streak} gündür kesintisiz` : ""}
+            </p>
+            {week.total === 0 ? (
+              <EmptyNote>Bu hafta henüz kayıtlı çalışma yok. Bir odak oturumunu bitirdiğinde süresi burada görünür.</EmptyNote>
+            ) : (
+              <div className="h-[220px]" role="img" aria-label={`Son 7 gün çalışma: ${week.bars.map((bar) => `${bar.day} ${bar.minutes} dakika`).join(", ")}`}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={week.bars} margin={{ top: 16, right: 4, bottom: 0, left: 0 }} barGap={3}>
+                    <CartesianGrid stroke={palette.rule} vertical={false} />
+                    <XAxis dataKey="day" tick={{ fontSize: 11, fill: palette.ink3 }} axisLine={false} tickLine={false} interval={0} />
+                    <YAxis tick={{ fontSize: 11, fill: palette.ink3 }} axisLine={false} tickLine={false} width={48} unit=" dk" allowDecimals={false} />
+                    <Tooltip formatter={(value: number, key) => [`${value} dk`, key === "goal" ? "Hedef" : "Senin süren"]} contentStyle={{ borderRadius: 12, border: `1px solid ${palette.rule}`, fontSize: 12 }} cursor={{ fill: palette.paper }} />
+                    <Bar dataKey="minutes" fill={palette.brand} radius={[5, 5, 0, 0]} maxBarSize={18} />
+                    {week.goal > 0 && <Bar dataKey="goal" fill={palette.rule} radius={[5, 5, 0, 0]} maxBarSize={18} />}
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </Panel>
+        </div>
+
+        {/* Konu hâkimiyeti, bugünün planı, son deneme. */}
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 2xl:grid-cols-[1.1fr_1fr_0.9fr]">
+          <Panel icon={<Target size={18} />} title="Konu hâkimiyeti" action={<ExamTabs value={masteryExam} onChange={setMasteryExam} />}>
+            {mastery.length === 0 ? (
+              <EmptyNote>{masteryExam} konuların henüz yüklenmedi.</EmptyNote>
+            ) : (
+              <>
+                <ul className="grid gap-x-5 gap-y-3 sm:grid-cols-2">
+                  {mastery.map((row) => (
+                    <li key={row.subject}>
+                      <div className="mb-1.5 flex items-center justify-between text-[13px]"><span className="flex items-center gap-2 font-semibold text-ink"><span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: row.color }} />{row.subject}</span><span className="font-semibold text-ink-3">{row.value === null ? "Veri yok" : `%${row.value}`}</span></div>
+                      <Bar100 value={row.value ?? 0} color={row.color} />
+                    </li>
+                  ))}
+                </ul>
+                <div className="mt-auto flex flex-wrap items-center justify-between gap-3 pt-4">
+                  <div className="flex flex-wrap gap-3 text-[11px] text-ink-3">{(["İyi", "Orta", "Zayıf"] as const).map((status) => <span key={status} className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: statusMeta[status].color }} />{status}</span>)}<span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: palette.ruleStrong }} />Veri yok</span></div>
+                  <LinkButton onClick={() => onSection("topics")}>Konu haritası</LinkButton>
+                </div>
+              </>
+            )}
+          </Panel>
+
+          <Panel icon={<CalendarDays size={18} />} title="Bugünkü çalışma planın" action={<LinkButton onClick={() => onSection("calendar")}>Tümünü gör</LinkButton>}>
+            {sessions.length === 0 ? (
+              <EmptyNote>Bugün için görev yok.<br /><button onClick={() => onSection("plan")} className="mt-2 font-semibold text-brand">AI Planım ile haftanı planla →</button></EmptyNote>
+            ) : (
+              <ol className="space-y-2.5">
+                {sessions.slice(0, 4).map((item, index) => (
+                  <li key={String(item.id)} className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 ${item === nextSession ? "border-[#f3dc9b] bg-pencil-soft/60" : "border-rule"}`}>
+                    <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[12px] font-bold ${item.done ? "bg-success text-white" : item === nextSession ? "bg-brand-strong text-white" : "bg-paper text-ink-3"}`}>{item.done ? <CircleCheck size={15} /> : index + 1}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className={`block truncate text-[13px] font-semibold ${item.done ? "text-ink-3 line-through" : "text-ink"}`}>{item.subject} · {item.topic}</span>
+                      <span className="block truncate text-[12px] text-ink-3">{[item.kind, item.targetQuestions ? `${item.targetQuestions} soru` : null].filter(Boolean).join(" · ")}</span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1 text-[12px] text-ink-3"><Clock3 size={13} />{item.plannedMinutes} dk</span>
+                  </li>
+                ))}
+                {sessions.length > 4 && <li className="text-center text-[12px] text-ink-3">+{sessions.length - 4} görev daha</li>}
+              </ol>
+            )}
+          </Panel>
+
+          <Panel icon={<BarChart3 size={18} />} title="Son deneme analizi" className="lg:col-span-2 2xl:col-span-1" action={latest ? <LinkButton onClick={() => onSection("exams")}>Detaylı analiz</LinkButton> : undefined}>
+            {!latest || !analysis ? (
+              <EmptyNote>Deneme sonucu eklediğinde doğru, yanlış ve boş dağılımın burada görünür.</EmptyNote>
+            ) : (
+              <div className="flex flex-1 flex-col">
+                <p className="-mt-2 mb-3 text-[12px] text-ink-3">{latest.title || `${latest.exam ?? "TYT"} denemesi`} · {formatExamDate(latest.date)}</p>
+                {analysis.rate !== null ? (
+                  <div className="flex items-center gap-5">
+                    <Ring value={analysis.rate} size={104} stroke={11}><span className="text-[20px] font-extrabold text-ink">%{analysis.rate}</span><span className="text-[10px] text-ink-3">Doğru oranı</span></Ring>
+                    <dl className="flex-1 space-y-1.5 text-[13px]">
+                      {[["Doğru", analysis.correct, palette.success], ["Yanlış", analysis.wrong, palette.danger], ["Boş", analysis.blank, palette.ruleStrong]].map(([label, count, color]) => (
+                        <div key={label as string} className="flex items-center justify-between"><dt className="flex items-center gap-2 text-ink-3"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: color as string }} />{label}</dt><dd className="font-bold text-ink">{count}</dd></div>
+                      ))}
+                    </dl>
+                  </div>
+                ) : (
+                  <ul className="space-y-2">
+                    {subjectOrder.filter((subject) => latest.subjects[subject] !== undefined).map((subject) => (
+                      <li key={subject} className="flex items-center justify-between text-[13px]"><span className="text-ink-2">{subject}</span><span className="font-bold text-ink">{(latest.subjects[subject] ?? 0).toFixed(2)} net</span></li>
+                    ))}
+                    <li className="pt-1 text-[11px] text-ink-4">Doğru/yanlış dağılımı için denemeye konu detayı ekleyebilirsin.</li>
+                  </ul>
+                )}
+                <div className="mt-auto flex items-center justify-between border-t border-rule pt-3 text-[13px]">
+                  <span className="text-ink-3">Net</span>
+                  <span className="flex items-baseline gap-2"><strong className="text-[18px] font-extrabold text-ink">{latest.net.toFixed(2)}</strong>{netChange !== null && <span className={`text-[12px] font-bold ${netChange >= 0 ? "text-success" : "text-danger"}`}>{netDeltaLabel(netChange)}</span>}</span>
+                </div>
+              </div>
+            )}
+          </Panel>
+        </div>
+      </div>
+
+      {/* Sağ sütun: hedef, koç önerisi, hızlı erişim. */}
+      <aside className="grid content-start gap-5 sm:grid-cols-2 xl:grid-cols-1">
+        <section className="soft-card border-[#f3dc9b] bg-gradient-to-b from-pencil-soft/80 to-white p-5">
+          <p className="flex gap-2 text-[15px] font-semibold italic leading-6 text-ink-2"><Quote size={16} className="mt-1 shrink-0 text-pencil-strong" />{quote}</p>
+          <div className="mt-4 rounded-xl border border-rule bg-white p-4">
+            <div className="flex items-center gap-2 text-[14px] font-bold text-ink"><Target size={18} className="text-brand" /> Hedefin</div>
+            {targetSchool ? (
+              <p className="mt-2 text-[14px] font-semibold leading-5 text-ink">{targetSchool}</p>
+            ) : (
+              <p className="mt-2 text-[13px] text-ink-3">{isGuest ? "Giriş yapınca hedefin burada görünür." : "Hedef üniversite ve bölümünü henüz yazmadın."}</p>
+            )}
+            {(scoreType || profile?.targetRanking || profile?.examYear) && <p className="mt-1 text-[12px] text-ink-3">{[scoreType, profile?.targetRanking ? `İlk ${profile.targetRanking}` : null, profile?.examYear ? `YKS ${profile.examYear}` : null].filter(Boolean).join(" · ")}</p>}
+            {!isGuest && <button onClick={onEditProfile} className="mt-3 text-[12px] font-semibold text-brand hover:text-brand-strong">{targetSchool ? "Hedefini düzenle" : "Hedefini belirle"} →</button>}
+          </div>
+        </section>
+
+        <section className="soft-card p-5">
+          <h2 className="flex items-center gap-2 text-[14px] font-bold text-ink"><Sparkles size={17} className="text-pencil-strong" /> Koçunun sana önerisi</h2>
+          <p className="mt-3 text-[14px] leading-6 text-ink-2">{coachNote}</p>
+          <button onClick={() => onSection(latest ? (weakTopic ? "topics" : "exams") : "exams")} className="mt-4 flex w-full items-center justify-between rounded-xl border border-rule px-3.5 py-2.5 text-[13px] font-semibold text-brand hover:bg-paper">
+            {latest ? (weakTopic ? "Zayıf konularıma bak" : "Denemelerime bak") : "Deneme sonucu ekle"} <ChevronRight size={15} />
+          </button>
+        </section>
+
+        <section className="soft-card p-5">
+          <h2 className="flex items-center gap-2 text-[14px] font-bold text-ink"><Zap size={17} className="text-brand" /> Hızlı erişim</h2>
+          <ul className="mt-3 divide-y divide-rule">
+            {[
+              { icon: <CalendarDays size={17} />, label: "Ders programım", run: () => onSection("calendar") },
+              { icon: <PenLine size={17} />, label: "Planı düzenle", run: () => onSection("plan") },
+              { icon: <Trophy size={17} />, label: "Deneme ekle", run: () => onSection("exams") },
+              { icon: <Camera size={17} />, label: "Çözemediğim soruyu ekle", run: () => (user ? notebook.captureQuestion() : onSection("notebook")) },
+              { icon: <NotebookPen size={17} />, label: "Soru defterim", run: () => onSection("notebook") },
+              { icon: <BookOpen size={17} />, label: "Kaynak önerileri", run: () => onSection("resources") },
+            ].map((item) => (
+              <li key={item.label}>
+                <button onClick={item.run} className="flex w-full items-center gap-3 py-2.5 text-left text-[13.5px] font-medium text-ink-2 hover:text-brand-strong">
+                  <span className="text-brand">{item.icon}</span><span className="flex-1">{item.label}</span><ChevronRight size={15} className="text-ink-4" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        {landscapeAvailable && (
+          <section className="relative overflow-hidden rounded-2xl sm:col-span-2 xl:col-span-1">
+            <Illustration src={ILLUSTRATIONS.motivationLandscape} className="h-[190px] w-full object-cover" />
+            <div className="absolute inset-0 bg-gradient-to-r from-black/45 to-transparent" />
+            <p className="absolute left-5 top-5 max-w-[60%] text-[20px] font-bold leading-snug text-white">Küçük adımlar büyük hedeflere götürür.</p>
+          </section>
+        )}
+      </aside>
+    </div>
+  );
+}

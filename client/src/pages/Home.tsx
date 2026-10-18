@@ -30,6 +30,7 @@ import {
   FileText,
   Flame,
   Grid2X2,
+  GraduationCap,
   Library,
   ListFilter,
   KeyRound,
@@ -58,6 +59,11 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
+import { SECTION_PATHS, sectionFromPath } from "@/lib/sections";
+import Illustration, { ILLUSTRATIONS } from "@/components/app/Illustration";
+import NotificationBell from "@/components/app/NotificationBell";
+import Overview, { type FocusSessionSeed } from "@/pages/overview/Overview";
+import { useLocation } from "wouter";
 import * as XLSX from "xlsx";
 import ResourceCatalogSection from "@/components/resourceCatalog/ResourceCatalogSection";
 import PaywallSection from "@/components/subscription/PaywallSection";
@@ -93,7 +99,6 @@ import {
   getColorForSubject,
   getDisplayName,
   getInitials,
-  getNextStatus,
   getStatusFromProgress,
   getStoredValue,
   initialExams,
@@ -231,9 +236,12 @@ const toneClasses: Record<string, string> = {
 
 function Brand() {
   return (
-    <div className="flex items-center gap-2.5 px-2">
-      <div className="brand-mark">P</div>
-      <div className="font-display text-[22px] font-semibold leading-none text-ink">Pusula</div>
+    <div className="flex items-center gap-3 px-1.5">
+      <div className="brand-tile"><GraduationCap size={22} strokeWidth={2} /></div>
+      <div className="min-w-0">
+        <div className="font-display text-[20px] font-extrabold leading-none text-ink">Pusula</div>
+        <div className="mt-1 text-[12px] font-medium text-ink-3">Kişisel YKS koçun</div>
+      </div>
     </div>
   );
 }
@@ -272,232 +280,16 @@ function SectionHeading({ eyebrow, title, copy, action }: { eyebrow?: string; ti
   );
 }
 
-type OverviewSession = { id: string | number; subject: string; topic: string; kind?: string; plannedMinutes: number; done: boolean; sessionDate?: string | Date };
-
-/** Bugünden (bugün boşsa dünden) geriye kesintisiz çalışılan gün sayısı. */
-const countStreak = (minutesByDay: globalThis.Map<string, number>) => {
-  const cursor = new Date();
-  cursor.setHours(12, 0, 0, 0);
-  if (!(minutesByDay.get(toLocalDateKey(cursor)) ?? 0)) cursor.setDate(cursor.getDate() - 1);
-  let streak = 0;
-  while ((minutesByDay.get(toLocalDateKey(cursor)) ?? 0) > 0) { streak++; cursor.setDate(cursor.getDate() - 1); }
-  return streak;
-};
-
-/** Koç notu: sabit bir cümle değil, eldeki veriden çıkan tek öneri. */
-function buildCoachNote(latest: MockExam | undefined, previous: MockExam | undefined, weakTopic: Topic | undefined) {
-  if (latest && previous) {
-    const deltas = subjectOrder.map((subject) => ({ subject, delta: (latest.subjects[subject] ?? 0) - (previous.subjects[subject] ?? 0) }));
-    const best = [...deltas].sort((a, b) => b.delta - a.delta)[0];
-    const worst = [...deltas].sort((a, b) => a.delta - b.delta)[0];
-    if (worst.delta < 0) return `${worst.subject} son denemede ${Math.abs(worst.delta).toFixed(2)} net düştü. Bu hafta bir oturumu ${weakTopic && weakTopic.subject === worst.subject ? weakTopic.topic : worst.subject} tekrarına ayır.`;
-    if (best.delta > 0) return `${best.subject} ${best.delta.toFixed(2)} net arttı. ${weakTopic ? `Sıradaki adım: ${weakTopic.topic}.` : "Aynı ritmi koru."}`;
-  }
-  if (weakTopic) return `En zayıf konun ${weakTopic.topic} (${weakTopic.subject}). Bugünkü oturumu ona ayırmak en hızlı net kazancı.`;
-  if (!latest) return "İlk deneme sonucunu eklediğinde hangi derse öncelik vermen gerektiğini burada göreceksin.";
-  return "İkinci deneme sonucunu eklediğinde ders bazında değişimi burada göreceksin.";
-}
-
-function Overview({ topics, exams, onSection, onStartSession }: { topics: Topic[]; exams: MockExam[]; onSection: (section: DashboardSection) => void; onStartSession: (seed?: FocusSessionSeed) => void }) {
-  const { user } = useAuth();
-  const notebook = useNotebook();
-  const isGuest = !user;
-  const onboarding = trpc.onboarding.get.useQuery(undefined, { enabled: Boolean(user), retry: false });
-  const profile = onboarding.data;
-  const calendarSnapshot = trpc.calendar.snapshot.useQuery(undefined, { enabled: Boolean(user), retry: false });
-
-  const today = new Date();
-  const todayKey = toLocalDateKey(today);
-  const todayTitle = new Intl.DateTimeFormat("tr-TR", { day: "numeric", month: "long" }).format(today);
-  const todayWeekday = new Intl.DateTimeFormat("tr-TR", { weekday: "long" }).format(today);
-  const greeting = profile?.preferredName || (user ? getDisplayName(user.name) : null);
-
-  // Bugünün oturumları: hesapta Takvim'deki gerçek plan, misafirde demo plan.
-  const sessions: OverviewSession[] = isGuest
-    ? dailyPlan.map((item, index) => { const [topic] = item.title.split(" · "); return { id: `demo-${index}`, subject: item.meta.replace(/^(TYT|AYT) /, ""), topic, kind: item.title.split(" · ")[1], plannedMinutes: 40, done: item.done }; })
-    : (calendarSnapshot.data?.sessions ?? [])
-        .filter((item) => item.status !== "skipped" && toLocalDateKey(item.sessionDate) === todayKey)
-        .sort((a, b) => new Date(a.sessionDate).getTime() - new Date(b.sessionDate).getTime())
-        .map((item) => ({ id: item.id, subject: item.subject, topic: item.topic, kind: item.kind, plannedMinutes: item.plannedMinutes, done: item.status === "completed", sessionDate: item.sessionDate }));
-  const doneCount = sessions.filter((item) => item.done).length;
-  const nextSession = sessions.find((item) => !item.done);
-
-  // Son 7 gün: hesapta konu çalışma günlüğü, misafirde demo çubuklar.
-  const last7Days = Array.from({ length: 7 }, (_, index) => { const date = new Date(); date.setHours(12, 0, 0, 0); date.setDate(date.getDate() - (6 - index)); return date; });
-  const minutesByDay = new globalThis.Map<string, number>(); // "Map" burada lucide ikonu
-  if (isGuest) {
-    for (const date of last7Days) minutesByDay.set(toLocalDateKey(date), weeklyBars.find((bar) => bar.day === chartLabels[(date.getDay() + 6) % 7])?.value ?? 0);
-  } else {
-    for (const log of calendarSnapshot.data?.logs ?? []) { const key = toLocalDateKey(log.studyDate); minutesByDay.set(key, (minutesByDay.get(key) ?? 0) + log.minutes); }
-  }
-  const bars = last7Days.map((date) => ({ key: toLocalDateKey(date), day: chartLabels[(date.getDay() + 6) % 7], value: minutesByDay.get(toLocalDateKey(date)) ?? 0 }));
-  const weekTotal = bars.reduce((sum, bar) => sum + bar.value, 0);
-  const weekMax = Math.max(1, ...bars.map((bar) => bar.value));
-  const weekGoal = isGuest ? weeklyGoalMinutes : (profile?.dailyStudyDuration ?? 0) * 7;
-  const streak = countStreak(minutesByDay);
-
-  const studiedTopicCount = topics.filter((item) => !item.insufficientData).length;
-  const coverage = topics.length ? Math.round(topics.reduce((sum, item) => sum + item.progress, 0) / topics.length) : 0;
-  const weakTopic = topics.filter((item) => item.status === "Zayıf" && !item.insufficientData).sort((a, b) => a.progress - b.progress)[0];
-
-  const latest = exams[0];
-  const previous = exams[1];
-  const netChange = latest && previous ? latest.net - previous.net : null;
-  const latestTyt = exams.find((item) => (item.exam ?? "TYT") === "TYT");
-  // Hedef net yalnızca demoda var; hesapta profil hedefi sıralama olarak tutuluyor.
-  const demoTarget = isGuest ? targetNet : null;
-  const targetText = profile?.targetRanking ? `İlk ${profile.targetRanking}` : null;
-  const scoreTypeText = profile?.targetScoreType ? TARGET_SCORE_TYPE_LABELS[profile.targetScoreType] : null;
-
-  // Defter tekrarı görevi odak sayacıyla değil, soruları tek tek gösteren tekrar ekranıyla başlar.
-  const startNext = () => nextSession?.kind === NOTEBOOK_REVIEW_TASK_KIND ? notebook.startReview() : onStartSession(nextSession ? { sessionId: typeof nextSession.id === "number" ? nextSession.id : undefined, subject: nextSession.subject, topic: nextSession.topic, plannedMinutes: nextSession.plannedMinutes, sessionDate: nextSession.sessionDate } : undefined);
-
-  return (
-    <div className="space-y-5 animate-page-in">
-      {/* Bugün şeridi: günün oturumları optik form baloncukları olarak. */}
-      <section className="today-band grid gap-6 p-6 sm:p-7 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.6fr)] lg:gap-10">
-        <div>
-          <p className="text-[15px] font-medium capitalize text-ink-3">{todayWeekday}</p>
-          <h1 className="today-date mt-1">{todayTitle}</h1>
-          <p className="mt-3 max-w-[38ch] text-[15px] leading-6 text-ink-2">
-            {greeting ? `Merhaba ${greeting}. ` : ""}
-            {sessions.length === 0 ? "Bugün için planlanmış oturum yok." : doneCount === sessions.length ? "Bugünün planı tamam." : `Bugün ${sessions.length} oturumdan ${doneCount} tanesi bitti.`}
-          </p>
-        </div>
-        <div className="lg:border-l lg:border-rule lg:pl-10">
-          <div className="flex items-baseline justify-between gap-3">
-            <h2 className="text-[15px] font-semibold text-ink">Bugünkü plan</h2>
-            {sessions.length > 0 && <span className="text-[14px] text-ink-3">{doneCount}/{sessions.length} oturum</span>}
-          </div>
-          <div className="bubble-row mt-3" role="list" aria-label="Bugünkü oturumlar">
-            {sessions.length === 0 && <span className="bubble-item" aria-hidden="true"><span className="bubble is-empty">–</span><span className="bubble-label">Plan yok</span></span>}
-            {sessions.map((item, index) => (
-              <span key={String(item.id)} role="listitem" className="bubble-item" aria-label={`${index + 1}. ${item.subject}, ${item.topic}${item.done ? ", bitti" : item === nextSession ? ", sıradaki" : ""}`}>
-                <span className={`bubble ${item.done ? "is-done" : ""} ${item === nextSession ? "is-next" : ""}`} aria-hidden="true">{item.done ? <Check size={18} strokeWidth={3} /> : index + 1}</span>
-                <span className="bubble-label" aria-hidden="true">{item.subject}</span>
-              </span>
-            ))}
-          </div>
-          {nextSession ? (
-            <p className="mt-4 text-[15px] text-ink-2">Sıradaki: <strong className="font-semibold text-ink">{nextSession.subject} · {nextSession.topic}</strong>{nextSession.kind ? `, ${nextSession.kind.toLocaleLowerCase("tr-TR")}` : ""} · {nextSession.plannedMinutes} dk</p>
-          ) : sessions.length > 0 ? (
-            <p className="mt-4 text-[15px] text-ink-2">Planın bitti. İstersen serbest bir oturum daha açabilirsin.</p>
-          ) : (
-            <p className="mt-4 text-[15px] text-ink-2">Takvimde bugün için oturum oluştur ya da serbest bir oturumla başla.</p>
-          )}
-          <div className="mt-5 flex flex-wrap gap-2.5">
-            {nextSession ? (
-              <Button onClick={startNext} className="h-11 rounded-[10px] bg-pencil px-5 text-[15px] font-semibold text-ink hover:bg-pencil-strong"><Play className="mr-1.5" size={16} /> Oturumu başlat</Button>
-            ) : (
-              <Button onClick={() => onStartSession()} className="h-11 rounded-[10px] bg-pencil px-5 text-[15px] font-semibold text-ink hover:bg-pencil-strong"><Play className="mr-1.5" size={16} /> Serbest oturum başlat</Button>
-            )}
-            <button onClick={() => onSection("calendar")} className="inline-flex h-11 items-center gap-2 rounded-[10px] border border-rule-strong px-4 text-[15px] font-medium text-ink-2 hover:bg-paper">
-              <CalendarDays size={16} /> {sessions.length ? "Takvimi aç" : "Takvimde plan oluştur"}
-            </button>
-          </div>
-        </div>
-      </section>
-      {user && <ReviewDueNotes />}
-
-      <div className="stat-strip">
-        <div>
-          <p className="text-[14px] text-ink-3">Konu kapsama</p>
-          <p className="stat-value mt-1">{formatPercent(coverage)}</p>
-          <p className="mt-1 text-[13px] text-ink-3">{studiedTopicCount} / {topics.length} konuda yeterli veri</p>
-        </div>
-        <div>
-          <p className="text-[14px] text-ink-3">Son 7 gün</p>
-          <p className="stat-value mt-1">{formatMinutes(weekTotal)}</p>
-          <p className="mt-1 text-[13px] text-ink-3">{weekGoal > 0 ? `Hedef ${formatMinutes(weekGoal)} · ${formatPercent(Math.min(100, (weekTotal / weekGoal) * 100))}` : "Günlük hedefini profilinden belirle"}</p>
-        </div>
-        <div>
-          <p className="text-[14px] text-ink-3">Çalışma serisi</p>
-          <p className="stat-value mt-1">{streak} gün</p>
-          <p className="mt-1 text-[13px] text-ink-3">{streak ? "Kesintisiz çalıştığın günler" : "Bugün bir oturumla başlat"}</p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.25fr_0.75fr]">
-        <Card className="soft-card gap-0 p-6 sm:p-7">
-          <SectionHeading title="Odak süren" copy={`${formatDayRange(last7Days[0], last7Days[6])} arasında konu çalışmasına ayırdığın zaman.`} />
-          {weekTotal === 0 ? (
-            <div className="flex h-[190px] flex-col items-start justify-end">
-              <div className="flex w-full items-end gap-2 sm:gap-4">{bars.map((bar) => <div key={bar.key} className="flex flex-1 flex-col items-center gap-2"><div className="weekly-stub" /><span className="text-[13px] text-ink-4">{bar.day}</span></div>)}</div>
-              <p className="mt-5 text-[14px] text-ink-3">Bu hafta henüz kayıtlı çalışma yok. Bir odak oturumunu bitirdiğinde süresi burada görünür.</p>
-            </div>
-          ) : (
-            <div className="flex h-[190px] items-end gap-2 pt-6 sm:gap-4">
-              {bars.map((bar) => (
-                <div key={bar.key} className="flex h-full flex-1 flex-col items-center justify-end gap-2">
-                  <div className="relative flex w-full flex-1 items-end justify-center">
-                    <div className={`weekly-bar ${bar.value > 0 && bar.value === weekMax ? "is-active" : ""}`} style={{ height: `${bar.value ? Math.max(4, Math.round((bar.value / weekMax) * 100)) : 0}%` }}>{bar.value > 0 && <span>{bar.value} dk</span>}</div>
-                  </div>
-                  <span className={`text-[13px] ${bar.key === todayKey ? "font-semibold text-ink" : "text-ink-3"}`}>{bar.day}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-
-        <Card className="soft-card gap-0 p-6 sm:p-7">
-          <SectionHeading title="Denemeler" copy={[scoreTypeText, targetText ? `${targetText} hedefi` : null].filter(Boolean).join(" · ") || (isGuest ? "Demo verisi" : "Hedefini profilinden belirleyebilirsin")} />
-          {latest ? (
-            <div>
-              <p className="text-[14px] text-ink-3">Son deneme · {formatExamDate(latest.date)}</p>
-              <p className="mt-1 flex items-baseline gap-2"><span className="stat-value">{latest.net.toFixed(2)}</span><span className="text-[15px] text-ink-3">net</span>{netChange !== null && <span className={`ml-1 text-[15px] font-semibold ${netChange >= 0 ? "text-success" : "text-danger"}`}>{netDeltaLabel(netChange)}</span>}</p>
-              {demoTarget !== null && (
-                <div className="mt-4">
-                  <div className="mb-2 flex justify-between text-[14px]"><span className="text-ink-3">{demoTarget} net hedefine</span><span className="font-semibold text-ink">{(demoTarget - latest.net).toFixed(2)} net kaldı</span></div>
-                  <ProgressBar value={(latest.net / demoTarget) * 100} />
-                </div>
-              )}
-            </div>
-          ) : (
-            <div>
-              <p className="text-[15px] text-ink-2">Henüz deneme sonucu yok.</p>
-              <Button onClick={() => onSection("exams")} variant="outline" className="mt-3 h-10 rounded-[10px] text-[14px]"><Plus className="mr-1" size={15} /> Deneme sonucu ekle</Button>
-            </div>
-          )}
-          <p className="mt-5 border-t border-rule pt-4 text-[14px] leading-6 text-ink-2">{buildCoachNote(latest, previous, weakTopic)}</p>
-        </Card>
-      </div>
-
-      <Card className="soft-card gap-0 p-6 sm:p-7">
-        <SectionHeading
-          title="Derslerin"
-          copy={latestTyt ? `${latestTyt.title || "Son TYT denemesi"} · ${formatExamDate(latestTyt.date)}` : "Ders bazındaki netlerin ilk TYT denemenden sonra görünür."}
-          action={<button onClick={() => onSection(latestTyt ? "exams" : "topics")} className="text-[14px] font-semibold text-brand hover:text-brand-strong">{latestTyt ? "Denemeler" : "Konu haritası"}</button>}
-        />
-        {latestTyt && (
-          <div className="grid gap-x-8 gap-y-5 sm:grid-cols-2 lg:grid-cols-4">
-            {subjectOrder.map((subject) => {
-              const value = latestTyt.subjects[subject] ?? 0;
-              const total = tytSubjectTotals[subject];
-              return (
-                <div key={subject}>
-                  <div className="mb-2 flex items-baseline justify-between"><span className="text-[15px] font-semibold text-ink">{subject}</span><span className="text-[14px] text-ink-3"><strong className="font-semibold text-ink">{value}</strong> / {total} net</span></div>
-                  <ProgressBar value={(value / total) * 100} color={getColorForSubject(subject)} />
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </Card>
-    </div>
-  );
-}
-
 function Topics({ topics, setTopics, onSection }: { topics: Topic[]; setTopics: React.Dispatch<React.SetStateAction<Topic[]>>; onSection: (section: DashboardSection) => void }) {
   const [search, setSearch] = useState("");
   const [subject, setSubject] = useState("Tümü");
   const [status, setStatus] = useState<(typeof statusFilters)[number]>("Tümü");
   const filtered = useMemo(() => topics.filter((topic) => `${topic.topic} ${topic.subject} ${topic.unit}`.toLocaleLowerCase("tr").includes(search.toLocaleLowerCase("tr")) && (subject === "Tümü" || topic.subject === subject) && (status === "Tümü" || topic.status === status)), [topics, search, subject, status]);
-  const cycleStatus = (id: string) => setTopics((items) => items.map((item) => item.id === id ? { ...item, status: getNextStatus(item.status) } : item));
 
   return <div id="topics" className="space-y-7 animate-page-in"><div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between"><div><div className="eyebrow mb-2">ÖSYM kapsamı · kişisel takip</div><h1 className="page-heading">Konu haritan.</h1><p className="page-subtitle">{sectionDescriptions.topics}</p></div><Button onClick={() => onSection("exams")} className="h-10 rounded-xl bg-ink px-4 text-[13px] font-semibold text-white hover:bg-ink"><Plus className="mr-2" size={15} /> Deneme sonucu ekle</Button></div>
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{[{ label: "Toplam konu", value: topics.length, tone: "blue" }, { label: "Zayıf", value: topics.filter((item) => item.status === "Zayıf").length, tone: "coral" }, { label: "Orta", value: topics.filter((item) => item.status === "Orta").length, tone: "yellow" }, { label: "İyi", value: topics.filter((item) => item.status === "İyi").length, tone: "mint" }].map((item) => <div key={item.label} className={`rounded-2xl p-4 ${toneClasses[item.tone]}`}><div className="text-[12px] font-medium opacity-75">{item.label}</div><div className="mt-2 text-[29px] font-semibold font-display">{item.value}</div></div>)}</div>
     <Card className="soft-card p-4 sm:p-5"><div className="flex flex-col gap-3 lg:flex-row"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-4" size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Konu ara..." className="h-10 w-full rounded-xl border border-ink/[0.08] bg-paper pl-10 pr-3 text-[14px] outline-none transition placeholder:text-rule-strong focus:border-brand/45 focus:ring-4 focus:ring-brand/[0.08]" /></div><div className="flex items-center gap-2 overflow-x-auto"><ListFilter size={15} className="shrink-0 text-ink-4" />{statusFilters.map((item) => <button key={item} onClick={() => setStatus(item)} className={`whitespace-nowrap rounded-lg px-3 py-2 text-[12px] font-semibold transition ${status === item ? "bg-ink text-white" : "bg-paper text-ink-3 hover:bg-rule"}`}>{item}</button>)}</div></div><div className="mt-3 flex gap-2 overflow-x-auto">{subjectFilters.map((item) => <button key={item} onClick={() => setSubject(item)} className={`whitespace-nowrap rounded-full border px-3 py-1.5 text-[12px] font-medium transition ${subject === item ? "border-brand bg-brand-soft text-brand" : "border-ink/[0.08] text-ink-4 hover:border-brand/40"}`}>{item}</button>)}</div></Card>
-    <Card className="soft-card overflow-hidden"><div className="hidden grid-cols-[1.5fr_0.7fr_1fr_0.7fr_0.85fr] gap-4 border-b border-ink/[0.06] bg-paper px-6 py-3 text-[12px] font-bold text-ink-4 lg:grid"><span>Konu</span><span>Ders</span><span>İlerleme</span><span>Durum</span><span>Sonraki adım</span></div><div className="divide-y divide-ink/[0.06]">{filtered.map((topic) => <button key={topic.id} onClick={() => { cycleStatus(topic.id); toast.success("Konu durumu güncellendi."); }} className="group grid w-full grid-cols-1 gap-3 px-5 py-4 text-left transition hover:bg-paper lg:grid-cols-[1.5fr_0.7fr_1fr_0.7fr_0.85fr] lg:items-center lg:gap-4 lg:px-6"><div className="flex items-center gap-3"><span className="h-8 w-1 rounded-full" style={{ backgroundColor: getColorForSubject(topic.subject) }} /><span><span className="block text-[14px] font-semibold text-ink">{topic.topic}</span><span className="mt-0.5 block text-[12px] text-ink-4">{topic.exam} · {topic.unit}</span></span></div><span className="hidden text-[13px] font-medium text-ink-3 lg:block">{topic.subject}</span><div className="flex items-center gap-3"><div className="flex-1 lg:max-w-[130px]"><ProgressBar value={topic.progress} color={getColorForSubject(topic.subject)} /></div><span className="w-8 text-right text-[12px] font-semibold text-ink-3">{formatPercent(topic.progress)}</span></div><div><StatusPill status={topic.status} insufficientData={topic.insufficientData} /></div><span className="hidden text-[12px] text-ink-3 lg:block">{statusMeta[topic.status].description} <ArrowRight className="ml-1 inline transition group-hover:translate-x-0.5" size={12} /></span></button>)}{filtered.length === 0 && <div className="px-6 py-12 text-center text-[14px] text-ink-4">Bu filtrelerle eşleşen bir konu yok.</div>}</div></Card>
+    <Card className="soft-card overflow-hidden"><div className="hidden grid-cols-[1.5fr_0.7fr_1fr_0.7fr_0.85fr] gap-4 border-b border-ink/[0.06] bg-paper px-6 py-3 text-[12px] font-bold text-ink-4 lg:grid"><span>Konu</span><span>Ders</span><span>İlerleme</span><span>Durum</span><span>Sonraki adım</span></div><div className="divide-y divide-ink/[0.06]">{filtered.map((topic) => <div key={topic.id} className="grid w-full grid-cols-1 gap-3 px-5 py-4 text-left lg:grid-cols-[1.5fr_0.7fr_1fr_0.7fr_0.85fr] lg:items-center lg:gap-4 lg:px-6"><div className="flex items-center gap-3"><span className="h-8 w-1 rounded-full" style={{ backgroundColor: getColorForSubject(topic.subject) }} /><span><span className="block text-[14px] font-semibold text-ink">{topic.topic}</span><span className="mt-0.5 block text-[12px] text-ink-4">{topic.exam} · {topic.unit}</span></span></div><span className="hidden text-[13px] font-medium text-ink-3 lg:block">{topic.subject}</span><div className="flex items-center gap-3"><div className="flex-1 lg:max-w-[130px]"><ProgressBar value={topic.progress} color={getColorForSubject(topic.subject)} /></div><span className="w-8 text-right text-[12px] font-semibold text-ink-3">{formatPercent(topic.progress)}</span></div><div><StatusPill status={topic.status} insufficientData={topic.insufficientData} /></div><span className="hidden text-[12px] text-ink-3 lg:block">{statusMeta[topic.status].description}</span></div>)}{filtered.length === 0 && <div className="px-6 py-12 text-center text-[14px] text-ink-4">Bu filtrelerle eşleşen bir konu yok.</div>}</div></Card>
     <div className="flex flex-col gap-3 rounded-2xl border border-brand/10 bg-brand-soft p-4 text-[13px] text-ink-2 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-start gap-3"><Compass size={17} className="mt-0.5 shrink-0 text-brand" /><p><span className="font-semibold text-brand-strong">Kapsam notu:</span> {officialScopeNote}</p></div><a href="https://www.osym.gov.tr" target="_blank" rel="noreferrer" className="inline-flex shrink-0 items-center gap-1 font-semibold text-brand">ÖSYM'yi aç <ExternalLink size={12} /></a></div>
   </div>;
 }
@@ -949,7 +741,6 @@ function AiPlan({ topics, exams }: { topics: Topic[]; exams: MockExam[] }) {
 }
 
 
-type FocusSessionSeed = { sessionId?: number; subject: string; topic: string; plannedMinutes?: number; sessionDate?: string | Date };
 type FocusModeProps = { user: ReturnType<typeof useAuth>["user"]; onClose: () => void; initialSession?: FocusSessionSeed | null; onGoToCalendar: () => void; topics: Topic[] };
 
 function FocusMode({ user, onClose, initialSession, onGoToCalendar, topics }: FocusModeProps) {
@@ -1571,6 +1362,8 @@ function Sidebar({ section, onSection, userName, onStartSession, isAdmin, weakTo
   const targetLine = signedIn
     ? [onboarding.data?.targetScoreType ? TARGET_SCORE_TYPE_LABELS[onboarding.data.targetScoreType] : null, onboarding.data?.targetRanking ? `İlk ${onboarding.data.targetRanking}` : null].filter(Boolean).join(", ")
     : defaultDashboardUser.target;
+  // Hedef kartı yalnızca profilde gerçekten yazılı olanı gösterir (uydurma ilerleme yüzdesi yok).
+  const targetSchool = signedIn ? [onboarding.data?.targetUniversity, onboarding.data?.targetDepartment].filter(Boolean) as string[] : [];
   return (
     <aside className={`app-sidebar ${drawer ? "is-drawer" : ""}`} role={drawer ? "dialog" : undefined} aria-modal={drawer || undefined} aria-label={drawer ? "Menü" : undefined}>
       <div className="flex items-center justify-between"><Brand />{drawer && <button onClick={onClose} className="drawer-close" aria-label="Menüyü kapat"><X size={18} /></button>}</div>
@@ -1588,12 +1381,16 @@ function Sidebar({ section, onSection, userName, onStartSession, isAdmin, weakTo
       </div>
       <div className="sidebar-bottom pt-6">
         {signedIn ? (
-          <div className="flex items-center gap-3 px-2">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ink text-[13px] font-semibold text-surface">{getInitials(userName)}</div>
-            <div className="min-w-0">
-              <div className="truncate text-[14px] font-semibold text-ink">{getDisplayName(userName)}</div>
-              {targetLine && <div className="truncate text-[13px] text-ink-3">{targetLine}</div>}
-            </div>
+          <div>
+            {(targetSchool.length > 0 || targetLine) && (
+              <div className="rounded-2xl border border-rule bg-surface p-3.5 shadow-[var(--shadow-card)]">
+                <div className="flex items-center gap-2 text-[13px] font-semibold text-brand"><Target size={16} /> Hedefin</div>
+                {targetSchool.length > 0 && <p className="mt-1.5 text-[13px] font-semibold leading-5 text-ink">{targetSchool.join(" · ")}</p>}
+                {targetLine && <p className="mt-1 text-[12px] text-ink-3">{targetLine}</p>}
+              </div>
+            )}
+            <Illustration src={ILLUSTRATIONS.sidebarMountains} className="mt-4 w-full" />
+            <p className="mt-3 px-1 text-[13px] font-medium leading-5 text-ink-2">Hayallerine giden yolda yalnız değilsin. Pusula hep yanında.</p>
           </div>
         ) : (
           <div className="rounded-[10px] bg-pencil-soft p-4">
@@ -1611,16 +1408,16 @@ export default function Home() {
   // Anket (onboarding) bitince App.tsx bir kerelik sessionStorage bayrağı
   // bırakır; burada onu tüketip kullanıcıyı doğrudan Kaynaklar sekmesine
   // yönlendiriyoruz ki elindeki kitapları seçmesi istensin (bkz. Resources).
-  const [section, setSection] = useState<DashboardSection>(() => {
-    if (typeof window === "undefined") return "overview";
+  // Bölüm adresten okunur (bkz. lib/sections.ts): /denemeler, /takvim…
+  const [location, setLocation] = useLocation();
+  useEffect(() => {
     try {
       if (window.sessionStorage.getItem(postOnboardingNudgeKey)) {
         window.sessionStorage.removeItem(postOnboardingNudgeKey);
-        return "resources";
+        setLocation(SECTION_PATHS.resources, { replace: true });
       }
     } catch {}
-    return "overview";
-  });
+  }, []);
   const [topics, setTopics] = useState<Topic[]>(() => getStoredValue(localStorageKeys.topics, initialTopics));
   const [exams, setExams] = useState<MockExam[]>(() => getStoredValue(localStorageKeys.exams, initialExams));
   const [mobileMenu, setMobileMenu] = useState(false);
@@ -1668,12 +1465,15 @@ export default function Home() {
   }, [user, topicProgressSnapshot.data]);
   useEffect(() => { document.title = "Pusula YKS · Kişisel çalışma koçu"; }, []);
 
-  const navigate = (next: DashboardSection) => { setSection(next); setMobileMenu(false); window.setTimeout(() => document.getElementById(next)?.scrollIntoView({ behavior: "smooth", block: "start" }), 30); };
+  const navigate = (next: DashboardSection) => { setLocation(SECTION_PATHS[next]); setMobileMenu(false); window.scrollTo({ top: 0 }); };
   const startSession = (seed?: FocusSessionSeed) => { setFocusSeed(seed ?? null); setSession(true); };
   const displayName = user?.name || defaultDashboardUser.name;
 
   const isAdmin = user?.role === "admin";
+  // Yönetim adresi yalnızca admine açılır; diğerleri Genel Bakış'ı görür.
+  const requested = sectionFromPath(location);
+  const section: DashboardSection = requested === "admin" && !isAdmin ? "overview" : requested;
   const weakTopicCount = topics.filter((item) => item.status === "Zayıf" && !item.insufficientData).length;
   const navSectionsForUser = isAdmin ? [...appNavSections, adminNavSection] : appNavSections;
-  return <NotebookProvider enabled={Boolean(user)}><div className="app-shell"><Sidebar section={section} onSection={navigate} userName={displayName} onStartSession={() => startSession()} isAdmin={isAdmin} weakTopicCount={weakTopicCount} signedIn={Boolean(user)} /><main className="app-main"><header className="topbar"><button onClick={() => setMobileMenu((value) => !value)} className="mobile-menu-button" aria-label="Menüyü aç"><Menu size={18} /></button><div className="topbar-context"><span className="topbar-title">{navSectionsForUser.find((item) => item.key === section)?.label}</span></div><div className="topbar-actions">{!user && <span className="demo-chip">Demo verisi</span>}{user ? <DropdownMenu><DropdownMenuTrigger asChild><button className="profile-button"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-[12px] font-bold text-white">{getInitials(displayName)}</span><span className="hidden text-[14px] font-semibold text-ink-2 md:block">{getDisplayName(displayName)}</span><ChevronDown size={14} className="hidden text-ink-4 md:block" /></button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={() => setShowProfileEdit(true)}><UserRound size={14} className="mr-2" /> Profili düzenle</DropdownMenuItem>{user.loginMethod?.startsWith("dev") && <DropdownMenuItem onClick={() => setShowPasswordChange(true)}><KeyRound size={14} className="mr-2" /> Şifre değiştir</DropdownMenuItem>}<DropdownMenuItem onClick={() => logout()}><LogOut size={14} className="mr-2" /> Çıkış yap</DropdownMenuItem></DropdownMenuContent></DropdownMenu> : <button onClick={() => startLogin()} className="h-9 rounded-[10px] bg-ink px-4 text-[14px] font-semibold text-surface hover:bg-ink-2">Giriş yap</button>}</div></header>{mobileMenu && <><div className="drawer-backdrop" onClick={() => setMobileMenu(false)} aria-hidden="true" /><Sidebar section={section} onSection={navigate} userName={displayName} onStartSession={() => { setMobileMenu(false); startSession(); }} isAdmin={isAdmin} weakTopicCount={weakTopicCount} signedIn={Boolean(user)} onClose={closeMobileMenu} /></>}<div className="content-wrap">{section === "overview" && <Overview topics={topics} exams={exams} onSection={navigate} onStartSession={startSession} />}{section === "topics" && <Topics topics={topics} setTopics={setTopics} onSection={navigate} />}{section === "exams" && <Exams topics={topics} exams={exams} setExams={setExams} setTopics={setTopics} persistExams={importExams.mutate} />}{section === "resources" && <Resources topics={topics} exams={exams} onSection={navigate} />}{section === "catalog" && <ResourceCatalogSection />}{section === "plan" && <AiPlan topics={topics} exams={exams} />}{section === "calendar" && <CalendarView topics={topics} onSection={navigate} onStartFocusSession={startSession} />}{section === "notebook" && (user ? <NotebookSection /> : <div className="soft-card p-8 text-center text-[14px] text-ink-3">Defteri kullanmak için giriş yapmalısın.</div>)}{section === "premium" && <PaywallSection />}{section === "admin" && isAdmin && <AdminPanel />}<footer className="mt-12 flex flex-col gap-3 border-t border-ink/[0.06] py-6 text-[12px] text-ink-4 sm:flex-row sm:items-center sm:justify-between"><span>{footerDisclaimer}</span><span>Konu kapsamı ÖSYM ve MEB programlarına dayanır.</span></footer></div></main>{session && <FocusMode user={user} topics={topics} initialSession={focusSeed} onClose={() => { setSession(false); setFocusSeed(null); }} onGoToCalendar={() => { setSession(false); setFocusSeed(null); navigate("calendar"); }} />}{showPasswordChange && <ChangePasswordDialog onClose={() => setShowPasswordChange(false)} />}{showProfileEdit && <Dialog open onOpenChange={(open) => !open && setShowProfileEdit(false)}><DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl"><DialogTitle>Profilini güncelle</DialogTitle><DialogDescription>Onboarding sırasında verdiğin yanıtları buradan gözden geçirip güncelleyebilirsin.</DialogDescription><OnboardingFlow userName={displayName} startAtStep={0} onClose={() => setShowProfileEdit(false)} onComplete={() => setShowProfileEdit(false)} /></DialogContent></Dialog>} </div></NotebookProvider>;
+  return <NotebookProvider enabled={Boolean(user)}><div className="app-shell"><Sidebar section={section} onSection={navigate} userName={displayName} onStartSession={() => startSession()} isAdmin={isAdmin} weakTopicCount={weakTopicCount} signedIn={Boolean(user)} /><main className="app-main"><header className="topbar"><button onClick={() => setMobileMenu((value) => !value)} className="mobile-menu-button" aria-label="Menüyü aç"><Menu size={18} /></button><div className="topbar-context"><span className="topbar-title">{navSectionsForUser.find((item) => item.key === section)?.label}</span></div><div className="topbar-actions">{!user && <span className="demo-chip">Demo verisi</span>}{user && <NotificationBell />}{user ? <DropdownMenu><DropdownMenuTrigger asChild><button className="profile-button"><span className="flex h-9 w-9 items-center justify-center rounded-full bg-brand text-[13px] font-bold text-white">{getInitials(displayName)}</span><span className="hidden text-[14px] font-semibold text-ink-2 md:block">{getDisplayName(displayName)}</span><ChevronDown size={14} className="hidden text-ink-4 md:block" /></button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={() => setShowProfileEdit(true)}><UserRound size={14} className="mr-2" /> Profili düzenle</DropdownMenuItem>{user.loginMethod?.startsWith("dev") && <DropdownMenuItem onClick={() => setShowPasswordChange(true)}><KeyRound size={14} className="mr-2" /> Şifre değiştir</DropdownMenuItem>}<DropdownMenuItem onClick={() => logout()}><LogOut size={14} className="mr-2" /> Çıkış yap</DropdownMenuItem></DropdownMenuContent></DropdownMenu> : <button onClick={() => startLogin()} className="h-9 rounded-[10px] bg-ink px-4 text-[14px] font-semibold text-surface hover:bg-ink-2">Giriş yap</button>}</div></header>{mobileMenu && <><div className="drawer-backdrop" onClick={() => setMobileMenu(false)} aria-hidden="true" /><Sidebar section={section} onSection={navigate} userName={displayName} onStartSession={() => { setMobileMenu(false); startSession(); }} isAdmin={isAdmin} weakTopicCount={weakTopicCount} signedIn={Boolean(user)} onClose={closeMobileMenu} /></>}<div className="content-wrap">{section === "overview" && <Overview topics={topics} exams={exams} onSection={navigate} onStartSession={startSession} onEditProfile={() => setShowProfileEdit(true)} />}{section === "topics" && <Topics topics={topics} setTopics={setTopics} onSection={navigate} />}{section === "exams" && <Exams topics={topics} exams={exams} setExams={setExams} setTopics={setTopics} persistExams={importExams.mutate} />}{section === "resources" && <Resources topics={topics} exams={exams} onSection={navigate} />}{section === "catalog" && <ResourceCatalogSection />}{section === "plan" && <AiPlan topics={topics} exams={exams} />}{section === "calendar" && <CalendarView topics={topics} onSection={navigate} onStartFocusSession={startSession} />}{section === "notebook" && (user ? <NotebookSection /> : <div className="soft-card p-8 text-center text-[14px] text-ink-3">Defteri kullanmak için giriş yapmalısın.</div>)}{section === "premium" && <PaywallSection />}{section === "admin" && isAdmin && <AdminPanel />}<footer className="mt-12 flex flex-col gap-3 border-t border-ink/[0.06] py-6 text-[12px] text-ink-4 sm:flex-row sm:items-center sm:justify-between"><span>{footerDisclaimer}</span><span>Konu kapsamı ÖSYM ve MEB programlarına dayanır.</span></footer></div></main>{session && <FocusMode user={user} topics={topics} initialSession={focusSeed} onClose={() => { setSession(false); setFocusSeed(null); }} onGoToCalendar={() => { setSession(false); setFocusSeed(null); navigate("calendar"); }} />}{showPasswordChange && <ChangePasswordDialog onClose={() => setShowPasswordChange(false)} />}{showProfileEdit && <Dialog open onOpenChange={(open) => !open && setShowProfileEdit(false)}><DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl"><DialogTitle>Profilini güncelle</DialogTitle><DialogDescription>Onboarding sırasında verdiğin yanıtları buradan gözden geçirip güncelleyebilirsin.</DialogDescription><OnboardingFlow userName={displayName} startAtStep={0} onClose={() => setShowProfileEdit(false)} onComplete={() => setShowProfileEdit(false)} /></DialogContent></Dialog>} </div></NotebookProvider>;
 }

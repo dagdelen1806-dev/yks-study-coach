@@ -514,6 +514,15 @@ export async function saveStudyPlan(userId: number, input: { title: string; week
 // için bu değer yalnızca hiç görülmemiş bir konu/ders çiftinde devreye girer.
 const FALLBACK_EXAM: ExamType = "TYT";
 
+/**
+ * Tamamlanan oturumun konu çalışma kaydı. Tamamlama verisi `actualMinutes` / `actualQuestions`
+ * adlarını taşır, tablo ise `minutes` / `questions` sütunlarını: alanlar açıkça eşlenir (daha önce
+ * yayılarak yazılıyordu ve süre/soru sessizce 0 kalıyordu). Sayfa bilgisi bu tabloda tutulmaz.
+ */
+export function topicLogRow(userId: number, log: ReturnType<typeof buildSessionCompletion>["topicLog"]) {
+  return { userId, sessionId: log.sessionId, subject: log.subject, topic: log.topic, studyDate: log.studyDate, minutes: log.actualMinutes, questions: log.actualQuestions, correct: log.correct, wrong: log.wrong, blank: log.blank, note: log.note ?? null };
+}
+
 export async function completeStudySession(userId: number, input: { sessionId: number; actualMinutes: number; actualQuestions: number; correct: number; wrong: number; blank: number; actualPages?: number; note?: string }) {
   const db = await getDb();
   if (!db) return undefined;
@@ -525,8 +534,7 @@ export async function completeStudySession(userId: number, input: { sessionId: n
   await db.update(studyPlanSessions).set({ ...plan.sessionUpdate, actualPages: plan.sessionUpdate.actualPages ?? null, note: plan.sessionUpdate.note ?? null }).where(eq(studyPlanSessions.id, input.sessionId));
   // topic_study_logs sayfa sütunu tutmaz (yalnızca soru/dakika bazlı konu
   // gelişimi için var) — actualPages'i buraya taşımıyoruz.
-  const { actualPages: _actualPages, ...topicLogInput } = plan.topicLog;
-  await db.insert(topicStudyLogs).values({ userId, ...topicLogInput, note: topicLogInput.note ?? null });
+  await db.insert(topicStudyLogs).values(topicLogRow(userId, plan.topicLog));
   // Kitaptan üretilmiş görev: aynı performans kitabın çözüm kaydına da düşer
   // (kitap istatistikleri + "bu testler çözüldü" bilgisi). Konu takibi
   // yukarıdaki topic_study_logs / aşağıdaki upsertTopicProgress'te kalır.
