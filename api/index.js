@@ -514,6 +514,8 @@ var studentProfiles = mysqlTable("student_profiles", {
   onboardingStep: int("onboardingStep").default(0).notNull(),
   // 1) Kullanıcı tanımlama
   preferredName: varchar("preferredName", { length: 120 }),
+  // Arayüz avatarı (öğrencinin seçimi; boşsa nötr tasarım). Bkz. shared/onboarding.ts AVATAR_STYLES.
+  avatarStyle: mysqlEnum("avatarStyle", ["girl", "boy"]),
   gradeLevel: mysqlEnum("gradeLevel", ["9", "10", "11", "12", "mezun"]),
   examYear: int("examYear"),
   targetScoreType: mysqlEnum("targetScoreType", ["SAY", "EA", "SOZ", "DIL", "TYT", "belirsiz"]),
@@ -1212,21 +1214,21 @@ function deriveTopicStatus(accuracy, questionCount) {
 
 // shared/palette.ts
 var palette = {
-  paper: "#eef1f0",
+  paper: "#f3f6f5",
   surface: "#ffffff",
-  ink: "#1d2026",
-  ink2: "#454952",
-  ink3: "#666a73",
-  ink4: "#7f838c",
-  ruleStrong: "#c3c7cc",
-  rule: "#e1e4e6",
-  brand: "#1c6a74",
-  brandStrong: "#144f57",
-  brandSoft: "#e2efef",
-  pencil: "#f2c230",
-  pencilStrong: "#e0ae14",
+  ink: "#18202a",
+  ink2: "#3f4753",
+  ink3: "#5f6671",
+  ink4: "#7b818b",
+  ruleStrong: "#c5ccd0",
+  rule: "#e3e9e7",
+  brand: "#17625f",
+  brandStrong: "#0f4a48",
+  brandSoft: "#e3f0ee",
+  pencil: "#f2b934",
+  pencilStrong: "#e0a514",
   pencilInk: "#7a5600",
-  pencilSoft: "#fcf1cc",
+  pencilSoft: "#fdf3d8",
   danger: "#bf3a2b",
   dangerStrong: "#962c20",
   dangerSoft: "#fae6e2",
@@ -1552,6 +1554,7 @@ var defaultStudentProfileView = {
   onboardingCompleted: false,
   onboardingStep: 0,
   preferredName: null,
+  avatarStyle: null,
   gradeLevel: null,
   examYear: null,
   targetScoreType: null,
@@ -1583,6 +1586,7 @@ var toStudentProfileView = (row) => ({
   onboardingCompleted: row.onboardingCompleted === 1,
   onboardingStep: row.onboardingStep,
   preferredName: row.preferredName,
+  avatarStyle: row.avatarStyle,
   gradeLevel: row.gradeLevel,
   examYear: row.examYear,
   targetScoreType: row.targetScoreType,
@@ -1642,6 +1646,14 @@ async function upsertStudentProfileStep(userId, step, patch) {
   } else {
     await db.insert(studentProfiles).values({ userId, onboardingStep: nextStep, ...rowValues });
   }
+  return getStudentProfile(userId);
+}
+async function setStudentAvatarStyle(userId, avatarStyle) {
+  const db = await getDb();
+  if (!db) return { ...defaultStudentProfileView, avatarStyle };
+  const existing = await db.select({ id: studentProfiles.id }).from(studentProfiles).where(eq(studentProfiles.userId, userId)).limit(1);
+  if (existing[0]) await db.update(studentProfiles).set({ avatarStyle }).where(eq(studentProfiles.id, existing[0].id));
+  else await db.insert(studentProfiles).values({ userId, avatarStyle });
   return getStudentProfile(userId);
 }
 async function completeOnboarding(userId) {
@@ -1800,6 +1812,9 @@ async function saveStudyPlan(userId, input) {
   return getStudyCalendar(userId);
 }
 var FALLBACK_EXAM = "TYT";
+function topicLogRow(userId, log) {
+  return { userId, sessionId: log.sessionId, subject: log.subject, topic: log.topic, studyDate: log.studyDate, minutes: log.actualMinutes, questions: log.actualQuestions, correct: log.correct, wrong: log.wrong, blank: log.blank, note: log.note ?? null };
+}
 async function completeStudySession(userId, input) {
   const db = await getDb();
   if (!db) return void 0;
@@ -1809,8 +1824,7 @@ async function completeStudySession(userId, input) {
   const { actualMinutes, actualQuestions, correct, wrong, blank, actualPages, note } = input;
   const plan = buildSessionCompletion(existing[0], { actualMinutes, actualQuestions, correct, wrong, blank, actualPages, note }, completedAt);
   await db.update(studyPlanSessions).set({ ...plan.sessionUpdate, actualPages: plan.sessionUpdate.actualPages ?? null, note: plan.sessionUpdate.note ?? null }).where(eq(studyPlanSessions.id, input.sessionId));
-  const { actualPages: _actualPages, ...topicLogInput } = plan.topicLog;
-  await db.insert(topicStudyLogs).values({ userId, ...topicLogInput, note: topicLogInput.note ?? null });
+  await db.insert(topicStudyLogs).values(topicLogRow(userId, plan.topicLog));
   if (existing[0].sourceBookId) {
     const pages = existing[0].targetPages?.match(/(\d+)\s*[-–]\s*(\d+)/);
     const tests = existing[0].targetTests?.match(/(\d+)(?:\s*[-–]\s*(\d+))?/);
@@ -8429,6 +8443,7 @@ import { TRPCError as TRPCError8 } from "@trpc/server";
 import { z as z9 } from "zod";
 
 // shared/onboarding.ts
+var AVATAR_STYLES = ["girl", "boy"];
 var GRADE_LEVELS = ["9", "10", "11", "12", "mezun"];
 var TARGET_SCORE_TYPES = ["SAY", "EA", "SOZ", "DIL", "TYT", "belirsiz"];
 var MOCK_EXAM_FREQUENCIES = ["haftada_birkac", "haftada_bir", "ayda_birkac", "nadiren", "henuz_cozmedim"];
@@ -8448,6 +8463,7 @@ var ONBOARDING_STEP_META = [
 var TOTAL_ONBOARDING_STEPS = ONBOARDING_STEP_META.length;
 var emptyOnboardingDraft = () => ({
   preferredName: "",
+  avatarStyle: "",
   gradeLevel: "",
   examYear: "",
   targetScoreType: "",
@@ -8513,6 +8529,7 @@ function validateOnboardingStep(step, draft) {
 var enumOrBlank = (values) => z9.union([z9.enum(values), z9.literal("")]);
 var draftSchema = z9.object({
   preferredName: z9.string().trim().max(120).optional(),
+  avatarStyle: enumOrBlank(AVATAR_STYLES).optional(),
   gradeLevel: enumOrBlank(GRADE_LEVELS).optional(),
   examYear: z9.string().max(4).optional(),
   targetScoreType: enumOrBlank(TARGET_SCORE_TYPES).optional(),
@@ -8547,6 +8564,7 @@ var saveStepInput = z9.object({
 function draftToPatch(data) {
   const patch = {};
   if (data.preferredName !== void 0) patch.preferredName = data.preferredName || null;
+  if (data.avatarStyle !== void 0) patch.avatarStyle = data.avatarStyle || null;
   if (data.gradeLevel !== void 0) patch.gradeLevel = data.gradeLevel || null;
   if (data.examYear !== void 0) patch.examYear = data.examYear ? Number(data.examYear) : null;
   if (data.targetScoreType !== void 0) patch.targetScoreType = data.targetScoreType || null;
@@ -8586,7 +8604,9 @@ var onboardingRouter = router({
     if (input.complete) await completeOnboarding(ctx.user.id);
     return getStudentProfile(ctx.user.id);
   }),
-  complete: protectedProcedure.mutation(({ ctx }) => completeOnboarding(ctx.user.id))
+  complete: protectedProcedure.mutation(({ ctx }) => completeOnboarding(ctx.user.id)),
+  // Genel Bakış'taki tek tıkla avatar seçimi (null = nötr tasarım).
+  setAvatar: protectedProcedure.input(z9.object({ avatarStyle: z9.enum(AVATAR_STYLES).nullable() })).mutation(({ ctx, input }) => setStudentAvatarStyle(ctx.user.id, input.avatarStyle))
 });
 
 // server/routers/subscription.ts
@@ -9437,6 +9457,8 @@ var appRouter = router({
       return { ...calculatePlanAdherence(sessions, averageAccuracy), averageAccuracy, alerts: await getCoachAlerts(ctx.user.id) };
     }),
     refreshCoach: protectedProcedure.input(z17.object({ periodStart: z17.string(), periodEnd: z17.string() })).mutation(({ ctx, input }) => savePlanAdherence(ctx.user.id, new Date(input.periodStart), new Date(input.periodEnd))),
+    // Üst çubuktaki bildirim zili: okunmamış koç uyarıları (yalnızca okuma; uyarıları refreshCoach üretir).
+    alerts: protectedProcedure.query(({ ctx }) => getCoachAlerts(ctx.user.id)),
     readCoachAlert: protectedProcedure.input(z17.object({ alertId: z17.number().int() })).mutation(({ ctx, input }) => markCoachAlertRead(ctx.user.id, input.alertId)),
     addFocusLog: protectedProcedure.input(z17.object({ subject: z17.string().max(80), topic: z17.string().max(180), studyDate: z17.string(), minutes: z17.number().int().min(1).max(1440), questions: z17.number().int().min(0).max(5e3), correct: z17.number().int().min(0).max(5e3), wrong: z17.number().int().min(0).max(5e3), blank: z17.number().int().min(0).max(5e3), note: z17.string().max(1e3).optional() })).mutation(({ ctx, input }) => addTopicStudyLog(ctx.user.id, { ...input, studyDate: new Date(input.studyDate), note: input.note ?? null, sessionId: null })),
     // Paragraf pratiği / gece okuması gibi "şimdi yaptım" alışkanlık kayıtları.
