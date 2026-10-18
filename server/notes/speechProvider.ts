@@ -21,7 +21,7 @@ export const whisperSpeechProvider: SpeechToTextProvider = {
     const result = await transcribeAudioBuffer(audio, mimeType, { language: notesConfig.speech.language, prompt: notesConfig.speech.prompt });
     if ("error" in result) {
       // Kayıt ya da ses verisi loglanmaz; yalnızca hata kodu.
-      console.warn(`[Notes] Transcription failed: ${result.code}`);
+      console.warn(`[Notes] Transcription failed: ${result.code}${result.details ? ` – ${result.details.slice(0, 300)}` : ""}`);
       if (result.code === "SERVICE_ERROR" && /not configured|not set/i.test(`${result.error} ${result.details ?? ""}`)) throw new SpeechToTextError("Ses → metin servisi şu an yapılandırılmamış.", false);
       throw new SpeechToTextError("Ses metne çevrilemedi. Tekrar dener misin?", true);
     }

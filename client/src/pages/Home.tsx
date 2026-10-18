@@ -1074,6 +1074,8 @@ function RoutineHabitCard({ kind, icon: Icon, eyebrow, title, description, defau
   const [bookChoice, setBookChoice] = useState<string>("");
   const [showReadingDialog, setShowReadingDialog] = useState(false);
   const chosenBook = activeBooks.find((book) => String(book.id) === (bookChoice || String(activeBooks[0]?.id ?? "")));
+  // Bugünkü kayıt bir okuma kitabına aitse (konu = kitap adı) tamamlandı ekranında da ilerlemesi görünür.
+  const loggedBook = showBookTitle && todaysSession ? (readingBooks.data ?? []).find((book) => book.title === todaysSession.topic) : undefined;
   const logRoutine = trpc.calendar.logRoutine.useMutation({ onSuccess: (result) => { utils.calendar.snapshot.invalidate(); utils.reading.list.invalidate(); toast.success(result?.readingBook?.justFinished ? `Tebrikler, "${result.readingBook.title}" bitti!` : "Kaydedildi; bugünkü rutin tamamlandı."); }, onError: () => toast.error("Kaydedilemedi, tekrar dener misin?") });
   const isDone = todaysSession?.status === "completed";
 
@@ -1101,7 +1103,16 @@ function RoutineHabitCard({ kind, icon: Icon, eyebrow, title, description, defau
       <div className="min-w-0 flex-1"><div className="eyebrow">{eyebrow}</div><h2 className="mt-1 text-[16px] font-semibold text-ink">{title}</h2><p className="mt-1 text-[12px] leading-5 text-ink-3">{description}</p></div>
     </div>
     {isDone ? (
-      <div className="mt-4 flex items-center gap-2 rounded-2xl bg-success-soft p-4 text-[13px] font-semibold text-success"><CheckCircle2 size={16} className="shrink-0" /> Bugün tamamlandı — {todaysSession?.actualMinutes ?? 0} dk{typeof todaysSession?.actualPages === "number" ? ` · ${todaysSession.actualPages} sayfa` : ""}</div>
+      <div className="mt-4 space-y-3">
+        <div className="flex items-center gap-2 rounded-2xl bg-success-soft p-4 text-[13px] font-semibold text-success"><CheckCircle2 size={16} className="shrink-0" /> Bugün tamamlandı — {todaysSession?.actualMinutes ?? 0} dk{typeof todaysSession?.actualPages === "number" ? ` · ${todaysSession.actualPages} sayfa` : ""}</div>
+        {loggedBook && (
+          <div className="rounded-2xl border border-rule p-3">
+            <div className="mb-1.5 flex items-baseline justify-between gap-2 text-[12px]"><span className="truncate font-semibold text-ink">{loggedBook.title}{loggedBook.status === "finished" && <span className="ml-2 rounded-full bg-success-soft px-2 py-0.5 text-[11px] font-bold text-success">Bitti</span>}</span><span className="shrink-0 text-ink-3">{readingProgressLabel(loggedBook)}</span></div>
+            {loggedBook.totalPages ? <Bar100 value={(loggedBook.pagesRead / loggedBook.totalPages) * 100} /> : null}
+          </div>
+        )}
+        {showBookTitle && user && <button type="button" onClick={() => setShowReadingDialog(true)} className="text-[12px] font-semibold text-brand hover:text-brand-strong">Okuma listemi gör</button>}
+      </div>
     ) : (
       <div className="mt-4 grid grid-cols-2 gap-3">
         {showBookTitle && user && activeBooks.length > 0 && (

@@ -6505,10 +6505,43 @@ var EXTENSIONS = {
   "audio/m4a": "m4a",
   "audio/mp4": "m4a"
 };
-async function transcribeAudioBuffer(audio, mimeType, options = {}) {
+async function transcribeWithGemini(audio, mimeType, key, model, options, fetchImpl = fetch) {
+  const language = options.language === "tr" || !options.language ? "T\xFCrk\xE7e" : options.language;
+  const instruction = [
+    `Bu ses kayd\u0131n\u0131 ${language} olarak kelimesi kelimesine yaz\u0131ya d\xF6k.`,
+    "Yaln\u0131zca konu\u015Fulan metni d\xF6nd\xFCr: a\xE7\u0131klama, ba\u015Fl\u0131k, zaman damgas\u0131 ya da t\u0131rnak ekleme.",
+    "Matematik ifadelerini d\xFCz yaz\u0131yla yaz (\xF6r. x kare \u2192 x^2). Anla\u015F\u0131lmayan k\u0131sm\u0131 uydurma, atla.",
+    "Kay\u0131tta konu\u015Fma yoksa bo\u015F yan\u0131t ver.",
+    options.prompt ? `Ba\u011Flam: ${options.prompt}` : ""
+  ].filter(Boolean).join(" ");
+  const response = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-goog-api-key": key },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: instruction }, { inline_data: { mime_type: mimeType, data: audio.toString("base64") } }] }],
+      generationConfig: { temperature: 0 }
+    })
+  });
+  if (!response.ok) {
+    const errorText = (await response.text().catch(() => "")).replace(/AIza[0-9A-Za-z_\-]{10,}/g, "[redacted]");
+    return { error: "Transcription service request failed", code: "TRANSCRIPTION_FAILED", details: `${response.status} ${response.statusText}${errorText ? `: ${errorText.slice(0, 300)}` : ""}` };
+  }
+  const result = await response.json();
+  const parts = result.candidates?.[0]?.content?.parts ?? [];
+  const text3 = parts.filter((part) => !part.thought && typeof part.text === "string").map((part) => part.text).join("").trim();
+  return { task: "transcribe", language: options.language, text: text3 };
+}
+async function transcribeAudioBuffer(audio, mimeType, options = {}, fetchImpl = fetch) {
   const target = resolveLlmTarget();
   if (!target) return { error: "Voice transcription service is not configured", code: "SERVICE_ERROR", details: "LLM_API_KEY is not set" };
   if (audio.length > MAX_AUDIO_BYTES) return { error: "Audio file exceeds maximum size limit", code: "FILE_TOO_LARGE" };
+  if (target.baseUrl.includes("generativelanguage.googleapis.com")) {
+    try {
+      return await transcribeWithGemini(audio, mimeType.split(";")[0].trim() || "audio/webm", target.key, ENV.transcribeModel?.startsWith("gemini") ? ENV.transcribeModel : target.model, options, fetchImpl);
+    } catch (error) {
+      return { error: "Voice transcription failed", code: "SERVICE_ERROR", details: error instanceof Error ? error.message : "Unknown error" };
+    }
+  }
   try {
     const baseMime = mimeType.split(";")[0].trim();
     const formData = new FormData();
@@ -6518,7 +6551,7 @@ async function transcribeAudioBuffer(audio, mimeType, options = {}) {
     formData.append("response_format", model === "whisper-1" ? "verbose_json" : "json");
     if (options.language) formData.append("language", options.language);
     if (options.prompt) formData.append("prompt", options.prompt);
-    const response = await fetch(`${target.baseUrl}/audio/transcriptions`, {
+    const response = await fetchImpl(`${target.baseUrl}/audio/transcriptions`, {
       method: "POST",
       headers: { authorization: `Bearer ${target.key}` },
       body: formData
@@ -6547,7 +6580,7 @@ var whisperSpeechProvider = {
   async transcribe(audio, mimeType) {
     const result = await transcribeAudioBuffer(audio, mimeType, { language: notesConfig.speech.language, prompt: notesConfig.speech.prompt });
     if ("error" in result) {
-      console.warn(`[Notes] Transcription failed: ${result.code}`);
+      console.warn(`[Notes] Transcription failed: ${result.code}${result.details ? ` \u2013 ${result.details.slice(0, 300)}` : ""}`);
       if (result.code === "SERVICE_ERROR" && /not configured|not set/i.test(`${result.error} ${result.details ?? ""}`)) throw new SpeechToTextError("Ses \u2192 metin servisi \u015Fu an yap\u0131land\u0131r\u0131lmam\u0131\u015F.", false);
       throw new SpeechToTextError("Ses metne \xE7evrilemedi. Tekrar dener misin?", true);
     }

@@ -2,9 +2,9 @@ import { ENV } from "./env";
 import { resolveLlmTarget } from "./llm";
 
 /**
- * Ses → metin: yapay zekâ sağlayıcısının OpenAI uyumlu `/audio/transcriptions`
- * uç noktası (OpenAI Whisper). Anahtar ve adres LLM_* ortam değişkenlerinden
- * gelir (bkz. env.ts); model TRANSCRIBE_MODEL ile değiştirilebilir.
+ * Ses → metin: OpenAI uyumlu sağlayıcıda `/audio/transcriptions` (Whisper); Gemini'de
+ * `generateContent` ile ses anlama (bkz. transcribeWithGemini). Anahtar ve adres LLM_*
+ * ortam değişkenlerinden gelir (bkz. env.ts); model TRANSCRIBE_MODEL ile değiştirilebilir.
  */
 
 export type WhisperSegment = {
@@ -49,10 +49,49 @@ const EXTENSIONS: Record<string, string> = {
   "audio/mp4": "m4a",
 };
 
-export async function transcribeAudioBuffer(audio: Buffer, mimeType: string, options: { language?: string; prompt?: string } = {}): Promise<TranscriptionResponse | TranscriptionError> {
+/**
+ * Gemini'de OpenAI uyumlu `/audio/transcriptions` (Whisper) ucu yok: ses, Gemini'nin kendi
+ * `generateContent` ucuna satır içi veri olarak gönderilir ve modelden kelimesi kelimesine
+ * döküm istenir. Süre bilgisi dönmez (istemci kaydın süresini zaten biliyor).
+ */
+async function transcribeWithGemini(audio: Buffer, mimeType: string, key: string, model: string, options: { language?: string; prompt?: string }, fetchImpl: typeof fetch = fetch): Promise<TranscriptionResponse | TranscriptionError> {
+  const language = options.language === "tr" || !options.language ? "Türkçe" : options.language;
+  const instruction = [
+    `Bu ses kaydını ${language} olarak kelimesi kelimesine yazıya dök.`,
+    "Yalnızca konuşulan metni döndür: açıklama, başlık, zaman damgası ya da tırnak ekleme.",
+    "Matematik ifadelerini düz yazıyla yaz (ör. x kare → x^2). Anlaşılmayan kısmı uydurma, atla.",
+    "Kayıtta konuşma yoksa boş yanıt ver.",
+    options.prompt ? `Bağlam: ${options.prompt}` : "",
+  ].filter(Boolean).join(" ");
+  const response = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-goog-api-key": key },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: instruction }, { inline_data: { mime_type: mimeType, data: audio.toString("base64") } }] }],
+      generationConfig: { temperature: 0 },
+    }),
+  });
+  if (!response.ok) {
+    const errorText = (await response.text().catch(() => "")).replace(/AIza[0-9A-Za-z_\-]{10,}/g, "[redacted]");
+    return { error: "Transcription service request failed", code: "TRANSCRIPTION_FAILED", details: `${response.status} ${response.statusText}${errorText ? `: ${errorText.slice(0, 300)}` : ""}` };
+  }
+  const result = (await response.json()) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> } }> };
+  const parts = result.candidates?.[0]?.content?.parts ?? [];
+  const text = parts.filter((part) => !part.thought && typeof part.text === "string").map((part) => part.text).join("").trim();
+  return { task: "transcribe", language: options.language, text };
+}
+
+export async function transcribeAudioBuffer(audio: Buffer, mimeType: string, options: { language?: string; prompt?: string } = {}, fetchImpl: typeof fetch = fetch): Promise<TranscriptionResponse | TranscriptionError> {
   const target = resolveLlmTarget();
   if (!target) return { error: "Voice transcription service is not configured", code: "SERVICE_ERROR", details: "LLM_API_KEY is not set" };
   if (audio.length > MAX_AUDIO_BYTES) return { error: "Audio file exceeds maximum size limit", code: "FILE_TOO_LARGE" };
+  if (target.baseUrl.includes("generativelanguage.googleapis.com")) {
+    try {
+      return await transcribeWithGemini(audio, mimeType.split(";")[0].trim() || "audio/webm", target.key, ENV.transcribeModel?.startsWith("gemini") ? ENV.transcribeModel : target.model, options, fetchImpl);
+    } catch (error) {
+      return { error: "Voice transcription failed", code: "SERVICE_ERROR", details: error instanceof Error ? error.message : "Unknown error" };
+    }
+  }
   try {
     const baseMime = mimeType.split(";")[0].trim();
     const formData = new FormData();
@@ -64,7 +103,7 @@ export async function transcribeAudioBuffer(audio: Buffer, mimeType: string, opt
     if (options.language) formData.append("language", options.language);
     if (options.prompt) formData.append("prompt", options.prompt);
 
-    const response = await fetch(`${target.baseUrl}/audio/transcriptions`, {
+    const response = await fetchImpl(`${target.baseUrl}/audio/transcriptions`, {
       method: "POST",
       headers: { authorization: `Bearer ${target.key}` },
       body: formData,
