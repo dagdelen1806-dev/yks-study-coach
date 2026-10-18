@@ -4,6 +4,7 @@ import { useNotebook } from "@/components/notebook/NotebookProvider";
 import { ReviewDueNotes } from "@/components/notebook/NotebookSection";
 import Illustration, { ILLUSTRATIONS, useIllustrationAvailable } from "@/components/app/Illustration";
 import { AvatarPicker, StudentAvatar } from "@/components/app/Avatar";
+import { Bar100, EmptyNote, LinkButton, Panel, Ring, Segmented, StatCard } from "@/components/app/kit";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { TARGET_SCORE_TYPE_LABELS, type AvatarStyle } from "@shared/onboarding";
 import { NOTEBOOK_REVIEW_TASK_KIND } from "@shared/questionNotebook";
@@ -79,75 +80,7 @@ function buildCoachNote(latest: MockExam | undefined, previous: MockExam | undef
   return "İkinci deneme sonucunu eklediğinde ders bazında değişimi burada göreceksin.";
 }
 
-// ---------------------------------------------------------------------------
-// Küçük yapı taşları (bu sayfanın kart dili; diğer sayfalar da aynı sınıfları kullanır)
-// ---------------------------------------------------------------------------
-
-function Panel({ icon, title, action, children, className = "" }: { icon: ReactNode; title: string; action?: ReactNode; children: ReactNode; className?: string }) {
-  return (
-    <section className={`soft-card flex flex-col p-5 ${className}`}>
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="flex items-center gap-2.5 text-[15px] font-bold text-ink"><span className="text-brand">{icon}</span>{title}</h2>
-        {action}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function LinkButton({ children, onClick }: { children: ReactNode; onClick: () => void }) {
-  return <button onClick={onClick} className="inline-flex items-center gap-1 text-[12px] font-semibold text-brand hover:text-brand-strong">{children} <ArrowRight size={13} /></button>;
-}
-
-function ExamTabs({ value, onChange }: { value: ExamKind; onChange: (value: ExamKind) => void }) {
-  return (
-    <div className="inline-flex rounded-full bg-paper p-1" role="tablist" aria-label="Sınav türü">
-      {(["TYT", "AYT"] as const).map((kind) => (
-        <button key={kind} role="tab" aria-selected={value === kind} onClick={() => onChange(kind)} className={`h-7 rounded-full px-3.5 text-[12px] font-bold transition ${value === kind ? "bg-brand text-white" : "text-ink-3 hover:text-ink"}`}>{kind}</button>
-      ))}
-    </div>
-  );
-}
-
-function Bar100({ value, color = palette.brand }: { value: number; color?: string }) {
-  return (
-    <div className="h-1.5 w-full overflow-hidden rounded-full bg-rule">
-      <div className="h-full rounded-full transition-[width] duration-500" style={{ width: `${Math.max(0, Math.min(100, value))}%`, backgroundColor: color }} />
-    </div>
-  );
-}
-
-function Ring({ value, size = 64, stroke = 7, color = palette.brand, children }: { value: number; size?: number; stroke?: number; color?: string; children?: ReactNode }) {
-  const radius = (size - stroke) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const clamped = Math.max(0, Math.min(100, value));
-  return (
-    <div className="relative shrink-0" style={{ width: size, height: size }}>
-      <svg width={size} height={size} className="-rotate-90" aria-hidden="true">
-        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={palette.rule} strokeWidth={stroke} />
-        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={circumference * (1 - clamped / 100)} />
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center text-center">{children}</div>
-    </div>
-  );
-}
-
-function StatCard({ icon, label, value, unit, foot, progress, tone = "plain" }: { icon: ReactNode; label: string; value: string; unit?: string; foot: ReactNode; progress?: number; tone?: "plain" | "warm" }) {
-  return (
-    <div className={`soft-card flex flex-col p-4 ${tone === "warm" ? "border-[#f3dc9b] bg-pencil-soft/70" : ""}`}>
-      <div className="flex items-center gap-2.5 text-[13px] font-semibold text-ink-2"><span className={tone === "warm" ? "text-pencil-strong" : "text-brand"}>{icon}</span>{label}</div>
-      <p className="mt-3 flex flex-wrap items-baseline gap-x-1.5"><span className="metric-value">{value}</span>{unit && <span className="text-[15px] font-semibold text-ink-2">{unit}</span>}</p>
-      <div className="mt-auto pt-3">
-        {progress !== undefined && <div className="mb-2"><Bar100 value={progress} /></div>}
-        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-[12px] text-ink-3">{foot}</div>
-      </div>
-    </div>
-  );
-}
-
-function EmptyNote({ children }: { children: ReactNode }) {
-  return <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-rule-strong bg-paper/60 px-4 py-8 text-center text-[13px] leading-5 text-ink-3">{children}</div>;
-}
+const ExamTabs = ({ value, onChange }: { value: ExamKind; onChange: (value: ExamKind) => void }) => <Segmented value={value} options={["TYT", "AYT"] as const} onChange={onChange} label="Sınav türü" />;
 
 // ---------------------------------------------------------------------------
 // Genel Bakış
