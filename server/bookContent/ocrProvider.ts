@@ -1,4 +1,4 @@
-import { invokeLLM } from "../_core/llm";
+import { invokeLLM, invokeLLMWithTier } from "../_core/llm";
 import { repairPageNumbers } from "./tocPostprocess";
 import type { TocRawItem, TocRawPage } from "./tocParser";
 
@@ -49,7 +49,10 @@ export const llmVisionOcrProvider: OcrProvider = {
     const instruction = hint
       ? `Bu içindekiler sayfasını yeniden, dikkatle oku. İlk okumada şu tutarsızlıklar bulundu: ${hint.issues.join(" | ")}. İlk okuma: ${JSON.stringify(hint.previous.items).slice(0, 6000)}. Görselde noktalı çizgileri takip ederek her sayfa numarasını doğru satıra eşle; görselde olmayan bir şeyi ekleme.`
       : "Bu içindekiler sayfasını oku.";
-    const response = await invokeLLM({
+    // İçindekiler okuması kitabın tüm konu/sayfa planını belirler: en güçlü model (kotası doluysa varsayılan model).
+    // Sayfa başına birkaç geçiş yapıldığından düşünme kısa tutulur; okuma kalitesi görme yeteneğinden gelir.
+    const response = await invokeLLMWithTier({
+      reasoningEffort: "low",
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: [{ type: "text" as const, text: instruction }, { type: "image_url" as const, image_url: { url: imageDataUrl, detail: "high" as const } }] },
@@ -58,7 +61,7 @@ export const llmVisionOcrProvider: OcrProvider = {
         type: "json_schema",
         json_schema: { name: "yks_book_toc_page", strict: true, schema: { type: "object", properties: { pageKind: { type: "string", enum: ["table_of_contents", "cover", "other"] }, items: { type: "array", items: tocItemSchema } }, required: ["pageKind", "items"], additionalProperties: false } },
       },
-    });
+    }, "strong", invokeLLM);
     const raw = response.choices[0]?.message?.content;
     const jsonText = typeof raw === "string" ? raw : raw?.map((part) => (part.type === "text" ? part.text : "")).join("");
     if (!jsonText) throw new Error("OCR yanıtı boş döndü");

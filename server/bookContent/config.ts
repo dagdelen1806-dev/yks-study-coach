@@ -30,8 +30,8 @@ export const bookContentConfig = {
     maxImageBytes: 3.5 * 1024 * 1024,
     /** Bir kitap için en fazla içindekiler sayfası. */
     maxTocPages: 8,
-    /** İsteğin tamamı için süre bütçesi (Vercel fonksiyonu 60 sn; yanıt + eşleştirme payı bırakılır). */
-    requestBudgetMs: 50_000,
+    /** İsteğin tamamı için süre bütçesi (Vercel fonksiyonu 300 sn; güçlü model yavaştır, yanıt + eşleştirme payı bırakılır). */
+    requestBudgetMs: 150_000,
     /** Aynı anda okunan sayfa sayısı bunu aşarsa sayfa başına geçiş sayısı kısılır (hız sınırı + süre). */
     manyPagesThreshold: 3,
     maxPassesWhenManyPages: 2,

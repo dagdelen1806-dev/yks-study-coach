@@ -26,12 +26,12 @@ import { pageIssues, type TocRawPage } from "./tocParser";
  */
 
 export const ocrOrchestratorConfig = {
-  /** Tek bir fotoğraf için toplam süre bütçesi (isteğin tamamı 60 sn ile sınırlı). */
-  timeBudgetMs: 48_000,
-  /** Tek bir okuma geçişinin zaman aşımı. */
-  passTimeoutMs: 28_000,
+  /** Tek bir fotoğraf için toplam süre bütçesi (istek bütçesi 150 sn; okuma güçlü modelle yapılır). */
+  timeBudgetMs: 140_000,
+  /** Tek bir okuma geçişinin zaman aşımı (güçlü model yoğun bir sayfada 30 sn'yi aşabilir). */
+  passTimeoutMs: 70_000,
   /** Yeni bir dalga başlatmak için kalması gereken en az süre. */
-  minRemainingForWaveMs: 16_000,
+  minRemainingForWaveMs: 35_000,
   maxWorkingDimension: 2400,
   jpegQuality: 85,
   /** Düzeltme okuması (sayfa numarası tutarsızlığı ipucuyla) yapılsın mı. */

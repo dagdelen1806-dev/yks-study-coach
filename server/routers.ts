@@ -8,7 +8,7 @@ import { checkRateLimit } from "./_core/rateLimit";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
 import { protectedProcedure, metredFeatureProcedure } from "./_core/trpc";
-import { LlmUnavailableError, invokeLLM, llmUnavailableMessage } from "./_core/llm";
+import { LlmUnavailableError, invokeLLM, invokeLLMWithTier, llmUnavailableMessage } from "./_core/llm";
 import { validateDataUrl } from "./_core/fileValidation";
 import { z } from "zod";
 import { addBookStudyLog, addBookToInventory, addSourceSwitch, addTopicStudyLog, addUserMockExams, addUserResourceBooks, completeStudySession, getBookInventory, getBookStudyLogs, getBookTopicMappings, getCoachAlerts, getPlanAdherenceInputs, getSourceSwitches, getStudyCalendar, getUserMockExams, getUserResourceBooks, logCompletedRoutineSession, markCoachAlertRead, removeBookFromInventory, savePlanAdherence, saveStudyPlan, upsertBookTopicMapping } from "./db";
@@ -253,13 +253,14 @@ export const appRouter = router({
       const fileCheck = validateDataUrl(input.dataUrl, input.mimeType);
       if (!fileCheck.valid) throw new Error(fileCheck.reason);
       try {
-        const response = await invokeLLM({
+        // Kapak okuması kütüphanedeki kitabın kimliğini belirler: en güçlü model (kotası doluysa varsayılan model).
+        const response = await invokeLLMWithTier({
           messages: [
             { role: "system", content: "Sen bir kitap kapağı tanıma asistanısın. Türkçe bir YKS kaynak kitabının kapak fotoğrafını okuyup kitap adını, yayınevini, dersini (Türkçe, Matematik, Fizik, Kimya, Biyoloji, Tarih, Coğrafya, Felsefe, Din Kültürü, Genel) ve sınav kapsamını (TYT/AYT/GENEL) tahmin et. Kapakta yazıyorsa yazar adlarını (authors), ISBN numarasını (isbn, yalnızca kapakta/arkada gerçekten görünüyorsa) ve baskı bilgisini (edition, ör. 'Güncellenmiş Yeni Baskı', '2025-2026') da çıkar. Görselde net okuyamadığın bir alanı boş string / boş dizi bırak, uydurma. fieldConfidence her alan için 0-1 arası okuma güvenin; alan boşsa 0. Kitap adı kapakta birden çok satıra/puntoya bölünmüş olabilir (ör. büyük 'Paragraf' + altında 'SORU BANKASI'): bunları tek başlıkta, kelimelerin ilk harfi büyük birleştir ('Paragraf Soru Bankası'); 'Video çözümlü', 'Yeni nesil', '20 deneme ilaveli' gibi slogan/özellik satırlarını başlığa katma. Ders kapakta açıkça yazmıyorsa kitap adından çıkar (Paragraf, Dil Bilgisi, Sözcükte Anlam → Türkçe; Problemler, Temel Matematik → Matematik); o durumda subject güvenini en fazla 0.7 ver. 'TYT-AYT' ya da 'YKS' yazıyorsa ve tek bir sınava ait değilse exam 'GENEL' olsun. Fotoğraf yan (90°) ya da ters çekilmiş, kapağın bir kısmı kadraj dışında kalmış olabilir: yazıyı döndürerek oku ve görünen başlığı yine çıkar; kapağın kısmen görünmesi onu 'other' yapmaz. Yayınevi çoğu zaman yalnızca logo olarak (ör. köşedeki 'ÜçDörtBeş') görünür; logodaki adı yayınevi olarak yaz. Büyük dekoratif yazılar ve rakamlar da başlığın parçasıdır ('0'DAN BAŞLA' + 'START' + 'Matematik' → '0'dan Başla Start Matematik'); yazar/hoca adı ('Şenol Hoca') authors alanına gider. imageKind: görsel bir kitap KAPAĞIYSA 'cover'; kitabın içindekiler / konu listesi / kitap bitirme planı sayfasıysa 'table_of_contents'; başka bir şeyse 'other'. `confident` alanını yalnızca kapaktaki yazıları gerçekten net okuyabildiysen true yap." },
             { role: "user", content: [{ type: "text" as const, text: "Bu kitap kapağını oku." }, { type: "image_url" as const, image_url: { url: input.dataUrl, detail: "high" as const } }] },
           ],
           response_format: { type: "json_schema", json_schema: { name: "yks_book_cover", strict: true, schema: bookPhotoSchema } },
-        });
+        }, "strong", invokeLLM);
         const raw = response.choices[0]?.message?.content;
         const jsonText = typeof raw === "string" ? raw : raw?.map((part) => part.type === "text" ? part.text : "").join("");
         if (!jsonText) throw new Error("Fotoğraftan yapılandırılmış veri alınamadı");

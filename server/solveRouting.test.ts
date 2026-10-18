@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { atLeastMedium, chooseSolveTier, nextTier, tierOfTag, type ModelTier } from "../shared/solveRouting";
-import { LlmUnavailableError } from "./_core/llm";
+import { invokeLLMWithTier, LlmUnavailableError } from "./_core/llm";
 import { solveWithRouting } from "./notes/questionSolver";
 
 const card = { difficulty: null, subject: null, exam: null, lastResult: null } as const;
@@ -98,5 +98,27 @@ describe("solveWithRouting", () => {
     const result = await solveWithRouting(input, "medium", invoke as never, pick);
     expect(result).toMatchObject({ tier: "medium", escalated: false });
     expect(result.solution.answer).toBe("x = 7");
+  });
+});
+
+describe("invokeLLMWithTier (book photo reading)", () => {
+  const pick = (tier: ModelTier) => ({ light: "m-light", medium: "m-medium", strong: "m-strong" })[tier];
+  const ok = { id: "1", created: 0, model: "x", choices: [] };
+  const params = { messages: [{ role: "user" as const, content: "kapak" }] };
+
+  it("reads with the strong model", async () => {
+    const invoke = vi.fn(async () => ok);
+    await invokeLLMWithTier(params, "strong", invoke as never, pick);
+    expect(invoke.mock.calls.map((call) => (call as unknown as [{ model?: string }])[0].model)).toEqual(["m-strong"]);
+  });
+
+  it("falls back to the default model only when the strong model is out of quota or missing", async () => {
+    const quota = vi.fn().mockRejectedValueOnce(new LlmUnavailableError("quota", "429", 429)).mockResolvedValueOnce(ok);
+    await invokeLLMWithTier(params, "strong", quota as never, pick);
+    expect(quota.mock.calls.map((call) => (call[0] as { model?: string }).model)).toEqual(["m-strong", "m-medium"]);
+
+    const auth = vi.fn().mockRejectedValue(new LlmUnavailableError("auth", "401", 401));
+    await expect(invokeLLMWithTier(params, "strong", auth as never, pick)).rejects.toThrow();
+    expect(auth).toHaveBeenCalledTimes(1);
   });
 });

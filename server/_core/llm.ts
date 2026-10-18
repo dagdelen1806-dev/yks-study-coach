@@ -273,6 +273,23 @@ export function modelForTier(tier: "light" | "medium" | "strong"): string | unde
   return normalizeLlmSettings(target.baseUrl, raw, target.key).model;
 }
 
+/**
+ * Belirli bir kademenin modeliyle çağırır; o modelin kotası doluysa ya da sağlayıcıda yoksa
+ * (429 / 404) varsayılan modelle bir kez daha dener — öğrenci, güçlü modelin kotası yüzünden boş dönmez.
+ */
+export async function invokeLLMWithTier(params: InvokeParams, tier: "light" | "medium" | "strong", invoke: typeof invokeLLM = invokeLLM, pickModel: typeof modelForTier = modelForTier): Promise<InvokeResult> {
+  const model = pickModel(tier);
+  const fallback = pickModel("medium");
+  try {
+    return await invoke({ ...params, ...(model ? { model } : {}) });
+  } catch (error) {
+    const retryable = error instanceof LlmUnavailableError && (error.reason === "quota" || error.status === 404);
+    if (!retryable || !fallback || fallback === model) throw error;
+    console.warn(`[LLM] ${tier} model ${model} unavailable (${error.status ?? error.reason}), falling back to ${fallback}`);
+    return invoke({ ...params, model: fallback });
+  }
+}
+
 const requireTarget = (): LlmTarget => {
   const target = resolveLlmTarget();
   if (!target) throw new LlmUnavailableError("not_configured", "LLM is not configured (set LLM_API_KEY or OPENAI_API_KEY)");

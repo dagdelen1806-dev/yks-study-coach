@@ -3523,6 +3523,18 @@ function modelForTier(tier) {
   if (!raw.trim()) return target.model;
   return normalizeLlmSettings(target.baseUrl, raw, target.key).model;
 }
+async function invokeLLMWithTier(params, tier, invoke = invokeLLM, pickModel = modelForTier) {
+  const model = pickModel(tier);
+  const fallback = pickModel("medium");
+  try {
+    return await invoke({ ...params, ...model ? { model } : {} });
+  } catch (error) {
+    const retryable = error instanceof LlmUnavailableError && (error.reason === "quota" || error.status === 404);
+    if (!retryable || !fallback || fallback === model) throw error;
+    console.warn(`[LLM] ${tier} model ${model} unavailable (${error.status ?? error.reason}), falling back to ${fallback}`);
+    return invoke({ ...params, model: fallback });
+  }
+}
 var requireTarget = () => {
   const target = resolveLlmTarget();
   if (!target) throw new LlmUnavailableError("not_configured", "LLM is not configured (set LLM_API_KEY or OPENAI_API_KEY)");
@@ -3843,8 +3855,8 @@ var bookContentConfig = {
     maxImageBytes: 3.5 * 1024 * 1024,
     /** Bir kitap için en fazla içindekiler sayfası. */
     maxTocPages: 8,
-    /** İsteğin tamamı için süre bütçesi (Vercel fonksiyonu 60 sn; yanıt + eşleştirme payı bırakılır). */
-    requestBudgetMs: 5e4,
+    /** İsteğin tamamı için süre bütçesi (Vercel fonksiyonu 300 sn; güçlü model yavaştır, yanıt + eşleştirme payı bırakılır). */
+    requestBudgetMs: 15e4,
     /** Aynı anda okunan sayfa sayısı bunu aşarsa sayfa başına geçiş sayısı kısılır (hız sınırı + süre). */
     manyPagesThreshold: 3,
     maxPassesWhenManyPages: 2
@@ -4613,7 +4625,8 @@ var llmVisionOcrProvider = {
   name: "llm-vision",
   async extractTableOfContentsPage(imageDataUrl, hint) {
     const instruction = hint ? `Bu i\xE7indekiler sayfas\u0131n\u0131 yeniden, dikkatle oku. \u0130lk okumada \u015Fu tutars\u0131zl\u0131klar bulundu: ${hint.issues.join(" | ")}. \u0130lk okuma: ${JSON.stringify(hint.previous.items).slice(0, 6e3)}. G\xF6rselde noktal\u0131 \xE7izgileri takip ederek her sayfa numaras\u0131n\u0131 do\u011Fru sat\u0131ra e\u015Fle; g\xF6rselde olmayan bir \u015Feyi ekleme.` : "Bu i\xE7indekiler sayfas\u0131n\u0131 oku.";
-    const response = await invokeLLM({
+    const response = await invokeLLMWithTier({
+      reasoningEffort: "low",
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: [{ type: "text", text: instruction }, { type: "image_url", image_url: { url: imageDataUrl, detail: "high" } }] }
@@ -4622,7 +4635,7 @@ var llmVisionOcrProvider = {
         type: "json_schema",
         json_schema: { name: "yks_book_toc_page", strict: true, schema: { type: "object", properties: { pageKind: { type: "string", enum: ["table_of_contents", "cover", "other"] }, items: { type: "array", items: tocItemSchema } }, required: ["pageKind", "items"], additionalProperties: false } }
       }
-    });
+    }, "strong", invokeLLM);
     const raw = response.choices[0]?.message?.content;
     const jsonText = typeof raw === "string" ? raw : raw?.map((part) => part.type === "text" ? part.text : "").join("");
     if (!jsonText) throw new Error("OCR yan\u0131t\u0131 bo\u015F d\xF6nd\xFC");
@@ -5710,12 +5723,12 @@ function parseTableOfContents(pages) {
 
 // server/bookContent/ocrOrchestrator.ts
 var ocrOrchestratorConfig = {
-  /** Tek bir fotoğraf için toplam süre bütçesi (isteğin tamamı 60 sn ile sınırlı). */
-  timeBudgetMs: 48e3,
-  /** Tek bir okuma geçişinin zaman aşımı. */
-  passTimeoutMs: 28e3,
+  /** Tek bir fotoğraf için toplam süre bütçesi (istek bütçesi 150 sn; okuma güçlü modelle yapılır). */
+  timeBudgetMs: 14e4,
+  /** Tek bir okuma geçişinin zaman aşımı (güçlü model yoğun bir sayfada 30 sn'yi aşabilir). */
+  passTimeoutMs: 7e4,
   /** Yeni bir dalga başlatmak için kalması gereken en az süre. */
-  minRemainingForWaveMs: 16e3,
+  minRemainingForWaveMs: 35e3,
   maxWorkingDimension: 2400,
   jpegQuality: 85,
   /** Düzeltme okuması (sayfa numarası tutarsızlığı ipucuyla) yapılsın mı. */
@@ -9376,13 +9389,13 @@ var appRouter = router({
       const fileCheck = validateDataUrl(input.dataUrl, input.mimeType);
       if (!fileCheck.valid) throw new Error(fileCheck.reason);
       try {
-        const response = await invokeLLM({
+        const response = await invokeLLMWithTier({
           messages: [
             { role: "system", content: "Sen bir kitap kapa\u011F\u0131 tan\u0131ma asistan\u0131s\u0131n. T\xFCrk\xE7e bir YKS kaynak kitab\u0131n\u0131n kapak foto\u011Fraf\u0131n\u0131 okuyup kitap ad\u0131n\u0131, yay\u0131nevini, dersini (T\xFCrk\xE7e, Matematik, Fizik, Kimya, Biyoloji, Tarih, Co\u011Frafya, Felsefe, Din K\xFClt\xFCr\xFC, Genel) ve s\u0131nav kapsam\u0131n\u0131 (TYT/AYT/GENEL) tahmin et. Kapakta yaz\u0131yorsa yazar adlar\u0131n\u0131 (authors), ISBN numaras\u0131n\u0131 (isbn, yaln\u0131zca kapakta/arkada ger\xE7ekten g\xF6r\xFCn\xFCyorsa) ve bask\u0131 bilgisini (edition, \xF6r. 'G\xFCncellenmi\u015F Yeni Bask\u0131', '2025-2026') da \xE7\u0131kar. G\xF6rselde net okuyamad\u0131\u011F\u0131n bir alan\u0131 bo\u015F string / bo\u015F dizi b\u0131rak, uydurma. fieldConfidence her alan i\xE7in 0-1 aras\u0131 okuma g\xFCvenin; alan bo\u015Fsa 0. Kitap ad\u0131 kapakta birden \xE7ok sat\u0131ra/puntoya b\xF6l\xFCnm\xFC\u015F olabilir (\xF6r. b\xFCy\xFCk 'Paragraf' + alt\u0131nda 'SORU BANKASI'): bunlar\u0131 tek ba\u015Fl\u0131kta, kelimelerin ilk harfi b\xFCy\xFCk birle\u015Ftir ('Paragraf Soru Bankas\u0131'); 'Video \xE7\xF6z\xFCml\xFC', 'Yeni nesil', '20 deneme ilaveli' gibi slogan/\xF6zellik sat\u0131rlar\u0131n\u0131 ba\u015Fl\u0131\u011Fa katma. Ders kapakta a\xE7\u0131k\xE7a yazm\u0131yorsa kitap ad\u0131ndan \xE7\u0131kar (Paragraf, Dil Bilgisi, S\xF6zc\xFCkte Anlam \u2192 T\xFCrk\xE7e; Problemler, Temel Matematik \u2192 Matematik); o durumda subject g\xFCvenini en fazla 0.7 ver. 'TYT-AYT' ya da 'YKS' yaz\u0131yorsa ve tek bir s\u0131nava ait de\u011Filse exam 'GENEL' olsun. Foto\u011Fraf yan (90\xB0) ya da ters \xE7ekilmi\u015F, kapa\u011F\u0131n bir k\u0131sm\u0131 kadraj d\u0131\u015F\u0131nda kalm\u0131\u015F olabilir: yaz\u0131y\u0131 d\xF6nd\xFCrerek oku ve g\xF6r\xFCnen ba\u015Fl\u0131\u011F\u0131 yine \xE7\u0131kar; kapa\u011F\u0131n k\u0131smen g\xF6r\xFCnmesi onu 'other' yapmaz. Yay\u0131nevi \xE7o\u011Fu zaman yaln\u0131zca logo olarak (\xF6r. k\xF6\u015Fedeki '\xDC\xE7D\xF6rtBe\u015F') g\xF6r\xFCn\xFCr; logodaki ad\u0131 yay\u0131nevi olarak yaz. B\xFCy\xFCk dekoratif yaz\u0131lar ve rakamlar da ba\u015Fl\u0131\u011F\u0131n par\xE7as\u0131d\u0131r ('0'DAN BA\u015ELA' + 'START' + 'Matematik' \u2192 '0'dan Ba\u015Fla Start Matematik'); yazar/hoca ad\u0131 ('\u015Eenol Hoca') authors alan\u0131na gider. imageKind: g\xF6rsel bir kitap KAPA\u011EIYSA 'cover'; kitab\u0131n i\xE7indekiler / konu listesi / kitap bitirme plan\u0131 sayfas\u0131ysa 'table_of_contents'; ba\u015Fka bir \u015Feyse 'other'. `confident` alan\u0131n\u0131 yaln\u0131zca kapaktaki yaz\u0131lar\u0131 ger\xE7ekten net okuyabildiysen true yap." },
             { role: "user", content: [{ type: "text", text: "Bu kitap kapa\u011F\u0131n\u0131 oku." }, { type: "image_url", image_url: { url: input.dataUrl, detail: "high" } }] }
           ],
           response_format: { type: "json_schema", json_schema: { name: "yks_book_cover", strict: true, schema: bookPhotoSchema } }
-        });
+        }, "strong", invokeLLM);
         const raw = response.choices[0]?.message?.content;
         const jsonText = typeof raw === "string" ? raw : raw?.map((part) => part.type === "text" ? part.text : "").join("");
         if (!jsonText) throw new Error("Foto\u011Fraftan yap\u0131land\u0131r\u0131lm\u0131\u015F veri al\u0131namad\u0131");
