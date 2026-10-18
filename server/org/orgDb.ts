@@ -1,0 +1,319 @@
+import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
+import {
+  classStudents,
+  counselingNotes,
+  organizationAuditLogs,
+  organizationClasses,
+  organizationInvitations,
+  organizationMembers,
+  organizations,
+  studentProfiles,
+  studyPlanSessions,
+  studyPlans,
+  teacherAssignments,
+  topicProgress,
+  topicStudyLogs,
+  userMockExams,
+  users,
+} from "../../drizzle/schema";
+import type { InvitableRole, OrgRole, StudentSignals } from "../../shared/org";
+import { getDb } from "../db";
+
+// Kurum Paneli veri katmanı. Her sorgu orgId ile kapsamlıdır; yetki kararı orgAccess.ts'te verilir.
+
+export class OrgError extends Error {}
+
+async function requireDb() {
+  const db = await getDb();
+  if (!db) throw new OrgError("Veritabanına ulaşılamadı.");
+  return db;
+}
+
+// --- Üyelik -----------------------------------------------------------------
+
+export type Membership = { orgId: number; orgName: string; role: OrgRole };
+
+/** Aktif kurumdaki aktif üyelik (askıya alınmış kurum = üyelik yok sayılır). */
+export async function getActiveMembership(userId: number, orgId: number): Promise<Membership | null> {
+  const db = await requireDb();
+  const [row] = await db
+    .select({ orgId: organizationMembers.orgId, orgName: organizations.name, role: organizationMembers.role })
+    .from(organizationMembers)
+    .innerJoin(organizations, eq(organizations.id, organizationMembers.orgId))
+    .where(and(eq(organizationMembers.userId, userId), eq(organizationMembers.orgId, orgId), eq(organizationMembers.status, "active"), eq(organizations.status, "active")))
+    .limit(1);
+  return row ?? null;
+}
+
+export async function listMyMemberships(userId: number): Promise<Membership[]> {
+  const db = await requireDb();
+  return db
+    .select({ orgId: organizationMembers.orgId, orgName: organizations.name, role: organizationMembers.role })
+    .from(organizationMembers)
+    .innerJoin(organizations, eq(organizations.id, organizationMembers.orgId))
+    .where(and(eq(organizationMembers.userId, userId), eq(organizationMembers.status, "active"), eq(organizations.status, "active")));
+}
+
+export async function hasActiveAssignment(orgId: number, teacherUserId: number, studentUserId: number): Promise<boolean> {
+  const db = await requireDb();
+  const [row] = await db.select({ id: teacherAssignments.id }).from(teacherAssignments)
+    .where(and(eq(teacherAssignments.orgId, orgId), eq(teacherAssignments.teacherUserId, teacherUserId), eq(teacherAssignments.studentUserId, studentUserId), eq(teacherAssignments.active, 1)))
+    .limit(1);
+  return Boolean(row);
+}
+
+export async function isActiveStudent(orgId: number, studentUserId: number): Promise<boolean> {
+  const db = await requireDb();
+  const [row] = await db.select({ id: organizationMembers.id }).from(organizationMembers)
+    .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, studentUserId), eq(organizationMembers.role, "student"), eq(organizationMembers.status, "active")))
+    .limit(1);
+  return Boolean(row);
+}
+
+export type OrgMemberRow = { userId: number; name: string; email: string | null; role: OrgRole; joinedAt: Date; consentAt: Date | null; lastSignedIn: Date | null };
+
+/** Kurumun aktif üyeleri; `teacherUserId` verilirse yalnızca o öğretmene atanmış öğrenciler. */
+export async function listMembers(orgId: number, options: { role?: OrgRole; teacherUserId?: number } = {}): Promise<OrgMemberRow[]> {
+  const db = await requireDb();
+  const conditions = [eq(organizationMembers.orgId, orgId), eq(organizationMembers.status, "active")];
+  if (options.role) conditions.push(eq(organizationMembers.role, options.role));
+  if (options.teacherUserId) {
+    const assigned = await db.select({ studentUserId: teacherAssignments.studentUserId }).from(teacherAssignments)
+      .where(and(eq(teacherAssignments.orgId, orgId), eq(teacherAssignments.teacherUserId, options.teacherUserId), eq(teacherAssignments.active, 1)));
+    if (!assigned.length) return [];
+    conditions.push(inArray(organizationMembers.userId, assigned.map((row) => row.studentUserId)));
+  }
+  const rows = await db
+    .select({ userId: organizationMembers.userId, preferredName: studentProfiles.preferredName, name: users.name, email: users.email, role: organizationMembers.role, joinedAt: organizationMembers.joinedAt, consentAt: organizationMembers.consentAt, lastSignedIn: users.lastSignedIn })
+    .from(organizationMembers)
+    .innerJoin(users, eq(users.id, organizationMembers.userId))
+    .leftJoin(studentProfiles, eq(studentProfiles.userId, organizationMembers.userId))
+    .where(and(...conditions))
+    .orderBy(users.name);
+  return rows.map((row) => ({ userId: row.userId, name: row.preferredName || row.name || "İsimsiz", email: row.email, role: row.role, joinedAt: row.joinedAt, consentAt: row.consentAt, lastSignedIn: row.lastSignedIn }));
+}
+
+export async function getMemberRole(orgId: number, userId: number): Promise<OrgRole | null> {
+  const db = await requireDb();
+  const [row] = await db.select({ role: organizationMembers.role }).from(organizationMembers)
+    .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, userId), eq(organizationMembers.status, "active"))).limit(1);
+  return row?.role ?? null;
+}
+
+export async function setMemberRole(orgId: number, userId: number, role: OrgRole): Promise<void> {
+  const db = await requireDb();
+  await db.update(organizationMembers).set({ role }).where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, userId), eq(organizationMembers.status, "active")));
+}
+
+/** Üyeliği bitirir ve kurumdaki tüm erişim bağlarını (atama, sınıf) kaldırır; öğrencinin kendi verisine dokunmaz. */
+export async function endMembership(orgId: number, userId: number, status: "left" | "removed"): Promise<void> {
+  const db = await requireDb();
+  await db.update(organizationMembers).set({ status, leftAt: new Date() }).where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, userId), eq(organizationMembers.status, "active")));
+  await db.update(teacherAssignments).set({ active: 0 }).where(and(eq(teacherAssignments.orgId, orgId), sql`(${teacherAssignments.studentUserId} = ${userId} OR ${teacherAssignments.teacherUserId} = ${userId})`));
+  const classes = await db.select({ id: organizationClasses.id }).from(organizationClasses).where(eq(organizationClasses.orgId, orgId));
+  if (classes.length) await db.delete(classStudents).where(and(eq(classStudents.studentUserId, userId), inArray(classStudents.classId, classes.map((row) => row.id))));
+}
+
+// --- Davet ------------------------------------------------------------------
+
+export async function createInvitation(input: { orgId: number; role: InvitableRole; codeHash: string; note: string | null; expiresAt: Date; maxUses: number; createdBy: number }) {
+  const db = await requireDb();
+  const result = await db.insert(organizationInvitations).values(input);
+  return Number(result[0].insertId);
+}
+
+export async function listInvitations(orgId: number) {
+  const db = await requireDb();
+  return db.select({ id: organizationInvitations.id, role: organizationInvitations.role, note: organizationInvitations.note, expiresAt: organizationInvitations.expiresAt, maxUses: organizationInvitations.maxUses, usedCount: organizationInvitations.usedCount, revokedAt: organizationInvitations.revokedAt, createdAt: organizationInvitations.createdAt })
+    .from(organizationInvitations).where(eq(organizationInvitations.orgId, orgId)).orderBy(desc(organizationInvitations.createdAt)).limit(100);
+}
+
+export async function revokeInvitation(orgId: number, id: number): Promise<boolean> {
+  const db = await requireDb();
+  const result = await db.update(organizationInvitations).set({ revokedAt: new Date() }).where(and(eq(organizationInvitations.orgId, orgId), eq(organizationInvitations.id, id), isNull(organizationInvitations.revokedAt)));
+  return Number((result[0] as { affectedRows?: number }).affectedRows ?? 0) > 0;
+}
+
+export async function findInvitationByHash(codeHash: string) {
+  const db = await requireDb();
+  const [row] = await db.select({ id: organizationInvitations.id, orgId: organizationInvitations.orgId, orgName: organizations.name, orgStatus: organizations.status, role: organizationInvitations.role, expiresAt: organizationInvitations.expiresAt, maxUses: organizationInvitations.maxUses, usedCount: organizationInvitations.usedCount, revokedAt: organizationInvitations.revokedAt, createdBy: organizationInvitations.createdBy })
+    .from(organizationInvitations).innerJoin(organizations, eq(organizations.id, organizationInvitations.orgId))
+    .where(eq(organizationInvitations.codeHash, codeHash)).limit(1);
+  return row ?? null;
+}
+
+/** Daveti kullanır: üyeliği açar (eskiden ayrılmışsa yeniden etkinleştirir) ve kullanım sayısını artırır. */
+export async function acceptInvitation(input: { invitationId: number; orgId: number; userId: number; role: InvitableRole; invitedBy: number }): Promise<void> {
+  const db = await requireDb();
+  const now = new Date();
+  const consentAt = input.role === "student" ? now : null;
+  const [existing] = await db.select({ id: organizationMembers.id }).from(organizationMembers).where(and(eq(organizationMembers.orgId, input.orgId), eq(organizationMembers.userId, input.userId))).limit(1);
+  if (existing) await db.update(organizationMembers).set({ role: input.role, status: "active", consentAt, joinedAt: now, leftAt: null, invitedBy: input.invitedBy }).where(eq(organizationMembers.id, existing.id));
+  else await db.insert(organizationMembers).values({ orgId: input.orgId, userId: input.userId, role: input.role, status: "active", consentAt, joinedAt: now, invitedBy: input.invitedBy });
+  await db.update(organizationInvitations).set({ usedCount: sql`${organizationInvitations.usedCount} + 1` }).where(eq(organizationInvitations.id, input.invitationId));
+}
+
+// --- Sınıflar ve atamalar ----------------------------------------------------
+
+export async function listClasses(orgId: number) {
+  const db = await requireDb();
+  const classes = await db.select({ id: organizationClasses.id, name: organizationClasses.name, gradeLevel: organizationClasses.gradeLevel }).from(organizationClasses).where(eq(organizationClasses.orgId, orgId)).orderBy(organizationClasses.name);
+  const links = classes.length ? await db.select({ classId: classStudents.classId, studentUserId: classStudents.studentUserId }).from(classStudents).where(inArray(classStudents.classId, classes.map((row) => row.id))) : [];
+  return classes.map((row) => ({ ...row, studentUserIds: links.filter((link) => link.classId === row.id).map((link) => link.studentUserId) }));
+}
+
+export async function createClass(orgId: number, name: string, gradeLevel: string | null) {
+  const db = await requireDb();
+  const result = await db.insert(organizationClasses).values({ orgId, name, gradeLevel });
+  return Number(result[0].insertId);
+}
+
+export async function deleteClass(orgId: number, classId: number): Promise<boolean> {
+  const db = await requireDb();
+  const [row] = await db.select({ id: organizationClasses.id }).from(organizationClasses).where(and(eq(organizationClasses.orgId, orgId), eq(organizationClasses.id, classId))).limit(1);
+  if (!row) return false;
+  await db.delete(classStudents).where(eq(classStudents.classId, classId));
+  await db.delete(organizationClasses).where(eq(organizationClasses.id, classId));
+  return true;
+}
+
+/** Sınıfın öğrenci listesini tamamen değiştirir; yalnızca kurumun aktif öğrencileri kabul edilir. */
+export async function setClassStudents(orgId: number, classId: number, studentUserIds: number[]): Promise<boolean> {
+  const db = await requireDb();
+  const [row] = await db.select({ id: organizationClasses.id }).from(organizationClasses).where(and(eq(organizationClasses.orgId, orgId), eq(organizationClasses.id, classId))).limit(1);
+  if (!row) return false;
+  const valid = studentUserIds.length ? (await listMembers(orgId, { role: "student" })).map((member) => member.userId).filter((id) => studentUserIds.includes(id)) : [];
+  await db.delete(classStudents).where(eq(classStudents.classId, classId));
+  if (valid.length) await db.insert(classStudents).values(valid.map((studentUserId) => ({ classId, studentUserId })));
+  return true;
+}
+
+export async function listAssignments(orgId: number) {
+  const db = await requireDb();
+  return db.select({ teacherUserId: teacherAssignments.teacherUserId, studentUserId: teacherAssignments.studentUserId }).from(teacherAssignments).where(and(eq(teacherAssignments.orgId, orgId), eq(teacherAssignments.active, 1)));
+}
+
+/** Öğretmenin öğrenci listesini tamamen değiştirir; yalnızca kurumun aktif öğrencileri atanabilir. */
+export async function setTeacherStudents(orgId: number, teacherUserId: number, studentUserIds: number[]): Promise<number[]> {
+  const db = await requireDb();
+  const valid = studentUserIds.length ? (await listMembers(orgId, { role: "student" })).map((member) => member.userId).filter((id) => studentUserIds.includes(id)) : [];
+  await db.update(teacherAssignments).set({ active: 0 }).where(and(eq(teacherAssignments.orgId, orgId), eq(teacherAssignments.teacherUserId, teacherUserId)));
+  for (const studentUserId of valid) {
+    await db.insert(teacherAssignments).values({ orgId, teacherUserId, studentUserId, active: 1 }).onDuplicateKeyUpdate({ set: { active: 1 } });
+  }
+  return valid;
+}
+
+// --- Görüşme notları ve denetim kaydı ---------------------------------------
+
+export async function listNotes(orgId: number, studentUserId: number) {
+  const db = await requireDb();
+  return db.select({ id: counselingNotes.id, body: counselingNotes.body, visibility: counselingNotes.visibility, authorUserId: counselingNotes.authorUserId, authorName: users.name, createdAt: counselingNotes.createdAt })
+    .from(counselingNotes).innerJoin(users, eq(users.id, counselingNotes.authorUserId))
+    .where(and(eq(counselingNotes.orgId, orgId), eq(counselingNotes.studentUserId, studentUserId))).orderBy(desc(counselingNotes.createdAt)).limit(200);
+}
+
+export async function createNote(input: { orgId: number; studentUserId: number; authorUserId: number; body: string; visibility: "staff" | "student" }) {
+  const db = await requireDb();
+  const result = await db.insert(counselingNotes).values(input);
+  return Number(result[0].insertId);
+}
+
+export async function getNote(orgId: number, id: number) {
+  const db = await requireDb();
+  const [row] = await db.select({ id: counselingNotes.id, studentUserId: counselingNotes.studentUserId, authorUserId: counselingNotes.authorUserId }).from(counselingNotes).where(and(eq(counselingNotes.orgId, orgId), eq(counselingNotes.id, id))).limit(1);
+  return row ?? null;
+}
+
+export async function deleteNote(orgId: number, id: number): Promise<void> {
+  const db = await requireDb();
+  await db.delete(counselingNotes).where(and(eq(counselingNotes.orgId, orgId), eq(counselingNotes.id, id)));
+}
+
+/** Öğrencinin görebildiği geri bildirimler: yalnızca aktif üyesi olduğu kurumlardan, `student` görünürlüklü notlar. */
+export async function listStudentFeedback(studentUserId: number) {
+  const db = await requireDb();
+  return db.select({ id: counselingNotes.id, body: counselingNotes.body, orgName: organizations.name, authorName: users.name, createdAt: counselingNotes.createdAt })
+    .from(counselingNotes)
+    .innerJoin(organizationMembers, and(eq(organizationMembers.orgId, counselingNotes.orgId), eq(organizationMembers.userId, studentUserId), eq(organizationMembers.status, "active")))
+    .innerJoin(organizations, eq(organizations.id, counselingNotes.orgId))
+    .innerJoin(users, eq(users.id, counselingNotes.authorUserId))
+    .where(and(eq(counselingNotes.studentUserId, studentUserId), eq(counselingNotes.visibility, "student")))
+    .orderBy(desc(counselingNotes.createdAt)).limit(20);
+}
+
+export async function writeAudit(input: { orgId: number; actorUserId: number; action: string; targetType?: string; targetId?: number; metadata?: Record<string, unknown> }) {
+  const db = await requireDb();
+  await db.insert(organizationAuditLogs).values({ orgId: input.orgId, actorUserId: input.actorUserId, action: input.action, targetType: input.targetType ?? null, targetId: input.targetId ?? null, metadataJson: input.metadata ? JSON.stringify(input.metadata) : null });
+}
+
+export async function listAudit(orgId: number) {
+  const db = await requireDb();
+  return db.select({ id: organizationAuditLogs.id, action: organizationAuditLogs.action, targetType: organizationAuditLogs.targetType, targetId: organizationAuditLogs.targetId, metadataJson: organizationAuditLogs.metadataJson, actorName: users.name, createdAt: organizationAuditLogs.createdAt })
+    .from(organizationAuditLogs).innerJoin(users, eq(users.id, organizationAuditLogs.actorUserId))
+    .where(eq(organizationAuditLogs.orgId, orgId)).orderBy(desc(organizationAuditLogs.createdAt)).limit(200);
+}
+
+// --- Öğrenci verisi (SALT OKUNUR) --------------------------------------------
+// Personel ekranı öğrencinin verisini değiştirmemeli: getStudyCalendar gecikmiş oturumları
+// yeniden planladığı (yazdığı) için burada kullanılmaz.
+
+/** Birden çok öğrencinin liste/panel sinyalleri, öğrenci başına değil toplu sorgularla. */
+export async function loadStudentSignals(studentUserIds: number[], weekStart: Date, weekEnd: Date, logsSince: Date): Promise<Map<number, StudentSignals>> {
+  const signals = new Map<number, StudentSignals>(studentUserIds.map((id) => [id, { exams: [], logs: [], weekSessions: [], weakTopicCount: 0, lastSignedIn: null }]));
+  if (!studentUserIds.length) return signals;
+  const db = await requireDb();
+  const [exams, logs, sessions, weak, signins] = await Promise.all([
+    db.select({ userId: userMockExams.userId, exam: userMockExams.exam, examDate: userMockExams.examDate, net: userMockExams.net }).from(userMockExams).where(inArray(userMockExams.userId, studentUserIds)),
+    db.select({ userId: topicStudyLogs.userId, studyDate: topicStudyLogs.studyDate, minutes: topicStudyLogs.minutes }).from(topicStudyLogs).where(and(inArray(topicStudyLogs.userId, studentUserIds), gte(topicStudyLogs.studyDate, logsSince))),
+    db.select({ userId: studyPlanSessions.userId, status: studyPlanSessions.status, plannedMinutes: studyPlanSessions.plannedMinutes, actualMinutes: studyPlanSessions.actualMinutes, targetQuestions: studyPlanSessions.targetQuestions, actualQuestions: studyPlanSessions.actualQuestions, sessionDate: studyPlanSessions.sessionDate, rescheduledFrom: studyPlanSessions.rescheduledFrom }).from(studyPlanSessions).where(and(inArray(studyPlanSessions.userId, studentUserIds), gte(studyPlanSessions.sessionDate, weekStart), lt(studyPlanSessions.sessionDate, weekEnd))),
+    db.select({ userId: topicProgress.userId, count: sql<number>`COUNT(*)` }).from(topicProgress).where(and(inArray(topicProgress.userId, studentUserIds), eq(topicProgress.status, "weak"))).groupBy(topicProgress.userId),
+    db.select({ id: users.id, lastSignedIn: users.lastSignedIn }).from(users).where(inArray(users.id, studentUserIds)),
+  ]);
+  for (const row of exams) signals.get(row.userId)?.exams.push({ exam: row.exam, examDate: row.examDate, net: Number(row.net) });
+  for (const row of logs) signals.get(row.userId)?.logs.push({ studyDate: row.studyDate, minutes: row.minutes });
+  for (const row of sessions) signals.get(row.userId)?.weekSessions.push({ ...row, status: row.status });
+  for (const row of weak) { const entry = signals.get(row.userId); if (entry) entry.weakTopicCount = Number(row.count); }
+  for (const row of signins) { const entry = signals.get(row.id); if (entry) entry.lastSignedIn = row.lastSignedIn; }
+  return signals;
+}
+
+/** Öğrenci detayı için takvim (yeniden planlama YAPMADAN). */
+export async function getStudentCalendarReadOnly(studentUserId: number, since: Date) {
+  const db = await requireDb();
+  const [sessions, logs] = await Promise.all([
+    db.select().from(studyPlanSessions).where(and(eq(studyPlanSessions.userId, studentUserId), gte(studyPlanSessions.sessionDate, since))).orderBy(studyPlanSessions.sessionDate).limit(300),
+    db.select().from(topicStudyLogs).where(and(eq(topicStudyLogs.userId, studentUserId), gte(topicStudyLogs.studyDate, since))).orderBy(desc(topicStudyLogs.studyDate)).limit(300),
+  ]);
+  return { sessions, logs };
+}
+
+/** Öğretmenin öğrenciye atadığı görev: öğrencinin takvimine "kim atadı" bilgisiyle tek oturum ekler. */
+export async function insertAssignedTask(input: { orgId: number; studentUserId: number; teacherUserId: number; sessionDate: Date; title: string; subject: string; topic: string; kind: string; plannedMinutes: number; targetQuestions: number | null; summary: string }) {
+  const db = await requireDb();
+  const dayStart = new Date(input.sessionDate); dayStart.setHours(0, 0, 0, 0);
+  const dayEnd = new Date(dayStart); dayEnd.setDate(dayEnd.getDate() + 1);
+  const plan = await db.insert(studyPlans).values({ userId: input.studentUserId, title: "Öğretmenin atadığı görevler", weekStart: dayStart, weekEnd: dayEnd, summary: input.summary, source: "manual" });
+  const session = await db.insert(studyPlanSessions).values({ userId: input.studentUserId, planId: Number(plan[0].insertId), sessionDate: input.sessionDate, title: input.title, subject: input.subject, topic: input.topic, kind: input.kind, plannedMinutes: input.plannedMinutes, targetQuestions: input.targetQuestions, assignedByUserId: input.teacherUserId, assignedOrgId: input.orgId });
+  return Number(session[0].insertId);
+}
+
+// --- Platform admini ----------------------------------------------------------
+
+export async function createOrganization(name: string, slug: string) {
+  const db = await requireDb();
+  const result = await db.insert(organizations).values({ name, slug });
+  return Number(result[0].insertId);
+}
+
+export async function listOrganizations() {
+  const db = await requireDb();
+  const rows = await db.select({ id: organizations.id, name: organizations.name, slug: organizations.slug, status: organizations.status, createdAt: organizations.createdAt }).from(organizations).orderBy(desc(organizations.createdAt));
+  const counts = rows.length ? await db.select({ orgId: organizationMembers.orgId, role: organizationMembers.role, count: sql<number>`COUNT(*)` }).from(organizationMembers).where(and(inArray(organizationMembers.orgId, rows.map((row) => row.id)), eq(organizationMembers.status, "active"))).groupBy(organizationMembers.orgId, organizationMembers.role) : [];
+  return rows.map((row) => ({ ...row, students: Number(counts.find((count) => count.orgId === row.id && count.role === "student")?.count ?? 0), staff: counts.filter((count) => count.orgId === row.id && count.role !== "student").reduce((sum, count) => sum + Number(count.count), 0) }));
+}
+
+export async function setOrganizationStatus(orgId: number, status: "active" | "suspended") {
+  const db = await requireDb();
+  await db.update(organizations).set({ status }).where(eq(organizations.id, orgId));
+}

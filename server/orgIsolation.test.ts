@@ -1,0 +1,213 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
+import type { User } from "../drizzle/schema";
+import { canAssignRole, canInviteRole, generateInviteCode, invitationProblem, normalizeInviteCode, summarizeStudent } from "../shared/org";
+
+// --- Bellek içi kurum veri katmanı (gerçek yetki katmanı ve router bunun üstünde çalışır) ---
+type Member = { orgId: number; userId: number; role: "owner" | "admin" | "coordinator" | "teacher" | "student"; status: "active" | "left" | "removed" };
+const store = {
+  orgs: [] as Array<{ id: number; name: string; status: "active" | "suspended" }>,
+  members: [] as Member[],
+  assignments: [] as Array<{ orgId: number; teacherUserId: number; studentUserId: number; active: number }>,
+  invitations: [] as Array<{ id: number; orgId: number; orgName: string; orgStatus: "active" | "suspended"; role: "admin" | "coordinator" | "teacher" | "student"; codeHash: string; expiresAt: Date; maxUses: number; usedCount: number; revokedAt: Date | null; createdBy: number; note: string | null; createdAt: Date }>,
+  notes: [] as Array<{ id: number; orgId: number; studentUserId: number; authorUserId: number; body: string; visibility: "staff" | "student" }>,
+  audit: [] as Array<{ orgId: number; actorUserId: number; action: string }>,
+  tasks: [] as Array<{ orgId: number; studentUserId: number; teacherUserId: number }>,
+};
+const reads: string[] = [];
+const active = (orgId: number, userId: number) => store.members.find((m) => m.orgId === orgId && m.userId === userId && m.status === "active" && store.orgs.find((o) => o.id === orgId)?.status === "active");
+
+vi.mock("./org/orgDb", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./org/orgDb")>();
+  return {
+    ...original,
+    getActiveMembership: vi.fn(async (userId: number, orgId: number) => { const m = active(orgId, userId); return m ? { orgId, orgName: store.orgs.find((o) => o.id === orgId)!.name, role: m.role } : null; }),
+    listMyMemberships: vi.fn(async (userId: number) => store.members.filter((m) => m.userId === userId && active(m.orgId, userId)).map((m) => ({ orgId: m.orgId, orgName: store.orgs.find((o) => o.id === m.orgId)!.name, role: m.role }))),
+    hasActiveAssignment: vi.fn(async (orgId: number, teacherUserId: number, studentUserId: number) => store.assignments.some((a) => a.orgId === orgId && a.teacherUserId === teacherUserId && a.studentUserId === studentUserId && a.active === 1)),
+    isActiveStudent: vi.fn(async (orgId: number, userId: number) => active(orgId, userId)?.role === "student"),
+    listMembers: vi.fn(async (orgId: number, options: { role?: string; teacherUserId?: number } = {}) => store.members
+      .filter((m) => m.orgId === orgId && m.status === "active" && (!options.role || m.role === options.role) && (!options.teacherUserId || store.assignments.some((a) => a.orgId === orgId && a.teacherUserId === options.teacherUserId && a.studentUserId === m.userId && a.active === 1)))
+      .map((m) => ({ userId: m.userId, name: `U${m.userId}`, email: null, role: m.role, joinedAt: new Date(), consentAt: m.role === "student" ? new Date() : null, lastSignedIn: new Date() }))),
+    getMemberRole: vi.fn(async (orgId: number, userId: number) => active(orgId, userId)?.role ?? null),
+    setMemberRole: vi.fn(async (orgId: number, userId: number, role: Member["role"]) => { active(orgId, userId)!.role = role; }),
+    endMembership: vi.fn(async (orgId: number, userId: number, status: "left" | "removed") => { const m = active(orgId, userId); if (m) m.status = status; store.assignments.filter((a) => a.orgId === orgId && (a.studentUserId === userId || a.teacherUserId === userId)).forEach((a) => (a.active = 0)); }),
+    createInvitation: vi.fn(async (input: { orgId: number; role: "student"; codeHash: string; note: string | null; expiresAt: Date; maxUses: number; createdBy: number }) => { const id = store.invitations.length + 1; store.invitations.push({ id, ...input, orgName: store.orgs.find((o) => o.id === input.orgId)!.name, orgStatus: "active", usedCount: 0, revokedAt: null, createdAt: new Date() }); return id; }),
+    listInvitations: vi.fn(async (orgId: number) => store.invitations.filter((i) => i.orgId === orgId)),
+    revokeInvitation: vi.fn(async (orgId: number, id: number) => { const i = store.invitations.find((x) => x.orgId === orgId && x.id === id); if (i) i.revokedAt = new Date(); return Boolean(i); }),
+    findInvitationByHash: vi.fn(async (hash: string) => store.invitations.find((i) => i.codeHash === hash) ?? null),
+    acceptInvitation: vi.fn(async (input: { invitationId: number; orgId: number; userId: number; role: Member["role"] }) => { const existing = store.members.find((m) => m.orgId === input.orgId && m.userId === input.userId); if (existing) { existing.status = "active"; existing.role = input.role; } else store.members.push({ orgId: input.orgId, userId: input.userId, role: input.role, status: "active" }); store.invitations.find((i) => i.id === input.invitationId)!.usedCount++; }),
+    listClasses: vi.fn(async () => []),
+    listAssignments: vi.fn(async (orgId: number) => store.assignments.filter((a) => a.orgId === orgId && a.active === 1)),
+    loadStudentSignals: vi.fn(async (ids: number[]) => { reads.push("signals"); return new Map(ids.map((userId) => [userId, { exams: [], logs: [], weekSessions: [], weakTopicCount: 0, lastSignedIn: new Date() }])); }),
+    getStudentCalendarReadOnly: vi.fn(async () => { reads.push("calendar-readonly"); return { sessions: [], logs: [] }; }),
+    listNotes: vi.fn(async (orgId: number, studentUserId: number) => store.notes.filter((n) => n.orgId === orgId && n.studentUserId === studentUserId)),
+    createNote: vi.fn(async (input: { orgId: number; studentUserId: number; authorUserId: number; body: string; visibility: "staff" | "student" }) => { const id = store.notes.length + 1; store.notes.push({ id, ...input }); return id; }),
+    getNote: vi.fn(async (orgId: number, id: number) => store.notes.find((n) => n.orgId === orgId && n.id === id) ?? null),
+    deleteNote: vi.fn(async () => undefined),
+    listStudentFeedback: vi.fn(async (studentUserId: number) => store.notes.filter((n) => n.studentUserId === studentUserId && n.visibility === "student" && active(n.orgId, studentUserId)).map((n) => ({ id: n.id, body: n.body, orgName: "", authorName: "", createdAt: new Date() }))),
+    insertAssignedTask: vi.fn(async (input: { orgId: number; studentUserId: number; teacherUserId: number }) => { store.tasks.push(input); return store.tasks.length; }),
+    writeAudit: vi.fn(async (input: { orgId: number; actorUserId: number; action: string }) => { store.audit.push(input); }),
+    listAudit: vi.fn(async (orgId: number) => store.audit.filter((a) => a.orgId === orgId)),
+  };
+});
+const getStudyCalendar = vi.fn();
+vi.mock("./db", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./db")>()),
+  getStudyCalendar: (...args: unknown[]) => getStudyCalendar(...args),
+  getStudentProfile: vi.fn(async () => ({ gradeLevel: "12", examYear: 2027, targetScoreType: "SAY", targetUniversity: null, targetDepartment: null, dailyStudyDuration: 120, avatarStyle: null })),
+  getUserMockExams: vi.fn(async () => []),
+  getUserTopicProgress: vi.fn(async () => []),
+}));
+vi.mock("./schedule/classScheduleDb", async (importOriginal) => ({ ...(await importOriginal<typeof import("./schedule/classScheduleDb")>()), getClassSchedule: vi.fn(async () => ({ periods: [], blocks: [] })) }));
+
+const { appRouter } = await import("./routers");
+import type { TrpcContext } from "./_core/context";
+
+const makeUser = (id: number): User => ({ id, openId: `u-${id}`, email: null, name: null, loginMethod: "dev_email", passwordHash: null, emailVerifiedAt: new Date(), emailVerificationSentAt: null, role: "user", approvalStatus: "approved", approvedAt: null, approvedBy: null, rejectedAt: null, rejectionReason: null, accountStatus: "active", createdAt: new Date(), updatedAt: new Date(), lastSignedIn: new Date() }) as User;
+const as = (id: number) => appRouter.createCaller({ user: makeUser(id), req: { protocol: "https", headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] } as TrpcContext);
+const hash = (code: string) => createHash("sha256").update(normalizeInviteCode(code)).digest("hex");
+
+// Kurum A (1): yönetici 10, öğretmen 11 (öğrenci 20'ye atanmış), öğretmen 12 (atamasız), öğrenciler 20, 21.
+// Kurum B (2): yönetici 30, öğrenci 40.
+beforeEach(() => {
+  store.orgs = [{ id: 1, name: "A Dershanesi", status: "active" }, { id: 2, name: "B Dershanesi", status: "active" }];
+  store.members = [
+    { orgId: 1, userId: 10, role: "admin", status: "active" }, { orgId: 1, userId: 11, role: "teacher", status: "active" }, { orgId: 1, userId: 12, role: "teacher", status: "active" },
+    { orgId: 1, userId: 20, role: "student", status: "active" }, { orgId: 1, userId: 21, role: "student", status: "active" },
+    { orgId: 2, userId: 30, role: "admin", status: "active" }, { orgId: 2, userId: 40, role: "student", status: "active" },
+  ];
+  store.assignments = [{ orgId: 1, teacherUserId: 11, studentUserId: 20, active: 1 }];
+  store.invitations = []; store.notes = []; store.audit = []; store.tasks = []; reads.length = 0;
+  getStudyCalendar.mockReset();
+});
+
+describe("kurum izolasyonu (docs/kurumsal.md §5)", () => {
+  it("1) başka kurumun öğrencisi ID ile okunamaz ve değiştirilemez", async () => {
+    await expect(as(10).org.student({ orgId: 1, studentUserId: 40 })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(as(10).org.tasks.assign({ orgId: 1, studentUserId: 40, date: "2026-10-20", time: "17:00", subject: "Matematik", topic: "Problemler", kind: "Soru çözümü", minutes: 40 })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(as(10).org.student({ orgId: 2, studentUserId: 40 })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(store.tasks).toEqual([]);
+  });
+
+  it("2) öğretmen yalnızca kendisine atanmış öğrenciyi görür", async () => {
+    await expect(as(11).org.student({ orgId: 1, studentUserId: 20 })).resolves.toBeTruthy();
+    await expect(as(11).org.student({ orgId: 1, studentUserId: 21 })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect((await as(11).org.students({ orgId: 1 })).map((s) => s.userId)).toEqual([20]);
+    expect(await as(12).org.students({ orgId: 1 })).toEqual([]);
+  });
+
+  it("3) kurumdan ayrılan öğrenci anında görünmez olur", async () => {
+    await as(20).org.leave({ orgId: 1 });
+    await expect(as(10).org.student({ orgId: 1, studentUserId: 20 })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect((await as(10).org.students({ orgId: 1 })).map((s) => s.userId)).toEqual([21]);
+    await expect(as(11).org.student({ orgId: 1, studentUserId: 20 })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("4) iptal edilmiş, süresi geçmiş ya da tükenmiş davet kabul edilmez; kullanılmış kod tekrar işlemez", async () => {
+    const { code } = await as(10).org.invitations.create({ orgId: 1, role: "student", maxUses: 1 });
+    await as(50).org.join({ code, consent: true });
+    await expect(as(51).org.join({ code, consent: true })).rejects.toThrow(/kullanım sınırına/);
+    const second = await as(10).org.invitations.create({ orgId: 1, role: "student" });
+    await as(10).org.invitations.revoke({ orgId: 1, invitationId: second.id });
+    await expect(as(52).org.join({ code: second.code, consent: true })).rejects.toThrow(/iptal/);
+    const third = await as(10).org.invitations.create({ orgId: 1, role: "student" });
+    store.invitations.find((i) => i.id === third.id)!.expiresAt = new Date(Date.now() - 1000);
+    await expect(as(53).org.join({ code: third.code, consent: true })).rejects.toThrow(/süresi/);
+    await expect(as(54).org.join({ code: "ABCD-EFGH", consent: true })).rejects.toThrow(/bulunamadı/);
+    expect(store.invitations.every((i) => i.codeHash.length === 64 && !i.codeHash.includes("-"))).toBe(true);
+  });
+
+  it("5) öğrenci kurum uçlarını çağıramaz", async () => {
+    await expect(as(20).org.overview({ orgId: 1 })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(as(20).org.students({ orgId: 1 })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(as(20).org.student({ orgId: 1, studentUserId: 21 })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(as(20).org.invitations.create({ orgId: 1, role: "student" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("6) rol yükseltme ve başka kurumun üyeliğine dokunma engellenir", async () => {
+    await expect(as(11).org.members.setRole({ orgId: 1, userId: 12, role: "admin" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(as(10).org.members.setRole({ orgId: 1, userId: 11, role: "admin" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(as(10).org.members.setRole({ orgId: 1, userId: 10, role: "owner" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(as(10).org.members.remove({ orgId: 1, userId: 40 })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(as(10).org.members.remove({ orgId: 2, userId: 40 })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(as(11).org.invitations.create({ orgId: 1, role: "teacher" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(as(10).org.members.setRole({ orgId: 1, userId: 20, role: "teacher" })).rejects.toThrow(/çevrilemez/);
+  });
+
+  it("7) kurum toplamları yalnızca aktif öğrencileri sayar", async () => {
+    store.members.find((m) => m.userId === 21)!.status = "left";
+    expect((await as(10).org.overview({ orgId: 1 })).totals.students).toBe(1);
+  });
+
+  it("8) personel notları öğrenciye ve atanmamış öğretmene kapalı; öğrenciye açık not yalnızca öğrencide", async () => {
+    await as(11).org.notes.create({ orgId: 1, studentUserId: 20, body: "Gizli personel notu", visibility: "staff" });
+    await as(11).org.notes.create({ orgId: 1, studentUserId: 20, body: "Aferin, devam!", visibility: "student" });
+    expect((await as(20).org.myFeedback()).map((n) => n.body)).toEqual(["Aferin, devam!"]);
+    await expect(as(12).org.student({ orgId: 1, studentUserId: 20 })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(as(12).org.notes.create({ orgId: 1, studentUserId: 20, body: "x", visibility: "staff" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect((await as(10).org.student({ orgId: 1, studentUserId: 20 })).notes).toHaveLength(2);
+  });
+
+  it("9) kritik işlemler denetim kaydı üretir", async () => {
+    const { code } = await as(10).org.invitations.create({ orgId: 1, role: "student" });
+    await as(60).org.join({ code, consent: true });
+    await as(11).org.tasks.assign({ orgId: 1, studentUserId: 20, date: "2026-10-20", time: "17:00", subject: "Matematik", topic: "Problemler", kind: "Soru çözümü", minutes: 40 });
+    await as(11).org.notes.create({ orgId: 1, studentUserId: 20, body: "not", visibility: "staff" });
+    await as(60).org.leave({ orgId: 1 });
+    expect(store.audit.map((a) => a.action)).toEqual(["invitation.create", "member.join", "task.assign", "note.create", "member.leave"]);
+    expect(store.tasks).toEqual([expect.objectContaining({ orgId: 1, studentUserId: 20, teacherUserId: 11 })]);
+  });
+});
+
+describe("kurum kuralları", () => {
+  it("personel ekranı öğrencinin takvimini değiştiren fonksiyonu hiç çağırmaz", async () => {
+    await as(10).org.overview({ orgId: 1 });
+    await as(10).org.students({ orgId: 1 });
+    await as(10).org.student({ orgId: 1, studentUserId: 20 });
+    expect(getStudyCalendar).not.toHaveBeenCalled();
+    expect(reads).toContain("calendar-readonly");
+  });
+
+  it("öğrenci açık onay olmadan katılamaz ve aynı anda tek kuruma bağlı olur", async () => {
+    const { code } = await as(30).org.invitations.create({ orgId: 2, role: "student", maxUses: 5 });
+    await expect(as(20).org.join({ code, consent: false as never })).rejects.toThrow();
+    await expect(as(20).org.join({ code, consent: true })).rejects.toThrow(/şu anki kurumundan ayrıl/);
+    await as(20).org.leave({ orgId: 1 });
+    await expect(as(20).org.join({ code, consent: true })).resolves.toMatchObject({ orgId: 2, role: "student" });
+  });
+
+  it("rol ve davet yetki tabloları", () => {
+    expect(canAssignRole("admin", "teacher", "coordinator")).toBe(true);
+    expect(canAssignRole("admin", "teacher", "admin")).toBe(false);
+    expect(canAssignRole("coordinator", "teacher", "student")).toBe(false);
+    expect(canAssignRole("owner", "admin", "owner")).toBe(false);
+    expect(canInviteRole("teacher", "student")).toBe(true);
+    expect(canInviteRole("teacher", "teacher")).toBe(false);
+    expect(canInviteRole("admin", "coordinator")).toBe(true);
+    expect(canInviteRole("admin", "admin")).toBe(false);
+  });
+
+  it("davet kodu biçimi ve normalizasyonu", () => {
+    let seed = 0;
+    const code = generateInviteCode((max) => (seed++ * 7) % max);
+    expect(code).toMatch(/^[A-Z2-9]{4}-[A-Z2-9]{4}$/);
+    expect(code).not.toMatch(/[01OIL]/);
+    expect(normalizeInviteCode(" abcd - efgh ")).toBe("ABCDEFGH");
+    expect(hash("abcd-efgh")).toBe(hash("ABCDEFGH"));
+    expect(invitationProblem({ revokedAt: null, expiresAt: new Date(Date.now() + 1000), usedCount: 0, maxUses: 1 })).toBeNull();
+  });
+
+  it("risk kuralları: etkinlik yok, düşük uyum, net düşüşü", () => {
+    const now = new Date("2026-10-18T12:00:00");
+    const base = { exams: [], logs: [], weekSessions: [], weakTopicCount: 0, lastSignedIn: new Date("2026-10-17T10:00:00") };
+    expect(summarizeStudent(base, now).risks).toEqual([]);
+    expect(summarizeStudent({ ...base, lastSignedIn: new Date("2026-10-01") }, now).risks).toContain("inactive");
+    const missed = Array.from({ length: 4 }, (_, i) => ({ status: "planned" as const, plannedMinutes: 40, sessionDate: new Date(`2026-10-1${3 + i}T17:00:00`) }));
+    expect(summarizeStudent({ ...base, weekSessions: missed }, now).risks).toContain("low_adherence");
+    const exams = [{ exam: "TYT" as const, examDate: new Date("2026-10-01"), net: 70 }, { exam: "TYT" as const, examDate: new Date("2026-10-15"), net: 62 }, { exam: "AYT" as const, examDate: new Date("2026-10-16"), net: 30 }];
+    const summary = summarizeStudent({ ...base, exams }, now);
+    expect(summary.risks).toContain("net_drop");
+    expect(summary.lastTyt).toMatchObject({ net: 62, delta: -8 });
+    expect(summary.lastAyt).toMatchObject({ net: 30, delta: null });
+  });
+});

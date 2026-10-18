@@ -6,6 +6,7 @@ import { adminSubscriptionsRouter } from "./subscriptions";
 import { adminSystemRouter } from "./system";
 import { adminUsageRouter } from "./usage";
 import { adminUsersRouter } from "./users";
+import { adminOrgsRouter } from "../org";
 
 /**
  * Admin Command Center (PHASE 3) — domain'e göre bölünmüş alt router'lar
@@ -22,4 +23,5 @@ export const adminRouter = router({
   audit: adminAuditRouter,
   payments: adminPaymentsRouter,
   system: adminSystemRouter,
+  orgs: adminOrgsRouter,
 });

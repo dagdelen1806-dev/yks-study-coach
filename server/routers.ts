@@ -20,6 +20,7 @@ import { questionsRouter } from "./routers/questions";
 import { getNotebookPlanSignal } from "./notes/questionsDb";
 import { classScheduleRouter } from "./routers/classSchedule";
 import { readingRouter } from "./routers/reading";
+import { orgRouter } from "./routers/org";
 import { recordReadingPages } from "./reading/readingDb";
 import { getPlanScheduleContext } from "./schedule/classScheduleDb";
 import { normalizeAiPlan } from "./studyPlan/normalizeAiPlan";
@@ -433,6 +434,7 @@ export const appRouter = router({
   questions: questionsRouter,
   classSchedule: classScheduleRouter,
   reading: readingRouter,
+  org: orgRouter,
   catalog: resourceCatalogRouter,
   onboarding: onboardingRouter,
   subscription: subscriptionRouter,
