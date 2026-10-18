@@ -1,7 +1,7 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { ROLE_LABELS, isStaffRole, type OrgRole } from "@shared/org";
-import { Building2, ClipboardList, GraduationCap, LayoutDashboard, LogOut, Mail, Menu, School, Users, X } from "lucide-react";
+import { Building2, ClipboardList, GraduationCap, LayoutDashboard, LogOut, Mail, Menu, School, Settings, Users, X } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { ORG_PATHS, type OrgSection } from "./orgShared";
@@ -13,6 +13,7 @@ const OrgClasses = lazy(() => import("./OrgManage").then((module) => ({ default:
 const OrgTeachers = lazy(() => import("./OrgManage").then((module) => ({ default: module.OrgTeachers })));
 const OrgInvitations = lazy(() => import("./OrgManage").then((module) => ({ default: module.OrgInvitations })));
 const OrgAudit = lazy(() => import("./OrgManage").then((module) => ({ default: module.OrgAudit })));
+const OrgSettings = lazy(() => import("./OrgSettings"));
 
 export type OrgScope = { orgId: number; orgName: string; role: OrgRole };
 
@@ -23,6 +24,7 @@ const NAV: Array<{ key: OrgSection; label: string; icon: typeof Users; minRole?:
   { key: "teachers", label: "Öğretmenler", icon: Users, minRole: "coordinator" },
   { key: "invitations", label: "Davetler", icon: Mail },
   { key: "audit", label: "İşlem kayıtları", icon: ClipboardList, minRole: "admin" },
+  { key: "settings", label: "Ayarlar", icon: Settings, minRole: "coordinator" },
 ];
 const RANK: Record<OrgRole, number> = { student: 0, teacher: 1, coordinator: 2, admin: 3, owner: 4 };
 const ORG_CHOICE_KEY = "pusula:org-choice";
@@ -116,6 +118,7 @@ export default function OrgApp() {
             {route.section === "teachers" && RANK[scope.role] >= RANK.coordinator && <OrgTeachers scope={scope} />}
             {route.section === "invitations" && <OrgInvitations scope={scope} />}
             {route.section === "audit" && RANK[scope.role] >= RANK.admin && <OrgAudit scope={scope} />}
+            {route.section === "settings" && RANK[scope.role] >= RANK.coordinator && <OrgSettings scope={scope} />}
           </Suspense>
         </div>
       </main>

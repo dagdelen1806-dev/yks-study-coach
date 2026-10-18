@@ -54,7 +54,7 @@ export function OrgClasses({ scope }: { scope: OrgScope }) {
       {!classes.data ? <EmptyNote>Yükleniyor…</EmptyNote> : classes.data.length === 0 ? <EmptyNote>Henüz sınıf yok.</EmptyNote> : (
         <div className="grid gap-4 md:grid-cols-2">
           {classes.data.map((item) => (
-            <Panel key={item.id} icon={<School size={18} />} title={item.name} subtitle={`${item.studentUserIds.length} öğrenci`} action={canManage ? <div className="flex gap-1"><button onClick={() => setEditing({ id: item.id, name: item.name, ids: item.studentUserIds })} className="rounded-lg px-2 py-1 text-[12px] font-semibold text-brand hover:bg-brand-soft">Öğrenciler</button><button onClick={() => { if (window.confirm(`"${item.name}" sınıfı silinsin mi? Öğrencilerin verisi silinmez.`)) remove.mutate({ orgId: scope.orgId, classId: item.id }); }} className="rounded-lg p-1.5 text-ink-4 hover:bg-danger-soft hover:text-danger" aria-label={`${item.name} sil`}><Trash2 size={14} /></button></div> : undefined}>
+            <Panel key={item.id} icon={<School size={18} />} title={item.name} subtitle={[item.gradeLevel && (item.gradeLevel === "Mezun" ? "Mezun" : `${item.gradeLevel}. sınıf`), item.track, `${item.studentUserIds.length} öğrenci`].filter(Boolean).join(" · ")} action={canManage ? <div className="flex gap-1"><button onClick={() => setEditing({ id: item.id, name: item.name, ids: item.studentUserIds })} className="rounded-lg px-2 py-1 text-[12px] font-semibold text-brand hover:bg-brand-soft">Öğrenciler</button><button onClick={() => { if (window.confirm(`"${item.name}" sınıfı silinsin mi? Öğrencilerin verisi silinmez.`)) remove.mutate({ orgId: scope.orgId, classId: item.id }); }} className="rounded-lg p-1.5 text-ink-4 hover:bg-danger-soft hover:text-danger" aria-label={`${item.name} sil`}><Trash2 size={14} /></button></div> : undefined}>
               {item.studentUserIds.length === 0 ? <p className="text-[13px] text-ink-3">Bu sınıfta öğrenci yok.</p> : <p className="text-[13px] leading-6 text-ink-2">{item.studentUserIds.map(nameOf).join(", ")}</p>}
             </Panel>
           ))}
@@ -87,7 +87,7 @@ export function OrgTeachers({ scope }: { scope: OrgScope }) {
               const count = (assignments.data ?? []).filter((row) => row.teacherUserId === member.userId).length;
               return (
                 <li key={member.userId} className="flex flex-col gap-3 px-5 py-3 sm:flex-row sm:items-center">
-                  <span className="flex min-w-0 flex-1 items-center gap-3"><Initials name={member.name} /><span className="min-w-0"><span className="block truncate text-[13.5px] font-semibold text-ink">{member.name}</span><span className="block text-[12px] text-ink-3">{ROLE_LABELS[member.role]}{member.role === "teacher" ? ` · ${count} öğrenci` : ""} · son giriş {relativeTime(member.lastSignedIn)}</span></span></span>
+                  <span className="flex min-w-0 flex-1 items-center gap-3"><Initials name={member.name} /><span className="min-w-0"><span className="block truncate text-[13.5px] font-semibold text-ink">{member.name}</span><span className="block text-[12px] text-ink-3">{ROLE_LABELS[member.role]}{member.subject ? ` · ${member.subject}` : ""}{member.role === "teacher" ? ` · ${count} öğrenci` : ""} · son giriş {relativeTime(member.lastSignedIn)}</span></span></span>
                   <span className="flex flex-wrap items-center gap-2">
                     {member.role === "teacher" && <button onClick={() => setEditing({ userId: member.userId, name: member.name })} className={secondaryButton}><Users size={15} /> Öğrenci ata</button>}
                     {isAdmin && staffRoles.includes(member.role) && <select value={member.role} onChange={(event) => setRole.mutate({ orgId: scope.orgId, userId: member.userId, role: event.target.value as OrgRole })} className="form-input h-10 w-auto text-[13px]" aria-label={`${member.name} rolü`}>{staffRoles.map((role) => <option key={role} value={role}>{ROLE_LABELS[role]}</option>)}</select>}
@@ -155,7 +155,7 @@ export function OrgInvitations({ scope }: { scope: OrgScope }) {
 
 const ACTION_LABELS: Record<string, string> = {
   "invitation.create": "Davet oluşturdu", "invitation.revoke": "Daveti iptal etti", "member.join": "Kuruma katıldı", "member.leave": "Kurumdan ayrıldı", "member.role": "Rol değiştirdi", "member.remove": "Üyeyi çıkardı",
-  "class.create": "Sınıf oluşturdu", "class.remove": "Sınıf sildi", "class.students": "Sınıf öğrencilerini güncelledi", "assignment.set": "Öğretmene öğrenci atadı", "task.assign": "Görev atadı", "note.create": "Not yazdı", "note.remove": "Not sildi",
+  "class.create": "Sınıf oluşturdu", "class.update": "Sınıfı düzenledi", "class.remove": "Sınıf sildi", "org.update": "Kurum bilgilerini güncelledi", "member.subject": "Branş değiştirdi", "class.students": "Sınıf öğrencilerini güncelledi", "assignment.set": "Öğretmene öğrenci atadı", "task.assign": "Görev atadı", "note.create": "Not yazdı", "note.remove": "Not sildi",
 };
 
 export function OrgAudit({ scope }: { scope: OrgScope }) {

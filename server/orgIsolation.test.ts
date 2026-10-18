@@ -37,6 +37,11 @@ vi.mock("./org/orgDb", async (importOriginal) => {
     findInvitationByHash: vi.fn(async (hash: string) => store.invitations.find((i) => i.codeHash === hash) ?? null),
     acceptInvitation: vi.fn(async (input: { invitationId: number; orgId: number; userId: number; role: Member["role"] }) => { const existing = store.members.find((m) => m.orgId === input.orgId && m.userId === input.userId); if (existing) { existing.status = "active"; existing.role = input.role; } else store.members.push({ orgId: input.orgId, userId: input.userId, role: input.role, status: "active" }); store.invitations.find((i) => i.id === input.invitationId)!.usedCount++; }),
     listClasses: vi.fn(async () => []),
+    createClass: vi.fn(async () => 1),
+    updateClass: vi.fn(async () => true),
+    getOrganization: vi.fn(async (orgId: number) => store.orgs.find((o) => o.id === orgId) ?? null),
+    updateOrganization: vi.fn(async () => undefined),
+    setMemberSubject: vi.fn(async () => true),
     listAssignments: vi.fn(async (orgId: number) => store.assignments.filter((a) => a.orgId === orgId && a.active === 1)),
     loadStudentSignals: vi.fn(async (ids: number[]) => { reads.push("signals"); return new Map(ids.map((userId) => [userId, { exams: [], logs: [], weekSessions: [], weakTopicCount: 0, lastSignedIn: new Date() }])); }),
     getStudentCalendarReadOnly: vi.fn(async () => { reads.push("calendar-readonly"); return { sessions: [], logs: [] }; }),
@@ -61,6 +66,7 @@ vi.mock("./db", async (importOriginal) => ({
 vi.mock("./schedule/classScheduleDb", async (importOriginal) => ({ ...(await importOriginal<typeof import("./schedule/classScheduleDb")>()), getClassSchedule: vi.fn(async () => ({ periods: [], blocks: [] })) }));
 
 const { appRouter } = await import("./routers");
+const { acceptInvitation, createInvitation, updateOrganization } = await import("./org/orgDb");
 import type { TrpcContext } from "./_core/context";
 
 const makeUser = (id: number): User => ({ id, openId: `u-${id}`, email: null, name: null, loginMethod: "dev_email", passwordHash: null, emailVerifiedAt: new Date(), emailVerificationSentAt: null, role: "user", approvalStatus: "approved", approvedAt: null, approvedBy: null, rejectedAt: null, rejectionReason: null, accountStatus: "active", createdAt: new Date(), updatedAt: new Date(), lastSignedIn: new Date() }) as User;
@@ -185,6 +191,31 @@ describe("kurum kuralları", () => {
     expect(canInviteRole("teacher", "teacher")).toBe(false);
     expect(canInviteRole("admin", "coordinator")).toBe(true);
     expect(canInviteRole("admin", "admin")).toBe(false);
+  });
+
+  it("ayarlar: kurum bilgisini yalnızca yönetici, sınıfı koordinatör+ tanımlar; danışman aynı kurumun personeli olmalı", async () => {
+    vi.clearAllMocks();
+    await expect(as(11).org.settings.update({ orgId: 1, name: "Değişti", kind: "okul" })).rejects.toThrow();
+    await expect(as(30).org.settings.update({ orgId: 1, name: "Değişti", kind: "okul" })).rejects.toThrow();
+    await expect(as(10).org.settings.update({ orgId: 1, name: "A Kurs Merkezi", kind: "dershane", contactEmail: "" })).resolves.toEqual({ ok: true });
+    expect(updateOrganization).toHaveBeenCalledWith(1, expect.objectContaining({ name: "A Kurs Merkezi", contactEmail: null, city: null }));
+    await expect(as(11).org.classes.create({ orgId: 1, name: "12-A" })).rejects.toThrow();
+    await expect(as(10).org.classes.create({ orgId: 1, name: "12-A", advisorUserId: 30 })).rejects.toThrow(/Danışman/);
+    await expect(as(10).org.classes.create({ orgId: 1, name: "12-A", advisorUserId: 20 })).rejects.toThrow(/Danışman/);
+    await expect(as(10).org.classes.create({ orgId: 1, name: "12-A", gradeLevel: "12", track: "SAY", advisorUserId: 11 })).resolves.toEqual({ id: 1 });
+    await expect(as(11).org.members.setSubject({ orgId: 1, userId: 11, subject: "Fizik" })).rejects.toThrow();
+    expect(store.audit.map((row) => row.action)).toEqual(expect.arrayContaining(["org.update", "class.create"]));
+  });
+
+  it("öğretmen tanımlama: branş davetle gelir, öğrenci davetinde branş tutulmaz", async () => {
+    vi.clearAllMocks();
+    const teacher = await as(10).org.invitations.create({ orgId: 1, role: "teacher", note: "Ayşe", subject: "Kimya" });
+    const student = await as(10).org.invitations.create({ orgId: 1, role: "student", subject: "Kimya" });
+    expect(createInvitation).toHaveBeenNthCalledWith(1, expect.objectContaining({ role: "teacher", subject: "Kimya" }));
+    expect(createInvitation).toHaveBeenNthCalledWith(2, expect.objectContaining({ role: "student", subject: null }));
+    await as(50).org.join({ code: teacher.code, consent: true });
+    expect(acceptInvitation).toHaveBeenLastCalledWith(expect.objectContaining({ userId: 50, role: "teacher", subject: "Kimya" }));
+    expect(student.code).toMatch(/-/);
   });
 
   it("davet kodu biçimi ve normalizasyonu", () => {

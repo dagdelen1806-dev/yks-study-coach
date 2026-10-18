@@ -9,6 +9,7 @@ export const ORG_PATHS = {
   teachers: "/kurum/ogretmenler",
   invitations: "/kurum/davetler",
   audit: "/kurum/kayitlar",
+  settings: "/kurum/ayarlar",
 } as const;
 export type OrgSection = keyof typeof ORG_PATHS;
 export const studentPath = (userId: number) => `/kurum/ogrenci/${userId}`;

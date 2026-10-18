@@ -12,6 +12,22 @@ export type InvitableRole = (typeof INVITABLE_ROLES)[number];
 export const ROLE_RANK: Record<OrgRole, number> = { student: 0, teacher: 1, coordinator: 2, admin: 3, owner: 4 };
 export const ROLE_LABELS: Record<OrgRole, string> = { owner: "Kurum sahibi", admin: "Kurum yöneticisi", coordinator: "Akademik koordinatör", teacher: "Öğretmen / koç", student: "Öğrenci" };
 
+/** Kurum Ayarları: kurum türü, sınıf seviyesi/alanı ve öğretmen branşı seçenekleri. */
+export const ORG_KINDS = ["dershane", "okul", "etut", "kocluk", "diger"] as const;
+export type OrgKind = (typeof ORG_KINDS)[number];
+export const ORG_KIND_LABELS: Record<OrgKind, string> = { dershane: "Dershane / kurs merkezi", okul: "Okul", etut: "Etüt merkezi", kocluk: "Koçluk merkezi", diger: "Diğer" };
+export const CLASS_GRADES = ["9", "10", "11", "12", "Mezun"] as const;
+export const CLASS_TRACKS = ["SAY", "EA", "SÖZ", "DİL", "TYT"] as const;
+export const CLASS_TRACK_LABELS: Record<(typeof CLASS_TRACKS)[number], string> = { SAY: "Sayısal", EA: "Eşit Ağırlık", "SÖZ": "Sözel", "DİL": "Dil", TYT: "TYT (ortak)" };
+export const TEACHER_SUBJECTS = ["Türkçe", "Edebiyat", "Matematik", "Geometri", "Fizik", "Kimya", "Biyoloji", "Tarih", "Coğrafya", "Felsefe", "Din Kültürü", "İngilizce", "Rehberlik"] as const;
+/** Ayarlar → Roller: her rolün panelde neyi görüp yapabildiği (bilgilendirme; yetki kararı sunucuda). */
+export const ROLE_PERMISSIONS: Array<{ role: Exclude<OrgRole, "student">; can: string[] }> = [
+  { role: "owner", can: ["Kurum yöneticisinin her şeyi", "Kurumdan çıkarılamaz"] },
+  { role: "admin", can: ["Kurum bilgilerini düzenler", "Öğretmen ve koordinatör tanımlar, rol değiştirir, çıkarır", "Tüm öğrencileri ve işlem kayıtlarını görür"] },
+  { role: "coordinator", can: ["Tüm öğrencileri görür", "Sınıf tanımlar, öğretmen branşlarını düzenler", "Öğretmenlere öğrenci atar, öğrenci daveti oluşturur"] },
+  { role: "teacher", can: ["Yalnızca kendisine atanan öğrencileri görür", "Görev atar, görüşme notu yazar", "Öğrenci daveti oluşturur"] },
+];
+
 export const isStaffRole = (role: OrgRole): role is StaffRole => role !== "student";
 export const hasRole = (role: OrgRole, minimum: OrgRole) => ROLE_RANK[role] >= ROLE_RANK[minimum];
 

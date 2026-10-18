@@ -16,7 +16,7 @@ import {
   userMockExams,
   users,
 } from "../../drizzle/schema";
-import type { InvitableRole, OrgRole, StudentSignals } from "../../shared/org";
+import type { InvitableRole, OrgKind, OrgRole, StudentSignals } from "../../shared/org";
 import { getDb } from "../db";
 
 // Kurum Paneli veri katmanı. Her sorgu orgId ile kapsamlıdır; yetki kararı orgAccess.ts'te verilir.
@@ -70,7 +70,7 @@ export async function isActiveStudent(orgId: number, studentUserId: number): Pro
   return Boolean(row);
 }
 
-export type OrgMemberRow = { userId: number; name: string; email: string | null; role: OrgRole; joinedAt: Date; consentAt: Date | null; lastSignedIn: Date | null };
+export type OrgMemberRow = { userId: number; name: string; email: string | null; role: OrgRole; subject: string | null; joinedAt: Date; consentAt: Date | null; lastSignedIn: Date | null };
 
 /** Kurumun aktif üyeleri; `teacherUserId` verilirse yalnızca o öğretmene atanmış öğrenciler. */
 export async function listMembers(orgId: number, options: { role?: OrgRole; teacherUserId?: number } = {}): Promise<OrgMemberRow[]> {
@@ -84,13 +84,13 @@ export async function listMembers(orgId: number, options: { role?: OrgRole; teac
     conditions.push(inArray(organizationMembers.userId, assigned.map((row) => row.studentUserId)));
   }
   const rows = await db
-    .select({ userId: organizationMembers.userId, preferredName: studentProfiles.preferredName, name: users.name, email: users.email, role: organizationMembers.role, joinedAt: organizationMembers.joinedAt, consentAt: organizationMembers.consentAt, lastSignedIn: users.lastSignedIn })
+    .select({ userId: organizationMembers.userId, preferredName: studentProfiles.preferredName, name: users.name, email: users.email, role: organizationMembers.role, subject: organizationMembers.subject, joinedAt: organizationMembers.joinedAt, consentAt: organizationMembers.consentAt, lastSignedIn: users.lastSignedIn })
     .from(organizationMembers)
     .innerJoin(users, eq(users.id, organizationMembers.userId))
     .leftJoin(studentProfiles, eq(studentProfiles.userId, organizationMembers.userId))
     .where(and(...conditions))
     .orderBy(users.name);
-  return rows.map((row) => ({ userId: row.userId, name: row.preferredName || row.name || "İsimsiz", email: row.email, role: row.role, joinedAt: row.joinedAt, consentAt: row.consentAt, lastSignedIn: row.lastSignedIn }));
+  return rows.map((row) => ({ userId: row.userId, name: row.preferredName || row.name || "İsimsiz", email: row.email, role: row.role, subject: row.subject, joinedAt: row.joinedAt, consentAt: row.consentAt, lastSignedIn: row.lastSignedIn }));
 }
 
 export async function getMemberRole(orgId: number, userId: number): Promise<OrgRole | null> {
@@ -105,6 +105,13 @@ export async function setMemberRole(orgId: number, userId: number, role: OrgRole
   await db.update(organizationMembers).set({ role }).where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, userId), eq(organizationMembers.status, "active")));
 }
 
+/** Personelin branşı (Ayarlar → Öğretmenler). */
+export async function setMemberSubject(orgId: number, userId: number, subject: string | null): Promise<boolean> {
+  const db = await requireDb();
+  const result = await db.update(organizationMembers).set({ subject }).where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, userId), eq(organizationMembers.status, "active"), sql`${organizationMembers.role} <> 'student'`));
+  return Number((result[0] as { affectedRows?: number }).affectedRows ?? 0) > 0;
+}
+
 /** Üyeliği bitirir ve kurumdaki tüm erişim bağlarını (atama, sınıf) kaldırır; öğrencinin kendi verisine dokunmaz. */
 export async function endMembership(orgId: number, userId: number, status: "left" | "removed"): Promise<void> {
   const db = await requireDb();
@@ -116,7 +123,7 @@ export async function endMembership(orgId: number, userId: number, status: "left
 
 // --- Davet ------------------------------------------------------------------
 
-export async function createInvitation(input: { orgId: number; role: InvitableRole; codeHash: string; note: string | null; expiresAt: Date; maxUses: number; createdBy: number }) {
+export async function createInvitation(input: { orgId: number; role: InvitableRole; codeHash: string; note: string | null; subject?: string | null; expiresAt: Date; maxUses: number; createdBy: number }) {
   const db = await requireDb();
   const result = await db.insert(organizationInvitations).values(input);
   return Number(result[0].insertId);
@@ -124,7 +131,7 @@ export async function createInvitation(input: { orgId: number; role: InvitableRo
 
 export async function listInvitations(orgId: number) {
   const db = await requireDb();
-  return db.select({ id: organizationInvitations.id, role: organizationInvitations.role, note: organizationInvitations.note, expiresAt: organizationInvitations.expiresAt, maxUses: organizationInvitations.maxUses, usedCount: organizationInvitations.usedCount, revokedAt: organizationInvitations.revokedAt, createdAt: organizationInvitations.createdAt })
+  return db.select({ id: organizationInvitations.id, role: organizationInvitations.role, note: organizationInvitations.note, subject: organizationInvitations.subject, expiresAt: organizationInvitations.expiresAt, maxUses: organizationInvitations.maxUses, usedCount: organizationInvitations.usedCount, revokedAt: organizationInvitations.revokedAt, createdAt: organizationInvitations.createdAt })
     .from(organizationInvitations).where(eq(organizationInvitations.orgId, orgId)).orderBy(desc(organizationInvitations.createdAt)).limit(100);
 }
 
@@ -136,20 +143,21 @@ export async function revokeInvitation(orgId: number, id: number): Promise<boole
 
 export async function findInvitationByHash(codeHash: string) {
   const db = await requireDb();
-  const [row] = await db.select({ id: organizationInvitations.id, orgId: organizationInvitations.orgId, orgName: organizations.name, orgStatus: organizations.status, role: organizationInvitations.role, expiresAt: organizationInvitations.expiresAt, maxUses: organizationInvitations.maxUses, usedCount: organizationInvitations.usedCount, revokedAt: organizationInvitations.revokedAt, createdBy: organizationInvitations.createdBy })
+  const [row] = await db.select({ id: organizationInvitations.id, orgId: organizationInvitations.orgId, orgName: organizations.name, orgStatus: organizations.status, role: organizationInvitations.role, expiresAt: organizationInvitations.expiresAt, maxUses: organizationInvitations.maxUses, usedCount: organizationInvitations.usedCount, revokedAt: organizationInvitations.revokedAt, createdBy: organizationInvitations.createdBy, subject: organizationInvitations.subject })
     .from(organizationInvitations).innerJoin(organizations, eq(organizations.id, organizationInvitations.orgId))
     .where(eq(organizationInvitations.codeHash, codeHash)).limit(1);
   return row ?? null;
 }
 
 /** Daveti kullanır: üyeliği açar (eskiden ayrılmışsa yeniden etkinleştirir) ve kullanım sayısını artırır. */
-export async function acceptInvitation(input: { invitationId: number; orgId: number; userId: number; role: InvitableRole; invitedBy: number }): Promise<void> {
+export async function acceptInvitation(input: { invitationId: number; orgId: number; userId: number; role: InvitableRole; invitedBy: number; subject?: string | null }): Promise<void> {
   const db = await requireDb();
   const now = new Date();
   const consentAt = input.role === "student" ? now : null;
+  const subject = input.role === "student" ? null : input.subject ?? null;
   const [existing] = await db.select({ id: organizationMembers.id }).from(organizationMembers).where(and(eq(organizationMembers.orgId, input.orgId), eq(organizationMembers.userId, input.userId))).limit(1);
-  if (existing) await db.update(organizationMembers).set({ role: input.role, status: "active", consentAt, joinedAt: now, leftAt: null, invitedBy: input.invitedBy }).where(eq(organizationMembers.id, existing.id));
-  else await db.insert(organizationMembers).values({ orgId: input.orgId, userId: input.userId, role: input.role, status: "active", consentAt, joinedAt: now, invitedBy: input.invitedBy });
+  if (existing) await db.update(organizationMembers).set({ role: input.role, status: "active", consentAt, subject, joinedAt: now, leftAt: null, invitedBy: input.invitedBy }).where(eq(organizationMembers.id, existing.id));
+  else await db.insert(organizationMembers).values({ orgId: input.orgId, userId: input.userId, role: input.role, status: "active", consentAt, subject, joinedAt: now, invitedBy: input.invitedBy });
   await db.update(organizationInvitations).set({ usedCount: sql`${organizationInvitations.usedCount} + 1` }).where(eq(organizationInvitations.id, input.invitationId));
 }
 
@@ -157,15 +165,23 @@ export async function acceptInvitation(input: { invitationId: number; orgId: num
 
 export async function listClasses(orgId: number) {
   const db = await requireDb();
-  const classes = await db.select({ id: organizationClasses.id, name: organizationClasses.name, gradeLevel: organizationClasses.gradeLevel }).from(organizationClasses).where(eq(organizationClasses.orgId, orgId)).orderBy(organizationClasses.name);
+  const classes = await db.select({ id: organizationClasses.id, name: organizationClasses.name, gradeLevel: organizationClasses.gradeLevel, track: organizationClasses.track, advisorUserId: organizationClasses.advisorUserId }).from(organizationClasses).where(eq(organizationClasses.orgId, orgId)).orderBy(organizationClasses.name);
   const links = classes.length ? await db.select({ classId: classStudents.classId, studentUserId: classStudents.studentUserId }).from(classStudents).where(inArray(classStudents.classId, classes.map((row) => row.id))) : [];
   return classes.map((row) => ({ ...row, studentUserIds: links.filter((link) => link.classId === row.id).map((link) => link.studentUserId) }));
 }
 
-export async function createClass(orgId: number, name: string, gradeLevel: string | null) {
+export type ClassFields = { name: string; gradeLevel: string | null; track: string | null; advisorUserId: number | null };
+
+export async function createClass(orgId: number, fields: ClassFields) {
   const db = await requireDb();
-  const result = await db.insert(organizationClasses).values({ orgId, name, gradeLevel });
+  const result = await db.insert(organizationClasses).values({ orgId, ...fields });
   return Number(result[0].insertId);
+}
+
+export async function updateClass(orgId: number, classId: number, fields: ClassFields): Promise<boolean> {
+  const db = await requireDb();
+  const result = await db.update(organizationClasses).set(fields).where(and(eq(organizationClasses.orgId, orgId), eq(organizationClasses.id, classId)));
+  return Number((result[0] as { affectedRows?: number }).affectedRows ?? 0) > 0;
 }
 
 export async function deleteClass(orgId: number, classId: number): Promise<boolean> {
@@ -299,6 +315,19 @@ export async function insertAssignedTask(input: { orgId: number; studentUserId: 
 }
 
 // --- Platform admini ----------------------------------------------------------
+
+export type OrganizationProfile = { name: string; kind: OrgKind; city: string | null; district: string | null; address: string | null; phone: string | null; contactEmail: string | null };
+
+export async function getOrganization(orgId: number) {
+  const db = await requireDb();
+  const [row] = await db.select({ id: organizations.id, name: organizations.name, slug: organizations.slug, kind: organizations.kind, city: organizations.city, district: organizations.district, address: organizations.address, phone: organizations.phone, contactEmail: organizations.contactEmail, createdAt: organizations.createdAt }).from(organizations).where(eq(organizations.id, orgId)).limit(1);
+  return row ?? null;
+}
+
+export async function updateOrganization(orgId: number, profile: OrganizationProfile): Promise<void> {
+  const db = await requireDb();
+  await db.update(organizations).set(profile).where(eq(organizations.id, orgId));
+}
 
 export async function createOrganization(name: string, slug: string) {
   const db = await requireDb();

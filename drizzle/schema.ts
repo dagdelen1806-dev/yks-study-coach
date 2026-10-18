@@ -428,6 +428,13 @@ export const organizations = mysqlTable("organizations", {
   name: varchar("name", { length: 160 }).notNull(),
   slug: varchar("slug", { length: 80 }).notNull().unique(),
   status: mysqlEnum("status", ["active", "suspended"]).default("active").notNull(),
+  // Kurum bilgileri (Ayarlar → Kurum bilgileri; kurum yöneticisi düzenler).
+  kind: mysqlEnum("kind", ["dershane", "okul", "etut", "kocluk", "diger"]).default("dershane").notNull(),
+  city: varchar("city", { length: 80 }),
+  district: varchar("district", { length: 80 }),
+  address: varchar("address", { length: 300 }),
+  phone: varchar("phone", { length: 40 }),
+  contactEmail: varchar("contactEmail", { length: 160 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -442,6 +449,8 @@ export const organizationMembers = mysqlTable("organization_members", {
   joinedAt: timestamp("joinedAt").defaultNow().notNull(),
   leftAt: timestamp("leftAt"),
   invitedBy: int("invitedBy"),
+  // Personelin branşı (ör. Matematik); öğrencide boş.
+  subject: varchar("subject", { length: 60 }),
 }, (table) => ({
   orgUserUnique: uniqueIndex("organization_members_org_user_unique").on(table.orgId, table.userId),
   userStatusIdx: index("organization_members_user_status_idx").on(table.userId, table.status),
@@ -454,6 +463,8 @@ export const organizationInvitations = mysqlTable("organization_invitations", {
   // Kodun kendisi saklanmaz; yalnızca sha256 özeti (kod oluşturulurken bir kez gösterilir).
   codeHash: varchar("codeHash", { length: 64 }).notNull().unique(),
   note: varchar("note", { length: 160 }),
+  // Öğretmen tanımlarken girilen branş; kabulde üyeliğe yazılır.
+  subject: varchar("subject", { length: 60 }),
   expiresAt: timestamp("expiresAt").notNull(),
   maxUses: int("maxUses").default(1).notNull(),
   usedCount: int("usedCount").default(0).notNull(),
@@ -469,6 +480,9 @@ export const organizationClasses = mysqlTable("organization_classes", {
   orgId: int("orgId").notNull(),
   name: varchar("name", { length: 80 }).notNull(),
   gradeLevel: varchar("gradeLevel", { length: 20 }),
+  // Alan (SAY/EA/SÖZ/DİL/TYT) ve danışman (rehber) öğretmen.
+  track: varchar("track", { length: 20 }),
+  advisorUserId: int("advisorUserId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => ({
   orgIdx: index("organization_classes_org_idx").on(table.orgId),

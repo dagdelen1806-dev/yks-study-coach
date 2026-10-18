@@ -2,7 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { createHash, randomInt } from "node:crypto";
 import { z } from "zod";
 import { findClassConflict, toMinutes } from "../../shared/classSchedule";
-import { INVITABLE_ROLES, ORG_ROLES, canAssignRole, canInviteRole, generateInviteCode, hasRole, invitationProblem, isStaffRole, normalizeInviteCode, seesAllStudents, summarizeStudent, type RiskKey, type StudentSummary } from "../../shared/org";
+import { CLASS_GRADES, CLASS_TRACKS, INVITABLE_ROLES, ORG_KINDS, ORG_ROLES, canAssignRole, canInviteRole, generateInviteCode, hasRole, invitationProblem, isStaffRole, normalizeInviteCode, seesAllStudents, summarizeStudent, type RiskKey, type StudentSummary } from "../../shared/org";
 import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 import { getStudentProfile, getUserMockExams, getUserTopicProgress } from "../db";
 import { audit, assertCanViewStudent, orgProcedure, type OrgContext } from "../org/orgAccess";
@@ -19,6 +19,7 @@ import {
   findInvitationByHash,
   getMemberRole,
   getNote,
+  getOrganization,
   getStudentCalendarReadOnly,
   insertAssignedTask,
   listAssignments,
@@ -34,8 +35,11 @@ import {
   revokeInvitation,
   setClassStudents,
   setMemberRole,
+  setMemberSubject,
   setOrganizationStatus,
   setTeacherStudents,
+  updateClass,
+  updateOrganization,
 } from "../org/orgDb";
 import { getClassSchedule } from "../schedule/classScheduleDb";
 
@@ -66,6 +70,19 @@ async function visibleStudentsWithSummary(ctx: OrgContext) {
   const { start, end } = currentWeek();
   const signals = await loadStudentSignals(students.map((student) => student.userId), start, end, new Date(Date.now() - 30 * DAY));
   return students.map((student) => ({ ...student, summary: summarizeStudent(signals.get(student.userId)!) }));
+}
+
+/** Boş metni null yapan isteğe bağlı alan (Ayarlar formları). */
+const optionalText = (max: number) => z.string().trim().max(max).optional().transform((value) => value || null);
+const classInput = z.object({ name: z.string().trim().min(1).max(80), gradeLevel: z.enum(CLASS_GRADES).nullable().optional(), track: z.enum(CLASS_TRACKS).nullable().optional(), advisorUserId: id.nullable().optional() });
+
+/** Sınıf danışmanı kurumun aktif personeli olmalı. */
+async function classFields(orgId: number, input: z.infer<typeof classInput>) {
+  if (input.advisorUserId) {
+    const role = await getMemberRole(orgId, input.advisorUserId);
+    if (!role || !isStaffRole(role)) throw new TRPCError({ code: "NOT_FOUND", message: "Danışman öğretmen bulunamadı." });
+  }
+  return { name: input.name, gradeLevel: input.gradeLevel ?? null, track: input.track ?? null, advisorUserId: input.advisorUserId ?? null };
 }
 
 const average = (values: number[]) => (values.length ? Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 10) / 10 : null);
@@ -150,6 +167,22 @@ export const orgRouter = router({
     };
   }),
 
+  /** Ayarlar → Kurum bilgileri: personel görür, yalnızca yönetici düzenler. */
+  settings: router({
+    get: orgProcedure("teacher").query(async ({ ctx }) => {
+      const org = await getOrganization(ctx.membership.orgId);
+      if (!org) throw new TRPCError({ code: "NOT_FOUND", message: "Kurum bulunamadı." });
+      return org;
+    }),
+    update: orgProcedure("admin")
+      .input(z.object({ name: z.string().trim().min(2).max(160), kind: z.enum(ORG_KINDS), city: optionalText(80), district: optionalText(80), address: optionalText(300), phone: optionalText(40), contactEmail: z.union([z.literal(""), z.string().trim().email("Geçerli bir e-posta yaz.").max(160)]).optional().transform((value) => value || null) }))
+      .mutation(async ({ ctx, input }) => {
+        await updateOrganization(ctx.membership.orgId, input);
+        await audit(ctx, "org.update", { type: "organization", id: ctx.membership.orgId }, { name: input.name });
+        return { ok: true };
+      }),
+  }),
+
   invitations: router({
     list: orgProcedure("teacher").query(async ({ ctx }) => {
       const rows = await listInvitations(ctx.membership.orgId);
@@ -157,11 +190,11 @@ export const orgRouter = router({
       return hasRole(ctx.membership.role, "coordinator") ? rows : rows.filter((row) => row.role === "student");
     }),
     create: orgProcedure("teacher")
-      .input(z.object({ role: z.enum(INVITABLE_ROLES), note: z.string().trim().max(160).optional(), days: z.number().int().min(1).max(60).default(14), maxUses: z.number().int().min(1).max(500).default(1) }))
+      .input(z.object({ role: z.enum(INVITABLE_ROLES), note: z.string().trim().max(160).optional(), subject: z.string().trim().max(60).optional(), days: z.number().int().min(1).max(60).default(14), maxUses: z.number().int().min(1).max(500).default(1) }))
       .mutation(({ ctx, input }) => userFacing(async () => {
         if (!canInviteRole(ctx.membership.role, input.role)) throw new TRPCError({ code: "FORBIDDEN", message: "Bu rol için davet oluşturma yetkin yok." });
         const code = generateInviteCode((max) => randomInt(max));
-        const invitationId = await createInvitation({ orgId: ctx.membership.orgId, role: input.role, codeHash: hashCode(code), note: input.note || null, expiresAt: new Date(Date.now() + input.days * DAY), maxUses: input.maxUses, createdBy: ctx.user.id });
+        const invitationId = await createInvitation({ orgId: ctx.membership.orgId, role: input.role, codeHash: hashCode(code), note: input.note || null, subject: input.role === "student" ? null : input.subject || null, expiresAt: new Date(Date.now() + input.days * DAY), maxUses: input.maxUses, createdBy: ctx.user.id });
         await audit(ctx, "invitation.create", { type: "invitation", id: invitationId }, { role: input.role, maxUses: input.maxUses, days: input.days });
         // Kodun kendisi yalnızca bu yanıtta döner; veritabanında özeti saklanır.
         return { id: invitationId, code };
@@ -188,6 +221,11 @@ export const orgRouter = router({
       await audit(ctx, "member.role", { type: "user", id: input.userId }, { from: current, to: input.role });
       return { ok: true };
     }),
+    setSubject: orgProcedure("coordinator").input(z.object({ userId: id, subject: optionalText(60) })).mutation(async ({ ctx, input }) => {
+      if (!(await setMemberSubject(ctx.membership.orgId, input.userId, input.subject))) throw new TRPCError({ code: "NOT_FOUND", message: "Personel bulunamadı." });
+      await audit(ctx, "member.subject", { type: "user", id: input.userId }, { subject: input.subject });
+      return { ok: true };
+    }),
     remove: orgProcedure("admin").input(z.object({ userId: id })).mutation(async ({ ctx, input }) => {
       const current = await getMemberRole(ctx.membership.orgId, input.userId);
       if (!current || input.userId === ctx.user.id || !canAssignRole(ctx.membership.role, current, current === "student" ? "student" : "teacher")) throw new TRPCError({ code: "NOT_FOUND", message: "Üye bulunamadı." });
@@ -199,10 +237,15 @@ export const orgRouter = router({
 
   classes: router({
     list: orgProcedure("teacher").query(({ ctx }) => listClasses(ctx.membership.orgId)),
-    create: orgProcedure("coordinator").input(z.object({ name: z.string().trim().min(1).max(80), gradeLevel: z.string().trim().max(20).optional() })).mutation(async ({ ctx, input }) => {
-      const classId = await createClass(ctx.membership.orgId, input.name, input.gradeLevel || null);
+    create: orgProcedure("coordinator").input(classInput).mutation(async ({ ctx, input }) => {
+      const classId = await createClass(ctx.membership.orgId, await classFields(ctx.membership.orgId, input));
       await audit(ctx, "class.create", { type: "class", id: classId }, { name: input.name });
       return { id: classId };
+    }),
+    update: orgProcedure("coordinator").input(classInput.extend({ classId: id })).mutation(async ({ ctx, input }) => {
+      if (!(await updateClass(ctx.membership.orgId, input.classId, await classFields(ctx.membership.orgId, input)))) throw new TRPCError({ code: "NOT_FOUND", message: "Sınıf bulunamadı." });
+      await audit(ctx, "class.update", { type: "class", id: input.classId }, { name: input.name });
+      return { ok: true };
     }),
     remove: orgProcedure("coordinator").input(z.object({ classId: id })).mutation(async ({ ctx, input }) => {
       if (!(await deleteClass(ctx.membership.orgId, input.classId))) throw new TRPCError({ code: "NOT_FOUND", message: "Sınıf bulunamadı." });
@@ -278,7 +321,7 @@ export const orgRouter = router({
     if (memberships.some((row) => row.orgId === invitation!.orgId)) throw new OrgError("Bu kuruma zaten bağlısın.");
     // Öğrenci aynı anda tek kuruma bağlı olur.
     if (invitation!.role === "student" && memberships.some((row) => row.role === "student")) throw new OrgError("Önce şu anki kurumundan ayrılman gerekiyor.");
-    await acceptInvitation({ invitationId: invitation!.id, orgId: invitation!.orgId, userId: ctx.user.id, role: invitation!.role, invitedBy: invitation!.createdBy });
+    await acceptInvitation({ invitationId: invitation!.id, orgId: invitation!.orgId, userId: ctx.user.id, role: invitation!.role, invitedBy: invitation!.createdBy, subject: invitation!.subject });
     await audit({ user: { id: ctx.user.id }, membership: { orgId: invitation!.orgId, orgName: invitation!.orgName, role: invitation!.role } }, "member.join", { type: "user", id: ctx.user.id }, { role: invitation!.role });
     return { orgId: invitation!.orgId, orgName: invitation!.orgName, role: invitation!.role };
   })),

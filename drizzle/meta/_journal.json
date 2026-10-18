@@ -176,6 +176,13 @@
       "when": 1792342524367,
       "tag": "0024_organizations",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "5",
+      "when": 1792347527811,
+      "tag": "0025_org_settings",
+      "breakpoints": true
     }
   ]
 }
