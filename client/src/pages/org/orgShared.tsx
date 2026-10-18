@@ -27,7 +27,7 @@ export const formatNet = (value: number | null | undefined) => (typeof value ===
 export const deltaText = (delta: number | null | undefined) => (typeof delta === "number" ? `${delta >= 0 ? "+" : ""}${delta.toFixed(2)}` : "");
 
 export function RiskBadges({ risks }: { risks: RiskKey[] }) {
-  if (!risks.length) return <span className="rounded-full bg-success-soft px-2 py-0.5 text-[11px] font-bold text-success">Yolunda</span>;
+  if (!risks.length) return <span className="flex"><span className="rounded-full bg-success-soft px-2 py-0.5 text-[11px] font-bold text-success">Yolunda</span></span>;
   return <span className="flex flex-wrap gap-1">{risks.map((risk) => <span key={risk} className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${risk === "net_drop" ? "bg-danger-soft text-danger" : "bg-warn-soft text-warn"}`}>{RISK_LABELS[risk]}</span>)}</span>;
 }
 

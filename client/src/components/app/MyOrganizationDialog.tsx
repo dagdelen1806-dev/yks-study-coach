@@ -24,8 +24,8 @@ export default function MyOrganizationDialog({ onClose }: { onClose: () => void 
   const [preview, setPreview] = useState<{ orgName: string; role: string } | null>(null);
   const [consent, setConsent] = useState(false);
   const check = trpc.org.previewInvitation.useMutation({ onSuccess: (result) => { setPreview(result); setConsent(false); }, onError: (error) => toast.error(error.message) });
-  const join = trpc.org.join.useMutation({ onSuccess: (result) => { toast.success(`${result.orgName} kurumuna katıldın.`); setCode(""); setPreview(null); utils.org.mine.invalidate(); if (result.role !== "student") setLocation("/kurum"); }, onError: (error) => toast.error(error.message) });
-  const leave = trpc.org.leave.useMutation({ onSuccess: () => { toast.success("Kurumdan ayrıldın; verilerin artık kurumla paylaşılmıyor."); utils.org.mine.invalidate(); }, onError: (error) => toast.error(error.message) });
+  const join = trpc.org.join.useMutation({ onSuccess: (result) => { toast.success(`${result.orgName} kurumuna katıldın.`); setCode(""); setPreview(null); utils.org.mine.invalidate(); utils.org.myFeedback.invalidate(); if (result.role !== "student") setLocation("/kurum"); }, onError: (error) => toast.error(error.message) });
+  const leave = trpc.org.leave.useMutation({ onSuccess: () => { toast.success("Kurumdan ayrıldın; verilerin artık kurumla paylaşılmıyor."); utils.org.mine.invalidate(); utils.org.myFeedback.invalidate(); }, onError: (error) => toast.error(error.message) });
   const studentOrgs = (memberships.data ?? []).filter((membership) => membership.role === "student");
   const staffOrgs = (memberships.data ?? []).filter((membership) => isStaffRole(membership.role));
 
