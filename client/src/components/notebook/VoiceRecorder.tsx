@@ -27,6 +27,9 @@ const getSpeechRecognition = (): (new () => SpeechRecognitionLike) | null => {
  * "Tekrar dene" aynı kaydı yeniden gönderir. Sunucu servisi kapalıysa ve tarayıcı
  * destekliyorsa tarayıcının kendi Türkçe dikte özelliğine geçilebilir.
  */
+/** Kayıt boyunca bu RMS seviyesinin hiç üstüne çıkılmadıysa kayıt "sessiz" sayılır (konuşma genelde 0,05+). */
+const SILENCE_LEVEL = 0.015;
+
 export default function VoiceRecorder({ onDone, onClose, offerKeepAudio = true }: { onDone: (result: { text: string; attachmentId: number | null; durationSec: number }) => void; onClose: () => void; /** false: yalnızca metin döner, ses kaydı saklanmaz. */ offerKeepAudio?: boolean }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [seconds, setSeconds] = useState(0);
@@ -41,8 +44,32 @@ export default function VoiceRecorder({ onDone, onClose, offerKeepAudio = true }
   const recognition = useRef<SpeechRecognitionLike | null>(null);
   const cancelled = useRef(false);
   const transcribe = trpc.notes.transcribe.useMutation();
+  // Kayıt boyunca ölçülen en yüksek ses seviyesi: neredeyse sessiz bir kayıt AI'a gönderilmez
+  // (model sessizlikte metin uydurabiliyor; ayrıca hak boşa harcanmasın).
+  const peakLevel = useRef(0);
+  const levelMeter = useRef<{ context: AudioContext; timer: number } | null>(null);
+  const [silent, setSilent] = useState(false);
+  const stopMeter = () => { if (!levelMeter.current) return; window.clearInterval(levelMeter.current.timer); void levelMeter.current.context.close().catch(() => undefined); levelMeter.current = null; };
+  const startMeter = (source: MediaStream) => {
+    try {
+      const context = new AudioContext();
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 1024;
+      context.createMediaStreamSource(source).connect(analyser);
+      const samples = new Float32Array(analyser.fftSize);
+      const timer = window.setInterval(() => {
+        analyser.getFloatTimeDomainData(samples);
+        let sum = 0;
+        for (let index = 0; index < samples.length; index++) sum += samples[index] * samples[index];
+        peakLevel.current = Math.max(peakLevel.current, Math.sqrt(sum / samples.length));
+      }, 150);
+      levelMeter.current = { context, timer };
+    } catch {
+      peakLevel.current = 1; // Ölçülemiyorsa kaydı engelleme.
+    }
+  };
 
-  const stopTracks = () => { stream.current?.getTracks().forEach((track) => track.stop()); stream.current = null; };
+  const stopTracks = () => { stopMeter(); stream.current?.getTracks().forEach((track) => track.stop()); stream.current = null; };
   useEffect(() => () => { cancelled.current = true; recorder.current?.state !== "inactive" && recorder.current?.stop(); stopTracks(); recognition.current?.stop(); }, []);
 
   useEffect(() => {
@@ -58,6 +85,7 @@ export default function VoiceRecorder({ onDone, onClose, offerKeepAudio = true }
     if (!blob.current) return;
     setPhase("transcribing");
     setError("");
+    setSilent(false);
     try {
       const dataUrl = await blobToDataUrl(blob.current);
       const result = await transcribe.mutateAsync({ dataUrl, durationSec: seconds, keepAudio });
@@ -84,12 +112,20 @@ export default function VoiceRecorder({ onDone, onClose, offerKeepAudio = true }
       return;
     }
     chunks.current = [];
+    peakLevel.current = 0;
+    startMeter(stream.current);
     const media = new MediaRecorder(stream.current, { ...(mimeType ? { mimeType } : {}), audioBitsPerSecond: 32_000 });
     media.ondataavailable = (event) => { if (event.data.size) chunks.current.push(event.data); };
     media.onstop = () => {
       stopTracks();
       if (cancelled.current) return;
       blob.current = new Blob(chunks.current, { type: (media.mimeType || mimeType || "audio/webm").split(";")[0] });
+      if (peakLevel.current < SILENCE_LEVEL) {
+        setSilent(true);
+        setError("Kayıtta ses algılanamadı. Mikrofonun açık olduğundan emin olup biraz daha yakından konuşarak yeniden kaydeder misin?");
+        setPhase("error");
+        return;
+      }
       void send();
     };
     recorder.current = media;
@@ -183,7 +219,7 @@ export default function VoiceRecorder({ onDone, onClose, offerKeepAudio = true }
           <div className="py-5">
             <p role="alert" className="rounded-xl bg-danger-soft p-3 text-[13px] font-medium text-danger">{error || "Bir sorun oluştu."}</p>
             <div className="mt-4 flex flex-wrap justify-center gap-2">
-              {blob.current && !serviceDown && <button onClick={() => void send()} className="h-10 rounded-xl bg-brand px-4 text-[13px] font-semibold text-white">Tekrar dene</button>}
+              {blob.current && !serviceDown && <button onClick={() => void send()} className="h-10 rounded-xl bg-brand px-4 text-[13px] font-semibold text-white">{silent ? "Yine de gönder" : "Tekrar dene"}</button>}
               <button onClick={() => { blob.current = null; cancelled.current = false; setPhase("idle"); }} className="h-10 rounded-xl border border-ink/10 px-4 text-[13px] font-semibold text-ink-2">Yeni kayıt</button>
               {serviceDown && getSpeechRecognition() && <button onClick={startDictation} className="h-10 rounded-xl border border-brand/25 px-4 text-[13px] font-semibold text-brand">Tarayıcı ile yazıya dök</button>}
             </div>
