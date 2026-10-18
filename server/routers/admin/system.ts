@@ -64,7 +64,12 @@ export const adminSystemRouter = router({
     }));
     const image = encodeGrayToJpegDataUrl(createGray(64, 64, 230), 80);
     const vision = await check(() => invokeLLM({ messages: [{ role: "user", content: [{ type: "text", text: "Bu görselin rengi ne? Tek kelime." }, { type: "image_url", image_url: { url: image, detail: "low" } }] }], max_tokens: 10 }));
-    return { config, hints, checks: { text, json, vision } };
+    // Güçlü kademe (kitap okuma, zor sorular) ayrı bir model: kotası ve erişimi ayrıca denenir.
+    const strongModel = modelForTier("strong");
+    const strong = strongModel && strongModel !== target.model
+      ? { model: strongModel, ...(await check(() => invokeLLM({ model: strongModel, reasoningEffort: "low", messages: [{ role: "user", content: "Yalnızca OK yaz." }], max_tokens: 200 }))) }
+      : null;
+    return { config, hints, checks: { text, json, vision, strong } };
   }),
 
   // Soru çözümü kademelerinin (LLM_MODEL_LIGHT / LLM_MODEL / LLM_MODEL_STRONG) sağlayıcıda var olup olmadığı.

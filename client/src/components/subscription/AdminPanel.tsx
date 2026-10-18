@@ -148,6 +148,7 @@ function LlmHealthCard() {
               {row("Düz metin", data.checks.text)}
               {row("JSON şema", data.checks.json)}
               {row("Görsel okuma", data.checks.vision)}
+              {data.checks.strong && row(`Güçlü model (${data.checks.strong.model})`, data.checks.strong)}
             </div>
           )}
         </div>

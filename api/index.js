@@ -8857,7 +8857,9 @@ var adminSystemRouter = router({
     }));
     const image = encodeGrayToJpegDataUrl(createGray(64, 64, 230), 80);
     const vision = await check(() => invokeLLM({ messages: [{ role: "user", content: [{ type: "text", text: "Bu g\xF6rselin rengi ne? Tek kelime." }, { type: "image_url", image_url: { url: image, detail: "low" } }] }], max_tokens: 10 }));
-    return { config, hints, checks: { text: text3, json, vision } };
+    const strongModel = modelForTier("strong");
+    const strong = strongModel && strongModel !== target.model ? { model: strongModel, ...await check(() => invokeLLM({ model: strongModel, reasoningEffort: "low", messages: [{ role: "user", content: "Yaln\u0131zca OK yaz." }], max_tokens: 200 })) } : null;
+    return { config, hints, checks: { text: text3, json, vision, strong } };
   }),
   // Soru çözümü kademelerinin (LLM_MODEL_LIGHT / LLM_MODEL / LLM_MODEL_STRONG) sağlayıcıda var olup olmadığı.
   // Yalnızca model listesini okur: üretim kotası harcamaz.
