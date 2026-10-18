@@ -1,16 +1,17 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { llmUnavailableMessage } from "../_core/llm";
+import { llmUnavailableMessage, modelForTier } from "../_core/llm";
 import { metredFeatureProcedure, protectedProcedure, router } from "../_core/trpc";
 import { getMatchableTopics } from "../bookContent/bookContentDb";
 import { AttachmentError, getAttachmentStorage } from "../notes/attachmentStorage";
 import { NoteError } from "../notes/notesDb";
 import { suggestQuestionDetails } from "../notes/questionAi";
-import { solveQuestion } from "../notes/questionSolver";
+import { solveWithRouting } from "../notes/questionSolver";
 import { generateSimilarQuestion } from "../notes/similarQuestion";
 import { addReviewTask, createQuestion, deleteQuestion, finishReviewSession, getErrorMap, getQuestion, getQuestionIdByNote, getReviewSummary, getSolveContext, getSubjectSummary, listQuestions, moveNoteToSubject, recordAttempt, saveAiSolution, updateQuestion } from "../notes/questionsDb";
 import { PlanTaskError } from "../studyPlan/planTasks";
 import { ATTEMPT_RESULT_KEYS, DIFFICULTY_KEYS, ERROR_TYPE_KEYS, HINT_LEVELS } from "../../shared/questionNotebook";
+import { atLeastMedium, chooseSolveTier, tierOfTag } from "../../shared/solveRouting";
 
 async function userFacing<T>(work: () => Promise<T>): Promise<T> {
   try {
@@ -106,18 +107,22 @@ export const questionsRouter = router({
 
   // ✨ Adım adım çöz: kartı AI ile çözer ve karta kaydeder (AI not araçları kotasından sayılır).
   // İstemci kayıtlı çözümü `get` ile zaten alır; bu uç yalnızca ilk çözüm ya da "Yeniden çöz" için çağrılır.
+  // Model kademesi kartın zorluk/ders/sınav sinyallerinden seçilir; `escalate` = öğrenci "daha güçlü modelle çöz" dedi.
   solve: metredFeatureProcedure("NOTE_AI")
-    .input(z.object({ id }))
+    .input(z.object({ id, escalate: z.boolean().optional() }))
     .mutation(({ ctx, input }) => userFacing(async () => {
       const { context, imageDataUrl } = await loadQuestionForAi(ctx.user!.id, input.id);
-      let solution;
+      const tier = chooseSolveTier({ difficulty: context.difficulty, subject: context.subject, exam: context.exam, lastResult: context.lastResult, escalate: input.escalate });
+      let routed;
       try {
-        solution = await solveQuestion({ imageDataUrl, ocrText: context.ocrText, stuckPoint: context.stuckPoint, subject: context.subject, topic: context.topic });
+        routed = await solveWithRouting({ imageDataUrl, ocrText: context.ocrText, stuckPoint: context.stuckPoint, subject: context.subject, topic: context.topic }, tier);
       } catch (error) {
         console.warn("[Questions] solve failed:", error instanceof Error ? error.message : error);
         throw new NoteError(llmUnavailableMessage(error) ?? "Çözüm şu an hazırlanamadı. Biraz sonra tekrar dene.");
       }
-      return saveAiSolution(ctx.user!.id, input.id, solution);
+      console.info("[Questions] solve", { chosen: tier, tier: routed.tier, model: routed.model, escalated: routed.escalated, requested: Boolean(input.escalate) });
+      const tag = `${routed.tier}:${routed.model ?? "default"}${routed.escalated ? "↑" : ""}`.slice(0, 100);
+      return saveAiSolution(ctx.user!.id, input.id, routed.solution, tag);
     })),
 
   // 🔁 Benzer soru: aynı yöntemi ölçen yeni 5 şıklı alıştırma; kaydedilmez, her üretim AI not hakkından sayılır.
@@ -126,7 +131,9 @@ export const questionsRouter = router({
     .mutation(({ ctx, input }) => userFacing(async () => {
       const { context, imageDataUrl } = await loadQuestionForAi(ctx.user!.id, input.id);
       try {
-        return await generateSimilarQuestion({ imageDataUrl, ocrText: context.ocrText, stuckPoint: context.stuckPoint, subject: context.subject, topic: context.topic, solution: context.aiSolution });
+        // Cevap anahtarı doğru olmalı: en az orta kademe; kartı güçlü model çözdüyse benzer soruyu da o yazar.
+        const tier = atLeastMedium(tierOfTag(context.aiSolutionModel) ?? chooseSolveTier({ difficulty: context.difficulty, subject: context.subject, exam: context.exam, lastResult: context.lastResult }));
+        return await generateSimilarQuestion({ imageDataUrl, ocrText: context.ocrText, stuckPoint: context.stuckPoint, subject: context.subject, topic: context.topic, solution: context.aiSolution }, undefined, { model: modelForTier(tier) });
       } catch (error) {
         console.warn("[Questions] similar failed:", error instanceof Error ? error.message : error);
         throw new NoteError(llmUnavailableMessage(error) ?? "Benzer soru şu an hazırlanamadı. Biraz sonra tekrar dene.");

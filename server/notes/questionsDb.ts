@@ -201,6 +201,7 @@ const questionColumns = {
   lastAttemptAt: notebookQuestions.lastAttemptAt,
   aiSolution: notebookQuestions.aiSolution,
   aiSolutionAt: notebookQuestions.aiSolutionAt,
+  aiSolutionModel: notebookQuestions.aiSolutionModel,
   createdAt: notebookQuestions.createdAt,
 };
 
@@ -219,22 +220,22 @@ export async function getQuestion(userId: number, id: number) {
 export async function getSolveContext(userId: number, id: number) {
   const db = await requireDb();
   const [row] = await db
-    .select({ questionImageId: notebookQuestions.questionImageId, stuckPoint: notebookQuestions.stuckPoint, subject: notebookQuestions.subject, topic: yksTopics.topic, content: notes.content, aiSolution: notebookQuestions.aiSolution })
+    .select({ questionImageId: notebookQuestions.questionImageId, stuckPoint: notebookQuestions.stuckPoint, subject: notebookQuestions.subject, topic: yksTopics.topic, exam: yksTopics.exam, content: notes.content, aiSolution: notebookQuestions.aiSolution, aiSolutionModel: notebookQuestions.aiSolutionModel, difficulty: notebookQuestions.difficulty, lastResult: notebookQuestions.lastResult })
     .from(notebookQuestions)
     .innerJoin(notes, eq(notes.id, notebookQuestions.noteId))
     .leftJoin(yksTopics, eq(yksTopics.id, notebookQuestions.topicId))
     .where(and(eq(notebookQuestions.id, id), eq(notebookQuestions.userId, userId)))
     .limit(1);
   if (!row) throw new NoteError("Soru bulunamadı.");
-  return { questionImageId: row.questionImageId, ocrText: ocrTextOf(row.content, row.questionImageId), stuckPoint: row.stuckPoint, subject: row.subject, topic: row.topic, aiSolution: parseAiSolution(row.aiSolution) };
+  return { questionImageId: row.questionImageId, ocrText: ocrTextOf(row.content, row.questionImageId), stuckPoint: row.stuckPoint, subject: row.subject, topic: row.topic, aiSolution: parseAiSolution(row.aiSolution), aiSolutionModel: row.aiSolutionModel, exam: row.exam, difficulty: row.difficulty, lastResult: row.lastResult };
 }
 
 /** AI çözümünü karta yazar: kart yeniden açıldığında çözüm için yeniden ücret ödenmez. */
-export async function saveAiSolution(userId: number, id: number, solution: AiSolution) {
+export async function saveAiSolution(userId: number, id: number, solution: AiSolution, aiSolutionModel: string | null = null) {
   const db = await requireDb();
   const aiSolutionAt = new Date();
-  await db.update(notebookQuestions).set({ aiSolution: JSON.stringify(solution), aiSolutionAt }).where(and(eq(notebookQuestions.id, id), eq(notebookQuestions.userId, userId)));
-  return { aiSolution: solution, aiSolutionAt };
+  await db.update(notebookQuestions).set({ aiSolution: JSON.stringify(solution), aiSolutionAt, aiSolutionModel }).where(and(eq(notebookQuestions.id, id), eq(notebookQuestions.userId, userId)));
+  return { aiSolution: solution, aiSolutionAt, aiSolutionModel };
 }
 
 export async function getQuestionIdByNote(userId: number, noteId: number) {

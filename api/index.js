@@ -367,6 +367,8 @@ var notebookQuestions = mysqlTable("notebook_questions", {
   // ✨ Adım adım çöz: AI çözümü (JSON, AiSolution). Kartta saklanır; tekrar açmak yeniden ücret ödetmez.
   aiSolution: text("aiSolution"),
   aiSolutionAt: timestamp("aiSolutionAt"),
+  // Çözümü hangi kademe/model yazdı ("strong:gemini-…", üst kademeye çıkıldıysa sonu "↑"): maliyet ve isabet takibi.
+  aiSolutionModel: varchar("aiSolutionModel", { length: 100 }),
   status: mysqlEnum("status", ["unsolved", "learning", "mastered"]).default("unsolved").notNull(),
   reviewStage: int("reviewStage").default(0).notNull(),
   nextReviewAt: timestamp("nextReviewAt"),
@@ -1438,7 +1440,7 @@ function parseAiSolution(raw) {
   const input = value;
   const steps = (Array.isArray(input.steps) ? input.steps : []).map((step) => step && typeof step === "object" ? { work: clip(step.work, 600), why: clip(step.why, 600) } : null).filter((step) => Boolean(step && (step.work || step.why))).slice(0, 12);
   if (!steps.length) return null;
-  return { method: clip(input.method, 400), steps, answer: clip(input.answer, 400), check: clip(input.check, 600), hint: clip(input.hint, 400) };
+  return { method: clip(input.method, 400), steps, answer: clip(input.answer, 400), check: clip(input.check, 600), hint: clip(input.hint, 400), ...typeof input.verified === "boolean" ? { verified: input.verified } : {} };
 }
 var OPTION_LETTERS = ["A", "B", "C", "D", "E"];
 function parseSimilarQuestion(raw) {
@@ -2083,6 +2085,9 @@ var ENV = {
   llmApiKey: process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || "",
   llmApiUrl: (process.env.LLM_API_URL ?? "").replace(/\/+$/, ""),
   llmModel: process.env.LLM_MODEL ?? "",
+  //   LLM_MODEL_LIGHT / LLM_MODEL_STRONG — soru çözümünde kolay / zor sorular için (boşsa LLM_MODEL)
+  llmModelLight: process.env.LLM_MODEL_LIGHT ?? "",
+  llmModelStrong: process.env.LLM_MODEL_STRONG ?? "",
   transcribeModel: process.env.TRANSCRIBE_MODEL ?? "",
   // --- Subscription / Payment (PHASE 2) — bkz. docs/subscription/SUBSCRIPTION-ARCHITECTURE.md ---
   // "mock" (sandbox, varsayılan) | "apple" | "google" | gerçek bir web sağlayıcısı seçildiğinde onun adı.
@@ -3511,6 +3516,13 @@ var resolveLlmTarget = () => {
   const { baseUrl, model } = normalizeLlmSettings(ENV.llmApiUrl, ENV.llmModel, ENV.llmApiKey);
   return { baseUrl, chatUrl: `${baseUrl}/chat/completions`, modelsUrl: `${baseUrl}/models`, key: ENV.llmApiKey.trim(), model };
 };
+function modelForTier(tier) {
+  const target = resolveLlmTarget();
+  if (!target) return void 0;
+  const raw = tier === "light" ? ENV.llmModelLight : tier === "strong" ? ENV.llmModelStrong : "";
+  if (!raw.trim()) return target.model;
+  return normalizeLlmSettings(target.baseUrl, raw, target.key).model;
+}
 var requireTarget = () => {
   const target = resolveLlmTarget();
   if (!target) throw new LlmUnavailableError("not_configured", "LLM is not configured (set LLM_API_KEY or OPENAI_API_KEY)");
@@ -3725,6 +3737,19 @@ async function invokeLLM(params) {
     }
   }
   return result;
+}
+async function listLLMModels() {
+  const target = requireTarget();
+  const response = await fetchWithBackoff(target.modelsUrl, {
+    headers: { authorization: `Bearer ${target.key}` }
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `List LLM models failed: ${response.status} ${response.statusText} \u2013 ${errorText}`
+    );
+  }
+  return await response.json();
 }
 
 // server/_core/fileValidation.ts
@@ -6667,6 +6692,28 @@ async function suggestQuestionDetails(input, invoke = invokeLLM) {
   };
 }
 
+// shared/solveRouting.ts
+var MODEL_TIERS = ["light", "medium", "strong"];
+var NUMERIC_SUBJECT = /matematik|geometri|fizik|kimya/;
+var isNumericSubject = (subject) => NUMERIC_SUBJECT.test((subject ?? "").toLocaleLowerCase("tr-TR"));
+function chooseSolveTier(signals) {
+  if (signals.escalate) return "strong";
+  const numeric = isNumericSubject(signals.subject);
+  let score = signals.difficulty === "easy" ? 0 : signals.difficulty === "hard" ? 2 : 1;
+  if (numeric) score += 1;
+  if (numeric && signals.exam === "AYT") score += 1;
+  if (signals.lastResult === "failed") score += 1;
+  if (score >= 3) return "strong";
+  if (score === 0 && !numeric) return "light";
+  return "medium";
+}
+var nextTier = (tier) => tier === "light" ? "medium" : tier === "medium" ? "strong" : null;
+var atLeastMedium = (tier) => tier === "light" ? "medium" : tier;
+function tierOfTag(tag) {
+  const tier = tag?.split(":")[0];
+  return MODEL_TIERS.includes(tier) ? tier : null;
+}
+
 // server/notes/questionSolver.ts
 function subjectGuidance(subject) {
   const name = (subject ?? "").toLocaleLowerCase("tr-TR");
@@ -6678,7 +6725,7 @@ function subjectGuidance(subject) {
   if (subject) return "Sorunun neyi \xF6l\xE7t\xFC\u011F\xFCn\xFC s\xF6yle, metinden/bilgiden kan\u0131tla do\u011Fru se\xE7ene\u011Fe ula\u015F ve en g\xFC\xE7l\xFC \xE7eldiricinin neden yanl\u0131\u015F oldu\u011Funu a\xE7\u0131kla.";
   return "Sorunun t\xFCr\xFCn\xFC belirle ve ona uygun y\xF6ntemle \xE7\xF6z; say\u0131sal ise sa\u011Fla, s\xF6zel ise \xE7eldiricileri a\xE7\u0131kla.";
 }
-async function solveQuestion(input, invoke = invokeLLM) {
+async function solveQuestion(input, invoke = invokeLLM, options = {}) {
   const questionText = input.ocrText?.trim();
   if (!input.imageDataUrl && !questionText) throw new Error("\xC7\xF6z\xFClecek soru yok: kartta soru foto\u011Fraf\u0131 olmal\u0131.");
   const system = [
@@ -6691,7 +6738,8 @@ async function solveQuestion(input, invoke = invokeLLM) {
     "- check: sa\u011Flama ya da kontrol, tek c\xFCmle.",
     "- hint: cevab\u0131 ve sonucu ELE VERMEYEN, \xF6\u011Frenciyi do\u011Fru y\xF6nteme y\xF6nelten tek c\xFCmle ipucu.",
     "- \xD6\u011Frenci tak\u0131ld\u0131\u011F\u0131 yeri yazd\u0131ysa o ad\u0131m\u0131 \xF6zellikle a\xE7\u0131k anlat.",
-    "- Soru okunam\u0131yorsa ya da eksikse uydurma: steps i\xE7ine tek ad\u0131m olarak neyin okunamad\u0131\u011F\u0131n\u0131 yaz, answer bo\u015F string."
+    "- Soru okunam\u0131yorsa ya da eksikse uydurma: steps i\xE7ine tek ad\u0131m olarak neyin okunamad\u0131\u011F\u0131n\u0131 yaz, answer bo\u015F string.",
+    "- verified: sa\u011Flama tuttuysa ve soruyu do\u011Fru okudu\u011Fundan eminsen true; \u015F\xFCphen varsa d\xFCr\xFCst\xE7e false."
   ].join("\n");
   const userText = [
     questionText ? `Sorunun metni (OCR, hatal\u0131 olabilir; g\xF6rsel varsa g\xF6rsel esast\u0131r):
@@ -6699,6 +6747,7 @@ ${questionText.slice(0, 4e3)}` : null,
     input.stuckPoint?.trim() ? `\xD6\u011Frencinin tak\u0131ld\u0131\u011F\u0131 yer: "${input.stuckPoint.trim().slice(0, 1500)}"` : null
   ].filter(Boolean).join("\n\n") || "Soruyu g\xF6rselden oku ve \xE7\xF6z.";
   const response = await invoke({
+    ...options.model ? { model: options.model } : {},
     messages: [
       { role: "system", content: system },
       { role: "user", content: input.imageDataUrl ? [{ type: "text", text: userText }, { type: "image_url", image_url: { url: input.imageDataUrl, detail: "high" } }] : userText }
@@ -6715,9 +6764,10 @@ ${questionText.slice(0, 4e3)}` : null,
             steps: { type: "array", items: { type: "object", properties: { work: { type: "string" }, why: { type: "string" } }, required: ["work", "why"], additionalProperties: false } },
             answer: { type: "string" },
             check: { type: "string" },
-            hint: { type: "string" }
+            hint: { type: "string" },
+            verified: { type: "boolean" }
           },
-          required: ["method", "steps", "answer", "check", "hint"],
+          required: ["method", "steps", "answer", "check", "hint", "verified"],
           additionalProperties: false
         }
       }
@@ -6730,9 +6780,37 @@ ${questionText.slice(0, 4e3)}` : null,
   if (!solution) throw new Error("AI \xE7\xF6z\xFCm\xFC okunamad\u0131.");
   return solution;
 }
+var worthEscalating = (error) => !(error instanceof LlmUnavailableError) || error.reason === "quota" || error.status === 404;
+async function solveWithRouting(input, tier, invoke = invokeLLM, pickModel = modelForTier) {
+  const model = pickModel(tier);
+  const upper = nextTier(tier);
+  const upperModel = upper ? pickModel(upper) : void 0;
+  const canEscalate = upper !== null && upperModel !== model;
+  let first = null;
+  try {
+    first = await solveQuestion(input, invoke, { model });
+  } catch (error) {
+    if (!worthEscalating(error)) throw error;
+    if (!canEscalate) {
+      const fallbackModel = pickModel("medium");
+      if (tier === "medium" || fallbackModel === model) throw error;
+      console.warn(`[Questions] ${tier} solve failed, falling back to medium:`, error instanceof Error ? error.message : error);
+      return { solution: await solveQuestion(input, invoke, { model: fallbackModel }), tier: "medium", model: fallbackModel, escalated: false };
+    }
+    console.warn(`[Questions] ${tier} solve failed, escalating:`, error instanceof Error ? error.message : error);
+  }
+  const confident = first !== null && Boolean(first.answer) && first.verified !== false;
+  if (first && (confident || !canEscalate)) return { solution: first, tier, model, escalated: false };
+  try {
+    return { solution: await solveQuestion(input, invoke, { model: upperModel }), tier: upper, model: upperModel, escalated: true };
+  } catch (error) {
+    if (first) return { solution: first, tier, model, escalated: false };
+    throw error;
+  }
+}
 
 // server/notes/similarQuestion.ts
-async function generateSimilarQuestion(input, invoke = invokeLLM) {
+async function generateSimilarQuestion(input, invoke = invokeLLM, options = {}) {
   const questionText = input.ocrText?.trim();
   if (!input.imageDataUrl && !questionText) throw new Error("Benzer soru i\xE7in kartta soru foto\u011Fraf\u0131 olmal\u0131.");
   const system = [
@@ -6755,6 +6833,7 @@ ${input.solution.steps.map((step, index2) => `${index2 + 1}) ${step.work}`).join
     input.stuckPoint?.trim() ? `\xD6\u011Frencinin tak\u0131ld\u0131\u011F\u0131 yer: "${input.stuckPoint.trim().slice(0, 1e3)}" \u2014 yeni soru bu ad\u0131m\u0131 da \xE7al\u0131\u015Ft\u0131rs\u0131n.` : null
   ].filter(Boolean).join("\n\n") || "Orijinal soruyu g\xF6rselden oku ve ona benzer yeni bir soru yaz.";
   const response = await invoke({
+    ...options.model ? { model: options.model } : {},
     messages: [
       { role: "system", content: system },
       { role: "user", content: input.imageDataUrl ? [{ type: "text", text: userText }, { type: "image_url", image_url: { url: input.imageDataUrl, detail: "high" } }] : userText }
@@ -6930,6 +7009,7 @@ var questionColumns = {
   lastAttemptAt: notebookQuestions.lastAttemptAt,
   aiSolution: notebookQuestions.aiSolution,
   aiSolutionAt: notebookQuestions.aiSolutionAt,
+  aiSolutionModel: notebookQuestions.aiSolutionModel,
   createdAt: notebookQuestions.createdAt
 };
 var shape = (row) => ({ ...row, errorType: row.errorType, aiSolution: row.aiSolution ? parseAiSolution(row.aiSolution) : null });
@@ -6942,15 +7022,15 @@ async function getQuestion(userId, id2) {
 }
 async function getSolveContext(userId, id2) {
   const db = await requireDb4();
-  const [row] = await db.select({ questionImageId: notebookQuestions.questionImageId, stuckPoint: notebookQuestions.stuckPoint, subject: notebookQuestions.subject, topic: yksTopics.topic, content: notes.content, aiSolution: notebookQuestions.aiSolution }).from(notebookQuestions).innerJoin(notes, eq10(notes.id, notebookQuestions.noteId)).leftJoin(yksTopics, eq10(yksTopics.id, notebookQuestions.topicId)).where(and8(eq10(notebookQuestions.id, id2), eq10(notebookQuestions.userId, userId))).limit(1);
+  const [row] = await db.select({ questionImageId: notebookQuestions.questionImageId, stuckPoint: notebookQuestions.stuckPoint, subject: notebookQuestions.subject, topic: yksTopics.topic, exam: yksTopics.exam, content: notes.content, aiSolution: notebookQuestions.aiSolution, aiSolutionModel: notebookQuestions.aiSolutionModel, difficulty: notebookQuestions.difficulty, lastResult: notebookQuestions.lastResult }).from(notebookQuestions).innerJoin(notes, eq10(notes.id, notebookQuestions.noteId)).leftJoin(yksTopics, eq10(yksTopics.id, notebookQuestions.topicId)).where(and8(eq10(notebookQuestions.id, id2), eq10(notebookQuestions.userId, userId))).limit(1);
   if (!row) throw new NoteError("Soru bulunamad\u0131.");
-  return { questionImageId: row.questionImageId, ocrText: ocrTextOf(row.content, row.questionImageId), stuckPoint: row.stuckPoint, subject: row.subject, topic: row.topic, aiSolution: parseAiSolution(row.aiSolution) };
+  return { questionImageId: row.questionImageId, ocrText: ocrTextOf(row.content, row.questionImageId), stuckPoint: row.stuckPoint, subject: row.subject, topic: row.topic, aiSolution: parseAiSolution(row.aiSolution), aiSolutionModel: row.aiSolutionModel, exam: row.exam, difficulty: row.difficulty, lastResult: row.lastResult };
 }
-async function saveAiSolution(userId, id2, solution) {
+async function saveAiSolution(userId, id2, solution, aiSolutionModel = null) {
   const db = await requireDb4();
   const aiSolutionAt = /* @__PURE__ */ new Date();
-  await db.update(notebookQuestions).set({ aiSolution: JSON.stringify(solution), aiSolutionAt }).where(and8(eq10(notebookQuestions.id, id2), eq10(notebookQuestions.userId, userId)));
-  return { aiSolution: solution, aiSolutionAt };
+  await db.update(notebookQuestions).set({ aiSolution: JSON.stringify(solution), aiSolutionAt, aiSolutionModel }).where(and8(eq10(notebookQuestions.id, id2), eq10(notebookQuestions.userId, userId)));
+  return { aiSolution: solution, aiSolutionAt, aiSolutionModel };
 }
 async function getQuestionIdByNote(userId, noteId) {
   const db = await requireDb4();
@@ -7152,22 +7232,27 @@ var questionsRouter = router({
   finishReview: protectedProcedure.input(z5.object({ minutes: z5.number().min(0).max(600), solved: z5.number().int().min(0).max(100), partial: z5.number().int().min(0).max(100), failed: z5.number().int().min(0).max(100) })).mutation(({ ctx, input }) => userFacing2(() => finishReviewSession(ctx.user.id, input))),
   // ✨ Adım adım çöz: kartı AI ile çözer ve karta kaydeder (AI not araçları kotasından sayılır).
   // İstemci kayıtlı çözümü `get` ile zaten alır; bu uç yalnızca ilk çözüm ya da "Yeniden çöz" için çağrılır.
-  solve: metredFeatureProcedure("NOTE_AI").input(z5.object({ id })).mutation(({ ctx, input }) => userFacing2(async () => {
+  // Model kademesi kartın zorluk/ders/sınav sinyallerinden seçilir; `escalate` = öğrenci "daha güçlü modelle çöz" dedi.
+  solve: metredFeatureProcedure("NOTE_AI").input(z5.object({ id, escalate: z5.boolean().optional() })).mutation(({ ctx, input }) => userFacing2(async () => {
     const { context, imageDataUrl } = await loadQuestionForAi(ctx.user.id, input.id);
-    let solution;
+    const tier = chooseSolveTier({ difficulty: context.difficulty, subject: context.subject, exam: context.exam, lastResult: context.lastResult, escalate: input.escalate });
+    let routed;
     try {
-      solution = await solveQuestion({ imageDataUrl, ocrText: context.ocrText, stuckPoint: context.stuckPoint, subject: context.subject, topic: context.topic });
+      routed = await solveWithRouting({ imageDataUrl, ocrText: context.ocrText, stuckPoint: context.stuckPoint, subject: context.subject, topic: context.topic }, tier);
     } catch (error) {
       console.warn("[Questions] solve failed:", error instanceof Error ? error.message : error);
       throw new NoteError(llmUnavailableMessage(error) ?? "\xC7\xF6z\xFCm \u015Fu an haz\u0131rlanamad\u0131. Biraz sonra tekrar dene.");
     }
-    return saveAiSolution(ctx.user.id, input.id, solution);
+    console.info("[Questions] solve", { chosen: tier, tier: routed.tier, model: routed.model, escalated: routed.escalated, requested: Boolean(input.escalate) });
+    const tag = `${routed.tier}:${routed.model ?? "default"}${routed.escalated ? "\u2191" : ""}`.slice(0, 100);
+    return saveAiSolution(ctx.user.id, input.id, routed.solution, tag);
   })),
   // 🔁 Benzer soru: aynı yöntemi ölçen yeni 5 şıklı alıştırma; kaydedilmez, her üretim AI not hakkından sayılır.
   similar: metredFeatureProcedure("NOTE_AI").input(z5.object({ id })).mutation(({ ctx, input }) => userFacing2(async () => {
     const { context, imageDataUrl } = await loadQuestionForAi(ctx.user.id, input.id);
     try {
-      return await generateSimilarQuestion({ imageDataUrl, ocrText: context.ocrText, stuckPoint: context.stuckPoint, subject: context.subject, topic: context.topic, solution: context.aiSolution });
+      const tier = atLeastMedium(tierOfTag(context.aiSolutionModel) ?? chooseSolveTier({ difficulty: context.difficulty, subject: context.subject, exam: context.exam, lastResult: context.lastResult }));
+      return await generateSimilarQuestion({ imageDataUrl, ocrText: context.ocrText, stuckPoint: context.stuckPoint, subject: context.subject, topic: context.topic, solution: context.aiSolution }, void 0, { model: modelForTier(tier) });
     } catch (error) {
       console.warn("[Questions] similar failed:", error instanceof Error ? error.message : error);
       throw new NoteError(llmUnavailableMessage(error) ?? "Benzer soru \u015Fu an haz\u0131rlanamad\u0131. Biraz sonra tekrar dene.");
@@ -8760,6 +8845,18 @@ var adminSystemRouter = router({
     const image = encodeGrayToJpegDataUrl(createGray(64, 64, 230), 80);
     const vision = await check(() => invokeLLM({ messages: [{ role: "user", content: [{ type: "text", text: "Bu g\xF6rselin rengi ne? Tek kelime." }, { type: "image_url", image_url: { url: image, detail: "low" } }] }], max_tokens: 10 }));
     return { config, hints, checks: { text: text3, json, vision } };
+  }),
+  // Soru çözümü kademelerinin (LLM_MODEL_LIGHT / LLM_MODEL / LLM_MODEL_STRONG) sağlayıcıda var olup olmadığı.
+  // Yalnızca model listesini okur: üretim kotası harcamaz.
+  llmTiers: adminProcedure.query(async () => {
+    if (!resolveLlmTarget()) return { tiers: null, available: [], error: "LLM_API_KEY tan\u0131ml\u0131 de\u011Fil." };
+    const tiers = { light: modelForTier("light") ?? null, medium: modelForTier("medium") ?? null, strong: modelForTier("strong") ?? null };
+    try {
+      const available = (await listLLMModels()).data.map((model) => model.id.replace(/^models\//, "")).sort();
+      return { tiers, available, error: null };
+    } catch (error) {
+      return { tiers, available: [], error: redact(error instanceof Error ? error.message : String(error)).slice(0, 300) };
+    }
   })
 });
 

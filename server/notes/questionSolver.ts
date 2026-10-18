@@ -1,5 +1,6 @@
-import { invokeLLM } from "../_core/llm";
+import { invokeLLM, LlmUnavailableError, modelForTier } from "../_core/llm";
 import { parseAiSolution, type AiSolution } from "../../shared/questionNotebook";
+import { nextTier, type ModelTier } from "../../shared/solveRouting";
 
 export type SolveInput = { imageDataUrl: string | null; ocrText: string | null; stuckPoint: string | null; subject: string | null; topic: string | null };
 
@@ -21,7 +22,7 @@ export function subjectGuidance(subject: string | null): string {
  * sağlama ve tekrar oturumunda kullanılacak, cevabı ele vermeyen bir ipucu.
  * Yalnızca öğrenci açıkça istediğinde çağrılır.
  */
-export async function solveQuestion(input: SolveInput, invoke: typeof invokeLLM = invokeLLM): Promise<AiSolution> {
+export async function solveQuestion(input: SolveInput, invoke: typeof invokeLLM = invokeLLM, options: { model?: string } = {}): Promise<AiSolution> {
   const questionText = input.ocrText?.trim();
   if (!input.imageDataUrl && !questionText) throw new Error("Çözülecek soru yok: kartta soru fotoğrafı olmalı.");
   const system = [
@@ -35,12 +36,14 @@ export async function solveQuestion(input: SolveInput, invoke: typeof invokeLLM 
     "- hint: cevabı ve sonucu ELE VERMEYEN, öğrenciyi doğru yönteme yönelten tek cümle ipucu.",
     "- Öğrenci takıldığı yeri yazdıysa o adımı özellikle açık anlat.",
     "- Soru okunamıyorsa ya da eksikse uydurma: steps içine tek adım olarak neyin okunamadığını yaz, answer boş string.",
+    "- verified: sağlama tuttuysa ve soruyu doğru okuduğundan eminsen true; şüphen varsa dürüstçe false.",
   ].join("\n");
   const userText = [
     questionText ? `Sorunun metni (OCR, hatalı olabilir; görsel varsa görsel esastır):\n${questionText.slice(0, 4000)}` : null,
     input.stuckPoint?.trim() ? `Öğrencinin takıldığı yer: "${input.stuckPoint.trim().slice(0, 1500)}"` : null,
   ].filter(Boolean).join("\n\n") || "Soruyu görselden oku ve çöz.";
   const response = await invoke({
+    ...(options.model ? { model: options.model } : {}),
     messages: [
       { role: "system", content: system },
       { role: "user", content: input.imageDataUrl ? [{ type: "text" as const, text: userText }, { type: "image_url" as const, image_url: { url: input.imageDataUrl, detail: "high" as const } }] : userText },
@@ -58,8 +61,9 @@ export async function solveQuestion(input: SolveInput, invoke: typeof invokeLLM 
             answer: { type: "string" },
             check: { type: "string" },
             hint: { type: "string" },
+            verified: { type: "boolean" },
           },
-          required: ["method", "steps", "answer", "check", "hint"],
+          required: ["method", "steps", "answer", "check", "hint", "verified"],
           additionalProperties: false,
         },
       },
@@ -71,4 +75,45 @@ export async function solveQuestion(input: SolveInput, invoke: typeof invokeLLM 
   const solution = parseAiSolution(jsonText.replace(/```json|```/g, "").trim());
   if (!solution) throw new Error("AI çözümü okunamadı.");
   return solution;
+}
+
+export type RoutedSolution = { solution: AiSolution; tier: ModelTier; model: string | undefined; escalated: boolean };
+
+// Üst kademede yeniden denemeye değen hatalar: okunamayan yanıt ya da o modelin kotası dolu / modeli yok
+// (Gemini kotası modele göre ayrı sayılır). Anahtar hatası gibi sağlayıcı geneli sorunlar yeniden denenmez.
+const worthEscalating = (error: unknown) => !(error instanceof LlmUnavailableError) || error.reason === "quota" || error.status === 404;
+
+/**
+ * Kademeli çözüm: seçilen kademenin modeliyle çözer; yanıt okunamazsa, cevap boşsa, model
+ * sağlamadan emin değilse ya da o modelin kotası doluysa BİR üst kademeyle bir kez daha dener.
+ * Üst kademe aynı modele çıkıyorsa (LLM_MODEL_STRONG tanımsız) ikinci çağrı yapılmaz.
+ */
+export async function solveWithRouting(input: SolveInput, tier: ModelTier, invoke: typeof invokeLLM = invokeLLM, pickModel: (tier: ModelTier) => string | undefined = modelForTier): Promise<RoutedSolution> {
+  const model = pickModel(tier);
+  const upper = nextTier(tier);
+  const upperModel = upper ? pickModel(upper) : undefined;
+  const canEscalate = upper !== null && upperModel !== model;
+  let first: AiSolution | null = null;
+  try {
+    first = await solveQuestion(input, invoke, { model });
+  } catch (error) {
+    if (!worthEscalating(error)) throw error;
+    if (!canEscalate) {
+      // En üst kademenin modeli yok ya da kotası dolu: öğrenci boş dönmesin, orta kademeyle çöz.
+      const fallbackModel = pickModel("medium");
+      if (tier === "medium" || fallbackModel === model) throw error;
+      console.warn(`[Questions] ${tier} solve failed, falling back to medium:`, error instanceof Error ? error.message : error);
+      return { solution: await solveQuestion(input, invoke, { model: fallbackModel }), tier: "medium", model: fallbackModel, escalated: false };
+    }
+    console.warn(`[Questions] ${tier} solve failed, escalating:`, error instanceof Error ? error.message : error);
+  }
+  const confident = first !== null && Boolean(first.answer) && first.verified !== false;
+  if (first && (confident || !canEscalate)) return { solution: first, tier, model, escalated: false };
+  try {
+    return { solution: await solveQuestion(input, invoke, { model: upperModel }), tier: upper!, model: upperModel, escalated: true };
+  } catch (error) {
+    // Üst kademe de başarısızsa ilk (şüpheli ama okunabilir) çözüm boşa gitmesin.
+    if (first) return { solution: first, tier, model, escalated: false };
+    throw error;
+  }
 }

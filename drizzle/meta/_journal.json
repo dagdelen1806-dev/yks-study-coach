@@ -148,6 +148,13 @@
       "when": 1792256640186,
       "tag": "0020_class_schedule",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "5",
+      "when": 1792302605695,
+      "tag": "0021_question_ai_model",
+      "breakpoints": true
     }
   ]
 }

@@ -1,5 +1,6 @@
 import { trpc } from "@/lib/trpc";
 import { DIFFICULTIES, ERROR_TYPES, HINT_LEVEL_LABELS, QUESTION_STATUS_LABELS, REVIEW_INTERVALS_DAYS, aiSolutionToText, type Difficulty, type ErrorType } from "@shared/questionNotebook";
+import { tierOfTag } from "@shared/solveRouting";
 import { Camera, Loader2, Mic, RotateCcw, Sparkles, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -53,6 +54,8 @@ export default function QuestionDetail({ id, onClose, onReview }: { id: number; 
   const dirty = form.subject !== (data.subject ?? "") || form.topicId !== data.topicId || form.stuckPoint !== (data.stuckPoint ?? "") || form.solutionText !== (data.solutionText ?? "") || form.solutionImageId !== data.solutionImageId || form.errorType !== data.errorType || form.difficulty !== data.difficulty;
   const patch = (value: Partial<typeof form>) => setForm({ ...form, ...value });
   const subjectTopics = topics.filter((topic) => !form.subject || topic.subject === form.subject);
+  const solvedTier = tierOfTag(data.aiSolutionModel);
+  const solvedByStrong = solvedTier === "strong";
 
   const save = async () => {
     try {
@@ -146,7 +149,13 @@ export default function QuestionDetail({ id, onClose, onReview }: { id: number; 
             </div>
             {data.aiSolution ? (
               showSolution
-                ? <div className="mt-3"><AiSolutionSteps solution={data.aiSolution} onStuck={markStuck} /></div>
+                ? <div className="mt-3">
+                    <AiSolutionSteps solution={data.aiSolution} onStuck={markStuck} />
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-violet/15 pt-2 text-[12px]">
+                      <span className="text-ink-3">{solvedByStrong ? "Güçlü model çözdü" : solvedTier === "light" ? "Hızlı model çözdü" : "AI çözdü"} · AI hata yapabilir, sonucu kontrol et.</span>
+                      {!solvedByStrong && <button type="button" onClick={() => void solver.run(false, true)} disabled={solver.pending} className="flex items-center gap-1 font-semibold text-violet disabled:opacity-50">{solver.pending && <Loader2 size={12} className="animate-spin" />} Çözüm yanlış ya da anlaşılmadı mı? Daha güçlü modelle çöz</button>}
+                    </div>
+                  </div>
                 : <button type="button" onClick={() => setShowSolution(true)} className="mt-2 text-[13px] font-semibold text-violet">Kayıtlı çözümü göster</button>
             ) : (
               <div className="mt-2">

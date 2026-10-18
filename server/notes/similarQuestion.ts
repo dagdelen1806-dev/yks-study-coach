@@ -7,7 +7,7 @@ import { subjectGuidance, type SolveInput } from "./questionSolver";
  * YKS biçiminde 5 şıklı yeni bir alıştırma sorusu üretir. Öğrenci yöntemi gerçekten öğrendi mi,
  * kopyalamadan dener. Kayıtlı AI çözümü varsa yöntem oradan alınır. Yalnızca öğrenci isteyince çağrılır.
  */
-export async function generateSimilarQuestion(input: SolveInput & { solution: AiSolution | null }, invoke: typeof invokeLLM = invokeLLM): Promise<SimilarQuestion> {
+export async function generateSimilarQuestion(input: SolveInput & { solution: AiSolution | null }, invoke: typeof invokeLLM = invokeLLM, options: { model?: string } = {}): Promise<SimilarQuestion> {
   const questionText = input.ocrText?.trim();
   if (!input.imageDataUrl && !questionText) throw new Error("Benzer soru için kartta soru fotoğrafı olmalı.");
   const system = [
@@ -28,6 +28,7 @@ export async function generateSimilarQuestion(input: SolveInput & { solution: Ai
     input.stuckPoint?.trim() ? `Öğrencinin takıldığı yer: "${input.stuckPoint.trim().slice(0, 1000)}" — yeni soru bu adımı da çalıştırsın.` : null,
   ].filter(Boolean).join("\n\n") || "Orijinal soruyu görselden oku ve ona benzer yeni bir soru yaz.";
   const response = await invoke({
+    ...(options.model ? { model: options.model } : {}),
     messages: [
       { role: "system", content: system },
       { role: "user", content: input.imageDataUrl ? [{ type: "text" as const, text: userText }, { type: "image_url" as const, image_url: { url: input.imageDataUrl, detail: "high" as const } }] : userText },

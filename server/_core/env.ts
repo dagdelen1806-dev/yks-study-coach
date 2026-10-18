@@ -25,6 +25,9 @@ export const ENV = {
   llmApiKey: process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || "",
   llmApiUrl: (process.env.LLM_API_URL ?? "").replace(/\/+$/, ""),
   llmModel: process.env.LLM_MODEL ?? "",
+  //   LLM_MODEL_LIGHT / LLM_MODEL_STRONG — soru çözümünde kolay / zor sorular için (boşsa LLM_MODEL)
+  llmModelLight: process.env.LLM_MODEL_LIGHT ?? "",
+  llmModelStrong: process.env.LLM_MODEL_STRONG ?? "",
   transcribeModel: process.env.TRANSCRIBE_MODEL ?? "",
 
   // --- Subscription / Payment (PHASE 2) — bkz. docs/subscription/SUBSCRIPTION-ARCHITECTURE.md ---

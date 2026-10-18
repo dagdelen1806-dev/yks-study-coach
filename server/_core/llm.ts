@@ -263,6 +263,15 @@ export const resolveLlmTarget = (): LlmTarget | null => {
 
 export const isLlmConfigured = () => resolveLlmTarget() !== null;
 
+/** Kademe → model adı. LLM_MODEL_LIGHT / LLM_MODEL_STRONG tanımlı değilse varsayılan model (LLM_MODEL) kullanılır. */
+export function modelForTier(tier: "light" | "medium" | "strong"): string | undefined {
+  const target = resolveLlmTarget();
+  if (!target) return undefined;
+  const raw = tier === "light" ? ENV.llmModelLight : tier === "strong" ? ENV.llmModelStrong : "";
+  if (!raw.trim()) return target.model;
+  return normalizeLlmSettings(target.baseUrl, raw, target.key).model;
+}
+
 const requireTarget = (): LlmTarget => {
   const target = resolveLlmTarget();
   if (!target) throw new LlmUnavailableError("not_configured", "LLM is not configured (set LLM_API_KEY or OPENAI_API_KEY)");

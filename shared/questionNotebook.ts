@@ -196,6 +196,8 @@ export type AiSolution = {
   answer: string;
   check: string;
   hint: string;
+  /** Model sağlamanın tuttuğunu ve sorudan emin olduğunu söyledi mi (false → üst modelle yeniden çözülür). */
+  verified?: boolean;
 };
 
 const clip = (value: unknown, max: number) => (typeof value === "string" ? value.trim().slice(0, max) : "");
@@ -213,7 +215,7 @@ export function parseAiSolution(raw: unknown): AiSolution | null {
     .filter((step): step is { work: string; why: string } => Boolean(step && (step.work || step.why)))
     .slice(0, 12);
   if (!steps.length) return null;
-  return { method: clip(input.method, 400), steps, answer: clip(input.answer, 400), check: clip(input.check, 600), hint: clip(input.hint, 400) };
+  return { method: clip(input.method, 400), steps, answer: clip(input.answer, 400), check: clip(input.check, 600), hint: clip(input.hint, 400), ...(typeof input.verified === "boolean" ? { verified: input.verified } : {}) };
 }
 
 export const OPTION_LETTERS = ["A", "B", "C", "D", "E"] as const;

@@ -299,6 +299,8 @@ export const notebookQuestions = mysqlTable("notebook_questions", {
   // ✨ Adım adım çöz: AI çözümü (JSON, AiSolution). Kartta saklanır; tekrar açmak yeniden ücret ödetmez.
   aiSolution: text("aiSolution"),
   aiSolutionAt: timestamp("aiSolutionAt"),
+  // Çözümü hangi kademe/model yazdı ("strong:gemini-…", üst kademeye çıkıldıysa sonu "↑"): maliyet ve isabet takibi.
+  aiSolutionModel: varchar("aiSolutionModel", { length: 100 }),
   status: mysqlEnum("status", ["unsolved", "learning", "mastered"]).default("unsolved").notNull(),
   reviewStage: int("reviewStage").default(0).notNull(),
   nextReviewAt: timestamp("nextReviewAt"),

@@ -15,14 +15,16 @@ export function useAiSolve(id: number | null, onSolved: (result: { aiSolution: A
   const utils = trpc.useUtils();
   const solve = trpc.questions.solve.useMutation();
   const [asking, setAsking] = useState(false);
+  const [escalateAfterConsent, setEscalateAfterConsent] = useState(false);
 
-  const run = async (consentGiven = false) => {
+  // escalate: "daha güçlü modelle çöz" — sunucu kademe seçimini atlayıp güçlü modeli kullanır.
+  const run = async (consentGiven = false, escalate = false) => {
     if (!id || solve.isPending) return;
     let consent = consentGiven;
     try { consent = consent || localStorage.getItem(SOLVE_CONSENT_KEY) === "1"; } catch {}
-    if (!consent) { setAsking(true); return; }
+    if (!consent) { setEscalateAfterConsent(escalate); setAsking(true); return; }
     try {
-      const result = await solve.mutateAsync({ id });
+      const result = await solve.mutateAsync({ id, ...(escalate ? { escalate: true } : {}) });
       utils.questions.get.setData({ id }, (previous) => (previous ? { ...previous, ...result } : previous));
       void utils.questions.list.invalidate();
       onSolved(result);
@@ -39,7 +41,7 @@ export function useAiSolve(id: number | null, onSolved: (result: { aiSolution: A
         <p className="mt-2 text-[12px] text-ink-3">Her yeni çözüm AI not araçları hakkından sayılır; kayıtlı çözümü tekrar açmak ücretsizdir.</p>
         <div className="mt-5 flex justify-end gap-2">
           <button onClick={() => setAsking(false)} className="h-10 rounded-xl border border-ink/10 px-4 text-[13px] font-semibold text-ink-3">Vazgeç</button>
-          <button onClick={() => { try { localStorage.setItem(SOLVE_CONSENT_KEY, "1"); } catch {} setAsking(false); void run(true); }} className="h-10 rounded-xl bg-violet px-4 text-[13px] font-semibold text-white">Anladım, çöz</button>
+          <button onClick={() => { try { localStorage.setItem(SOLVE_CONSENT_KEY, "1"); } catch {} setAsking(false); void run(true, escalateAfterConsent); }} className="h-10 rounded-xl bg-violet px-4 text-[13px] font-semibold text-white">Anladım, çöz</button>
         </div>
       </div>
     </div>

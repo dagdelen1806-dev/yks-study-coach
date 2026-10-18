@@ -1,5 +1,5 @@
 import { ENV } from "../../_core/env";
-import { invokeLLM, LlmUnavailableError, resolveLlmTarget } from "../../_core/llm";
+import { invokeLLM, listLLMModels, LlmUnavailableError, modelForTier, resolveLlmTarget } from "../../_core/llm";
 import { adminProcedure, router } from "../../_core/trpc";
 import { encodeGrayToJpegDataUrl } from "../../bookContent/imageCodec";
 import { createGray } from "../../../shared/imaging/image";
@@ -65,5 +65,18 @@ export const adminSystemRouter = router({
     const image = encodeGrayToJpegDataUrl(createGray(64, 64, 230), 80);
     const vision = await check(() => invokeLLM({ messages: [{ role: "user", content: [{ type: "text", text: "Bu görselin rengi ne? Tek kelime." }, { type: "image_url", image_url: { url: image, detail: "low" } }] }], max_tokens: 10 }));
     return { config, hints, checks: { text, json, vision } };
+  }),
+
+  // Soru çözümü kademelerinin (LLM_MODEL_LIGHT / LLM_MODEL / LLM_MODEL_STRONG) sağlayıcıda var olup olmadığı.
+  // Yalnızca model listesini okur: üretim kotası harcamaz.
+  llmTiers: adminProcedure.query(async () => {
+    if (!resolveLlmTarget()) return { tiers: null, available: [] as string[], error: "LLM_API_KEY tanımlı değil." };
+    const tiers = { light: modelForTier("light") ?? null, medium: modelForTier("medium") ?? null, strong: modelForTier("strong") ?? null };
+    try {
+      const available = (await listLLMModels()).data.map((model) => model.id.replace(/^models\//, "")).sort();
+      return { tiers, available, error: null };
+    } catch (error) {
+      return { tiers, available: [] as string[], error: redact(error instanceof Error ? error.message : String(error)).slice(0, 300) };
+    }
   }),
 });

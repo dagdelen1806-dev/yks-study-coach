@@ -1,0 +1,1 @@
+ALTER TABLE `notebook_questions` ADD `aiSolutionModel` varchar(100);

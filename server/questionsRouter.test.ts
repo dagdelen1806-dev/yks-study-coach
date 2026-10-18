@@ -23,9 +23,9 @@ vi.mock("./notes/questionsDb", () => ({
   getSolveContext: vi.fn(async (userId: number, id: number) => {
     calls.push({ fn: "getSolveContext", userId, args: [id] });
     if (userId !== 1 || id !== 3) throw new Error("Soru bulunamadı.");
-    return { questionImageId: 100, ocrText: "3x − 5 = 16", stuckPoint: "ikinci adım", subject: "Matematik", topic: "Problemler" };
+    return { questionImageId: 100, ocrText: "3x − 5 = 16", stuckPoint: "ikinci adım", subject: "Matematik", topic: "Problemler", exam: "TYT", difficulty: "easy", lastResult: null, aiSolution: null, aiSolutionModel: null };
   }),
-  saveAiSolution: vi.fn(async (userId: number, id: number, aiSolution: unknown) => { calls.push({ fn: "saveAiSolution", userId, args: [id] }); return { aiSolution, aiSolutionAt: new Date() }; }),
+  saveAiSolution: vi.fn(async (userId: number, id: number, aiSolution: unknown, model: string | null) => { calls.push({ fn: "saveAiSolution", userId, args: [id, model] }); return { aiSolution, aiSolutionAt: new Date(), aiSolutionModel: model }; }),
 }));
 
 vi.mock("./bookContent/bookContentDb", async (importOriginal) => ({
@@ -44,7 +44,7 @@ vi.mock("./notes/attachmentStorage", async (importOriginal) => {
 });
 
 const aiInvoke = vi.fn(async () => ({ choices: [{ message: { content: JSON.stringify({ ocrText: "Bir sayının 3 katı…", topicId: 7, difficulty: "medium", errorType: "method" }) } }] }));
-vi.mock("./_core/llm", async (importOriginal) => ({ ...(await importOriginal<typeof import("./_core/llm")>()), invokeLLM: (...args: unknown[]) => (aiInvoke as (...a: unknown[]) => unknown)(...args) }));
+vi.mock("./_core/llm", async (importOriginal) => ({ ...(await importOriginal<typeof import("./_core/llm")>()), invokeLLM: (...args: unknown[]) => (aiInvoke as (...a: unknown[]) => unknown)(...args), modelForTier: (tier: string) => `m-${tier}` }));
 vi.mock("./subscriptions/entitlementService", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./subscriptions/entitlementService")>()),
   assertUsageAvailable: vi.fn(async () => undefined),
@@ -133,7 +133,21 @@ describe("questions router — ✨ step-by-step solve", () => {
     aiInvoke.mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify(solution) } }] });
     const result = await callerFor(makeUser(1)).questions.solve({ id: 3 });
     expect(result.aiSolution).toEqual(solution);
-    expect(calls.map((call) => [call.fn, call.userId, ...call.args])).toEqual([["getSolveContext", 1, 3], ["saveAiSolution", 1, 3]]);
+    // Kolay TYT matematik → orta kademe (sayısal soru hafif modele gitmez).
+    expect(calls.map((call) => [call.fn, call.userId, ...call.args])).toEqual([["getSolveContext", 1, 3], ["saveAiSolution", 1, 3, "medium:m-medium"]]);
+    expect((aiInvoke.mock.calls[0] as unknown as [{ model?: string }])[0].model).toBe("m-medium");
+  });
+
+  it("uses the strong model when the student asks, and tags an automatic escalation", async () => {
+    aiInvoke.mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify({ ...solution, verified: true }) } }] });
+    await callerFor(makeUser(1)).questions.solve({ id: 3, escalate: true });
+    expect(calls.at(-1)?.args).toEqual([3, "strong:m-strong"]);
+
+    aiInvoke
+      .mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify({ ...solution, verified: false }) } }] })
+      .mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify({ ...solution, verified: true }) } }] });
+    await callerFor(makeUser(1)).questions.solve({ id: 3 });
+    expect(calls.at(-1)?.args).toEqual([3, "strong:m-strong↑"]);
   });
 
   it("never solves another student's card", async () => {
@@ -152,6 +166,7 @@ describe("questions router — ✨ step-by-step solve", () => {
     aiInvoke.mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify({ question: "4x + 3 = 27 ise x?", options: ["4", "5", "6", "7", "8"], answer: "C", steps: [{ work: "4x = 24", why: "" }], hint: "" }) } }] });
     const result = await callerFor(makeUser(1)).questions.similar({ id: 3 });
     expect(result.answer).toBe("C");
+    expect((aiInvoke.mock.calls[0] as unknown as [{ model?: string }])[0].model).toBe("m-medium");
     expect(calls.map((call) => call.fn)).toEqual(["getSolveContext"]);
     await expect(callerFor(makeUser(2)).questions.similar({ id: 3 })).rejects.toThrow();
     expect(aiInvoke).toHaveBeenCalledTimes(1);
