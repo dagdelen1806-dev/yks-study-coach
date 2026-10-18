@@ -22,7 +22,8 @@ export const ENV = {
   //     (Gemini: https://generativelanguage.googleapis.com/v1beta/openai)
   //   LLM_MODEL — görsel okuyabilen bir model; varsayılan gpt-4o-mini
   //   TRANSCRIBE_MODEL — ses → metin modeli; varsayılan whisper-1 (Gemini'de yok)
-  llmApiKey: process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || "",
+  //   GEMINI_API_KEY — tanımlıysa LLM_API_KEY yerine kullanılır (Google AI Studio anahtarı)
+  llmApiKey: process.env.GEMINI_API_KEY || process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || "",
   llmApiUrl: (process.env.LLM_API_URL ?? "").replace(/\/+$/, ""),
   llmModel: process.env.LLM_MODEL ?? "",
   //   LLM_MODEL_LIGHT / LLM_MODEL_STRONG — soru çözümünde kolay / zor sorular için (boşsa LLM_MODEL)

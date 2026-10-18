@@ -43,6 +43,8 @@ export const adminSystemRouter = router({
     const config = {
       configured: Boolean(target),
       keyLength: ENV.llmApiKey ? ENV.llmApiKey.trim().length : 0,
+      // Hangi değişkenden okundu (değer değil): GEMINI_API_KEY > LLM_API_KEY > OPENAI_API_KEY.
+      keySource: process.env.GEMINI_API_KEY ? "GEMINI_API_KEY" : process.env.LLM_API_KEY ? "LLM_API_KEY" : process.env.OPENAI_API_KEY ? "OPENAI_API_KEY" : null,
       keyHasWhitespace: ENV.llmApiKey !== ENV.llmApiKey.trim() || /\s/.test(ENV.llmApiKey.trim()),
       baseUrl: target?.baseUrl ?? null,
       model: target?.model ?? null,
