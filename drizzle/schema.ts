@@ -450,6 +450,22 @@ export const organizations = mysqlTable("organizations", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+/// Kurum yöneticisinin paket yükseltme / süre uzatma talebi; platform yöneticisi onaylar.
+export const organizationUpgradeRequests = mysqlTable("organization_upgrade_requests", {
+  id: int("id").autoincrement().primaryKey(),
+  orgId: int("orgId").notNull(),
+  requestedBy: int("requestedBy").notNull(),
+  currentPlan: mysqlEnum("currentPlan", ["trial", "standard", "pro"]).notNull(),
+  requestedPlan: mysqlEnum("requestedPlan", ["trial", "standard", "pro"]).notNull(),
+  note: varchar("note", { length: 300 }),
+  status: mysqlEnum("status", ["pending", "approved", "rejected", "canceled"]).default("pending").notNull(),
+  resolvedBy: int("resolvedBy"),
+  resolvedAt: timestamp("resolvedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  orgStatusIdx: index("organization_upgrade_requests_org_status_idx").on(table.orgId, table.status),
+}));
+
 // Kurum AI kredi havuzundan yapılan harcamalar (append-only; ay toplamı SUM ile).
 export const organizationCreditUsage = mysqlTable("organization_credit_usage", {
   id: int("id").autoincrement().primaryKey(),

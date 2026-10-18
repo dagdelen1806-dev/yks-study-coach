@@ -7,13 +7,14 @@ import { DEFAULT_KVKK_NOTICE, renderKvkk } from "../shared/kvkk";
 // --- Bellek içi kurum veri katmanı (gerçek yetki katmanı ve router bunun üstünde çalışır) ---
 type Member = { orgId: number; userId: number; role: "owner" | "admin" | "coordinator" | "teacher" | "student"; status: "active" | "left" | "removed" };
 const store = {
-  orgs: [] as Array<{ id: number; name: string; status: "active" | "suspended"; kvkkVersion?: number; membershipStartsAt?: Date | null; membershipEndsAt?: Date | null; address?: string | null; contactEmail?: string | null; phone?: string | null; kvkkNotice?: string | null; kvkkConsent?: string | null }>,
+  orgs: [] as Array<{ id: number; name: string; status: "active" | "suspended"; kvkkVersion?: number; membershipStartsAt?: Date | null; membershipEndsAt?: Date | null; address?: string | null; contactEmail?: string | null; phone?: string | null; kvkkNotice?: string | null; kvkkConsent?: string | null; plan?: "trial" | "standard" | "pro"; aiCreditsMonthly?: number }>,
   members: [] as Member[],
   assignments: [] as Array<{ orgId: number; teacherUserId: number; studentUserId: number; active: number }>,
   invitations: [] as Array<{ id: number; orgId: number; orgName: string; orgStatus: "active" | "suspended"; role: "admin" | "coordinator" | "teacher" | "student"; codeHash: string; expiresAt: Date; maxUses: number; usedCount: number; revokedAt: Date | null; createdBy: number; note: string | null; createdAt: Date }>,
   notes: [] as Array<{ id: number; orgId: number; studentUserId: number; authorUserId: number; body: string; visibility: "staff" | "student" }>,
   audit: [] as Array<{ orgId: number; actorUserId: number; action: string }>,
   tasks: [] as Array<{ orgId: number; studentUserId: number; teacherUserId: number }>,
+  upgrades: [] as Array<{ id: number; orgId: number; requestedBy: number; currentPlan: "trial" | "standard" | "pro"; requestedPlan: "trial" | "standard" | "pro"; note: string | null; status: "pending" | "approved" | "rejected" | "canceled" }>,
 };
 const reads: string[] = [];
 const active = (orgId: number, userId: number) => store.members.find((m) => m.orgId === orgId && m.userId === userId && m.status === "active" && store.orgs.find((o) => o.id === orgId)?.status === "active");
@@ -40,9 +41,15 @@ vi.mock("./org/orgDb", async (importOriginal) => {
     listClasses: vi.fn(async () => []),
     createClass: vi.fn(async () => 1),
     updateClass: vi.fn(async () => true),
-    getOrganization: vi.fn(async (orgId: number) => { const org = store.orgs.find((o) => o.id === orgId); return org ? { address: null, contactEmail: null, phone: null, kvkkNotice: null, kvkkConsent: null, kvkkVersion: 1, ...org } : null; }),
+    getOrganization: vi.fn(async (orgId: number) => { const org = store.orgs.find((o) => o.id === orgId); return org ? { address: null, contactEmail: null, phone: null, kvkkNotice: null, kvkkConsent: null, kvkkVersion: 1, plan: "trial" as const, aiCreditsMonthly: 500, membershipStartsAt: null, membershipEndsAt: null, ...org } : null; }),
     updateOrganization: vi.fn(async () => undefined),
     setMemberSubject: vi.fn(async () => true),
+    updateOrgMembership: vi.fn(async () => undefined),
+    createUpgradeRequest: vi.fn(async (input: { orgId: number; requestedBy: number; currentPlan: "trial"; requestedPlan: "trial"; note: string | null }) => { const id = store.upgrades.length + 1; store.upgrades.push({ id, ...input, status: "pending" }); return id; }),
+    listOrgUpgradeRequests: vi.fn(async (orgId: number) => store.upgrades.filter((u) => u.orgId === orgId)),
+    cancelUpgradeRequest: vi.fn(async (orgId: number, id: number) => { const u = store.upgrades.find((x) => x.orgId === orgId && x.id === id && x.status === "pending"); if (u) u.status = "canceled"; return Boolean(u); }),
+    getUpgradeRequest: vi.fn(async (id: number) => store.upgrades.find((u) => u.id === id) ?? null),
+    resolveUpgradeRequest: vi.fn(async (id: number, status: "approved" | "rejected") => { const u = store.upgrades.find((x) => x.id === id && x.status === "pending"); if (u) u.status = status; return Boolean(u); }),
     listAssignments: vi.fn(async (orgId: number) => store.assignments.filter((a) => a.orgId === orgId && a.active === 1)),
     loadStudentSignals: vi.fn(async (ids: number[]) => { reads.push("signals"); return new Map(ids.map((userId) => [userId, { exams: [], logs: [], weekSessions: [], weakTopicCount: 0, lastSignedIn: new Date() }])); }),
     getStudentCalendarReadOnly: vi.fn(async () => { reads.push("calendar-readonly"); return { sessions: [], logs: [] }; }),
@@ -67,10 +74,11 @@ vi.mock("./db", async (importOriginal) => ({
 vi.mock("./schedule/classScheduleDb", async (importOriginal) => ({ ...(await importOriginal<typeof import("./schedule/classScheduleDb")>()), getClassSchedule: vi.fn(async () => ({ periods: [], blocks: [] })) }));
 
 const { appRouter } = await import("./routers");
-const { acceptInvitation, createInvitation, updateOrganization } = await import("./org/orgDb");
+const { acceptInvitation, createInvitation, updateOrganization, updateOrgMembership } = await import("./org/orgDb");
 import type { TrpcContext } from "./_core/context";
 
 const makeUser = (id: number): User => ({ id, openId: `u-${id}`, email: null, name: null, loginMethod: "dev_email", passwordHash: null, emailVerifiedAt: new Date(), emailVerificationSentAt: null, role: "user", approvalStatus: "approved", approvedAt: null, approvedBy: null, rejectedAt: null, rejectionReason: null, accountStatus: "active", createdAt: new Date(), updatedAt: new Date(), lastSignedIn: new Date() }) as User;
+const asPlatformAdmin = () => appRouter.createCaller({ user: { ...makeUser(1), role: "admin" } as User, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] } as TrpcContext);
 const as = (id: number) => appRouter.createCaller({ user: makeUser(id), req: { protocol: "https", headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] } as TrpcContext);
 const hash = (code: string) => createHash("sha256").update(normalizeInviteCode(code)).digest("hex");
 
@@ -84,7 +92,7 @@ beforeEach(() => {
     { orgId: 2, userId: 30, role: "admin", status: "active" }, { orgId: 2, userId: 40, role: "student", status: "active" },
   ];
   store.assignments = [{ orgId: 1, teacherUserId: 11, studentUserId: 20, active: 1 }];
-  store.invitations = []; store.notes = []; store.audit = []; store.tasks = []; reads.length = 0;
+  store.invitations = []; store.notes = []; store.audit = []; store.tasks = []; store.upgrades = []; reads.length = 0;
   getStudyCalendar.mockReset();
 });
 
@@ -239,6 +247,34 @@ describe("kurum kuralları", () => {
     await expect(as(11).org.notes.create({ orgId: 1, studentUserId: 20, body: "Not", visibility: "staff" })).rejects.toThrow(/süresi doldu/);
     await expect(as(61).org.previewInvitation({ code })).rejects.toThrow(/süresi dolmuş/);
     await expect(as(61).org.join({ code, consent: true, kvkkVersion: 1 })).rejects.toThrow(/süresi dolmuş/);
+  });
+
+  it("paket yükseltme: yalnızca kurum yöneticisi, tek bekleyen talep, düşürme yok; süresi dolsa da talep edilir", async () => {
+    await expect(as(11).org.settings.requestUpgrade({ orgId: 1, plan: "pro" })).rejects.toThrow();
+    await expect(as(30).org.settings.requestUpgrade({ orgId: 1, plan: "pro" })).rejects.toThrow();
+    await expect(as(10).org.settings.requestUpgrade({ orgId: 1, plan: "trial" })).rejects.toThrow(/talep edilemez/);
+    store.orgs[0].membershipEndsAt = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
+    await expect(as(10).org.settings.requestUpgrade({ orgId: 1, plan: "standard", note: "50 öğrenci" })).resolves.toEqual({ id: 1 });
+    await expect(as(10).org.settings.requestUpgrade({ orgId: 1, plan: "pro" })).rejects.toThrow(/bekleyen/);
+    await expect(as(10).org.settings.cancelUpgrade({ orgId: 1, requestId: 1 })).resolves.toEqual({ ok: true });
+    store.orgs[0].plan = "pro";
+    await expect(as(10).org.settings.requestUpgrade({ orgId: 1, plan: "standard" })).rejects.toThrow(/talep edilemez/);
+    await expect(as(10).org.settings.requestUpgrade({ orgId: 1, plan: "pro" })).resolves.toEqual({ id: 2 });
+  });
+
+  it("paket talebini yalnızca platform yöneticisi onaylar; onay paketi, krediyi ve süreyi günceller, ikinci kez onaylanmaz", async () => {
+    vi.clearAllMocks();
+    store.orgs[0].membershipEndsAt = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
+    await as(10).org.settings.requestUpgrade({ orgId: 1, plan: "pro" });
+    await expect(as(10).admin.orgs.resolveUpgrade({ requestId: 1, approve: true })).rejects.toThrow();
+    await expect(asPlatformAdmin().admin.orgs.resolveUpgrade({ requestId: 1, approve: true })).resolves.toEqual({ ok: true });
+    const [orgId, applied] = vi.mocked(updateOrgMembership).mock.calls[0];
+    expect(orgId).toBe(1);
+    expect(applied).toMatchObject({ plan: "pro", aiCreditsMonthly: 20000 });
+    expect(applied.membershipEndsAt!.getTime()).toBeGreaterThan(Date.now() + 360 * 24 * 60 * 60 * 1000);
+    expect(store.upgrades[0].status).toBe("approved");
+    await expect(asPlatformAdmin().admin.orgs.resolveUpgrade({ requestId: 1, approve: true })).rejects.toThrow(/Bekleyen talep/);
+    expect(store.audit.map((row) => row.action)).toEqual(expect.arrayContaining(["org.upgrade_request", "org.upgrade_approved"]));
   });
 
   it("kredi havuzu kararı, üyelik durumu ve KVKK şablonu", () => {

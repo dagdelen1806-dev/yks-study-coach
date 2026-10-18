@@ -32,10 +32,27 @@ export default function AdminOrgsPage() {
   const saveMembership = trpc.admin.orgs.setMembership.useMutation({ onSuccess: () => { toast.success("Üyelik kaydedildi."); setMembership(null); utils.admin.orgs.list.invalidate(); }, onError: (error) => toast.error(error.message) });
   const setStatus = trpc.admin.orgs.setStatus.useMutation({ onSuccess: () => utils.admin.orgs.list.invalidate(), onError: (error) => toast.error(error.message) });
 
+  const upgrades = trpc.admin.orgs.upgradeRequests.useQuery();
+  const resolveUpgrade = trpc.admin.orgs.resolveUpgrade.useMutation({ onSuccess: (_, input) => { toast.success(input.approve ? "Talep onaylandı; paket, kredi ve süre güncellendi." : "Talep reddedildi."); utils.admin.orgs.upgradeRequests.invalidate(); utils.admin.orgs.list.invalidate(); }, onError: (error) => toast.error(error.message) });
   const copy = (code: string) => navigator.clipboard?.writeText(code).then(() => toast.success("Kod kopyalandı."), () => undefined);
 
   return (
     <div className="space-y-4">
+      {(upgrades.data?.length ?? 0) > 0 && (
+        <Card className="border-[#f3dc9b] bg-pencil-soft/50 p-5">
+          <h3 className="text-[15px] font-bold text-ink">Bekleyen paket talepleri ({upgrades.data!.length})</h3>
+          <p className="mt-1 text-[12px] text-ink-3">Onaylayınca kurum talep ettiği pakete geçer, aylık kredi en az paketin varsayılanı olur ve süre 1 yıl uzar (bitmemişse mevcut bitişin üstüne).</p>
+          <ul className="mt-3 divide-y divide-rule">
+            {upgrades.data!.map((row) => (
+              <li key={row.id} className="flex flex-wrap items-center gap-3 py-3">
+                <span className="min-w-0 flex-1 text-[13px]"><strong className="text-ink">{row.orgName}</strong> · {ORG_PLAN_LABELS[row.currentPlan]} → <strong className="text-ink">{ORG_PLAN_LABELS[row.requestedPlan]}</strong>{row.requestedPlan === row.currentPlan ? " (süre uzatma)" : ""}<span className="block text-[12px] text-ink-3">{row.requesterName ?? "Kurum yöneticisi"}{row.requesterEmail ? ` · ${row.requesterEmail}` : ""} · {new Date(row.createdAt).toLocaleDateString("tr-TR")} · mevcut bitiş {trDay(row.membershipEndsAt)}{row.note ? ` · “${row.note}”` : ""}</span></span>
+                <Button size="sm" disabled={resolveUpgrade.isPending} onClick={() => resolveUpgrade.mutate({ requestId: row.id, approve: true })}>Onayla</Button>
+                <Button size="sm" variant="outline" disabled={resolveUpgrade.isPending} onClick={() => { if (window.confirm(`${row.orgName} talebi reddedilsin mi?`)) resolveUpgrade.mutate({ requestId: row.id, approve: false }); }}>Reddet</Button>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
       <Card className="p-5">
         <h3 className="text-[15px] font-bold text-ink">Yeni kurum</h3>
         <p className="mt-1 text-[12px] text-ink-3">Kurum oluşunca ilk yöneticisi için 30 gün geçerli, tek kullanımlık bir davet kodu üretilir. Kodu kurum yetkilisine ilet; o da uygulamada profil menüsü → Kurumum'dan girer.</p>

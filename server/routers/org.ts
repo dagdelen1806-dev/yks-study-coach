@@ -3,7 +3,7 @@ import { createHash, randomInt } from "node:crypto";
 import { z } from "zod";
 import { findClassConflict, toMinutes } from "../../shared/classSchedule";
 import { effectiveKvkk } from "../../shared/kvkk";
-import { CLASS_GRADES, CLASS_TRACKS, INVITABLE_ROLES, ORG_KINDS, ORG_PLANS, ORG_PLAN_DEFAULT_CREDITS, ORG_ROLES, membershipState, canAssignRole, canInviteRole, generateInviteCode, hasRole, invitationProblem, isStaffRole, normalizeInviteCode, seesAllStudents, summarizeStudent, type RiskKey, type StudentSummary } from "../../shared/org";
+import { CLASS_GRADES, CLASS_TRACKS, INVITABLE_ROLES, ORG_KINDS, ORG_PLANS, ORG_PLAN_DEFAULT_CREDITS, ORG_PLAN_LABELS, ORG_ROLES, canRequestPlan, membershipState, renewedMembershipEnd, canAssignRole, canInviteRole, generateInviteCode, hasRole, invitationProblem, isStaffRole, normalizeInviteCode, seesAllStudents, summarizeStudent, type RiskKey, type StudentSummary } from "../../shared/org";
 import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 import { getStudentProfile, getUserMockExams, getUserTopicProgress } from "../db";
 import { audit, assertCanViewStudent, orgProcedure, type OrgContext } from "../org/orgAccess";
@@ -38,6 +38,13 @@ import {
   setMemberRole,
   setMemberSubject,
   setPerStudentCreditCap,
+  cancelUpgradeRequest,
+  createUpgradeRequest,
+  getUpgradeRequest,
+  listOrgUpgradeRequests,
+  listPendingUpgradeRequests,
+  resolveUpgradeRequest,
+  writeAudit,
   listStudentKvkkVersions,
   updateKvkk,
   updateOrgMembership,
@@ -196,6 +203,22 @@ export const orgRouter = router({
     updateKvkk: orgProcedure("admin").input(z.object({ notice: z.string().trim().max(20000).nullable(), consent: z.string().trim().max(5000).nullable() })).mutation(async ({ ctx, input }) => {
       await updateKvkk(ctx.membership.orgId, input.notice || null, input.consent || null);
       await audit(ctx, "org.kvkk", { type: "organization", id: ctx.membership.orgId }, { custom: Boolean(input.notice || input.consent) });
+      return { ok: true };
+    }),
+    /** Paket yükseltme / süre uzatma talebi: kurum yöneticisi gönderir, platform yöneticisi onaylar. Süresi dolmuş kurumda da açık. */
+    upgrades: orgProcedure("admin").query(({ ctx }) => listOrgUpgradeRequests(ctx.membership.orgId)),
+    requestUpgrade: orgProcedure("admin", { allowInactive: true }).input(z.object({ plan: z.enum(ORG_PLANS), note: z.string().trim().max(300).optional() })).mutation(({ ctx, input }) => userFacing(async () => {
+      const org = await getOrganization(ctx.membership.orgId);
+      if (!org) throw new TRPCError({ code: "NOT_FOUND", message: "Kurum bulunamadı." });
+      if (!canRequestPlan(org.plan, input.plan)) throw new OrgError("Bu pakete geçiş talep edilemez; yalnızca üst pakete yükseltme ya da süre uzatma istenebilir.");
+      if ((await listOrgUpgradeRequests(ctx.membership.orgId)).some((row) => row.status === "pending")) throw new OrgError("Zaten bekleyen bir talebin var; sonuçlanmasını bekle ya da iptal et.");
+      const requestId = await createUpgradeRequest({ orgId: ctx.membership.orgId, requestedBy: ctx.user.id, currentPlan: org.plan, requestedPlan: input.plan, note: input.note || null });
+      await audit(ctx, "org.upgrade_request", { type: "upgrade", id: requestId }, { from: org.plan, to: input.plan });
+      return { id: requestId };
+    })),
+    cancelUpgrade: orgProcedure("admin", { allowInactive: true }).input(z.object({ requestId: id })).mutation(async ({ ctx, input }) => {
+      if (!(await cancelUpgradeRequest(ctx.membership.orgId, input.requestId))) throw new TRPCError({ code: "NOT_FOUND", message: "Bekleyen talep bulunamadı." });
+      await audit(ctx, "org.upgrade_cancel", { type: "upgrade", id: input.requestId });
       return { ok: true };
     }),
     kvkkStatus: orgProcedure("coordinator").query(async ({ ctx }) => {
@@ -389,6 +412,22 @@ export const adminOrgsRouter = router({
     const orgs = await listOrganizations();
     const used = await creditsUsedThisMonth(orgs.map((org) => org.id));
     return orgs.map((org) => ({ ...org, membershipState: membershipState(org), creditsUsed: used.get(org.id) ?? 0 }));
+  }),
+  upgradeRequests: adminProcedure.query(() => listPendingUpgradeRequests()),
+  /** Onay: paket talep edilene geçer, kredi en az paketin varsayılanı olur, süre 1 yıl uzar (bitmemişse üstüne). */
+  resolveUpgrade: adminProcedure.input(z.object({ requestId: id, approve: z.boolean() })).mutation(async ({ ctx, input }) => {
+    const request = await getUpgradeRequest(input.requestId);
+    if (!request || request.status !== "pending") throw new TRPCError({ code: "NOT_FOUND", message: "Bekleyen talep bulunamadı." });
+    const org = await getOrganization(request.orgId);
+    if (!org) throw new TRPCError({ code: "NOT_FOUND", message: "Kurum bulunamadı." });
+    if (!(await resolveUpgradeRequest(input.requestId, input.approve ? "approved" : "rejected", ctx.user.id))) throw new TRPCError({ code: "CONFLICT", message: "Talep az önce sonuçlandırıldı." });
+    if (input.approve) {
+      const now = new Date();
+      const expired = membershipState(org, now) !== "active";
+      await updateOrgMembership(org.id, { plan: request.requestedPlan, membershipStartsAt: expired || !org.membershipStartsAt ? now : org.membershipStartsAt, membershipEndsAt: renewedMembershipEnd(org.membershipEndsAt, now), aiCreditsMonthly: Math.max(org.aiCreditsMonthly, ORG_PLAN_DEFAULT_CREDITS[request.requestedPlan]) });
+    }
+    await writeAudit({ orgId: org.id, actorUserId: ctx.user.id, action: input.approve ? "org.upgrade_approved" : "org.upgrade_rejected", targetType: "upgrade", targetId: input.requestId, metadata: { plan: ORG_PLAN_LABELS[request.requestedPlan] } });
+    return { ok: true };
   }),
   setMembership: adminProcedure.input(z.object({ orgId: id, plan: z.enum(ORG_PLANS), startsAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), endsAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), aiCreditsMonthly: z.number().int().min(0).max(10_000_000) })).mutation(async ({ input }) => {
     if (input.startsAt && input.endsAt && input.endsAt < input.startsAt) throw new TRPCError({ code: "BAD_REQUEST", message: "Bitiş tarihi başlangıçtan önce olamaz." });

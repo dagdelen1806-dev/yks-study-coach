@@ -155,7 +155,7 @@ export function OrgInvitations({ scope }: { scope: OrgScope }) {
 
 const ACTION_LABELS: Record<string, string> = {
   "invitation.create": "Davet oluşturdu", "invitation.revoke": "Daveti iptal etti", "member.join": "Kuruma katıldı", "member.leave": "Kurumdan ayrıldı", "member.role": "Rol değiştirdi", "member.remove": "Üyeyi çıkardı",
-  "class.create": "Sınıf oluşturdu", "class.update": "Sınıfı düzenledi", "class.remove": "Sınıf sildi", "org.update": "Kurum bilgilerini güncelledi", "member.subject": "Branş değiştirdi", "class.students": "Sınıf öğrencilerini güncelledi", "assignment.set": "Öğretmene öğrenci atadı", "task.assign": "Görev atadı", "note.create": "Not yazdı", "note.remove": "Not sildi",
+  "class.create": "Sınıf oluşturdu", "class.update": "Sınıfı düzenledi", "class.remove": "Sınıf sildi", "org.update": "Kurum bilgilerini güncelledi", "org.credit_cap": "Öğrenci kredi sınırını değiştirdi", "org.kvkk": "KVKK metinlerini güncelledi", "org.upgrade_request": "Paket talebi gönderdi", "org.upgrade_cancel": "Paket talebini iptal etti", "org.upgrade_approved": "Paket talebi onaylandı (Pusula)", "org.upgrade_rejected": "Paket talebi reddedildi (Pusula)", "member.subject": "Branş değiştirdi", "class.students": "Sınıf öğrencilerini güncelledi", "assignment.set": "Öğretmene öğrenci atadı", "task.assign": "Görev atadı", "note.create": "Not yazdı", "note.remove": "Not sildi",
 };
 
 export function OrgAudit({ scope }: { scope: OrgScope }) {

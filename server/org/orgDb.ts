@@ -6,6 +6,7 @@ import {
   organizationClasses,
   organizationInvitations,
   organizationMembers,
+  organizationUpgradeRequests,
   organizations,
   studentProfiles,
   studyPlanSessions,
@@ -379,4 +380,50 @@ export async function listOrganizations() {
 export async function setOrganizationStatus(orgId: number, status: "active" | "suspended") {
   const db = await requireDb();
   await db.update(organizations).set({ status }).where(eq(organizations.id, orgId));
+}
+
+// --- Paket yükseltme talepleri ------------------------------------------------
+
+const upgradeColumns = { id: organizationUpgradeRequests.id, orgId: organizationUpgradeRequests.orgId, currentPlan: organizationUpgradeRequests.currentPlan, requestedPlan: organizationUpgradeRequests.requestedPlan, note: organizationUpgradeRequests.note, status: organizationUpgradeRequests.status, createdAt: organizationUpgradeRequests.createdAt, resolvedAt: organizationUpgradeRequests.resolvedAt, requestedBy: organizationUpgradeRequests.requestedBy };
+
+export async function createUpgradeRequest(input: { orgId: number; requestedBy: number; currentPlan: OrgPlan; requestedPlan: OrgPlan; note: string | null }) {
+  const db = await requireDb();
+  const result = await db.insert(organizationUpgradeRequests).values(input);
+  return Number(result[0].insertId);
+}
+
+/** Kurumun son talepleri (en yeni önce). */
+export async function listOrgUpgradeRequests(orgId: number) {
+  const db = await requireDb();
+  return db.select(upgradeColumns).from(organizationUpgradeRequests).where(eq(organizationUpgradeRequests.orgId, orgId)).orderBy(desc(organizationUpgradeRequests.createdAt)).limit(10);
+}
+
+export async function cancelUpgradeRequest(orgId: number, requestId: number): Promise<boolean> {
+  const db = await requireDb();
+  const result = await db.update(organizationUpgradeRequests).set({ status: "canceled", resolvedAt: new Date() }).where(and(eq(organizationUpgradeRequests.orgId, orgId), eq(organizationUpgradeRequests.id, requestId), eq(organizationUpgradeRequests.status, "pending")));
+  return Number((result[0] as { affectedRows?: number }).affectedRows ?? 0) > 0;
+}
+
+/** Platform yöneticisi: bekleyen talepler, kurum ve talep eden adıyla. */
+export async function listPendingUpgradeRequests() {
+  const db = await requireDb();
+  return db.select({ ...upgradeColumns, orgName: organizations.name, requesterName: users.name, requesterEmail: users.email, membershipEndsAt: organizations.membershipEndsAt })
+    .from(organizationUpgradeRequests)
+    .innerJoin(organizations, eq(organizations.id, organizationUpgradeRequests.orgId))
+    .innerJoin(users, eq(users.id, organizationUpgradeRequests.requestedBy))
+    .where(eq(organizationUpgradeRequests.status, "pending"))
+    .orderBy(organizationUpgradeRequests.createdAt);
+}
+
+export async function getUpgradeRequest(requestId: number) {
+  const db = await requireDb();
+  const [row] = await db.select(upgradeColumns).from(organizationUpgradeRequests).where(eq(organizationUpgradeRequests.id, requestId)).limit(1);
+  return row ?? null;
+}
+
+/** Yalnızca bekleyen talep sonuçlandırılır (aynı talep iki kez onaylanmaz). */
+export async function resolveUpgradeRequest(requestId: number, status: "approved" | "rejected", resolvedBy: number): Promise<boolean> {
+  const db = await requireDb();
+  const result = await db.update(organizationUpgradeRequests).set({ status, resolvedBy, resolvedAt: new Date() }).where(and(eq(organizationUpgradeRequests.id, requestId), eq(organizationUpgradeRequests.status, "pending")));
+  return Number((result[0] as { affectedRows?: number }).affectedRows ?? 0) > 0;
 }

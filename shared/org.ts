@@ -89,6 +89,24 @@ export const ORG_PLAN_LABELS: Record<OrgPlan, string> = { trial: "Deneme", stand
 /** Platform yöneticisinin kurum oluştururken / paketi değiştirirken önerilen aylık AI kredisi (elle değiştirilebilir). */
 export const ORG_PLAN_DEFAULT_CREDITS: Record<OrgPlan, number> = { trial: 500, standard: 5000, pro: 20000 };
 
+export const ORG_PLAN_RANK: Record<OrgPlan, number> = { trial: 0, standard: 1, pro: 2 };
+export const ORG_PLAN_DESCRIPTIONS: Record<OrgPlan, string[]> = {
+  trial: ["30 gün", "Kurum paneli ve tüm yönetim araçları", "Küçük bir AI kredi havuzu ile deneme"],
+  standard: ["1 yıl", "Kurum paneli ve tüm yönetim araçları", "Orta ölçekli kurum için aylık AI kredisi"],
+  pro: ["1 yıl", "Kurum paneli ve tüm yönetim araçları", "Yoğun AI kullanımı için en geniş kredi havuzu"],
+};
+/** Talep edilebilir paket: daha üst paket ya da (deneme dışında) aynı paketin süre uzatması. Düşürme yok. */
+export function canRequestPlan(current: OrgPlan, requested: OrgPlan): boolean {
+  if (requested === "trial") return false;
+  return ORG_PLAN_RANK[requested] >= ORG_PLAN_RANK[current];
+}
+/** Onaylanan talepte yeni bitiş: mevcut süre bitmediyse onun üstüne, bittiyse bugünden itibaren 1 yıl. */
+export function renewedMembershipEnd(currentEnd: Date | null, now = new Date()): Date {
+  const base = currentEnd && currentEnd.getTime() > now.getTime() ? new Date(currentEnd) : new Date(now);
+  base.setFullYear(base.getFullYear() + 1);
+  return base;
+}
+
 /** Bir AI işleminin kurum havuzundan düşürdüğü kredi (maliyeti yüksek işlem = daha çok kredi). */
 export const ORG_CREDIT_COSTS: Partial<Record<FeatureKey, number>> = {
   NOTE_VOICE: 1,

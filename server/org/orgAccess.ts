@@ -17,14 +17,15 @@ const notFound = (message = "Bulunamadı.") => new TRPCError({ code: "NOT_FOUND"
 
 export type OrgContext = { user: { id: number }; membership: Membership };
 
-export function orgProcedure(minRole: OrgRole) {
+/** `allowInactive`: süresi dolmuş kurumda da çalışan değişiklik uçları (paket yükseltme / süre uzatma talebi). */
+export function orgProcedure(minRole: OrgRole, options: { allowInactive?: boolean } = {}) {
   return protectedProcedure
     .input(z.object({ orgId: z.number().int().positive() }))
     .use(async ({ ctx, input, next, type }) => {
       const membership = await getActiveMembership(ctx.user.id, input.orgId);
       if (!membership || !hasRole(membership.role, minRole)) throw notFound("Kurum bulunamadı.");
       // Üyelik süresi dolmuş (ya da henüz başlamamış) kurumda panel salt okunur: veriler görülür, değişiklik yapılamaz.
-      if (type === "mutation" && membership.state && membership.state !== "active") {
+      if (type === "mutation" && !options.allowInactive && membership.state && membership.state !== "active") {
         throw new TRPCError({ code: "FORBIDDEN", message: membership.state === "expired" ? "Kurum üyeliğinin süresi doldu; panel salt okunur. Yenilemek için platform yöneticisiyle görüşün." : "Kurum üyeliği henüz başlamadı." });
       }
       return next({ ctx: { ...ctx, membership } });

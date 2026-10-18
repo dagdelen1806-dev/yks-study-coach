@@ -112,7 +112,7 @@ export default function OrgApp() {
         <div className="content-wrap">
           {scope.state && scope.state !== "active" && (
             <div className="mb-5 rounded-2xl border border-danger/30 bg-danger-soft/60 px-4 py-3 text-[13px] font-semibold text-danger" role="status">
-              {scope.state === "expired" ? "Kurum üyeliğinin süresi doldu. Panel salt okunur: verileri görebilirsin ama değişiklik yapamazsın; öğrencilerin AI işlemleri kendi kotalarından yürür. Yenilemek için Pusula ile iletişime geç." : "Kurum üyeliği henüz başlamadı; başlangıç tarihine kadar panel salt okunur."}
+              {scope.state === "expired" ? "Kurum üyeliğinin süresi doldu. Panel salt okunur: verileri görebilirsin ama değişiklik yapamazsın; öğrencilerin AI işlemleri kendi kotalarından yürür. Yenilemek için kurum yöneticisi Ayarlar → Üyelik ve krediler'den süre uzatma talebi gönderebilir." : "Kurum üyeliği henüz başlamadı; başlangıç tarihine kadar panel salt okunur."}
             </div>
           )}
           <Suspense fallback={<div className="flex min-h-[40vh] items-center justify-center"><span className="h-7 w-7 animate-spin rounded-full border-2 border-brand border-t-transparent" /></div>}>

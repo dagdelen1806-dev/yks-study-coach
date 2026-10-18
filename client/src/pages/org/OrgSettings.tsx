@@ -1,9 +1,9 @@
 import { trpc } from "@/lib/trpc";
 import { EmptyNote, PageHeader, Panel, Segmented, primaryButton, secondaryButton } from "@/components/app/kit";
-import { CLASS_GRADES, CLASS_TRACKS, CLASS_TRACK_LABELS, ORG_CREDIT_COSTS, ORG_CREDIT_FEATURE_LABELS, ORG_KINDS, ORG_KIND_LABELS, ORG_PLAN_LABELS, ROLE_LABELS, ROLE_PERMISSIONS, TEACHER_SUBJECTS, hasRole, isStaffRole, type OrgKind } from "@shared/org";
+import { CLASS_GRADES, CLASS_TRACKS, CLASS_TRACK_LABELS, ORG_CREDIT_COSTS, ORG_CREDIT_FEATURE_LABELS, ORG_KINDS, ORG_KIND_LABELS, ORG_PLANS, ORG_PLAN_DEFAULT_CREDITS, ORG_PLAN_DESCRIPTIONS, ORG_PLAN_LABELS, ORG_PLAN_RANK, ROLE_LABELS, canRequestPlan, type MembershipState, type OrgPlan, ROLE_PERMISSIONS, TEACHER_SUBJECTS, hasRole, isStaffRole, type OrgKind } from "@shared/org";
 import { DEFAULT_KVKK_CONSENT, DEFAULT_KVKK_NOTICE, KVKK_PLACEHOLDERS } from "@shared/kvkk";
 import type { FeatureKey } from "@shared/entitlements";
-import { Building2, Check, Copy, FileText, Pencil, Plus, RotateCcw, School, ShieldCheck, Sparkles, Trash2, UserPlus, Users, Wallet, X } from "lucide-react";
+import { Building2, Check, Copy, FileText, Pencil, Plus, Rocket, RotateCcw, School, ShieldCheck, Sparkles, Trash2, UserPlus, Users, Wallet, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import type { OrgScope } from "./OrgApp";
@@ -69,6 +69,60 @@ function OrgProfileSettings({ scope }: { scope: OrgScope }) {
 
 const formatDay = (value: string | Date | null | undefined) => (value ? new Date(value).toLocaleDateString("tr-TR", { day: "numeric", month: "long", year: "numeric" }) : "Süresiz");
 
+const REQUEST_STATUS_LABELS = { pending: "Onay bekliyor", approved: "Onaylandı", rejected: "Reddedildi", canceled: "İptal edildi" } as const;
+
+/** Paket yükseltme / süre uzatma: kurum yöneticisi talep gönderir, Pusula onaylayınca paket, kredi ve süre güncellenir. */
+function PlanUpgrade({ scope, currentPlan, state }: { scope: OrgScope; currentPlan: OrgPlan; state: MembershipState }) {
+  const utils = trpc.useUtils();
+  const isAdmin = hasRole(scope.role, "admin");
+  const requests = trpc.org.settings.upgrades.useQuery({ orgId: scope.orgId }, { enabled: isAdmin, retry: false });
+  const [choice, setChoice] = useState<OrgPlan | null>(null);
+  const [note, setNote] = useState("");
+  const refresh = () => utils.org.settings.upgrades.invalidate();
+  const request = trpc.org.settings.requestUpgrade.useMutation({ onSuccess: () => { toast.success("Talebin alındı; onaylanınca paketin otomatik güncellenecek."); setChoice(null); setNote(""); refresh(); }, onError: (error) => toast.error(error.message) });
+  const cancel = trpc.org.settings.cancelUpgrade.useMutation({ onSuccess: () => { toast.success("Talep iptal edildi."); refresh(); }, onError: (error) => toast.error(error.message) });
+  const pending = requests.data?.find((row) => row.status === "pending");
+  const lastResolved = requests.data?.find((row) => row.status === "approved" || row.status === "rejected");
+  const plans = ORG_PLANS.filter((plan) => plan !== "trial" || currentPlan === "trial");
+
+  return (
+    <Panel icon={<Rocket size={18} />} title="Paketini yükselt" subtitle={isAdmin ? "Üst pakete geçmek ya da süreni uzatmak için talep gönder. Pusula onayladığında paket, aylık kredi ve süre otomatik güncellenir; süre bitmeden uzatırsan kalan günlerin korunur." : "Paket değişikliğini kurum yöneticisi talep edebilir."}>
+      {pending && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#f3dc9b] bg-pencil-soft/70 p-4" role="status">
+          <span className="text-[13px] text-ink"><strong>{ORG_PLAN_LABELS[pending.requestedPlan]}</strong> {pending.requestedPlan === currentPlan ? "süre uzatma" : "paketine yükseltme"} talebin onay bekliyor · {new Date(pending.createdAt).toLocaleDateString("tr-TR")}</span>
+          <button onClick={() => cancel.mutate({ orgId: scope.orgId, requestId: pending.id })} disabled={cancel.isPending} className={secondaryButton}><X size={15} /> Talebi iptal et</button>
+        </div>
+      )}
+      {!pending && lastResolved && <p className="mb-3 text-[12px] text-ink-3">Son talep: {ORG_PLAN_LABELS[lastResolved.requestedPlan]} · {REQUEST_STATUS_LABELS[lastResolved.status]}{lastResolved.resolvedAt ? ` (${new Date(lastResolved.resolvedAt).toLocaleDateString("tr-TR")})` : ""}</p>}
+      <div className={`grid gap-4 ${plans.length === 3 ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
+        {plans.map((plan) => {
+          const isCurrent = plan === currentPlan;
+          const allowed = canRequestPlan(currentPlan, plan);
+          const label = isCurrent ? (state === "active" ? "Süreyi uzat" : "Yenile") : ORG_PLAN_RANK[plan] > ORG_PLAN_RANK[currentPlan] ? "Bu pakete yükselt" : "";
+          return (
+            <section key={plan} className={`flex flex-col rounded-2xl border p-4 ${isCurrent ? "border-brand bg-brand-soft/40" : "border-rule"} ${choice === plan ? "ring-2 ring-brand/40" : ""}`}>
+              <div className="flex items-center justify-between gap-2"><h3 className="text-[16px] font-extrabold text-ink">{ORG_PLAN_LABELS[plan]}</h3>{isCurrent && <span className="rounded-full bg-brand px-2 py-0.5 text-[11px] font-bold text-white">Mevcut paket</span>}</div>
+              <p className="mt-1 text-[22px] font-extrabold text-ink">{ORG_PLAN_DEFAULT_CREDITS[plan].toLocaleString("tr-TR")} <span className="text-[12px] font-semibold text-ink-3">AI kredisi / ay</span></p>
+              <ul className="mt-2 flex-1 space-y-1 text-[12.5px] text-ink-2">{ORG_PLAN_DESCRIPTIONS[plan].map((line) => <li key={line} className="flex gap-2"><Check size={14} className="mt-0.5 shrink-0 text-success" />{line}</li>)}</ul>
+              {isAdmin && allowed && label && <button onClick={() => setChoice(choice === plan ? null : plan)} disabled={Boolean(pending)} className={`${isCurrent ? secondaryButton : primaryButton} mt-3 w-full justify-center`}>{label}</button>}
+            </section>
+          );
+        })}
+      </div>
+      {choice && !pending && (
+        <div className="mt-4 rounded-2xl border border-rule p-4">
+          <p className="text-[13px] font-semibold text-ink">{ORG_PLAN_LABELS[choice]} {choice === currentPlan ? "süre uzatma" : "yükseltme"} talebi</p>
+          <label className="mt-2 block"><span className="form-label">Not (opsiyonel)</span><input value={note} onChange={(event) => setNote(event.target.value)} maxLength={300} placeholder="Ör. öğrenci sayımız 80'e çıkacak, fatura bilgisi…" className="form-input" /></label>
+          <div className="mt-3 flex gap-2">
+            <button onClick={() => request.mutate({ orgId: scope.orgId, plan: choice, note: note.trim() || undefined })} disabled={request.isPending} className={primaryButton}><Rocket size={15} /> {request.isPending ? "Gönderiliyor…" : "Talebi gönder"}</button>
+            <button onClick={() => setChoice(null)} className={secondaryButton}>Vazgeç</button>
+          </div>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
 function MembershipSettings({ scope }: { scope: OrgScope }) {
   const utils = trpc.useUtils();
   const isAdmin = hasRole(scope.role, "admin");
@@ -104,7 +158,7 @@ function MembershipSettings({ scope }: { scope: OrgScope }) {
           <p className="mt-1 text-[12px] text-ink-3">{nextReset.toLocaleDateString("tr-TR", { day: "numeric", month: "long" })} tarihinde yenilenir.</p>
         </section>
       </div>
-      <p className="text-[12px] text-ink-3">Paket, süre ve aylık kredi Pusula platform yöneticisi tarafından tanımlanır. Değişiklik için bizimle iletişime geçin.</p>
+      <PlanUpgrade scope={scope} currentPlan={org.data.plan} state={state} />
 
       <div className="grid gap-5 lg:grid-cols-2">
         <Panel icon={<Wallet size={18} />} title="Kredi nasıl harcanır?" subtitle="Kuruma bağlı öğrencilerin AI işlemleri önce kurum havuzundan düşer; havuz biterse öğrencinin kendi hakkı kullanılır.">
