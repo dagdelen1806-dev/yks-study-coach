@@ -25,13 +25,10 @@ import {
   ChevronDown,
   CircleHelp,
   Clock3,
-  Compass,
-  ExternalLink,
   Flame,
   Grid2X2,
   GraduationCap,
   Library,
-  ListFilter,
   KeyRound,
   LogOut,
   NotebookPen,
@@ -42,7 +39,6 @@ import {
   PenLine,
   Play,
   Plus,
-  Search,
   ShieldCheck,
   Sparkles,
   Target,
@@ -63,6 +59,7 @@ import NotificationBell from "@/components/app/NotificationBell";
 import { StudentAvatar } from "@/components/app/Avatar";
 import Overview, { type FocusSessionSeed } from "@/pages/overview/Overview";
 import ExamsDashboard from "@/pages/exams/ExamsDashboard";
+import TopicMap from "@/pages/topics/TopicMap";
 import { useLocation } from "wouter";
 import * as XLSX from "xlsx";
 import ResourceCatalogSection from "@/components/resourceCatalog/ResourceCatalogSection";
@@ -108,21 +105,17 @@ import {
   motivationBody,
   motivationTitle,
   netDeltaLabel,
-  officialScopeNote,
   postOnboardingNudgeKey,
   questionGoal,
   questionProgress,
   resourceSeeds,
   resourceBookCatalog,
   scopeSources,
-  sectionDescriptions,
-  statusFilters,
   statusLegend,
   statusMeta,
   adminNavSection,
   chartLabels,
   subjectColors,
-  subjectFilters,
   subjectOrder,
   trackedTopics,
   timeFieldLabels,
@@ -244,18 +237,6 @@ function Brand() {
   );
 }
 
-function StatusPill({ status, insufficientData }: { status: Topic["status"]; insufficientData?: boolean }) {
-  const meta = statusMeta[status];
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <span className="status-pill" style={{ color: meta.color, backgroundColor: meta.bg }}>
-        <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full" style={{ backgroundColor: meta.color }} />
-        {status}
-      </span>
-      {insufficientData && <span className="status-pill bg-paper text-ink-3" title="Kesin karar için yeterli soru hacmi yok">Veri yetersiz</span>}
-    </span>
-  );
-}
 
 function ProgressBar({ value, color = palette.brand }: { value: number; color?: string }) {
   return (
@@ -278,24 +259,6 @@ function SectionHeading({ eyebrow, title, copy, action }: { eyebrow?: string; ti
   );
 }
 
-function Topics({ topics, setTopics, onSection }: { topics: Topic[]; setTopics: React.Dispatch<React.SetStateAction<Topic[]>>; onSection: (section: DashboardSection) => void }) {
-  const [search, setSearch] = useState("");
-  const [subject, setSubject] = useState("Tümü");
-  const [status, setStatus] = useState<(typeof statusFilters)[number]>("Tümü");
-  const filtered = useMemo(() => topics.filter((topic) => `${topic.topic} ${topic.subject} ${topic.unit}`.toLocaleLowerCase("tr").includes(search.toLocaleLowerCase("tr")) && (subject === "Tümü" || topic.subject === subject) && (status === "Tümü" || topic.status === status)), [topics, search, subject, status]);
-
-  return <div id="topics" className="space-y-7 animate-page-in"><div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between"><div><div className="eyebrow mb-2">ÖSYM kapsamı · kişisel takip</div><h1 className="page-heading">Konu haritan.</h1><p className="page-subtitle">{sectionDescriptions.topics}</p></div><Button onClick={() => onSection("exams")} className="h-10 rounded-xl bg-ink px-4 text-[13px] font-semibold text-white hover:bg-ink"><Plus className="mr-2" size={15} /> Deneme sonucu ekle</Button></div>
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{[{ label: "Toplam konu", value: topics.length, tone: "blue" }, { label: "Zayıf", value: topics.filter((item) => item.status === "Zayıf").length, tone: "coral" }, { label: "Orta", value: topics.filter((item) => item.status === "Orta").length, tone: "yellow" }, { label: "İyi", value: topics.filter((item) => item.status === "İyi").length, tone: "mint" }].map((item) => <div key={item.label} className={`rounded-2xl p-4 ${toneClasses[item.tone]}`}><div className="text-[12px] font-medium opacity-75">{item.label}</div><div className="mt-2 text-[29px] font-semibold font-display">{item.value}</div></div>)}</div>
-    <Card className="soft-card p-4 sm:p-5"><div className="flex flex-col gap-3 lg:flex-row"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-4" size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Konu ara..." className="h-10 w-full rounded-xl border border-ink/[0.08] bg-paper pl-10 pr-3 text-[14px] outline-none transition placeholder:text-rule-strong focus:border-brand/45 focus:ring-4 focus:ring-brand/[0.08]" /></div><div className="flex items-center gap-2 overflow-x-auto"><ListFilter size={15} className="shrink-0 text-ink-4" />{statusFilters.map((item) => <button key={item} onClick={() => setStatus(item)} className={`whitespace-nowrap rounded-lg px-3 py-2 text-[12px] font-semibold transition ${status === item ? "bg-ink text-white" : "bg-paper text-ink-3 hover:bg-rule"}`}>{item}</button>)}</div></div><div className="mt-3 flex gap-2 overflow-x-auto">{subjectFilters.map((item) => <button key={item} onClick={() => setSubject(item)} className={`whitespace-nowrap rounded-full border px-3 py-1.5 text-[12px] font-medium transition ${subject === item ? "border-brand bg-brand-soft text-brand" : "border-ink/[0.08] text-ink-4 hover:border-brand/40"}`}>{item}</button>)}</div></Card>
-    <Card className="soft-card overflow-hidden"><div className="hidden grid-cols-[1.5fr_0.7fr_1fr_0.7fr_0.85fr] gap-4 border-b border-ink/[0.06] bg-paper px-6 py-3 text-[12px] font-bold text-ink-4 lg:grid"><span>Konu</span><span>Ders</span><span>İlerleme</span><span>Durum</span><span>Sonraki adım</span></div><div className="divide-y divide-ink/[0.06]">{filtered.map((topic) => <div key={topic.id} className="grid w-full grid-cols-1 gap-3 px-5 py-4 text-left lg:grid-cols-[1.5fr_0.7fr_1fr_0.7fr_0.85fr] lg:items-center lg:gap-4 lg:px-6"><div className="flex items-center gap-3"><span className="h-8 w-1 rounded-full" style={{ backgroundColor: getColorForSubject(topic.subject) }} /><span><span className="block text-[14px] font-semibold text-ink">{topic.topic}</span><span className="mt-0.5 block text-[12px] text-ink-4">{topic.exam} · {topic.unit}</span></span></div><span className="hidden text-[13px] font-medium text-ink-3 lg:block">{topic.subject}</span><div className="flex items-center gap-3"><div className="flex-1 lg:max-w-[130px]"><ProgressBar value={topic.progress} color={getColorForSubject(topic.subject)} /></div><span className="w-8 text-right text-[12px] font-semibold text-ink-3">{formatPercent(topic.progress)}</span></div><div><StatusPill status={topic.status} insufficientData={topic.insufficientData} /></div><span className="hidden text-[12px] text-ink-3 lg:block">{statusMeta[topic.status].description}</span></div>)}{filtered.length === 0 && <div className="px-6 py-12 text-center text-[14px] text-ink-4">Bu filtrelerle eşleşen bir konu yok.</div>}</div></Card>
-    <div className="flex flex-col gap-3 rounded-2xl border border-brand/10 bg-brand-soft p-4 text-[13px] text-ink-2 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-start gap-3"><Compass size={17} className="mt-0.5 shrink-0 text-brand" /><p><span className="font-semibold text-brand-strong">Kapsam notu:</span> {officialScopeNote}</p></div><a href="https://www.osym.gov.tr" target="_blank" rel="noreferrer" className="inline-flex shrink-0 items-center gap-1 font-semibold text-brand">ÖSYM'yi aç <ExternalLink size={12} /></a></div>
-  </div>;
-}
-
-// TYT dershane denemesi konu tablosu — öğrencinin dershanesinin gerçek
-// "Derslere Göre Başarı Analizi" raporuyla aynı hiyerarşi: ders başlığı
-// (koyu), kategori başlığı (gri zemin), konu satırları (S/D/Y/Boş girilebilir,
-// B%/Net otomatik). Her seviyede toplamlar canlı hesaplanır.
 function TytTopicTemplateTable({ topicDetails, updateDetail, removeRow }: { topicDetails: ExamTopicResult[]; updateDetail: (index: number, field: keyof ExamTopicResult, value: string) => void; removeRow: (index: number) => void }) {
   const grouped = useMemo(() => groupTopicDetailsBySubject(topicDetails), [topicDetails]);
   const numberInput = (value: number, onChange: (value: string) => void) => (
@@ -1440,5 +1403,5 @@ export default function Home() {
   const section: DashboardSection = requested === "admin" && !isAdmin ? "overview" : requested;
   const weakTopicCount = topics.filter((item) => item.status === "Zayıf" && !item.insufficientData).length;
   const navSectionsForUser = isAdmin ? [...appNavSections, adminNavSection] : appNavSections;
-  return <NotebookProvider enabled={Boolean(user)}><div className="app-shell"><Sidebar section={section} onSection={navigate} userName={displayName} onStartSession={() => startSession()} isAdmin={isAdmin} weakTopicCount={weakTopicCount} signedIn={Boolean(user)} /><main className="app-main"><header className="topbar"><button onClick={() => setMobileMenu((value) => !value)} className="mobile-menu-button" aria-label="Menüyü aç"><Menu size={18} /></button><div className="topbar-context"><span className="topbar-title">{navSectionsForUser.find((item) => item.key === section)?.label}</span></div><div className="topbar-actions">{!user && <span className="demo-chip">Demo verisi</span>}{user && <NotificationBell />}{user ? <DropdownMenu><DropdownMenuTrigger asChild><button className="profile-button"><StudentAvatar style={profileQuery.data?.avatarStyle} name={profileQuery.data?.preferredName || getDisplayName(displayName)} size={36} /><span className="hidden text-[14px] font-semibold text-ink-2 md:block">{getDisplayName(displayName)}</span><ChevronDown size={14} className="hidden text-ink-4 md:block" /></button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={() => setShowProfileEdit(true)}><UserRound size={14} className="mr-2" /> Profili düzenle</DropdownMenuItem>{user.loginMethod?.startsWith("dev") && <DropdownMenuItem onClick={() => setShowPasswordChange(true)}><KeyRound size={14} className="mr-2" /> Şifre değiştir</DropdownMenuItem>}<DropdownMenuItem onClick={() => logout()}><LogOut size={14} className="mr-2" /> Çıkış yap</DropdownMenuItem></DropdownMenuContent></DropdownMenu> : <button onClick={() => startLogin()} className="h-9 rounded-[10px] bg-ink px-4 text-[14px] font-semibold text-surface hover:bg-ink-2">Giriş yap</button>}</div></header>{mobileMenu && <><div className="drawer-backdrop" onClick={() => setMobileMenu(false)} aria-hidden="true" /><Sidebar section={section} onSection={navigate} userName={displayName} onStartSession={() => { setMobileMenu(false); startSession(); }} isAdmin={isAdmin} weakTopicCount={weakTopicCount} signedIn={Boolean(user)} onClose={closeMobileMenu} /></>}<div className="content-wrap">{section === "overview" && <Overview topics={topics} exams={exams} onSection={navigate} onStartSession={startSession} onEditProfile={() => setShowProfileEdit(true)} />}{section === "topics" && <Topics topics={topics} setTopics={setTopics} onSection={navigate} />}{section === "exams" && <Exams topics={topics} exams={exams} setExams={setExams} setTopics={setTopics} persistExams={importExams.mutate} />}{section === "resources" && <Resources topics={topics} exams={exams} onSection={navigate} />}{section === "catalog" && <ResourceCatalogSection />}{section === "plan" && <AiPlan topics={topics} exams={exams} />}{section === "calendar" && <CalendarView topics={topics} onSection={navigate} onStartFocusSession={startSession} />}{section === "notebook" && (user ? <NotebookSection /> : <div className="soft-card p-8 text-center text-[14px] text-ink-3">Defteri kullanmak için giriş yapmalısın.</div>)}{section === "premium" && <PaywallSection />}{section === "admin" && isAdmin && <AdminPanel />}<footer className="mt-12 flex flex-col gap-3 border-t border-ink/[0.06] py-6 text-[12px] text-ink-4 sm:flex-row sm:items-center sm:justify-between"><span>{footerDisclaimer}</span><span>Konu kapsamı ÖSYM ve MEB programlarına dayanır.</span></footer></div></main>{session && <FocusMode user={user} topics={topics} initialSession={focusSeed} onClose={() => { setSession(false); setFocusSeed(null); }} onGoToCalendar={() => { setSession(false); setFocusSeed(null); navigate("calendar"); }} />}{showPasswordChange && <ChangePasswordDialog onClose={() => setShowPasswordChange(false)} />}{showProfileEdit && <Dialog open onOpenChange={(open) => !open && setShowProfileEdit(false)}><DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl"><DialogTitle>Profilini güncelle</DialogTitle><DialogDescription>Onboarding sırasında verdiğin yanıtları buradan gözden geçirip güncelleyebilirsin.</DialogDescription><OnboardingFlow userName={displayName} startAtStep={0} onClose={() => setShowProfileEdit(false)} onComplete={() => setShowProfileEdit(false)} /></DialogContent></Dialog>} </div></NotebookProvider>;
+  return <NotebookProvider enabled={Boolean(user)}><div className="app-shell"><Sidebar section={section} onSection={navigate} userName={displayName} onStartSession={() => startSession()} isAdmin={isAdmin} weakTopicCount={weakTopicCount} signedIn={Boolean(user)} /><main className="app-main"><header className="topbar"><button onClick={() => setMobileMenu((value) => !value)} className="mobile-menu-button" aria-label="Menüyü aç"><Menu size={18} /></button><div className="topbar-context"><span className="topbar-title">{navSectionsForUser.find((item) => item.key === section)?.label}</span></div><div className="topbar-actions">{!user && <span className="demo-chip">Demo verisi</span>}{user && <NotificationBell />}{user ? <DropdownMenu><DropdownMenuTrigger asChild><button className="profile-button"><StudentAvatar style={profileQuery.data?.avatarStyle} name={profileQuery.data?.preferredName || getDisplayName(displayName)} size={36} /><span className="hidden text-[14px] font-semibold text-ink-2 md:block">{getDisplayName(displayName)}</span><ChevronDown size={14} className="hidden text-ink-4 md:block" /></button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={() => setShowProfileEdit(true)}><UserRound size={14} className="mr-2" /> Profili düzenle</DropdownMenuItem>{user.loginMethod?.startsWith("dev") && <DropdownMenuItem onClick={() => setShowPasswordChange(true)}><KeyRound size={14} className="mr-2" /> Şifre değiştir</DropdownMenuItem>}<DropdownMenuItem onClick={() => logout()}><LogOut size={14} className="mr-2" /> Çıkış yap</DropdownMenuItem></DropdownMenuContent></DropdownMenu> : <button onClick={() => startLogin()} className="h-9 rounded-[10px] bg-ink px-4 text-[14px] font-semibold text-surface hover:bg-ink-2">Giriş yap</button>}</div></header>{mobileMenu && <><div className="drawer-backdrop" onClick={() => setMobileMenu(false)} aria-hidden="true" /><Sidebar section={section} onSection={navigate} userName={displayName} onStartSession={() => { setMobileMenu(false); startSession(); }} isAdmin={isAdmin} weakTopicCount={weakTopicCount} signedIn={Boolean(user)} onClose={closeMobileMenu} /></>}<div className="content-wrap">{section === "overview" && <Overview topics={topics} exams={exams} onSection={navigate} onStartSession={startSession} onEditProfile={() => setShowProfileEdit(true)} />}{section === "topics" && <TopicMap topics={topics} onSection={navigate} onStartSession={(seed) => startSession(seed)} />}{section === "exams" && <Exams topics={topics} exams={exams} setExams={setExams} setTopics={setTopics} persistExams={importExams.mutate} />}{section === "resources" && <Resources topics={topics} exams={exams} onSection={navigate} />}{section === "catalog" && <ResourceCatalogSection />}{section === "plan" && <AiPlan topics={topics} exams={exams} />}{section === "calendar" && <CalendarView topics={topics} onSection={navigate} onStartFocusSession={startSession} />}{section === "notebook" && (user ? <NotebookSection /> : <div className="soft-card p-8 text-center text-[14px] text-ink-3">Defteri kullanmak için giriş yapmalısın.</div>)}{section === "premium" && <PaywallSection />}{section === "admin" && isAdmin && <AdminPanel />}<footer className="mt-12 flex flex-col gap-3 border-t border-ink/[0.06] py-6 text-[12px] text-ink-4 sm:flex-row sm:items-center sm:justify-between"><span>{footerDisclaimer}</span><span>Konu kapsamı ÖSYM ve MEB programlarına dayanır.</span></footer></div></main>{session && <FocusMode user={user} topics={topics} initialSession={focusSeed} onClose={() => { setSession(false); setFocusSeed(null); }} onGoToCalendar={() => { setSession(false); setFocusSeed(null); navigate("calendar"); }} />}{showPasswordChange && <ChangePasswordDialog onClose={() => setShowPasswordChange(false)} />}{showProfileEdit && <Dialog open onOpenChange={(open) => !open && setShowProfileEdit(false)}><DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl"><DialogTitle>Profilini güncelle</DialogTitle><DialogDescription>Onboarding sırasında verdiğin yanıtları buradan gözden geçirip güncelleyebilirsin.</DialogDescription><OnboardingFlow userName={displayName} startAtStep={0} onClose={() => setShowProfileEdit(false)} onComplete={() => setShowProfileEdit(false)} /></DialogContent></Dialog>} </div></NotebookProvider>;
 }

@@ -1,13 +1,12 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { Bar100, EmptyNote, Panel, PageHeader, Segmented, StatCard, primaryButton, secondaryButton } from "@/components/app/kit";
-import { findClassConflict, fromMinutes, toMinutes } from "@shared/classSchedule";
+import TaskDialog, { taskDraftFor, type TaskDraft } from "@/components/app/TaskDialog";
 import { palette } from "@shared/palette";
 import { formatExamDate, getColorForSubject, netDeltaLabel, subjectOrder, toLocalDateKey, tytSubjectTotals, type MockExam } from "@shared/yksData";
-import { AlertTriangle, BarChart3, CalendarPlus, Clock3, FileText, ListChecks, Plus, Target, TrendingUp, Trophy, Upload, X } from "lucide-react";
+import { AlertTriangle, BarChart3, CalendarPlus, Clock3, FileText, ListChecks, Plus, Target, TrendingUp, Trophy, Upload } from "lucide-react";
 import { useMemo, useState } from "react";
 import { CartesianGrid, ComposedChart, Area, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { toast } from "sonner";
 
 type ExamKind = "TYT" | "AYT";
 type Range = "all" | "30" | "90";
@@ -20,47 +19,6 @@ const netOf = (exam: MockExam) => Object.values(exam.subjects).reduce((sum, valu
 /** Aynı türden bir önceki denemeye göre fark (TYT ile AYT kıyaslanmaz). */
 export function previousOfSameKind(exams: MockExam[], exam: MockExam) {
   return exams.filter((item) => item !== exam && kindOf(item) === kindOf(exam) && item.date <= exam.date).sort((a, b) => b.date.localeCompare(a.date))[0];
-}
-
-type TaskDraft = { subject: string; topic: string; date: string; time: string; minutes: string; questions: string };
-
-/** Analizden çalışma görevi: seçilen gün/saate takvime tek oturum ekler (ders programıyla çakışma kontrolü dahil). */
-function TaskDialog({ draft, onChange, onClose }: { draft: TaskDraft; onChange: (draft: TaskDraft) => void; onClose: () => void }) {
-  const utils = trpc.useUtils();
-  const schedule = trpc.classSchedule.get.useQuery(undefined, { retry: false });
-  const save = trpc.calendar.savePlan.useMutation({ onSuccess: () => { utils.calendar.snapshot.invalidate(); toast.success("Görev takvime eklendi."); onClose(); }, onError: () => toast.error("Görev eklenemedi, tekrar dener misin?") });
-  const submit = () => {
-    const minutes = Math.max(10, Math.min(240, Number(draft.minutes) || 40));
-    const start = toMinutes(draft.time);
-    const day = new Date(`${draft.date}T12:00:00`);
-    if (!/^\d{2}:\d{2}$/.test(draft.time) || Number.isNaN(day.getTime())) { toast.error("Tarih ve saati kontrol et."); return; }
-    if (start + minutes > 23 * 60 + 30) { toast.error("Görev 23:30'dan önce bitmeli."); return; }
-    const conflict = findClassConflict(schedule.data?.blocks ?? [], day, start, minutes);
-    if (conflict) { toast.error(`Bu saat ${conflict.label} (${conflict.startTime}–${conflict.endTime}) ile çakışıyor.`); return; }
-    const startsAt = new Date(`${draft.date}T${draft.time}:00`);
-    const weekEnd = new Date(startsAt); weekEnd.setDate(weekEnd.getDate() + 1);
-    save.mutate({ title: "Deneme analizi görevleri", weekStart: startsAt.toISOString(), weekEnd: weekEnd.toISOString(), summary: "Deneme analizindeki yanlış ve boşlardan oluşturulan görev.", source: "manual", sessions: [{ sessionDate: startsAt.toISOString(), title: `${draft.subject} · ${draft.topic}`, subject: draft.subject, topic: draft.topic, kind: "Soru çözümü", plannedMinutes: minutes, ...(Number(draft.questions) > 0 ? { targetQuestions: Number(draft.questions) } : {}) }] });
-  };
-  return (
-    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div className="modal-card max-w-[420px]">
-        <div className="flex items-start justify-between gap-3">
-          <div><p className="text-[13px] font-semibold text-brand">Analizden görev</p><h2 className="mt-1 text-[20px] font-extrabold text-ink">{draft.subject} · {draft.topic}</h2><p className="mt-1 text-[13px] text-ink-3">Bu konudaki yanlış ve boşların için takvimine bir soru çözümü oturumu ekle.</p></div>
-          <button onClick={onClose} className="rounded-lg p-2 text-ink-4 hover:bg-paper" aria-label="Kapat"><X size={17} /></button>
-        </div>
-        <div className="mt-5 grid grid-cols-2 gap-3">
-          <label className="block"><span className="form-label">Gün</span><input type="date" value={draft.date} min={toLocalDateKey()} onChange={(event) => onChange({ ...draft, date: event.target.value })} className="form-input" /></label>
-          <label className="block"><span className="form-label">Saat</span><input type="time" value={draft.time} onChange={(event) => onChange({ ...draft, time: event.target.value })} className="form-input" /></label>
-          <label className="block"><span className="form-label">Süre (dk)</span><input type="number" min={10} max={240} value={draft.minutes} onChange={(event) => onChange({ ...draft, minutes: event.target.value })} className="form-input" /></label>
-          <label className="block"><span className="form-label">Soru hedefi</span><input type="number" min={0} max={200} value={draft.questions} onChange={(event) => onChange({ ...draft, questions: event.target.value })} className="form-input" /></label>
-        </div>
-        <div className="mt-6 flex justify-end gap-2">
-          <button onClick={onClose} className={secondaryButton}>Vazgeç</button>
-          <button onClick={submit} disabled={save.isPending} className={primaryButton}><CalendarPlus size={16} /> {save.isPending ? "Ekleniyor…" : "Takvime ekle"}</button>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 export default function ExamsDashboard({ exams, onAddExam, onAddScan, onUpload }: { exams: MockExam[]; onAddExam: () => void; onAddScan: () => void; onUpload: () => void }) {
@@ -111,11 +69,8 @@ export default function ExamsDashboard({ exams, onAddExam, onAddScan, onUpload }
   const timeRows = latest ? subjectOrder.map((name) => ({ name, minutes: latest.timeSpent?.[name] ?? 0 })).filter((row) => row.minutes > 0) : [];
   const totalTime = timeRows.reduce((sum, row) => sum + row.minutes, 0);
 
-  const openTask = (row: { subject: string; topic: string; wrong: number; blank: number }) => {
-    const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
-    const time = profile?.preferredStudyStartTime && /^\d{2}:\d{2}$/.test(profile.preferredStudyStartTime) ? profile.preferredStudyStartTime : "17:00";
-    setTask({ subject: row.subject, topic: row.topic, date: toLocalDateKey(tomorrow), time: fromMinutes(toMinutes(time)), minutes: "40", questions: String(Math.min(40, Math.max(10, (row.wrong + row.blank) * 3))) });
-  };
+  const openTask = (row: { subject: string; topic: string; wrong: number; blank: number }) =>
+    setTask(taskDraftFor({ subject: row.subject, topic: row.topic, source: "Deneme analizi görevleri", questions: Math.min(40, Math.max(10, (row.wrong + row.blank) * 3)), preferredStart: profile?.preferredStudyStartTime }));
 
   return (
     <div className="space-y-5">
@@ -250,7 +205,7 @@ export default function ExamsDashboard({ exams, onAddExam, onAddScan, onUpload }
         )}
       </Panel>
 
-      {task && <TaskDialog draft={task} onChange={setTask} onClose={() => setTask(null)} />}
+      {task && <TaskDialog draft={task} description="Bu konudaki yanlış ve boşların için takvimine bir çalışma oturumu ekle." onChange={setTask} onClose={() => setTask(null)} />}
     </div>
   );
 }
