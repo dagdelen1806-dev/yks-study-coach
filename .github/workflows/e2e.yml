@@ -14,7 +14,8 @@ concurrency:
 
 jobs:
   smoke:
-    runs-on: ubuntu-latest
+    # Sabit sürüm: ubuntu-latest 26.04'e geçti ve Playwright 1.56'nın Chromium'u orada kurulamıyor.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
       mysql:
