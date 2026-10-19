@@ -204,6 +204,13 @@
       "when": 1792428595218,
       "tag": "0028_weekly_digest",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "5",
+      "when": 1792430560850,
+      "tag": "0029_app_errors",
+      "breakpoints": true
     }
   ]
 }

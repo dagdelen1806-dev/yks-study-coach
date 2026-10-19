@@ -4,6 +4,7 @@ import { registerLocalAuthRoutes } from "./localAuth";
 import { registerEmailVerificationRoutes } from "./emailVerification";
 import { registerNoteAttachmentRoutes } from "../notes/attachmentRoutes";
 import { registerWeeklyDigestRoutes } from "../digest/weeklyDigest";
+import { errorLogMiddleware, recordAppError, registerErrorLogRoutes } from "../errors/errorLog";
 import { registerWebhookRoutes } from "./webhooks";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
@@ -31,12 +32,19 @@ export function createApiApp(): Express {
   registerLocalAuthRoutes(app);
   registerEmailVerificationRoutes(app);
   registerWeeklyDigestRoutes(app);
+  registerErrorLogRoutes(app);
   registerNoteAttachmentRoutes(app);
   app.use(
     "/api/trpc",
     createExpressMiddleware({
       router: appRouter,
       createContext,
+      // Yalnızca beklenmeyen hatalar kaydedilir; BAD_REQUEST/UNAUTHORIZED gibi kullanıcıya
+      // gösterilen mesajlar hata değil, akışın parçası.
+      onError: ({ error, path, ctx }) => {
+        if (error.code !== "INTERNAL_SERVER_ERROR") return;
+        void recordAppError({ source: "server", message: error.cause?.message ?? error.message, stack: error.cause?.stack ?? error.stack, path: `trpc ${path ?? "?"}`, userId: ctx?.user?.id ?? null });
+      },
     })
   );
 
@@ -63,6 +71,9 @@ export function createApiApp(): Express {
       res.status(500).json({ ok: false, error: error instanceof Error ? error.message : "unknown error" });
     }
   });
+
+  // Rotalarda yakalanmayan hatalar: en sonda (Express hata yakalayıcısı 4 parametreli olmalı).
+  app.use(errorLogMiddleware);
 
   return app;
 }

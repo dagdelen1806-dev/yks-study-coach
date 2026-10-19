@@ -1,6 +1,7 @@
 import { router } from "../../_core/trpc";
 import { adminAnalyticsRouter } from "./analytics";
 import { adminAuditRouter } from "./audit";
+import { adminErrorsRouter } from "./errors";
 import { adminPaymentsRouter } from "./payments";
 import { adminSubscriptionsRouter } from "./subscriptions";
 import { adminSystemRouter } from "./system";
@@ -24,4 +25,5 @@ export const adminRouter = router({
   payments: adminPaymentsRouter,
   system: adminSystemRouter,
   orgs: adminOrgsRouter,
+  errors: adminErrorsRouter,
 });

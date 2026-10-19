@@ -9,6 +9,7 @@ import AdminPaymentsPage from "./AdminPaymentsPage";
 import AdminAuditPage from "./AdminAuditPage";
 import AdminCatalogPage from "./AdminCatalogPage";
 import AdminOrgsPage from "./AdminOrgsPage";
+import AdminErrorsPage from "./AdminErrorsPage";
 
 const TABS = [
   { key: "dashboard", label: "Panel" },
@@ -19,6 +20,7 @@ const TABS = [
   { key: "catalog", label: "Kaynak Kataloğu" },
   { key: "orgs", label: "Kurumlar" },
   { key: "audit", label: "Denetim Kayıtları" },
+  { key: "errors", label: "Hatalar" },
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
 
@@ -49,6 +51,7 @@ export default function AdminPanel() {
       {tab === "catalog" && <AdminCatalogPage />}
       {tab === "orgs" && <AdminOrgsPage />}
       {tab === "audit" && <AdminAuditPage />}
+      {tab === "errors" && <AdminErrorsPage />}
     </div>
   );
 }

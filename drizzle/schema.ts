@@ -1009,6 +1009,27 @@ export const featureUsageLogs = mysqlTable("feature_usage_logs", {
   userFeatureIdx: index("feature_usage_logs_user_feature_idx").on(table.userId, table.featureKey, table.usedAt),
 }));
 
+// Uygulama hataları (Admin → Hatalar). Aynı hata tek satırda toplanır: `fingerprint`
+// kaynak + mesaj + ilk yığın satırından türer, tekrar görülünce `count` artar ve
+// çözülmüş hata yeniden açılır (`resolvedAt` boşalır).
+export const appErrors = mysqlTable("app_errors", {
+  id: int("id").autoincrement().primaryKey(),
+  fingerprint: varchar("fingerprint", { length: 64 }).notNull(),
+  source: mysqlEnum("source", ["client", "server"]).notNull(),
+  message: varchar("message", { length: 500 }).notNull(),
+  stack: text("stack"),
+  path: varchar("path", { length: 300 }),
+  lastUserId: int("lastUserId"),
+  userAgent: varchar("userAgent", { length: 300 }),
+  count: int("count").default(1).notNull(),
+  firstSeenAt: timestamp("firstSeenAt").defaultNow().notNull(),
+  lastSeenAt: timestamp("lastSeenAt").defaultNow().notNull(),
+  resolvedAt: timestamp("resolvedAt"),
+}, (table) => ({
+  fingerprintIdx: uniqueIndex("app_errors_fingerprint_idx").on(table.fingerprint),
+  lastSeenIdx: index("app_errors_last_seen_idx").on(table.lastSeenAt),
+}));
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type StudentProfile = typeof studentProfiles.$inferSelect;
