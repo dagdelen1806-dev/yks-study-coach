@@ -13,13 +13,17 @@ const auditLogs: Array<{ userId: number; adminId: number | null; action: string 
 const usageLogs: Array<{ userId: number; featureKey: string; usedAt: Date }> = [];
 let nextId = 1;
 
-function seedPlan(plan: Partial<SubscriptionPlan> & { code: string; tier: "free" | "premium"; trialDays: number; billingPeriod: "none" | "monthly" | "yearly" }) {
+function seedPlan(plan: Partial<SubscriptionPlan> & { code: string; tier: SubscriptionPlan["tier"]; trialDays: number; billingPeriod: "none" | "monthly" | "yearly" }) {
   const row = { id: nextId++, name: plan.code, description: null, price: 0, currency: "TRY", storeProductId: null, provider: null, isActive: 1, metadata: null, createdAt: new Date(), updatedAt: new Date(), ...plan } as SubscriptionPlan;
   plans.set(plan.code, row);
   return row;
 }
 
+// Öğrencinin ankette seçtiği sınav yılı (yıllık planın süresi buna göre).
+const examYears = new Map<number, number>();
+
 vi.mock("./subscriptions/subscriptionDb", () => ({
+  getStudentExamYear: vi.fn(async (userId: number) => examYears.get(userId) ?? null),
   getPlanByCode: vi.fn(async (code: string) => plans.get(code)),
   getPlanById: vi.fn(async (id: number) => Array.from(plans.values()).find((p) => p.id === id)),
   listActivePlans: vi.fn(async () => Array.from(plans.values())),
@@ -71,6 +75,7 @@ vi.mock("./subscriptions/subscriptionDb", () => ({
 
 const { getCurrentSubscription, getEntitlements, hasEntitlement, isPremium, assertUsageAvailable, recordFeatureUsage, PremiumRequiredError, UsageLimitExceededError } = await import("./subscriptions/entitlementService");
 const { processWebhookEvent } = await import("./subscriptions/webhookProcessor");
+const { nextYksEnd } = await import("../shared/yksCalendar");
 
 // Prod akışında `metredFeatureProcedure` (server/_core/trpc.ts) bunu iki adımda
 // yapar: önce kota kontrolü, GERÇEK işlem başarılı olursa kayıt (spec §50/§51 —
@@ -204,6 +209,34 @@ describe("USAGE LIMITS — free vs premium kotası", () => {
 
   it("free kullanıcı premium-exclusive bir özelliği (limiti tanımsız) kullanamaz", async () => {
     await expect(assertUsageAvailable(12, "ADVANCED_ANALYTICS" as never)).rejects.toThrow(PremiumRequiredError);
+  });
+});
+
+describe("KADEMELER — kotalar ve YKS'ye kadar süren yıllık", () => {
+  beforeEach(() => {
+    seedPlan({ code: "BASIC_MONTHLY", tier: "basic", billingPeriod: "monthly", trialDays: 10, price: 24900 });
+    seedPlan({ code: "BASIC_YEARLY", tier: "basic", billingPeriod: "yearly", trialDays: 10, price: 239900 });
+    seedPlan({ code: "PRO_MONTHLY", tier: "premium_plus", billingPeriod: "monthly", trialDays: 10, price: 249900 });
+  });
+
+  it("Temel abone Temel kotasında durur, Pro abone aynı kullanımla devam eder", async () => {
+    await processWebhookEvent({ provider: "mock", eventId: "tier-1", eventType: "checkout.completed", payload: { userId: 30, planCode: "BASIC_MONTHLY" }, rawPayloadForAudit: {} });
+    await processWebhookEvent({ provider: "mock", eventId: "tier-2", eventType: "checkout.completed", payload: { userId: 31, planCode: "PRO_MONTHLY" }, rawPayloadForAudit: {} });
+    for (let i = 0; i < 8; i++) { await simulateSuccessfulUsage(30, "AI_STUDY_PLAN"); await simulateSuccessfulUsage(31, "AI_STUDY_PLAN"); }
+    await expect(assertUsageAvailable(30, "AI_STUDY_PLAN")).rejects.toThrow(UsageLimitExceededError); // Temel: ayda 8
+    await expect(assertUsageAvailable(31, "AI_STUDY_PLAN")).resolves.toBeDefined(); // Pro: ayda 150
+    expect((await getEntitlements(30)).entitlements).toContain("ADVANCED_ANALYTICS"); // kademeler yalnız kotada ayrılır
+  });
+
+  it("yıllık plan, sınav yılı yoksa bir sonraki YKS'nin son günü sona erer", async () => {
+    await processWebhookEvent({ provider: "mock", eventId: "tier-3", eventType: "checkout.completed", payload: { userId: 32, planCode: "BASIC_YEARLY" }, rawPayloadForAudit: {} });
+    expect(subscriptionsByUser.get(32)?.currentPeriodEnd?.getTime()).toBe(nextYksEnd(new Date()).endsAt.getTime());
+  });
+
+  it("yıllık plan, ankette seçilen sınav yılının YKS'si bitince sona erer", async () => {
+    examYears.set(33, new Date().getFullYear() + 2);
+    await processWebhookEvent({ provider: "mock", eventId: "tier-4", eventType: "checkout.completed", payload: { userId: 33, planCode: "BASIC_YEARLY" }, rawPayloadForAudit: {} });
+    expect(subscriptionsByUser.get(33)?.currentPeriodEnd?.getTime()).toBe(nextYksEnd(new Date(), new Date().getFullYear() + 2).endsAt.getTime());
   });
 });
 

@@ -17,6 +17,8 @@ import { formatDate, subscriptionStatusLabel } from "./adminFormat";
 export default function AdminSubscriptionsPage() {
   const utils = trpc.useUtils();
   const list = trpc.admin.subscriptions.list.useQuery();
+  // Elle verilecek plan listesi sunucudaki ücretli planlardan gelir (fiyat/plan değişince güncel kalır).
+  const paidPlans = (trpc.subscription.getPlans.useQuery().data ?? []).filter((plan) => plan.tier !== "free");
   const [grantPlan, setGrantPlan] = useState("PREMIUM_MONTHLY");
   const [grantDays, setGrantDays] = useState("30");
   const [grantUserId, setGrantUserId] = useState("");
@@ -33,7 +35,7 @@ export default function AdminSubscriptionsPage() {
         <p className="mt-1 text-[12px] text-ink-4">Gerçek bir ödeme olmadan, admin kararıyla verilir — ayrı bir "manuel" kaynak olarak işaretlenir, gerçek sağlayıcı aboneliğiyle karışmaz.</p>
         <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_1fr_100px_1.4fr_auto]">
           <input value={grantUserId} onChange={(event) => setGrantUserId(event.target.value)} placeholder="Kullanıcı ID" className="form-input text-[13px]" />
-          <select value={grantPlan} onChange={(event) => setGrantPlan(event.target.value)} className="form-input text-[13px]"><option value="PREMIUM_MONTHLY">Premium Aylık</option><option value="PREMIUM_YEARLY">Premium Yıllık</option></select>
+          <select value={grantPlan} onChange={(event) => setGrantPlan(event.target.value)} className="form-input text-[13px]">{paidPlans.map((plan) => <option key={plan.code} value={plan.code}>{plan.name}</option>)}</select>
           <input type="number" min="1" value={grantDays} onChange={(event) => setGrantDays(event.target.value)} placeholder="gün" className="form-input text-[13px]" />
           <input value={grantReason} onChange={(event) => setGrantReason(event.target.value)} placeholder="Neden (audit log'a yazılır)" className="form-input text-[13px]" />
           <Button

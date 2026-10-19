@@ -1,8 +1,10 @@
 import { assertValidSubscriptionTransition, type SubscriptionStatus } from "../../shared/subscriptionStateMachine";
+import { planPeriodEnd, yksTermPrice } from "../../shared/yksCalendar";
 import {
   createPayment,
   ensureFreeSubscription,
   getPlanByCode,
+  getStudentExamYear,
   getSubscriptionByUserId,
   isDuplicateEvent,
   markEventProcessed,
@@ -105,6 +107,16 @@ async function applyCanonicalEvent(eventType: CanonicalWebhookEventType, payload
   }
 }
 
+/**
+ * Tahsil edilecek tutar: aylık plan kayıtlı fiyatından; yıllık ("sınavına kadar") plan öğrencinin
+ * sınavına kalan süreye göre (shared/yksCalendar.ts yksTermPrice) — ödeme ekranında gösterilenle aynı hesap.
+ */
+async function chargeAmountFor(plan: { code: string; billingPeriod: string; price: number }, now: Date, examYear: number | null): Promise<number> {
+  if (plan.billingPeriod !== "yearly") return plan.price;
+  const monthly = await getPlanByCode(plan.code.replace(/_YEARLY$/, "_MONTHLY"));
+  return monthly ? yksTermPrice({ monthlyPrice: monthly.price, now, examYear }).price : plan.price;
+}
+
 async function handleCheckoutCompleted(payload: CanonicalWebhookPayload): Promise<void> {
   if (!payload.planCode) throw new Error("payload.planCode eksik");
   const plan = await getPlanByCode(payload.planCode);
@@ -116,8 +128,9 @@ async function handleCheckoutCompleted(payload: CanonicalWebhookPayload): Promis
   // sessizce hiçbir şey değiştirmez.
   const existing = await ensureFreeSubscription(payload.userId);
   const now = new Date();
-  const periodDays = payload.periodDays ?? (plan.billingPeriod === "yearly" ? 365 : 30);
-  const periodEnd = new Date(now.getTime() + periodDays * 24 * 60 * 60 * 1000);
+  // Yıllık plan öğrencinin ankette seçtiği sınavın sonuna kadar sürer (shared/yksCalendar.ts); sağlayıcı süreyi açıkça verdiyse o geçerli.
+  const examYear = await getStudentExamYear(payload.userId);
+  const periodEnd = payload.periodDays ? new Date(now.getTime() + payload.periodDays * 24 * 60 * 60 * 1000) : planPeriodEnd(plan.billingPeriod, now, examYear);
 
   // "trial yalnızca bir kez" (spec §11) — bu abonelik satırı DAHA ÖNCE hiç
   // trialStartedAt almadıysa VE plan trialDays>0 ise trialing'e girer;
@@ -133,7 +146,7 @@ async function handleCheckoutCompleted(payload: CanonicalWebhookPayload): Promis
     subscriptionId: existing?.id ?? null,
     provider: "web",
     providerPaymentId: payload.providerPaymentId ?? null,
-    amount: payload.amount ?? plan.price,
+    amount: payload.amount ?? await chargeAmountFor(plan, now, examYear),
     currency: payload.currency ?? plan.currency,
     status: eligibleForTrial ? "authorized" : "paid",
     paymentType: eligibleForTrial ? "trial_start" : "initial",
@@ -164,11 +177,11 @@ async function handleSubscriptionRenewed(payload: CanonicalWebhookPayload): Prom
   const plan = await getPlanByCode(payload.planCode ?? "");
   assertValidSubscriptionTransition(existing.status as SubscriptionStatus, "active");
 
-  const periodDays = payload.periodDays ?? (plan?.billingPeriod === "yearly" ? 365 : 30);
   const now = new Date();
-  const periodEnd = new Date(now.getTime() + periodDays * 24 * 60 * 60 * 1000);
+  const examYear = await getStudentExamYear(payload.userId);
+  const periodEnd = payload.periodDays ? new Date(now.getTime() + payload.periodDays * 24 * 60 * 60 * 1000) : planPeriodEnd(plan?.billingPeriod ?? "monthly", now, examYear);
 
-  const paymentId = await createPayment({ userId: payload.userId, subscriptionId: existing.id, provider: "web", providerPaymentId: payload.providerPaymentId ?? null, amount: payload.amount ?? plan?.price ?? 0, currency: payload.currency ?? plan?.currency ?? "TRY", status: "paid", paymentType: "renewal", paidAt: now });
+  const paymentId = await createPayment({ userId: payload.userId, subscriptionId: existing.id, provider: "web", providerPaymentId: payload.providerPaymentId ?? null, amount: payload.amount ?? (plan ? await chargeAmountFor(plan, now, examYear) : 0), currency: payload.currency ?? plan?.currency ?? "TRY", status: "paid", paymentType: "renewal", paidAt: now });
 
   await updateSubscription(payload.userId, { status: "active", currentPeriodStart: now, currentPeriodEnd: periodEnd, latestPaymentId: paymentId });
   await writeAuditLog({ userId: payload.userId, action: "subscription_renewed", oldState: { status: existing.status }, newState: { status: "active" }, metadata: { paymentId } });

@@ -1,4 +1,4 @@
-import { FEATURE_KEYS, FEATURE_USAGE_LIMITS, FREE_TIER_LIMITS, featuresForTier, type FeatureKey, type PlanTier } from "../../shared/entitlements";
+import { FEATURE_KEYS, FREE_TIER_LIMITS, featuresForTier, usageLimitFor, type FeatureKey, type PlanTier } from "../../shared/entitlements";
 import { resolveEffectiveStatus, statusGrantsPremiumAccess, type SubscriptionStatus } from "../../shared/subscriptionStateMachine";
 import { countFeatureUsage, ensureFreeSubscription, getPlanById, getSubscriptionByUserId, recordFeatureUsage, updateSubscription, writeAuditLog } from "./subscriptionDb";
 
@@ -110,8 +110,9 @@ export async function requireEntitlement(userId: number, feature: FeatureKey): P
   if (!has) throw new PremiumRequiredError(feature);
 }
 
-function limitForTier(feature: FeatureKey, isPremium: boolean) {
-  return isPremium ? FEATURE_USAGE_LIMITS[feature] : FREE_TIER_LIMITS[feature];
+/** Ücretli erişimi geçerli değilse (ör. süresi dolmuş) ücretsiz kotalar uygulanır. */
+function limitForSnapshot(feature: FeatureKey, snapshot: EntitlementSnapshot) {
+  return usageLimitFor(snapshot.isPremium ? snapshot.tier : "free", feature);
 }
 
 /**
@@ -136,7 +137,7 @@ export async function assertUsageAvailable(userId: number, feature: FeatureKey):
   if (!snapshot.isPremium && !FREE_TIER_LIMITS[feature]) {
     throw new PremiumRequiredError(feature);
   }
-  const limit = limitForTier(feature, snapshot.isPremium);
+  const limit = limitForSnapshot(feature, snapshot);
   if (limit) {
     const used = await countFeatureUsage(userId, feature, limit.windowDays);
     if (used >= limit.maxUses) throw new UsageLimitExceededError(feature, limit.maxUses, limit.windowDays);
@@ -159,7 +160,7 @@ export async function getUsageSummaryForUser(userId: number): Promise<FeatureUsa
   const snapshot = await getEntitlements(userId);
   const summaries: FeatureUsageSummary[] = [];
   for (const feature of FEATURE_KEYS) {
-    const limit = limitForTier(feature, snapshot.isPremium);
+    const limit = limitForSnapshot(feature, snapshot);
     if (!limit) {
       // Ya bu tier'da hiç erişimi yok (premium-exclusive + free) ya da gerçekten sınırsız.
       const hasAccess = snapshot.isPremium ? snapshot.entitlements.includes(feature) : Boolean(FREE_TIER_LIMITS[feature]);

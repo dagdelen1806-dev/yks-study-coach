@@ -1,10 +1,12 @@
 import { and, desc, eq, gte, sql } from "drizzle-orm";
+import type { PlanTier } from "../../shared/entitlements";
 import { phoneFromOpenId } from "../_core/loginIdentifier";
 import { getDb } from "../db";
 import {
   featureUsageLogs,
   paymentEvents,
   payments,
+  studentProfiles,
   subscriptionAuditLogs,
   subscriptionPlans,
   subscriptions,
@@ -29,6 +31,14 @@ export async function listActivePlans(): Promise<SubscriptionPlan[]> {
   return db.select().from(subscriptionPlans).where(eq(subscriptionPlans.isActive, 1));
 }
 
+/** Öğrencinin başlangıç anketinde seçtiği sınav yılı: yıllık planın süresi ve fiyatı buna göre (shared/yksCalendar.ts). */
+export async function getStudentExamYear(userId: number): Promise<number | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.select({ examYear: studentProfiles.examYear }).from(studentProfiles).where(eq(studentProfiles.userId, userId)).limit(1);
+  return row?.examYear ?? null;
+}
+
 export async function getPlanByCode(code: string): Promise<SubscriptionPlan | undefined> {
   const db = await getDb();
   if (!db) return undefined;
@@ -44,7 +54,7 @@ export async function getPlanById(id: number): Promise<SubscriptionPlan | undefi
 }
 
 /** Idempotent — var olan bir plan kodu tekrar seed edilirse günceller, çoğaltmaz. */
-export async function upsertPlan(input: { code: string; name: string; description?: string | null; tier: "free" | "premium" | "premium_plus"; billingPeriod: "none" | "monthly" | "yearly"; price: number; currency?: string; trialDays?: number; storeProductId?: string | null; provider?: string | null }): Promise<void> {
+export async function upsertPlan(input: { code: string; name: string; description?: string | null; tier: PlanTier; billingPeriod: "none" | "monthly" | "yearly"; price: number; currency?: string; trialDays?: number; storeProductId?: string | null; provider?: string | null }): Promise<void> {
   const db = await getDb();
   if (!db) return;
   const existing = await getPlanByCode(input.code);

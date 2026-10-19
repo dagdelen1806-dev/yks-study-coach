@@ -917,7 +917,8 @@ export const subscriptionPlans = mysqlTable("subscription_plans", {
   code: varchar("code", { length: 40 }).notNull().unique(),
   name: varchar("name", { length: 120 }).notNull(),
   description: text("description"),
-  tier: mysqlEnum("tier", ["free", "premium", "premium_plus"]).default("free").notNull(),
+  // basic = Temel, premium = Premium, premium_plus = Pro (bkz. shared/entitlements.ts).
+  tier: mysqlEnum("tier", ["free", "basic", "premium", "premium_plus"]).default("free").notNull(),
   billingPeriod: mysqlEnum("billingPeriod", ["none", "monthly", "yearly"]).default("none").notNull(),
   // Kuruş cinsinden (minor unit) — ondalık/float fiyat yuvarlama hatalarından kaçınmak için.
   price: int("price").default(0).notNull(),

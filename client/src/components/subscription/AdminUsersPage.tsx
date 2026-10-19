@@ -20,6 +20,7 @@ export default function AdminUsersPage() {
   const [activity, setActivity] = useState("");
   const [page, setPage] = useState(1);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+  const plans = trpc.subscription.getPlans.useQuery().data ?? [];
   const pageSize = 20;
 
   // Debounced search (spec §8) — yazarken her tuşta istek atmaz.
@@ -47,7 +48,7 @@ export default function AdminUsersPage() {
           <div className="relative flex-1 min-w-[200px]"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-4" size={15} /><input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} placeholder="İsim, e-posta veya telefon ara..." className="form-input h-9 w-full pl-9 text-[13px]" /></div>
           <select value={approvalStatus} onChange={(event) => { setApprovalStatus(event.target.value); setPage(1); }} className="form-input h-9 w-auto text-[12px]"><option value="">Tüm onay durumları</option><option value="pending">Onay bekliyor</option><option value="approved">Onaylı</option><option value="rejected">Reddedildi</option></select>
           <select value={accountStatus} onChange={(event) => { setAccountStatus(event.target.value); setPage(1); }} className="form-input h-9 w-auto text-[12px]"><option value="">Tüm hesap durumları</option><option value="active">Aktif</option><option value="suspended">Askıda</option></select>
-          <select value={planCode} onChange={(event) => { setPlanCode(event.target.value); setPage(1); }} className="form-input h-9 w-auto text-[12px]"><option value="">Tüm planlar</option><option value="FREE">Free</option><option value="PREMIUM_MONTHLY">Premium Aylık</option><option value="PREMIUM_YEARLY">Premium Yıllık</option></select>
+          <select value={planCode} onChange={(event) => { setPlanCode(event.target.value); setPage(1); }} className="form-input h-9 w-auto text-[12px]"><option value="">Tüm planlar</option>{plans.map((plan) => <option key={plan.code} value={plan.code}>{plan.name}</option>)}</select>
           <select value={activity} onChange={(event) => { setActivity(event.target.value); setPage(1); }} className="form-input h-9 w-auto text-[12px]"><option value="">Tüm aktivite</option><option value="today">Bugün aktif</option><option value="week">Bu hafta aktif</option><option value="inactive">7+ gün pasif</option></select>
         </div>
       </Card>
