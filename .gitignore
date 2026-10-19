@@ -119,3 +119,8 @@ temp/
 
 # OCR hata ayıklama / benchmark ara görüntüleri (yerel)
 .ocr-debug/
+
+# Duman testi (Playwright) çıktıları ve tarayıcı otomasyonu ekran görüntüleri
+playwright-report/
+test-results/
+.playwright-mcp/
