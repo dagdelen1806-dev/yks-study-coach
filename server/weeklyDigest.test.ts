@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import { buildWeeklyDigest, weeklyDigestWindow, type DigestLog, type DigestSession } from "../shared/weeklyDigest";
 import { buildWeeklyDigestEmail } from "./_core/emails/weeklyDigestEmail";
 
-const start = new Date(2026, 9, 12, 0, 0);
-const end = new Date(2026, 9, 19, 0, 0);
-const day = (offset: number, hour = 17) => new Date(2026, 9, 12 + offset, hour, 0);
+// Tarihler açıkça İstanbul saatiyle (UTC+3) kurulur: test makinenin saat diliminden bağımsız
+// (CI UTC'de çalışır). Pencere: Pazartesi 12 Ekim 00:00 → Pazartesi 19 Ekim 00:00 İstanbul.
+const istanbul = (day: number, hour = 0) => new Date(Date.UTC(2026, 9, day, hour - 3, 0));
+const start = istanbul(12);
+const end = istanbul(19);
+const day = (offset: number, hour = 17) => istanbul(12 + offset, hour);
 const session = (offset: number, status: DigestSession["status"]): DigestSession => ({ sessionDate: day(offset), status, plannedMinutes: 40 });
 const log = (offset: number, subject: string, minutes: number, questions = 0, correct = 0): DigestLog => ({ studyDate: day(offset), subject, minutes, questions, correct });
 
