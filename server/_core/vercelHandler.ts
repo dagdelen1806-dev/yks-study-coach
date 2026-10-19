@@ -45,8 +45,24 @@ process.on("unhandledRejection", (reason) => {
  * çökertmiyoruz.
  */
 const app = createApiApp();
-seedSubscriptionPlans().catch((error) => {
-  console.error("[vercelHandler] seedSubscriptionPlans başarısız (DATABASE_URL kontrol et):", error);
+
+// Soğuk başlangıçta veritabanı bağlantısı zaman aşımına uğrayabiliyor (Ekim 2026'da yaşandı:
+// `connect ETIMEDOUT`, yeni plan fiyatları yazılamadı ve ısınmış fonksiyon eski fiyatlarla kaldı).
+// Bu yüzden birkaç kez, artan aralıklarla denenir; yine olmazsa scripts/seed-plans.ts elle çalıştırılır.
+async function seedPlansWithRetry(attempts = 4) {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      await seedSubscriptionPlans();
+      return;
+    } catch (error) {
+      if (attempt === attempts) throw error;
+      console.warn(`[vercelHandler] seedSubscriptionPlans ${attempt}. deneme başarısız, yeniden denenecek:`, error instanceof Error ? error.message : error);
+      await new Promise((resolve) => setTimeout(resolve, 1000 * 2 ** attempt));
+    }
+  }
+}
+seedPlansWithRetry().catch((error) => {
+  console.error("[vercelHandler] seedSubscriptionPlans başarısız (DATABASE_URL kontrol et; elle: scripts/seed-plans.ts):", error);
 });
 
 export default app;
