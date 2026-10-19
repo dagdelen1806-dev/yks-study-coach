@@ -2,6 +2,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { useNotebook } from "@/components/notebook/NotebookProvider";
 import { ReviewDueNotes } from "@/components/notebook/NotebookSection";
+import { GettingStarted } from "./GettingStarted";
 import Illustration, { ILLUSTRATIONS, useIllustrationAvailable } from "@/components/app/Illustration";
 import { AvatarPicker, StudentAvatar } from "@/components/app/Avatar";
 import { Bar100, EmptyNote, LinkButton, Panel, Ring, Segmented, StatCard } from "@/components/app/kit";
@@ -263,6 +264,8 @@ export default function Overview({ topics, exams, onSection, onStartSession, onE
           </div>
           </div>
         </section>
+
+        <GettingStarted exams={exams} onSection={onSection} onStartSession={() => onStartSession()} />
 
         {/* Bugünün hedefleri + son deneme. */}
         <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
