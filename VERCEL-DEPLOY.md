@@ -136,6 +136,10 @@ ve aktif olduğunu doğrulayabilirsin. Devre dışı bırakmak istersen Vercel'e
 - Çalıştırma başına en fazla 90 mail (Resend ücretsiz kotası günde 100);
   ücretli planda `WEEKLY_DIGEST_MAX_PER_RUN` ile artır.
 - Göndermeden önizleme: `npx tsx --env-file=.env scripts/preview-weekly-digest.ts <userId> out.html`.
+- Aynı çalıştırma, öğrencilerden sonra **kurum personeline sınıf özeti** gönderir (migration
+  `0030_teacher_digest`): öğretmen kendisine atanan, koordinatör ve üstü tüm öğrencileri görür;
+  risk kuralları Kurum Paneli ile aynı. Personel mailleri de aynı 90'lık sınırdan düşülür.
+  Önizleme: `... preview-weekly-digest.ts --staff <organization_members.id> out.html`.
 
 ## 6) Bilinen sınırlamalar (mimari farkı nedeniyle)
 

@@ -5,7 +5,7 @@ import type { OutgoingMail } from "../mailer";
 const escapeHtml = (value: string) =>
   value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
 
-const rangeLabel = (start: Date, end: Date) => {
+export const rangeLabel = (start: Date, end: Date) => {
   const last = new Date(end.getTime() - 1);
   const fmt = (date: Date, withMonth: boolean) => date.toLocaleDateString("tr-TR", withMonth ? { day: "numeric", month: "long", timeZone: "Europe/Istanbul" } : { day: "numeric", timeZone: "Europe/Istanbul" });
   const sameMonth = start.toLocaleDateString("tr-TR", { month: "long", timeZone: "Europe/Istanbul" }) === last.toLocaleDateString("tr-TR", { month: "long", timeZone: "Europe/Istanbul" });

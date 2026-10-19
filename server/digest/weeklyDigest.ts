@@ -1,6 +1,5 @@
 import { and, asc, desc, eq, gte, isNotNull, isNull, lt, or } from "drizzle-orm";
 import type { Express } from "express";
-import { SignJWT, jwtVerify } from "jose";
 import { studentProfiles, studyPlanSessions, topicProgress, topicStudyLogs, users, yksTopics } from "../../drizzle/schema";
 import { buildWeeklyDigest, weeklyDigestWindow } from "../../shared/weeklyDigest";
 import { appBaseUrl } from "../_core/emailVerification";
@@ -9,6 +8,8 @@ import { ENV } from "../_core/env";
 import { MailNotConfiguredError, sendMail, type OutgoingMail } from "../_core/mailer";
 import { getDb } from "../db";
 import { getReviewSummary } from "../notes/questionsDb";
+import { runTeacherDigest, setStaffDigestEnabledByMemberId } from "./teacherDigest";
+import { readUnsubscribeToken, unsubscribeUrlFor } from "./unsubscribeToken";
 
 /**
  * Haftalık ilerleme e-postası (pazar akşamı, vercel.json `crons`).
@@ -28,23 +29,7 @@ const DEFAULT_MAX_PER_RUN = Number(process.env.WEEKLY_DIGEST_MAX_PER_RUN) || 90;
 // Vercel fonksiyonu 300 sn'de kesilir; yarıda kalan kişi bir sonraki çalıştırmaya kalsın.
 const TIME_BUDGET_MS = 240_000;
 
-const UNSUBSCRIBE_AUDIENCE = "weekly-digest-unsubscribe";
-const secretKey = () => new TextEncoder().encode(ENV.cookieSecret);
-
-/** Abonelikten çıkma jetonu: kullanıcı id'sine bağlı, süresiz (eski maillerdeki bağlantı da çalışmalı). */
-export async function createUnsubscribeToken(userId: number) {
-  return new SignJWT({}).setProtectedHeader({ alg: "HS256" }).setSubject(String(userId)).setAudience(UNSUBSCRIBE_AUDIENCE).setIssuedAt().sign(secretKey());
-}
-
-export async function readUnsubscribeToken(token: string): Promise<number | null> {
-  try {
-    const { payload } = await jwtVerify(token, secretKey(), { audience: UNSUBSCRIBE_AUDIENCE, algorithms: ["HS256"] });
-    const userId = Number(payload.sub);
-    return Number.isInteger(userId) && userId > 0 ? userId : null;
-  } catch {
-    return null;
-  }
-}
+export const WEEKLY_DIGEST_MAX_PER_RUN = DEFAULT_MAX_PER_RUN;
 
 export async function getWeeklyDigestEnabled(userId: number) {
   const db = await getDb();
@@ -102,7 +87,7 @@ export async function runWeeklyDigest(options: { now?: Date; appUrl: string; max
     if (Date.now() - startedAt > TIME_BUDGET_MS) { result.stoppedEarly = true; break; }
     try {
       const digest = await collectDigest(user.id, start, now);
-      const unsubscribeUrl = `${options.appUrl}/api/email/weekly-digest/unsubscribe?token=${encodeURIComponent(await createUnsubscribeToken(user.id))}`;
+      const unsubscribeUrl = await unsubscribeUrlFor(options.appUrl, "student", user.id);
       const mail = buildWeeklyDigestEmail({ to: user.email!, name: user.preferredName || user.name?.split(" ")[0] || null, digest, start, end: now, appUrl: options.appUrl, unsubscribeUrl });
       if (options.dryRun) { result.previews!.push(mail); continue; }
       await sendMail(mail);
@@ -130,7 +115,11 @@ export function registerWeeklyDigestRoutes(app: Express) {
     if (ENV.isProduction && !secret) { res.status(503).json({ ok: false, error: "CRON_SECRET not set" }); return; }
     if (secret && req.headers.authorization !== `Bearer ${secret}`) { res.status(401).json({ ok: false, error: "unauthorized" }); return; }
     try {
-      const result = await runWeeklyDigest({ appUrl: appBaseUrl(req) });
+      const appUrl = appBaseUrl(req);
+      const students = await runWeeklyDigest({ appUrl });
+      // Öğretmen özetleri aynı günlük kotadan: öğrencilere giden sayı düşülür.
+      const staff = await runTeacherDigest({ appUrl, maxPerRun: Math.max(0, WEEKLY_DIGEST_MAX_PER_RUN - students.sent - students.failed) });
+      const result = { students, staff };
       console.info("[WeeklyDigest]", JSON.stringify(result));
       res.json({ ok: true, result });
     } catch (error) {
@@ -145,15 +134,19 @@ export function registerWeeklyDigestRoutes(app: Express) {
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("Referrer-Policy", "no-referrer");
     if (!(await readUnsubscribeToken(token))) { res.status(400).send(page("Bağlantı geçersiz", `<h1 style="font-size:20px;margin:0 0 8px;">Bağlantı geçersiz</h1><p style="font-size:14px;color:#5d6670;line-height:1.6;">Haftalık özet ayarını uygulamada profil menüsünden değiştirebilirsin.</p><a href="${appBaseUrl(req)}" style="${button}">Pusula'yı aç</a>`)); return; }
-    res.send(page("Haftalık özet", `<h1 style="font-size:20px;margin:0 0 8px;">Haftalık özet e-postaları</h1><p style="font-size:14px;color:#5d6670;line-height:1.6;">Her pazar gelen ilerleme özetini artık almak istemiyor musun?</p><form method="post"><input type="hidden" name="token" value="${token.replace(/"/g, "&quot;")}"><button type="submit" style="${button}">Evet, almak istemiyorum</button></form>`));
+    res.send(page("Haftalık özet", `<h1 style="font-size:20px;margin:0 0 8px;">Haftalık özet e-postaları</h1><p style="font-size:14px;color:#5d6670;line-height:1.6;">Her pazar gelen özeti artık almak istemiyor musun?</p><form method="post"><input type="hidden" name="token" value="${token.replace(/"/g, "&quot;")}"><button type="submit" style="${button}">Evet, almak istemiyorum</button></form>`));
   });
 
   app.post("/api/email/weekly-digest/unsubscribe", async (req, res) => {
     const token = typeof req.body?.token === "string" ? req.body.token : typeof req.query.token === "string" ? req.query.token : "";
-    const userId = await readUnsubscribeToken(token);
+    const target = await readUnsubscribeToken(token);
     res.setHeader("Cache-Control", "no-store");
-    if (!userId) { res.status(400).send(page("Bağlantı geçersiz", `<h1 style="font-size:20px;margin:0;">Bağlantı geçersiz</h1>`)); return; }
-    await setWeeklyDigestEnabled(userId, false);
-    res.send(page("Abonelikten çıktın", `<h1 style="font-size:20px;margin:0 0 8px;">Tamam, artık göndermeyeceğiz</h1><p style="font-size:14px;color:#5d6670;line-height:1.6;">Fikrini değiştirirsen uygulamada profil menüsündeki <strong>Haftalık özet e-postası</strong> seçeneğiyle yeniden açabilirsin.</p><a href="${appBaseUrl(req)}" style="${button}">Pusula'yı aç</a>`));
+    if (!target) { res.status(400).send(page("Bağlantı geçersiz", `<h1 style="font-size:20px;margin:0;">Bağlantı geçersiz</h1>`)); return; }
+    if (target.kind === "staff") await setStaffDigestEnabledByMemberId(target.id, false);
+    else await setWeeklyDigestEnabled(target.id, false);
+    const where = target.kind === "staff"
+      ? "Kurum Paneli'nde sol alttaki <strong>Haftalık sınıf özeti</strong> seçeneğiyle"
+      : "uygulamada profil menüsündeki <strong>Haftalık özet e-postası</strong> seçeneğiyle";
+    res.send(page("Abonelikten çıktın", `<h1 style="font-size:20px;margin:0 0 8px;">Tamam, artık göndermeyeceğiz</h1><p style="font-size:14px;color:#5d6670;line-height:1.6;">Fikrini değiştirirsen ${where} yeniden açabilirsin.</p><a href="${appBaseUrl(req)}${target.kind === "staff" ? "/kurum" : ""}" style="${button}">Pusula'yı aç</a>`));
   });
 }

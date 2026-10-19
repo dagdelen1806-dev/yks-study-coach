@@ -494,6 +494,10 @@ export const organizationMembers = mysqlTable("organization_members", {
   subject: varchar("subject", { length: 60 }),
   // Öğrencinin onayladığı KVKK metin sürümü (organizations.kvkkVersion).
   kvkkVersion: int("kvkkVersion"),
+  // Personelin pazar akşamı aldığı sınıf özeti (server/digest/teacherDigest.ts): üyelik başına,
+  // varsayılan AÇIK. Son gönderim, cron tekrar çalışırsa aynı haftaya ikinci mail gitmesin diye.
+  weeklyDigestOptOut: int("weeklyDigestOptOut").default(0).notNull(),
+  weeklyDigestLastSentAt: timestamp("weeklyDigestLastSentAt"),
 }, (table) => ({
   orgUserUnique: uniqueIndex("organization_members_org_user_unique").on(table.orgId, table.userId),
   userStatusIdx: index("organization_members_user_status_idx").on(table.userId, table.status),

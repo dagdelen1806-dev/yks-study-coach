@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { createHash, randomInt } from "node:crypto";
 import { z } from "zod";
+import { getStaffDigestEnabled, setStaffDigestEnabled } from "../digest/teacherDigest";
 import { findClassConflict, toMinutes } from "../../shared/classSchedule";
 import { effectiveKvkk } from "../../shared/kvkk";
 import { CLASS_GRADES, CLASS_TRACKS, INVITABLE_ROLES, ORG_KINDS, ORG_PLANS, ORG_PLAN_DEFAULT_CREDITS, ORG_PLAN_LABELS, ORG_ROLES, canRequestPlan, membershipState, renewedMembershipEnd, canAssignRole, canInviteRole, generateInviteCode, hasRole, invitationProblem, isStaffRole, normalizeInviteCode, seesAllStudents, summarizeStudent, type RiskKey, type StudentSummary } from "../../shared/org";
@@ -103,6 +104,10 @@ const average = (values: number[]) => (values.length ? Math.round((values.reduce
 export const orgRouter = router({
   /** Kullanıcının aktif kurum üyelikleri: panel yönlendirmesi ve kurum seçici. */
   mine: protectedProcedure.query(({ ctx }) => listMyMemberships(ctx.user.id)),
+
+  /** Personelin pazar akşamı aldığı sınıf özeti (server/digest/teacherDigest.ts); üyelik başına. */
+  myDigest: orgProcedure("teacher").query(async ({ ctx }) => ({ enabled: await getStaffDigestEnabled(ctx.user.id, ctx.membership.orgId) })),
+  setMyDigest: orgProcedure("teacher", { allowInactive: true }).input(z.object({ enabled: z.boolean() })).mutation(async ({ ctx, input }) => ({ enabled: await setStaffDigestEnabled(ctx.user.id, ctx.membership.orgId, input.enabled) })),
 
   overview: orgProcedure("teacher").query(async ({ ctx }) => {
     const students = await visibleStudentsWithSummary(ctx);

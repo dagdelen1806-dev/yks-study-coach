@@ -3,6 +3,7 @@ import { trpc } from "@/lib/trpc";
 import { ROLE_LABELS, isStaffRole, type MembershipState, type OrgRole } from "@shared/org";
 import { Building2, ClipboardList, GraduationCap, LayoutDashboard, LogOut, Mail, Menu, School, Settings, Users, X } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
+import { toast } from "sonner";
 import { useLocation } from "wouter";
 import { ORG_PATHS, type OrgSection } from "./orgShared";
 
@@ -37,6 +38,25 @@ function sectionOf(path: string): { section: OrgSection | "student"; studentId?:
 }
 
 /** Kurum Paneli kabuğu: öğrenci uygulamasından ayrı menü, kurum seçici ve sayfalar. */
+/** Pazar akşamı gelen sınıf özeti e-postası (üyelik başına); yalnızca e-postalı hesapta görünür. */
+function DigestToggle({ orgId }: { orgId: number }) {
+  const utils = trpc.useUtils();
+  const digest = trpc.org.myDigest.useQuery({ orgId }, { retry: false });
+  // İyimser: kutu tıklanınca hemen değişir; kayıt başarısız olursa sunucudaki değere döner.
+  const update = trpc.org.setMyDigest.useMutation({
+    onMutate: ({ enabled }) => utils.org.myDigest.setData({ orgId }, { enabled }),
+    onSuccess: (next) => toast.success(next.enabled ? "Sınıf özeti her pazar e-postana gelecek." : "Sınıf özeti e-postası kapatıldı."),
+    onError: () => { void utils.org.myDigest.invalidate({ orgId }); toast.error("Ayar kaydedilemedi, tekrar dener misin?"); },
+  });
+  if (!digest.data) return null;
+  return (
+    <label className="mt-3 flex cursor-pointer items-center gap-2 text-[12px] text-ink-2">
+      <input type="checkbox" checked={digest.data.enabled} disabled={update.isPending} onChange={(event) => update.mutate({ orgId, enabled: event.target.checked })} className="h-4 w-4 accent-brand" />
+      Haftalık sınıf özeti e-postası
+    </label>
+  );
+}
+
 export default function OrgApp() {
   const { user, logout } = useAuth();
   const [location, setLocation] = useLocation();
@@ -90,6 +110,7 @@ export default function OrgApp() {
         <div className="rounded-2xl border border-rule bg-surface p-3.5">
           <div className="truncate text-[13px] font-semibold text-ink">{user?.name || "Personel"}</div>
           <div className="text-[12px] text-ink-3">{ROLE_LABELS[scope.role]}</div>
+          {user?.email && <DigestToggle orgId={scope.orgId} />}
           <div className="mt-3 flex gap-2">
             <button onClick={() => setLocation("/")} className="flex-1 rounded-lg border border-rule px-2 py-1.5 text-[12px] font-semibold text-ink-2 hover:bg-paper">Öğrenci uygulaması</button>
             <button onClick={() => void logout()} className="rounded-lg border border-rule px-2 py-1.5 text-ink-3 hover:bg-paper" aria-label="Çıkış yap" title="Çıkış yap"><LogOut size={14} /></button>
