@@ -7,6 +7,7 @@ import superjson from "superjson";
 import App from "./App";
 import { startLogin } from "./const";
 import "./lib/installPrompt";
+import "./lib/modalEscape";
 import "./index.css";
 
 // Bölümler arası geçişte aynı veriler (profil, takvim, denemeler…) her seferinde yeniden
