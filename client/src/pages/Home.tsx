@@ -9,6 +9,8 @@ import type { CoverDraft } from "@/components/books/AddBookWizard";
 import { isSameBook } from "@shared/bookIdentity";
 import ChangePasswordDialog from "@/components/auth/ChangePasswordDialog";
 import NotebookSection, { DayNotes, ReviewDueNotes } from "@/components/notebook/NotebookSection";
+import { AmbientSoundControl } from "@/components/focusAura/AmbientSoundControl";
+import { useAmbientSound } from "@/components/focusAura/useAmbientSound";
 import { NotebookProvider, useNotebook } from "@/components/notebook/NotebookProvider";
 import { NOTEBOOK_REVIEW_TASK_KIND } from "@shared/questionNotebook";
 import {
@@ -757,6 +759,8 @@ function FocusMode({ user, onClose, initialSession, onGoToCalendar, topics }: Fo
 
   const clock = useFocusClock({ totalMs: duration * 60 * 1000, onComplete: handleComplete });
   const { status, remainingMs, progress, auraColor } = clock;
+  // Ortam sesi saate bağlı: odak sürerken tam, nefes molasında yarım, aksi halde susar.
+  const ambient = useAmbientSound(breakMode ? "half" : status === "running" ? "full" : "off");
 
   // Nefes molası da canonical clock'u duraklatır — iki ayrı "ilerliyor mu"
   // mekanizması olmasın diye aynı pause/resume üzerinden yürütülür.
@@ -814,7 +818,7 @@ function FocusMode({ user, onClose, initialSession, onGoToCalendar, topics }: Fo
       <div className="flex items-center gap-2">
         {user && <button onClick={() => notebook.open({ prefill: { subject, title: `${topic} · odak notu` } })} className="focus-close" aria-label="Çalışırken not al (zamanlayıcı durmaz)">📝 Not al</button>}
         {(status === "running" || isPausedExplicitly) && <button onClick={togglePause} className="focus-close" aria-label={status === "running" ? "Odağı duraklat" : "Odağa devam et"}>{status === "running" ? <><Pause size={14} /> Duraklat</> : <><Play size={14} /> Devam et</>}</button>}
-        <button onClick={() => setSoundEnabled((value) => !value)} className="focus-close">{soundEnabled ? "Ses açık" : "Ses kapalı"}</button>
+        <AmbientSoundControl ambient={ambient} cuesEnabled={soundEnabled} onToggleCues={() => setSoundEnabled((value) => !value)} />
         <button onClick={() => { document.exitFullscreen?.().catch(() => undefined); onClose(); }} className="focus-close"><X size={16} /> Çıkış</button>
       </div>
     </div>
