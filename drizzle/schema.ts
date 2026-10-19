@@ -397,8 +397,26 @@ export const studyPlanSessions = mysqlTable("study_plan_sessions", {
   blank: int("blank"),
   actualPages: int("actualPages"),
   note: text("note"),
+  // Oturum hatırlatma bildirimi gönderildiyse (server/push/sessionReminders.ts): aynı oturuma ikinci bildirim gitmez.
+  reminderSentAt: timestamp("reminderSentAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
+
+// Web Push abonelikleri (oturum hatırlatmaları): kullanıcı başına cihaz başına bir satır.
+// Tarayıcı aboneliği geçersiz kılarsa (404/410) satır silinir.
+export const pushSubscriptions = mysqlTable("push_subscriptions", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  endpoint: varchar("endpoint", { length: 600 }).notNull(),
+  p256dh: varchar("p256dh", { length: 200 }).notNull(),
+  auth: varchar("auth", { length: 100 }).notNull(),
+  userAgent: varchar("userAgent", { length: 300 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  lastSentAt: timestamp("lastSentAt"),
+}, (table) => ({
+  endpointIdx: uniqueIndex("push_subscriptions_endpoint_idx").on(table.endpoint),
+  userIdx: index("push_subscriptions_user_idx").on(table.userId),
+}));
 
 // Ders programım: okul/dershane/özel ders blokları — tek haftalık, her hafta tekrar eder
 // (bkz. shared/classSchedule.ts). subject null = YKS dışı ders: takvimde gri, meşgul

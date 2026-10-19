@@ -5,6 +5,7 @@ import { registerEmailVerificationRoutes } from "./emailVerification";
 import { registerNoteAttachmentRoutes } from "../notes/attachmentRoutes";
 import { registerWeeklyDigestRoutes } from "../digest/weeklyDigest";
 import { errorLogMiddleware, recordAppError, registerErrorLogRoutes } from "../errors/errorLog";
+import { registerSessionReminderRoutes } from "../push/sessionReminders";
 import { registerWebhookRoutes } from "./webhooks";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
@@ -33,6 +34,7 @@ export function createApiApp(): Express {
   registerEmailVerificationRoutes(app);
   registerWeeklyDigestRoutes(app);
   registerErrorLogRoutes(app);
+  registerSessionReminderRoutes(app);
   registerNoteAttachmentRoutes(app);
   app.use(
     "/api/trpc",

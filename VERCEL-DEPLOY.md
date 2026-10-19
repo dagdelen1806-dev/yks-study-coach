@@ -141,6 +141,18 @@ ve aktif olduğunu doğrulayabilirsin. Devre dışı bırakmak istersen Vercel'e
   risk kuralları Kurum Paneli ile aynı. Personel mailleri de aynı 90'lık sınırdan düşülür.
   Önizleme: `... preview-weekly-digest.ts --staff <organization_members.id> out.html`.
 
+**Oturum hatırlatmaları** (Web Push, migration `0031_push_reminders`): öğrenci profil
+menüsünden "Oturum hatırlatmaları"nı açınca o cihaz abone olur; planındaki her oturumdan
+2–20 dakika önce bildirim gelir, dokununca o oturumun odak ekranı açılır (`/?odak=<id>`).
+
+- Vercel env: `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` (`npx web-push generate-vapid-keys`),
+  isteğe bağlı `VAPID_SUBJECT`, ve `REMINDER_CRON_SECRET`. VAPID anahtarı yoksa seçenek hiç görünmez.
+  Anahtarları değiştirmek mevcut tüm abonelikleri geçersiz kılar (öğrenciler yeniden açmalı).
+- Zamanlayıcı: `.github/workflows/session-reminders.yml` 5 dakikada bir
+  `POST /api/cron/session-reminders` çağırır; GitHub'da `REMINDER_CRON_SECRET` repo sırrı
+  Vercel'dekiyle aynı olmalı. (Vercel Hobby cron'u günde bir kez çalıştığı için dışarıdan.)
+- iPhone/iPad'de bildirim yalnızca ana ekrana eklenmiş Pusula'da çalışır (iOS 16.4+).
+
 ## 6) Bilinen sınırlamalar (mimari farkı nedeniyle)
 
 - **Rate limiting** bellek-içi (in-memory) tutuluyor; sunucusuz ortamda her

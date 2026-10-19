@@ -1,0 +1,29 @@
+name: Oturum hatırlatmaları
+
+# Vercel'in ücretsiz planındaki cron günde bir kez çalışır; hatırlatmalar dakikalık hassasiyet
+# ister. Bu iş 5 dakikada bir canlı uç noktayı tetikler (bkz. server/push/sessionReminders.ts).
+# GitHub zamanlanmış işleri birkaç dakika gecikebilir: uç nokta oturuma kalan gerçek süreyi
+# yazar ve başlamasına 2 dakikadan az kalmış oturum için bildirim göndermez.
+# Not: herkese açık repoda 60 gün hiç commit olmazsa GitHub zamanlanmış işleri durdurur.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: session-reminders
+  cancel-in-progress: false
+
+jobs:
+  trigger:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Hatırlatma uç noktasını çağır
+        env:
+          REMINDER_CRON_SECRET: ${{ secrets.REMINDER_CRON_SECRET }}
+          APP_URL: ${{ vars.APP_URL || 'https://yks-study-coach.vercel.app' }}
+        run: |
+          curl -fsS --max-time 60 -X POST \
+            -H "Authorization: Bearer ${REMINDER_CRON_SECRET}" \
+            "${APP_URL}/api/cron/session-reminders"

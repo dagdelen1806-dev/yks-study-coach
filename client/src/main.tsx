@@ -9,6 +9,7 @@ import { startLogin } from "./const";
 import "./lib/installPrompt";
 import "./lib/modalEscape";
 import "./lib/errorReporter";
+import { registerServiceWorker } from "./lib/push";
 import "./index.css";
 
 // Bölümler arası geçişte aynı veriler (profil, takvim, denemeler…) her seferinde yeniden
@@ -66,3 +67,5 @@ createRoot(document.getElementById("root")!).render(
     </QueryClientProvider>
   </trpc.Provider>
 );
+
+registerServiceWorker();

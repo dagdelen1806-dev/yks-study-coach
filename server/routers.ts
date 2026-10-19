@@ -19,6 +19,7 @@ import { notesRouter } from "./routers/notes";
 import { questionsRouter } from "./routers/questions";
 import { getNotebookPlanSignal } from "./notes/questionsDb";
 import { classScheduleRouter } from "./routers/classSchedule";
+import { pushRouter } from "./routers/push";
 import { readingRouter } from "./routers/reading";
 import { orgRouter } from "./routers/org";
 import { recordReadingPages } from "./reading/readingDb";
@@ -433,6 +434,7 @@ export const appRouter = router({
   notes: notesRouter,
   questions: questionsRouter,
   classSchedule: classScheduleRouter,
+  push: pushRouter,
   reading: readingRouter,
   org: orgRouter,
   catalog: resourceCatalogRouter,
