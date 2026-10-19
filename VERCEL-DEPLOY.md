@@ -125,6 +125,18 @@ kez çalışır. Deploy sonrası **Settings → Cron Jobs**'tan bunun göründü
 ve aktif olduğunu doğrulayabilirsin. Devre dışı bırakmak istersen Vercel'e
 `RESOURCE_CATALOG_SCHEDULER_ENABLED=false` env değişkenini ekle.
 
+**Haftalık özet e-postası** (`/api/cron/weekly-digest`, her pazar 15:00 UTC =
+18:00 İstanbul): e-postası doğrulanmış, son 30 günde giriş yapmış ve abonelikten
+çıkmamış öğrencilere son 7 günün özetini gönderir. Gerekenler:
+
+- Migration `0028_weekly_digest` (`student_profiles`'a iki sütun ekler) deploy'dan ÖNCE uygulanmalı.
+- `CRON_SECRET` env değişkeni production'da **zorunlu**: tanımlı değilse uç nokta
+  503 döner (toplu mail gönderen bir adres herkese açık kalmasın). Vercel, cron
+  isteklerine bu sırrı `Authorization: Bearer …` olarak kendisi ekler.
+- Çalıştırma başına en fazla 90 mail (Resend ücretsiz kotası günde 100);
+  ücretli planda `WEEKLY_DIGEST_MAX_PER_RUN` ile artır.
+- Göndermeden önizleme: `npx tsx --env-file=.env scripts/preview-weekly-digest.ts <userId> out.html`.
+
 ## 6) Bilinen sınırlamalar (mimari farkı nedeniyle)
 
 - **Rate limiting** bellek-içi (in-memory) tutuluyor; sunucusuz ortamda her

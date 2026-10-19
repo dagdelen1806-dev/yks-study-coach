@@ -698,6 +698,10 @@ export const studentProfiles = mysqlTable("student_profiles", {
   // "Zayıf konular için kitapları otomatik planla" — varsayılan KAPALI: kitap
   // görevleri yalnızca önerilir, öğrenci açıkça seçmeden plana girmez.
   autoScheduleBookTasks: int("autoScheduleBookTasks").default(0).notNull(),
+  // Pazar akşamı giden haftalık ilerleme özeti: varsayılan AÇIK, maildeki bağlantı
+  // ya da profil menüsü kapatır. Son gönderim, cron tekrar çalışırsa aynı haftaya ikinci mail gitmesin diye.
+  weeklyDigestOptOut: int("weeklyDigestOptOut").default(0).notNull(),
+  weeklyDigestLastSentAt: timestamp("weeklyDigestLastSentAt"),
 
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),

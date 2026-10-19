@@ -17,6 +17,7 @@ import {
 } from "@shared/onboarding";
 import { completeOnboarding, getStudentProfile, setStudentAvatarStyle, upsertStudentProfileStep, type StudentProfilePatch } from "../db";
 import { protectedProcedure, router } from "../_core/trpc";
+import { getWeeklyDigestEnabled, setWeeklyDigestEnabled } from "../digest/weeklyDigest";
 
 // Enum-shaped fields accept "" alongside the real enum values: the client
 // keeps every field as a plain string ("" = not chosen yet) so every input
@@ -122,4 +123,10 @@ export const onboardingRouter = router({
   setAvatar: protectedProcedure
     .input(z.object({ avatarStyle: z.enum(AVATAR_STYLES).nullable() }))
     .mutation(({ ctx, input }) => setStudentAvatarStyle(ctx.user.id, input.avatarStyle)),
+
+  // Pazar akşamı giden haftalık ilerleme e-postası (profil menüsündeki seçenek).
+  weeklyDigest: protectedProcedure.query(async ({ ctx }) => ({ enabled: await getWeeklyDigestEnabled(ctx.user.id) })),
+  setWeeklyDigest: protectedProcedure
+    .input(z.object({ enabled: z.boolean() }))
+    .mutation(async ({ ctx, input }) => ({ enabled: await setWeeklyDigestEnabled(ctx.user.id, input.enabled) })),
 });

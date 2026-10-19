@@ -3,6 +3,7 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerLocalAuthRoutes } from "./localAuth";
 import { registerEmailVerificationRoutes } from "./emailVerification";
 import { registerNoteAttachmentRoutes } from "../notes/attachmentRoutes";
+import { registerWeeklyDigestRoutes } from "../digest/weeklyDigest";
 import { registerWebhookRoutes } from "./webhooks";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
@@ -29,6 +30,7 @@ export function createApiApp(): Express {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   registerLocalAuthRoutes(app);
   registerEmailVerificationRoutes(app);
+  registerWeeklyDigestRoutes(app);
   registerNoteAttachmentRoutes(app);
   app.use(
     "/api/trpc",
