@@ -81,6 +81,18 @@ test("uygulama telefona yüklenebilir: manifest, ikon ve rehber videosu sunulur"
   expect((await request.head("/videos/pusula-nasil-kullanilir.mp4")).ok()).toBeTruthy();
 });
 
+test("çıkış yapınca önceki öğrencinin verisi ekranda kalmaz", async ({ page }) => {
+  // ogrenci2 = "Kerem" (misafir demosu "Ece" olduğu için ad ayırt edicidir).
+  await signIn(page, "ogrenci2@test.local");
+  await page.goto("/");
+  await expect(page.getByRole("heading", { level: 1 }).first()).toContainText("Kerem");
+  await page.locator(".profile-button").click();
+  await page.getByRole("menuitem", { name: "Çıkış yap" }).click();
+  await expect(page.getByRole("button", { name: "Giriş yap" }).first()).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1 }).first()).not.toContainText("Kerem");
+  await expect(page.locator("body")).not.toContainText("Kerem");
+});
+
 test("kurum yöneticisi Kurum Paneli'nde öğrencilerini görür", async ({ page }) => {
   await signIn(page, ORG_ADMIN);
   await page.goto("/kurum");
