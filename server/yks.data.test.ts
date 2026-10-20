@@ -3,7 +3,6 @@ import {
   calculateTopicResult,
   getNextStatus,
   getStatusFromProgress,
-  initialExams,
   resourceBookCatalog,
   subjectOrder,
   topicCounts,
@@ -33,20 +32,6 @@ describe("YKS konu durumları", () => {
     expect(topicCounts.weak).toBeGreaterThan(0);
     expect(topicCounts.medium).toBeGreaterThan(0);
     expect(topicCounts.good).toBeGreaterThan(0);
-  });
-
-  it("başlangıç deneme trendi artış yönündedir", () => {
-    expect(initialExams[0].net).toBeGreaterThan(initialExams[1].net);
-    expect(initialExams[1].net).toBeGreaterThan(initialExams[2].net);
-  });
-
-  it("denemelerde ders süresi ve konu bazlı trend verisi bulunur", () => {
-    expect(initialExams.every((exam) => subjectOrder.every((subject) => typeof exam.timeSpent?.[subject] === "number"))).toBe(true);
-    expect(initialExams.every((exam) => trackedTopics.every(({ topic }) => typeof exam.topicNets?.[topic] === "number"))).toBe(true);
-
-    const first = initialExams.at(-1)?.topicNets?.Problemler ?? 0;
-    const latest = initialExams[0]?.topicNets?.Problemler ?? 0;
-    expect(latest).toBeGreaterThan(first);
   });
 
   it("konu satırından doğruluk ve neti hesaplar", () => {

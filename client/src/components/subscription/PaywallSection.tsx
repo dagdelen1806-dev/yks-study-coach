@@ -48,10 +48,6 @@ export default function PaywallSection() {
   const resumeMutation = trpc.subscription.resume.useMutation({ onSuccess: () => { toast.success("Aboneliğin devam ediyor."); invalidateEntitlement(); }, onError: (error) => toast.error(error.message) });
   const restoreMutation = trpc.subscription.restore.useMutation({ onSuccess: () => { toast.success("Satın alma geri yüklendi."); invalidateEntitlement(); setShowRestore(false); setRestoreToken(""); }, onError: (error) => toast.error(error.message) });
 
-  if (!user) {
-    return <Card className="soft-card p-8 text-center"><p className="text-[14px] text-ink-3">Planlara göz atmak için önce giriş yapmalısın.</p></Card>;
-  }
-
   if (plansQuery.isLoading || entitlement.isLoading) {
     return <Card className="soft-card p-8"><div className="mx-auto h-6 w-6 animate-spin text-brand"><Loader2 size={24} /></div></Card>;
   }

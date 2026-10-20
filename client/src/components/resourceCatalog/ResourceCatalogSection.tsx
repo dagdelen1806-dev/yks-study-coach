@@ -82,16 +82,7 @@ function BookCard({ book, owned, onToggleLibrary, togglePending }: { book: { id:
 }
 
 function RecommendationPanel() {
-  const { user } = useAuth();
-  const recommendations = trpc.catalog.recommendations.useQuery({ limit: 6 }, { enabled: Boolean(user), retry: false });
-
-  if (!user) {
-    return (
-      <div className="rounded-2xl border border-dashed border-ink/[0.12] bg-paper p-5 text-[13px] text-ink-3">
-        Seviyene uygun kaynak önerilerini görmek için giriş yap.
-      </div>
-    );
-  }
+  const recommendations = trpc.catalog.recommendations.useQuery({ limit: 6 }, { retry: false });
 
   if (recommendations.isLoading) return <div className="text-[13px] text-ink-4">Öneriler hesaplanıyor…</div>;
   if (!recommendations.data || recommendations.data.length === 0) {
@@ -167,12 +158,11 @@ export default function ResourceCatalogSection() {
   // kütüphane modeli oluşturulmadı. Kataloğun sayısal `book.id`'si, string
   // `bookId` kolonuna doğrudan yazılır — eski statik katalog id'leri hiçbir
   // zaman salt sayısal olmadığından (`book-tyt-mat-345` gibi) çakışma olmaz.
-  const resourcesSnapshot = trpc.resources.snapshot.useQuery(undefined, { enabled: Boolean(user), retry: false });
+  const resourcesSnapshot = trpc.resources.snapshot.useQuery(undefined, { retry: false });
   const ownedBookIds = new Set((resourcesSnapshot.data?.inventory ?? []).map((row) => row.bookId));
   const addBook = trpc.resources.addBook.useMutation({ onSuccess: () => { utils.resources.snapshot.invalidate(); toast.success("Kitap kütüphanene eklendi."); }, onError: () => toast.error("Eklenemedi, tekrar dener misin?") });
   const removeBook = trpc.resources.removeBook.useMutation({ onSuccess: () => { utils.resources.snapshot.invalidate(); toast("Kitap kütüphanenden çıkarıldı."); }, onError: () => toast.error("Çıkarılamadı, tekrar dener misin?") });
   const toggleLibrary = (bookId: number) => {
-    if (!user) { toast.error("Kütüphanene eklemek için giriş yapmalısın."); return; }
     const key = String(bookId);
     if (ownedBookIds.has(key)) removeBook.mutate({ bookId: key });
     else addBook.mutate({ bookId: key });

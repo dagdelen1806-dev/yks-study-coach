@@ -1,4 +1,3 @@
-import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { Bar100, EmptyNote, Panel, PageHeader, Segmented, StatCard, primaryButton, secondaryButton } from "@/components/app/kit";
 import TaskDialog, { taskDraftFor, type TaskDraft } from "@/components/app/TaskDialog";
@@ -22,8 +21,7 @@ export function previousOfSameKind(exams: MockExam[], exam: MockExam) {
 }
 
 export default function ExamsDashboard({ exams, onAddExam, onAddScan, onUpload }: { exams: MockExam[]; onAddExam: () => void; onAddScan: () => void; onUpload: () => void }) {
-  const { user } = useAuth();
-  const profile = trpc.onboarding.get.useQuery(undefined, { enabled: Boolean(user), retry: false }).data;
+  const profile = trpc.onboarding.get.useQuery(undefined, { retry: false }).data;
   const [kind, setKind] = useState<ExamKind>(() => (exams.some((exam) => kindOf(exam) === "TYT") || !exams.length ? "TYT" : "AYT"));
   const [subject, setSubject] = useState("Toplam");
   const [range, setRange] = useState<Range>("all");
@@ -157,7 +155,7 @@ export default function ExamsDashboard({ exams, onAddExam, onAddScan, onUpload }
                       <div className="flex items-baseline justify-between gap-2"><span className="truncate text-[13.5px] font-semibold text-ink">{row.topic}</span><span className="shrink-0 text-[12px] text-ink-3">{row.subject}</span></div>
                       <div className="mt-1.5 flex items-center gap-3"><div className="flex-1"><Bar100 value={lostRate} color={lostRate >= 50 ? palette.danger : palette.warnFill} /></div><span className="w-[150px] shrink-0 text-right text-[12px] text-ink-3">{row.wrong} yanlış · {row.blank} boş / {row.questions}</span></div>
                     </div>
-                    {user && <button onClick={() => openTask(row)} className="inline-flex h-8 shrink-0 items-center gap-1.5 self-start rounded-lg border border-rule px-3 text-[12px] font-semibold text-brand hover:bg-brand-soft sm:self-auto"><CalendarPlus size={14} /> Görev oluştur</button>}
+                    <button onClick={() => openTask(row)} className="inline-flex h-8 shrink-0 items-center gap-1.5 self-start rounded-lg border border-rule px-3 text-[12px] font-semibold text-brand hover:bg-brand-soft sm:self-auto"><CalendarPlus size={14} /> Görev oluştur</button>
                   </li>
                 );
               })}

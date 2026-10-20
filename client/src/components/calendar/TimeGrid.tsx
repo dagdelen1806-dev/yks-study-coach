@@ -11,7 +11,7 @@ export type TimelineSession = { id: number | string; sessionDate: string | Date;
 const PX_PER_MINUTE = 0.9;
 const MIN_FREE_SLOT = 20;
 const dayKey = (date: Date) => `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
-/** "YYYY-MM-DD" biçimindeki eski/misafir oturumların saati yoktur; çizelgeye değil üst şeride konur. */
+/** "YYYY-MM-DD" biçimindeki eski oturumların saati yoktur; çizelgeye değil üst şeride konur. */
 const isUntimed = (value: string | Date) => typeof value === "string" && value.length === 10;
 const minutesOfDay = (date: Date) => date.getHours() * 60 + date.getMinutes();
 const formatDuration = (minutes: number) => { const hours = Math.floor(minutes / 60); const rest = minutes % 60; return hours ? `${hours} sa${rest ? ` ${rest} dk` : ""}` : `${rest} dk`; };

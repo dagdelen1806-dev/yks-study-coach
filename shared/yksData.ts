@@ -196,12 +196,6 @@ export const topicSeeds: Topic[] = [
   { id: "ayt-biyo-sistem", exam: "AYT", subject: "Biyoloji", topic: "Sistemler", unit: "İnsan fizyolojisi", progress: 67, status: "Orta", accent: "mint" },
 ];
 
-export const resourceSeeds: Resource[] = [
-  { id: "resource-1", title: "TYT Matematik Soru Bankası", publisher: "345 Yayınları", subject: "Problemler", level: "Orta", reason: "Son 3 denemede bu başlıkta net kaybı var.", tone: "blue" },
-  { id: "resource-2", title: "Paragrafın Ritmi", publisher: "Hız ve Renk", subject: "Paragrafta anlam", level: "Başlangıç", reason: "Günlük 20 soru ile hız kazanman için.", tone: "coral" },
-  { id: "resource-3", title: "AYT Matematik Fasikülleri", publisher: "Orijinal", subject: "İntegral", level: "İleri", reason: "Temel oturduğunda ikinci tur için.", tone: "lilac" },
-];
-
 export const resourceBookCatalog: ResourceBook[] = [
   { id: "book-tyt-turkce-pegem", title: "TYT Türkçe Ders İşleme Föyü", publisher: "Pegem Akademi", subject: "Türkçe", exam: "TYT", level: "Kolay", format: "Konu anlatımı / föy", pageCount: 272, reason: "Temel oluşturmak ve konuları adım adım öğrenmek isteyenler için.", sourceUrl: "https://pegem.net/urun/TYT-Turkce-Ders-Isleme-Foyu-237769", tone: "coral" },
   { id: "book-tyt-turkce-345", title: "ÜçDörtBeş TYT Türkçe Soru Bankası", publisher: "ÜçDörtBeş", subject: "Türkçe", exam: "TYT", level: "Orta", format: "Soru bankası / video çözümlü", pageCount: 440, reason: "ÖSYM tarzı ve kademeli soru pratiğine geçmek için.", sourceUrl: "https://www.kitapisler.com/ucdortbes-yayinlari-tyt-turkce-soru-bankasi_96721.html", tone: "coral" },
@@ -224,68 +218,8 @@ export const resourceBookCatalog: ResourceBook[] = [
   { id: "book-ayt-fen-miray", title: "AYT Biyoloji Soru Bankası", publisher: "Miray", subject: "Fen", exam: "AYT", level: "Kolay", format: "Pratik konu özetli soru bankası", pageCount: 240, reason: "MEB kazanımlarını basamaklı testler ve kısa özetlerle çalışmak için.", sourceUrl: "https://www.kitapsec.com/Products/AYT-Biyoloji-Soru-Bankasi-Miray-Yayinlari-568420.html", tone: "mint" },
 ];
 
-export const initialExams: MockExam[] = [
-  {
-    id: "mock-3",
-    title: "Türkiye Geneli TYT · 03",
-    date: "2026-09-14",
-    net: 68.25,
-    delta: 4.5,
-    tag: "Yükseliş",
-    subjects: { Türkçe: 28.5, Matematik: 18.75, Fen: 12.5, Sosyal: 8.5 },
-    timeSpent: { Türkçe: 48, Matematik: 74, Fen: 31, Sosyal: 27 },
-    topicNets: { "Paragrafta anlam": 10, Problemler: 6, "Maddenin halleri": 2.5, "Milli Mücadele": 4.5, Fonksiyonlar: 6.5 },
-  },
-  {
-    id: "mock-2",
-    title: "Kurum İçi TYT · 02",
-    date: "2026-09-07",
-    net: 63.75,
-    delta: 2.25,
-    tag: "Yükseliş",
-    subjects: { Türkçe: 27, Matematik: 16.5, Fen: 11.75, Sosyal: 8.5 },
-    timeSpent: { Türkçe: 51, Matematik: 69, Fen: 34, Sosyal: 26 },
-    topicNets: { "Paragrafta anlam": 8, Problemler: 5.25, "Maddenin halleri": 3.25, "Milli Mücadele": 4, Fonksiyonlar: 5.5 },
-  },
-  {
-    id: "mock-1",
-    title: "Başlangıç Denemesi",
-    date: "2026-08-31",
-    net: 61.5,
-    delta: 0,
-    tag: "Başlangıç",
-    subjects: { Türkçe: 26, Matematik: 15.25, Fen: 11.25, Sosyal: 9 },
-    timeSpent: { Türkçe: 56, Matematik: 63, Fen: 36, Sosyal: 25 },
-    topicNets: { "Paragrafta anlam": 7.5, Problemler: 4, "Maddenin halleri": 3.5, "Milli Mücadele": 4.5, Fonksiyonlar: 5 },
-  },
-];
-
-export const weeklyBars = [
-  { day: "Pzt", value: 62 }, { day: "Sal", value: 86 }, { day: "Çar", value: 48 },
-  { day: "Per", value: 95 }, { day: "Cum", value: 72 }, { day: "Cmt", value: 36 }, { day: "Paz", value: 54 },
-];
-
-export const dailyPlan = [
-  { time: "09:00", title: "Problemler · 20 soru", meta: "TYT Matematik", done: true, tone: "blue" },
-  { time: "11:30", title: "Paragraf · 20 soru", meta: "TYT Türkçe", done: false, tone: "coral" },
-  { time: "15:00", title: "İntegral tekrar", meta: "AYT Matematik", done: false, tone: "lilac" },
-];
-
 /** TYT ders başına soru sayısı (= alınabilecek en yüksek net). */
 export const tytSubjectTotals: Record<(typeof subjectOrder)[number], number> = { Türkçe: 40, Matematik: 40, Fen: 20, Sosyal: 20 };
-
-export const subjectBreakdown = [
-  { label: "Türkçe", value: 28.5, total: 40, color: subjectPalette.Türkçe },
-  { label: "Matematik", value: 18.75, total: 40, color: subjectPalette.Matematik },
-  { label: "Fen", value: 12.5, total: 20, color: subjectPalette.Fen },
-  { label: "Sosyal", value: 8.5, total: 20, color: subjectPalette.Sosyal },
-];
-
-export const curriculumSubjects = [
-  { label: "TYT Türkçe", count: 12, progress: 68 }, { label: "TYT Matematik", count: 18, progress: 54 },
-  { label: "TYT Fen", count: 14, progress: 73 }, { label: "TYT Sosyal", count: 16, progress: 82 },
-  { label: "AYT Matematik", count: 24, progress: 42 }, { label: "AYT Fen", count: 28, progress: 61 },
-];
 
 export const scopeSources = [
   { label: "ÖSYM YKS kılavuzları", url: "https://www.osym.gov.tr" },
@@ -307,12 +241,7 @@ export const topicCounts = {
 
 export const focusTopics = topicSeeds.filter((topic) => topic.status === "Zayıf");
 export const averageProgress = Math.round(topicSeeds.reduce((sum, topic) => sum + topic.progress, 0) / topicSeeds.length);
-export const currentNet = initialExams[0].net;
 export const targetNet = 85;
-export const streakDays = 12;
-export const weeklyStudyMinutes = 485;
-export const weeklyGoalMinutes = 600;
-export const upcomingExam = { date: "2027-06-19", label: "YKS 2027", daysLeft: 275 };
 export const officialScopeNote = "Konu haritası, ÖSYM sınav kapsamındaki TYT ve AYT ders başlıklarına göre başlangıç verisi olarak düzenlenmiştir.";
 export const motivationalLines = ["Bugün dünden bir adım öndesin.", "Küçük tekrarlar, büyük netler getirir.", "Zorlandığın yer, gelişimin başladığı yerdir."];
 export const getMotivationalLine = (seed = new Date().getDate()) => motivationalLines[seed % motivationalLines.length];
@@ -387,17 +316,11 @@ export const appNavSections = [
 // kullanıcılarda Sidebar tarafından ayrıca eklenir (bkz. Home.tsx Sidebar).
 export const adminNavSection = { key: "admin" as const, label: "Yönetim" };
 export const studyTip = "Önce zayıf konudan 25 dakika öğrenme, ardından 15 dakika soru çözme ve 5 dakika hata notu.";
-export const demoNotice = "Demo verileriyle başladı — kendi denemelerini ekledikçe koçun kişiselleşir.";
 export const fieldLabels = { turkce: "Türkçe neti", matematik: "Matematik neti", fen: "Fen neti", sosyal: "Sosyal neti" };
 export const timeFieldLabels = { turkceTime: "Türkçe dk", matematikTime: "Matematik dk", fenTime: "Fen dk", sosyalTime: "Sosyal dk" };
 export const netDeltaLabel = (delta: number) => delta > 0 ? `+${delta.toFixed(2)}` : delta.toFixed(2);
 export const sourceCopy = "Veri kaynağı: ÖSYM sınav kapsamı ve MEB öğretim programları referans alınarak hazırlanan başlangıç konu haritası.";
 export const subjectColors: Record<string, string> = subjectPalette;
-export const initialTopics = topicSeeds;
-export const initialResources = resourceSeeds;
-export const initialWeeklyBars = weeklyBars;
-export const initialPlan = dailyPlan;
-export const defaultDashboardUser = { name: "Ece", initials: "ED", target: "Sayısal · 50.000 hedefi" };
 export const productPromise = "Netlerini değil, sonraki adımını yönet.";
 export const footerDisclaimer = "Pusula YKS bir çalışma takip aracıdır; resmi puan veya sıralama tahmini sunmaz.";
 export const motivationTitle = "Ritmini koru";
@@ -408,15 +331,9 @@ export const pageTitle = "Genel Bakış";
 export const pageSubtitle = "Bugünün ritmi, yarının neti.";
 export const brandMark = "P";
 export const appMeta = { title: "Pusula YKS", description: "YKS çalışma sürecini görünür kılan kişisel koçluk paneli." };
-export const progressGoalPercent = Math.round((currentNet / targetNet) * 100);
-export const weeklyGoalPercent = Math.round((weeklyStudyMinutes / weeklyGoalMinutes) * 100);
-export const questionProgress = 1284;
-export const questionGoal = 1500;
-export const currentGoalText = `${currentNet} netten ${targetNet} nete`;
 export const initialDashboardSection: DashboardSection = "overview";
 export const searchPlaceholder = "Konu ara...";
 export const emptySearchCopy = "Bu filtrelerle eşleşen bir konu yok.";
-export const planProgress = 33;
 export const studySessionMinutes = 25;
 export const toastCopy = { topic: "Konu durumu güncellendi.", exam: "Deneme eklendi. Konu haritanı güncelledik.", start: "Çalışma oturumu başladı. 25 dakika sonra kısa bir nefes molası ver.", resource: "Kaynak listene kaydedildi." };
 export const sourceLinks = scopeSources;
@@ -426,21 +343,10 @@ export const statusLegend = [
 export const getStatusTone = (status: TopicStatus) => status === "Zayıf" ? "status-weak" : status === "Orta" ? "status-medium" : "status-good";
 export const getTopicAccent = (accent: Topic["accent"]) => ({ coral: subjectPalette.Türkçe, blue: subjectPalette.Matematik, mint: subjectPalette.Fen, yellow: subjectPalette.Sosyal, lilac: subjectPalette.Fizik }[accent]);
 export const targetDateLabel = "19 Haziran 2027";
-export const dashboardMetrics = [
-  { label: "Konu kapsama", value: "68%", change: "+8%", caption: "geçen haftaya göre", tone: "blue" },
-  { label: "Son deneme", value: "68.25", change: "+4.5", caption: "net yükselişi", tone: "coral" },
-  { label: "Çalışma serisi", value: "12", change: "gün", caption: "ritmini koru", tone: "mint" },
-];
-export const recentActivity = [
-  { text: "TYT Matematik · Problemler", meta: "25 soru çözüldü", time: "bugün", tone: "blue" },
-  { text: "Konu durumu güncellendi", meta: "Paragrafta anlam · Zayıf", time: "dün", tone: "coral" },
-  { text: "Deneme eklendi", meta: "Türkiye Geneli TYT · 03", time: "14 Eyl", tone: "mint" },
-];
 export const getGreeting = (hour = new Date().getHours()) => hour < 12 ? "Günaydın" : hour < 18 ? "İyi çalışmalar" : "İyi akşamlar";
 export const todayLabel = new Intl.DateTimeFormat("tr-TR", { weekday: "long", day: "numeric", month: "long" }).format(new Date());
 export const footerLinks = [{ label: "ÖSYM", url: "https://www.osym.gov.tr" }, { label: "MEB müfredat", url: "https://mufredat.meb.gov.tr" }];
 export const appVersion = "0.1.0";
-export const demoMode = true;
 export const allSubjects = subjectFilters;
 export const allStatuses = statusFilters;
 export const sourceAttribution = "ÖSYM · MEB";

@@ -1,4 +1,3 @@
-import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { Bar100, EmptyNote, PageHeader, Segmented, StatCard, primaryButton, secondaryButton } from "@/components/app/kit";
 import TaskDialog, { taskDraftFor, type TaskDraft } from "@/components/app/TaskDialog";
@@ -53,8 +52,7 @@ function TopicDetail({ topic, onClose, onFocus, onTask }: { topic: Topic; onClos
 }
 
 export default function TopicMap({ topics, onSection, onStartSession }: { topics: Topic[]; onSection: (section: DashboardSection) => void; onStartSession: (seed: FocusSeed) => void }) {
-  const { user } = useAuth();
-  const profile = trpc.onboarding.get.useQuery(undefined, { enabled: Boolean(user), retry: false }).data;
+  const profile = trpc.onboarding.get.useQuery(undefined, { retry: false }).data;
   const [exam, setExam] = useState<ExamFilter>("Tümü");
   const [status, setStatus] = useState<StatusFilter>("Tümü");
   const [subject, setSubject] = useState("Tümü");
@@ -162,7 +160,7 @@ export default function TopicMap({ topics, onSection, onStartSession }: { topics
           topic={selected}
           onClose={() => setSelected(null)}
           onFocus={() => { onStartSession({ subject: selected.subject, topic: selected.topic }); setSelected(null); }}
-          onTask={user ? () => setTask(taskDraftFor({ subject: selected.subject, topic: selected.topic, kind: stateOf(selected) === "Veri yok" ? "Konu çalışması" : "Konu tekrarı", source: "Konu haritası görevleri", questions: 20, preferredStart: profile?.preferredStudyStartTime })) : undefined}
+          onTask={() => setTask(taskDraftFor({ subject: selected.subject, topic: selected.topic, kind: stateOf(selected) === "Veri yok" ? "Konu çalışması" : "Konu tekrarı", source: "Konu haritası görevleri", questions: 20, preferredStart: profile?.preferredStudyStartTime }))}
         />
       )}
       {task && <TaskDialog draft={task} description="Bu konu için takvimine bir çalışma oturumu ekle." onChange={setTask} onClose={() => { setTask(null); setSelected(null); }} />}

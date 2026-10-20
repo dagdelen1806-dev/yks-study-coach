@@ -38,7 +38,7 @@ type Overlay =
 export function NotebookProvider({ enabled, children }: { enabled: boolean; children: React.ReactNode }) {
   const [current, setCurrent] = useState<Overlay | null>(null);
   const guard = useCallback((show: () => void) => {
-    if (!enabled) { toast("Defteri kullanmak için giriş yapmalısın."); return; }
+    if (!enabled) return;
     show();
   }, [enabled]);
   const open = useCallback((options: OpenOptions = {}) => guard(() => setCurrent({ kind: "note", key: Date.now(), options })), [guard]);

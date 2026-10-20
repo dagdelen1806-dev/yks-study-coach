@@ -13,7 +13,6 @@ import { palette } from "@shared/palette";
 import { getStatusFromProgress, statusMeta } from "@shared/yksData";
 import {
   chartLabels,
-  dailyPlan,
   formatExamDate,
   formatMinutes,
   getDisplayName,
@@ -21,8 +20,6 @@ import {
   netDeltaLabel,
   subjectOrder,
   toLocalDateKey,
-  weeklyBars,
-  weeklyGoalMinutes,
   type DashboardSection,
   type MockExam,
   type Topic,
@@ -113,14 +110,12 @@ function TeacherFeedback() {
 export default function Overview({ topics, exams, onSection, onStartSession, onEditProfile }: { topics: Topic[]; exams: MockExam[]; onSection: (section: DashboardSection) => void; onStartSession: (seed?: FocusSessionSeed) => void; onEditProfile: () => void }) {
   const { user } = useAuth();
   const notebook = useNotebook();
-  const isGuest = !user;
-  const profile = trpc.onboarding.get.useQuery(undefined, { enabled: Boolean(user), retry: false }).data;
-  const calendar = trpc.calendar.snapshot.useQuery(undefined, { enabled: Boolean(user), retry: false });
-  const review = trpc.questions.summary.useQuery(undefined, { enabled: Boolean(user), retry: false });
+  const profile = trpc.onboarding.get.useQuery(undefined, { retry: false }).data;
+  const calendar = trpc.calendar.snapshot.useQuery(undefined, { retry: false });
+  const review = trpc.questions.summary.useQuery(undefined, { retry: false });
   const utils = trpc.useUtils();
   const setAvatar = trpc.onboarding.setAvatar.useMutation({ onSuccess: (next) => utils.onboarding.get.setData(undefined, next) });
-  // Misafir demosu kız tasarımıyla gösterilir (demo öğrenci "Ece").
-  const avatarStyle: AvatarStyle | null = user ? profile?.avatarStyle ?? null : "girl";
+  const avatarStyle: AvatarStyle | null = profile?.avatarStyle ?? null;
   const summitAvailable = useIllustrationAvailable(ILLUSTRATIONS.summit);
   const coverAvailable = useIllustrationAvailable(ILLUSTRATIONS.heroGirl);
   const coverDesign = avatarStyle === "girl" && coverAvailable;
@@ -129,15 +124,13 @@ export default function Overview({ topics, exams, onSection, onStartSession, onE
 
   const now = new Date();
   const todayKey = toLocalDateKey(now);
-  const name = profile?.preferredName || (user ? getDisplayName(user.name) : "Ece");
+  const name = profile?.preferredName || getDisplayName(user?.name ?? "");
 
-  // Bugünün oturumları: hesapta Takvim'deki gerçek plan, misafirde demo plan.
-  const sessions: TodaySession[] = isGuest
-    ? dailyPlan.map((item, index) => { const [topic] = item.title.split(" · "); return { id: `demo-${index}`, subject: item.meta.replace(/^(TYT|AYT) /, ""), topic, kind: item.title.split(" · ")[1], plannedMinutes: 40, targetQuestions: 20, actualMinutes: item.done ? 40 : null, actualQuestions: item.done ? 20 : null, done: item.done }; })
-    : (calendar.data?.sessions ?? [])
-        .filter((item) => item.status !== "skipped" && toLocalDateKey(item.sessionDate) === todayKey)
-        .sort((a, b) => new Date(a.sessionDate).getTime() - new Date(b.sessionDate).getTime())
-        .map((item) => ({ id: item.id, subject: item.subject, topic: item.topic, kind: item.kind, plannedMinutes: item.plannedMinutes, targetQuestions: item.targetQuestions, actualMinutes: item.actualMinutes, actualQuestions: item.actualQuestions, done: item.status === "completed", sessionDate: item.sessionDate }));
+  // Bugünün oturumları: Takvim'deki plan.
+  const sessions: TodaySession[] = (calendar.data?.sessions ?? [])
+    .filter((item) => item.status !== "skipped" && toLocalDateKey(item.sessionDate) === todayKey)
+    .sort((a, b) => new Date(a.sessionDate).getTime() - new Date(b.sessionDate).getTime())
+    .map((item) => ({ id: item.id, subject: item.subject, topic: item.topic, kind: item.kind, plannedMinutes: item.plannedMinutes, targetQuestions: item.targetQuestions, actualMinutes: item.actualMinutes, actualQuestions: item.actualQuestions, done: item.status === "completed", sessionDate: item.sessionDate }));
   const doneCount = sessions.filter((item) => item.done).length;
   const nextSession = sessions.find((item) => !item.done);
   const plannedMinutes = sessions.reduce((sum, item) => sum + item.plannedMinutes, 0);
@@ -146,17 +139,16 @@ export default function Overview({ topics, exams, onSection, onStartSession, onE
   const doneQuestions = sessions.filter((item) => item.done).reduce((sum, item) => sum + (item.actualQuestions ?? 0), 0);
   const dueReviews = review.data?.due ?? 0;
 
-  // Son 7 gün: hesapta konu çalışma günlüğü, misafirde demo çubuklar.
+  // Son 7 gün: konu çalışma günlüğü.
   const week = useMemo(() => {
     const days = Array.from({ length: 7 }, (_, index) => { const date = new Date(); date.setHours(12, 0, 0, 0); date.setDate(date.getDate() - (6 - index)); return date; });
     const minutesByDay = new Map<string, number>();
-    if (isGuest) for (const date of days) minutesByDay.set(toLocalDateKey(date), weeklyBars.find((bar) => bar.day === chartLabels[(date.getDay() + 6) % 7])?.value ?? 0);
-    else for (const log of calendar.data?.logs ?? []) { const key = toLocalDateKey(log.studyDate); minutesByDay.set(key, (minutesByDay.get(key) ?? 0) + log.minutes); }
-    const dailyGoal = isGuest ? Math.round(weeklyGoalMinutes / 7) : profile?.dailyStudyDuration ?? 0;
+    for (const log of calendar.data?.logs ?? []) { const key = toLocalDateKey(log.studyDate); minutesByDay.set(key, (minutesByDay.get(key) ?? 0) + log.minutes); }
+    const dailyGoal = profile?.dailyStudyDuration ?? 0;
     const bars = days.map((date) => ({ key: toLocalDateKey(date), day: chartLabels[(date.getDay() + 6) % 7], minutes: minutesByDay.get(toLocalDateKey(date)) ?? 0, goal: dailyGoal }));
     const total = bars.reduce((sum, bar) => sum + bar.minutes, 0);
     return { bars, total, goal: dailyGoal * 7, streak: countStreak(minutesByDay), from: days[0], to: days[6] };
-  }, [isGuest, calendar.data?.logs, profile?.dailyStudyDuration]);
+  }, [calendar.data?.logs, profile?.dailyStudyDuration]);
 
   const weakTopic = topics.filter((item) => item.status === "Zayıf" && !item.insufficientData).sort((a, b) => a.progress - b.progress)[0];
   // Karşılaştırma yalnızca aynı türden denemeyle (TYT ile AYT'nin netleri kıyaslanamaz).
@@ -255,7 +247,7 @@ export default function Overview({ topics, exams, onSection, onStartSession, onE
             <button onClick={startNext} className="flex min-h-[52px] items-center gap-3 rounded-xl bg-brand px-4 text-left text-[14.5px] font-bold text-white shadow-[var(--shadow-card)] transition hover:bg-brand-strong">
               <Play size={18} className="shrink-0" /> <span className="flex-1">{nextSession ? "Bugünkü planıma başla" : "Serbest oturum başlat"}</span><ArrowRight size={16} />
             </button>
-            <button onClick={() => (user ? notebook.startReview() : onSection("notebook"))} className="flex min-h-[52px] items-center gap-3 rounded-xl border border-rule bg-white px-4 text-left text-[14.5px] font-semibold text-ink transition hover:border-brand/40">
+            <button onClick={() => notebook.startReview()} className="flex min-h-[52px] items-center gap-3 rounded-xl border border-rule bg-white px-4 text-left text-[14.5px] font-semibold text-ink transition hover:border-brand/40">
               <BookOpen size={18} className="shrink-0 text-brand" /> <span className="flex-1">Tekrar listemden başla{dueReviews > 0 && <span className="ml-1.5 rounded-full bg-warn-soft px-2 py-0.5 text-[11px] font-bold text-warn">{dueReviews}</span>}</span><ChevronRight size={16} className="text-ink-4" />
             </button>
             <button onClick={() => onSection("calendar")} className="flex min-h-[52px] items-center gap-3 rounded-xl border border-rule bg-white px-4 text-left text-[14.5px] font-semibold text-ink transition hover:border-brand/40">
@@ -392,10 +384,10 @@ export default function Overview({ topics, exams, onSection, onStartSession, onE
             {targetSchool ? (
               <p className="mt-2 text-[14px] font-semibold leading-5 text-ink">{targetSchool}</p>
             ) : (
-              <p className="mt-2 text-[13px] text-ink-3">{isGuest ? "Giriş yapınca hedefin burada görünür." : "Hedef üniversite ve bölümünü henüz yazmadın."}</p>
+              <p className="mt-2 text-[13px] text-ink-3">Hedef üniversite ve bölümünü henüz yazmadın.</p>
             )}
             {(scoreType || profile?.targetRanking || profile?.examYear) && <p className="mt-1 text-[12px] text-ink-3">{[scoreType, profile?.targetRanking ? `İlk ${profile.targetRanking}` : null, profile?.examYear ? `YKS ${profile.examYear}` : null].filter(Boolean).join(" · ")}</p>}
-            {!isGuest && <button onClick={onEditProfile} className="mt-3 text-[12px] font-semibold text-brand hover:text-brand-strong">{targetSchool ? "Hedefini düzenle" : "Hedefini belirle"} →</button>}
+            <button onClick={onEditProfile} className="mt-3 text-[12px] font-semibold text-brand hover:text-brand-strong">{targetSchool ? "Hedefini düzenle" : "Hedefini belirle"} →</button>
           </div>
         </section>
 
@@ -414,7 +406,7 @@ export default function Overview({ topics, exams, onSection, onStartSession, onE
               { icon: <CalendarDays size={17} />, label: "Ders programım", run: () => onSection("calendar") },
               { icon: <PenLine size={17} />, label: "Planı düzenle", run: () => onSection("plan") },
               { icon: <Trophy size={17} />, label: "Deneme ekle", run: () => onSection("exams") },
-              { icon: <Camera size={17} />, label: "Çözemediğim soruyu ekle", run: () => (user ? notebook.captureQuestion() : onSection("notebook")) },
+              { icon: <Camera size={17} />, label: "Çözemediğim soruyu ekle", run: () => notebook.captureQuestion() },
               { icon: <NotebookPen size={17} />, label: "Soru defterim", run: () => onSection("notebook") },
               { icon: <BookOpen size={17} />, label: "Kaynak önerileri", run: () => onSection("resources") },
             ].map((item) => (
