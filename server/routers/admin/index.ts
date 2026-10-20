@@ -5,6 +5,7 @@ import { adminErrorsRouter } from "./errors";
 import { adminPaymentsRouter } from "./payments";
 import { adminSubscriptionsRouter } from "./subscriptions";
 import { adminSystemRouter } from "./system";
+import { adminTestimonialsRouter } from "./testimonials";
 import { adminUsageRouter } from "./usage";
 import { adminUsersRouter } from "./users";
 import { adminOrgsRouter } from "../org";
@@ -26,4 +27,5 @@ export const adminRouter = router({
   system: adminSystemRouter,
   orgs: adminOrgsRouter,
   errors: adminErrorsRouter,
+  testimonials: adminTestimonialsRouter,
 });

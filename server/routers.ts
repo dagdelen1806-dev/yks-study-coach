@@ -31,6 +31,7 @@ import { onboardingRouter } from "./routers/onboarding";
 import { subscriptionRouter } from "./routers/subscription";
 import { paymentRouter } from "./routers/payment";
 import { adminRouter } from "./routers/admin";
+import { testimonialsRouter } from "./routers/testimonials";
 
 const planInput = z.object({
   topics: z.array(z.object({
@@ -442,6 +443,7 @@ export const appRouter = router({
   subscription: subscriptionRouter,
   payment: paymentRouter,
   admin: adminRouter,
+  testimonials: testimonialsRouter,
 });
 
 export type AppRouter = typeof appRouter;

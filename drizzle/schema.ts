@@ -1035,6 +1035,25 @@ export const featureUsageLogs = mysqlTable("feature_usage_logs", {
 // Uygulama hataları (Admin → Hatalar). Aynı hata tek satırda toplanır: `fingerprint`
 // kaynak + mesaj + ilk yığın satırından türer, tekrar görülünce `count` artar ve
 // çözülmüş hata yeniden açılır (`resolvedAt` boşalır).
+// Öğrenci yorumları: öğrenci uygulamadan yazar (kişi başı tek yorum, düzenleyince yeniden onaya düşer),
+// admin onaylar; yalnızca onaylananlar tanıtım sayfasında görünür (server/testimonials/testimonials.ts).
+export const testimonials = mysqlTable("testimonials", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  displayName: varchar("displayName", { length: 60 }).notNull(),
+  detail: varchar("detail", { length: 80 }),
+  rating: int("rating").notNull(),
+  body: varchar("body", { length: 600 }).notNull(),
+  status: mysqlEnum("status", ["pending", "approved", "rejected"]).default("pending").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+  reviewedAt: timestamp("reviewedAt"),
+  reviewedBy: int("reviewedBy"),
+}, (table) => ({
+  userIdx: uniqueIndex("testimonials_user_idx").on(table.userId),
+  statusIdx: index("testimonials_status_idx").on(table.status, table.updatedAt),
+}));
+
 export const appErrors = mysqlTable("app_errors", {
   id: int("id").autoincrement().primaryKey(),
   fingerprint: varchar("fingerprint", { length: 64 }).notNull(),

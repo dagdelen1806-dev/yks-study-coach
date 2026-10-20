@@ -3,7 +3,8 @@ import { trpc } from "@/lib/trpc";
 import { tierHighlights } from "@/components/subscription/PlanComparison";
 import { PAID_TIERS, TIER_LABELS, type PlanTier } from "@shared/entitlements";
 import { appData, footerDisclaimer } from "@shared/yksData";
-import { BarChart3, Building2, CalendarClock, Check, ChevronDown, Map, NotebookPen, PlayCircle, Sparkles, Target, Timer, Users } from "lucide-react";
+import { SAMPLE_TESTIMONIALS } from "@shared/testimonials";
+import { BarChart3, Building2, CalendarClock, Check, ChevronDown, Map, NotebookPen, PlayCircle, Sparkles, Star, Target, Timer, Users } from "lucide-react";
 
 const formatPrice = (minorUnits: number) => `${(minorUnits / 100).toLocaleString("tr-TR", { maximumFractionDigits: 0 })} ₺`;
 
@@ -45,6 +46,10 @@ const TIER_TAGLINES: Record<PlanTier, string> = {
 export default function Landing() {
   const plans = trpc.subscription.getPlans.useQuery(undefined, { retry: 1 }).data ?? [];
   const monthlyPrice = (tier: PlanTier) => plans.find((plan) => plan.tier === tier && plan.billingPeriod === "monthly")?.price;
+  // Onaylı gerçek yorum yoksa (ya da yüklenemezse) açıkça "örnek" etiketli yorumlar gösterilir; yüklenirken hiçbiri.
+  const published = trpc.testimonials.published.useQuery(undefined, { retry: 1 });
+  const showingSamples = !published.isLoading && (published.data?.length ?? 0) === 0;
+  const testimonialList = showingSamples ? SAMPLE_TESTIMONIALS : published.data ?? [];
   const register = () => startLogin("register");
   const login = () => startLogin("login");
 
@@ -120,6 +125,25 @@ export default function Landing() {
             ))}
           </ol>
         </section>
+
+        {testimonialList.length > 0 && (
+          <section id="yorumlar" className="mx-auto max-w-6xl scroll-mt-20 px-4 py-14 sm:px-6">
+            <h2 className="text-center text-[28px] font-semibold font-display sm:text-[34px]">Öğrenciler ne diyor?</h2>
+            {showingSamples && <p className="mx-auto mt-3 max-w-2xl text-center text-[13px] text-ink-4">Bunlar örnek yorumlardır. Öğrencilerimizin gerçek yorumları onaylandıkça burada yer alacak.</p>}
+            <div className="mt-10 grid gap-4 md:grid-cols-3">
+              {testimonialList.map((item) => (
+                <figure key={item.id} className="soft-card flex flex-col p-6">
+                  <div className="flex gap-0.5" aria-label={`${item.rating} / 5`}>{[1, 2, 3, 4, 5].map((value) => <Star key={value} size={16} className={value <= item.rating ? "fill-[var(--pencil)] text-[var(--pencil)]" : "text-ink-4"} />)}</div>
+                  <blockquote className="mt-4 flex-1 text-[14.5px] leading-7 text-ink-2">“{item.body}”</blockquote>
+                  <figcaption className="mt-5 flex items-center gap-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-soft text-[15px] font-bold text-brand">{item.displayName.charAt(0).toLocaleUpperCase("tr")}</span>
+                    <span><span className="block text-[14px] font-semibold">{item.displayName}</span>{item.detail && <span className="block text-[12.5px] text-ink-3">{item.detail}</span>}</span>
+                  </figcaption>
+                </figure>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section id="fiyatlar" className="mx-auto max-w-6xl scroll-mt-20 px-4 py-14 sm:px-6">
           <h2 className="text-center text-[28px] font-semibold font-display sm:text-[34px]">Fiyatlar</h2>

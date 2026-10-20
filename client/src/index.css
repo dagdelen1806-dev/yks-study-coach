@@ -296,7 +296,10 @@
   .focus-summary { width: min(500px, 100%); border: 1px solid rgb(255 255 255 / .12); border-radius: 14px; background: var(--night-2); padding: 24px; box-shadow: 0 24px 70px rgb(0 0 0 / .4); }
   .focus-summary h2 { margin-top: 6px; color: #fff; font-family: var(--font-display); font-size: 28px; font-weight: 600; }
   .focus-summary p { margin-top: 6px; color: rgb(255 255 255 / .65); font-size: 14px; line-height: 1.6; }
-  .focus-result-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 20px; }
+  /* minmax(0, 1fr) + width:100%: sayı kutusunun varsayılan genişliği sütunu büyütüp kartı taşırmasın. */
+  .focus-result-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 20px; }
+  .focus-result-grid label { min-width: 0; }
+  .focus-result-grid input { width: 100%; min-width: 0; }
   .focus-summary textarea { width: 100%; min-height: 78px; margin-top: 12px; border: 1px solid rgb(255 255 255 / .14); border-radius: 10px; background: rgb(255 255 255 / .06); padding: 11px; color: #fff; font: inherit; font-size: 14px; outline: none; }
   .focus-summary .focus-start, .focus-summary .focus-secondary { margin-top: 18px; }
   /* Duraklatma katmanı + tamamlanma nabzı (spec §7/§18). Sıradan keyframe'ler;
@@ -383,7 +386,7 @@
   .focus-topbar { gap: 8px; padding: 0 12px; }
   .focus-topbar .focus-close { padding: 8px 10px; font-size: 13px; white-space: nowrap; }
   .focus-setup-grid { grid-template-columns: 1fr; }
-  .focus-result-grid { grid-template-columns: 1fr 1fr; }
+  .focus-result-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .focus-checklist { flex-direction: column; }
   .synapse-field { height: 320px; }
   .synapse-core { width: 150px; height: 150px; }

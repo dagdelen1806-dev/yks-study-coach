@@ -105,6 +105,27 @@ test("giriş yapmamış ziyaretçi her adreste tanıtım sayfasını görür", a
   await expect(page.getByRole("dialog").getByRole("heading", { name: "Kayıt ol" })).toBeVisible();
 });
 
+test("öğrenci yorum gönderir; onaylanmadan tanıtım sayfasında görünmez", async ({ page, browser }) => {
+  await signIn(page, "ogrenci2@test.local");
+  await page.goto("/");
+  const body = `E2E yorum ${Date.now()}: deneme analizleri sayesinde zayıf konularımı netleştirdim.`;
+  const dialog = page.locator('[role="dialog"][aria-label="Yorum bırak"]');
+  await page.locator(".profile-button").click();
+  await page.getByRole("menuitem", { name: "Yorum bırak" }).click();
+  await dialog.getByPlaceholder("Pusula çalışmana nasıl yardımcı oldu?").fill(body);
+  await dialog.getByRole("button", { name: "Gönder" }).click();
+  await expect(page.getByText("onaylandıktan sonra tanıtım sayfasında görünecek")).toBeVisible();
+  await page.locator(".profile-button").click();
+  await page.getByRole("menuitem", { name: "Yorum bırak" }).click();
+  await expect(dialog.getByText("Onay bekliyor")).toBeVisible();
+
+  const visitor = await browser.newPage({ baseURL: test.info().project.use.baseURL });
+  await visitor.goto("/");
+  await expect(visitor.getByRole("heading", { name: "Öğrenciler ne diyor?" })).toBeVisible();
+  await expect(visitor.getByText(body)).toHaveCount(0);
+  await visitor.close();
+});
+
 test("kurum panelinden çıkış da ilk sayfaya döner", async ({ page }) => {
   await signIn(page, ORG_ADMIN);
   await page.goto("/kurum");

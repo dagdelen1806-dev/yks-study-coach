@@ -10,6 +10,7 @@ import AdminAuditPage from "./AdminAuditPage";
 import AdminCatalogPage from "./AdminCatalogPage";
 import AdminOrgsPage from "./AdminOrgsPage";
 import AdminErrorsPage from "./AdminErrorsPage";
+import AdminTestimonialsPage from "./AdminTestimonialsPage";
 
 const TABS = [
   { key: "dashboard", label: "Panel" },
@@ -19,6 +20,7 @@ const TABS = [
   { key: "payments", label: "Ödemeler" },
   { key: "catalog", label: "Kaynak Kataloğu" },
   { key: "orgs", label: "Kurumlar" },
+  { key: "testimonials", label: "Yorumlar" },
   { key: "audit", label: "Denetim Kayıtları" },
   { key: "errors", label: "Hatalar" },
 ] as const;
@@ -50,6 +52,7 @@ export default function AdminPanel() {
       {tab === "payments" && <AdminPaymentsPage />}
       {tab === "catalog" && <AdminCatalogPage />}
       {tab === "orgs" && <AdminOrgsPage />}
+      {tab === "testimonials" && <AdminTestimonialsPage />}
       {tab === "audit" && <AdminAuditPage />}
       {tab === "errors" && <AdminErrorsPage />}
     </div>
