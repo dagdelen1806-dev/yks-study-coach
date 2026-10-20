@@ -20,14 +20,8 @@ export default function MyOrganizationDialog({ onClose }: { onClose: () => void 
   const utils = trpc.useUtils();
   const [, setLocation] = useLocation();
   const memberships = trpc.org.mine.useQuery(undefined, { retry: false });
-  const [code, setCode] = useState("");
-  const [preview, setPreview] = useState<{ orgName: string; role: string; kvkk: { version: number; notice: string; consent: string } | null } | null>(null);
-  const [consent, setConsent] = useState(false);
-  const [noticeRead, setNoticeRead] = useState(false);
   const [showKvkkFor, setShowKvkkFor] = useState<number | null>(null);
   const myKvkk = trpc.org.myKvkk.useQuery({ orgId: showKvkkFor ?? 0 }, { enabled: showKvkkFor !== null, retry: false });
-  const check = trpc.org.previewInvitation.useMutation({ onSuccess: (result) => { setPreview(result); setConsent(false); setNoticeRead(false); }, onError: (error) => toast.error(error.message) });
-  const join = trpc.org.join.useMutation({ onSuccess: (result) => { toast.success(`${result.orgName} kurumuna katıldın.`); setCode(""); setPreview(null); utils.org.mine.invalidate(); utils.org.myFeedback.invalidate(); if (result.role !== "student") setLocation("/kurum"); }, onError: (error) => toast.error(error.message) });
   const leave = trpc.org.leave.useMutation({ onSuccess: () => { toast.success("Kurumdan ayrıldın; verilerin artık kurumla paylaşılmıyor."); utils.org.mine.invalidate(); utils.org.myFeedback.invalidate(); }, onError: (error) => toast.error(error.message) });
   const studentOrgs = (memberships.data ?? []).filter((membership) => membership.role === "student");
   const staffOrgs = (memberships.data ?? []).filter((membership) => isStaffRole(membership.role));
@@ -67,6 +61,27 @@ export default function MyOrganizationDialog({ onClose }: { onClose: () => void 
         {studentOrgs.length === 0 && (
           <div className="mt-4">
             <p className="text-[13px] leading-6 text-ink-2">Dershanen ya da okulun sana bir davet kodu verdiyse buraya gir. Katılmadan önce kurumun neleri göreceğini göreceksin.</p>
+            <JoinWithCode />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Davet kodu → kurum önizlemesi → onay → katıl. "Kurumum" penceresinde ve Kurum Paneli'nin
+ * "henüz personel değilsin" ekranında kullanılır; personel kodu girenler Kurum Paneli'ne gider. */
+export function JoinWithCode() {
+  const utils = trpc.useUtils();
+  const [, setLocation] = useLocation();
+  const [code, setCode] = useState("");
+  const [preview, setPreview] = useState<{ orgName: string; role: string; kvkk: { version: number; notice: string; consent: string } | null } | null>(null);
+  const [consent, setConsent] = useState(false);
+  const [noticeRead, setNoticeRead] = useState(false);
+  const check = trpc.org.previewInvitation.useMutation({ onSuccess: (result) => { setPreview(result); setConsent(false); setNoticeRead(false); }, onError: (error) => toast.error(error.message) });
+  const join = trpc.org.join.useMutation({ onSuccess: (result) => { toast.success(`${result.orgName} kurumuna katıldın.`); setCode(""); setPreview(null); utils.org.mine.invalidate(); utils.org.myFeedback.invalidate(); if (result.role !== "student") setLocation("/kurum"); }, onError: (error) => toast.error(error.message) });
+  return (
+          <>
             {!preview ? (
               <div className="mt-3 flex gap-2">
                 <input value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} maxLength={12} placeholder="ABCD-EFGH" aria-label="Davet kodu" className="form-input flex-1 text-center text-[16px] font-bold tracking-[0.15em]" />
@@ -94,9 +109,6 @@ export default function MyOrganizationDialog({ onClose }: { onClose: () => void 
                 </div>
               </div>
             )}
-          </div>
-        )}
-      </div>
-    </div>
+          </>
   );
 }

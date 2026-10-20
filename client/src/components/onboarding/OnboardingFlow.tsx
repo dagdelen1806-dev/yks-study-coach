@@ -384,6 +384,8 @@ export default function OnboardingFlow({
           <div className="mb-2">
             <div className="eyebrow mb-2">Hoş geldin{userName ? `, ${userName.split(" ")[0]}` : ""}</div>
             <h1 className="text-[25px] font-semibold text-ink font-display">YKS çalışma yolculuğunu birlikte planlayalım</h1>
+            {/* Anket öğrenci içindir; dershane/okul personeli doğrudan Kurum Paneli'ne geçer (App.tsx /kurum'u anketten önce açar). */}
+            <p className="mt-3 rounded-xl bg-paper px-3 py-2 text-[13px] text-ink-3">Dershane ya da okul personeli misin? <a href="/kurum" className="font-semibold text-brand hover:underline">Anketi atla, Kurum Paneli'ne geç</a></p>
           </div>
         )}
         <h2 className="text-[17px] font-semibold text-ink">{meta.title}</h2>

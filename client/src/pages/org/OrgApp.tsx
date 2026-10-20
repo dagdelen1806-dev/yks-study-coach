@@ -6,6 +6,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 import { ORG_PATHS, type OrgSection } from "./orgShared";
+import { JoinWithCode } from "@/components/app/MyOrganizationDialog";
 
 const OrgDashboard = lazy(() => import("./OrgDashboard"));
 const OrgStudents = lazy(() => import("./OrgStudents"));
@@ -73,11 +74,15 @@ export default function OrgApp() {
   if (!scope) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-paper p-6">
-        <div className="soft-card max-w-sm p-7 text-center">
+        <div className="soft-card w-full max-w-md p-7 text-center">
           <Building2 className="mx-auto text-brand" size={32} />
           <h1 className="mt-4 text-[20px] font-extrabold text-ink">Kurum Paneli</h1>
-          <p className="mt-2 text-[14px] leading-6 text-ink-3">Bu hesap henüz bir kurumun personeli değil. Kurumundan aldığın davet kodunu öğrenci uygulamasında profil menüsündeki "Kurumum" bölümüne girebilirsin.</p>
-          <button onClick={() => setLocation("/")} className="mt-5 h-10 rounded-xl bg-brand px-4 text-[13px] font-semibold text-white">Uygulamaya dön</button>
+          <p className="mt-2 text-[14px] leading-6 text-ink-3">Bu hesap henüz bir kurumun personeli değil. Kurumundan (ya da platform yöneticisinden) aldığın davet kodunu buraya gir.</p>
+          <div className="text-left"><JoinWithCode /></div>
+          <div className="mt-5 flex justify-center gap-4 text-[13px] font-semibold">
+            <button onClick={() => setLocation("/")} className="text-brand hover:underline">Öğrenci uygulamasına git</button>
+            <button onClick={() => void logout()} className="text-ink-3 hover:underline">Çıkış yap</button>
+          </div>
         </div>
       </div>
     );
