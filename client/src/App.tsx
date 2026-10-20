@@ -22,27 +22,14 @@ function OrgSignIn() {
     </div>
   );
 }
-// Giriş yapmamış ziyaretçinin gördüğü tek sayfa: uygulama yalnızca hesapla kullanılır.
-function SignInScreen() {
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-paper p-6">
-      <div className="soft-card w-full max-w-sm p-7 text-center">
-        <img src="/icon.svg" alt="" className="mx-auto h-14 w-14" />
-        <h1 className="mt-4 text-[22px] font-extrabold text-ink font-display">{appData.applicationName}</h1>
-        <p className="mt-1 text-[14px] font-semibold text-brand">{appData.tagline}</p>
-        <p className="mt-3 text-[14px] leading-6 text-ink-3">Denemelerin, konu haritan, çalışma takvimin ve sana özel haftalık planın tek yerde. Başlamak için giriş yap ya da hesap oluştur.</p>
-        <button onClick={() => startLogin("login")} className="mt-6 h-11 w-full rounded-xl bg-brand text-[14px] font-semibold text-white hover:bg-brand-strong">Giriş yap</button>
-        <button onClick={() => startLogin("register")} className="mt-2.5 h-11 w-full rounded-xl border border-ink/10 text-[14px] font-semibold text-ink-2 hover:bg-paper">Hesap oluştur</button>
-      </div>
-    </div>
-  );
-}
+// Giriş yapmamış ziyaretçi tanıtım sayfasını görür: uygulama yalnızca hesapla kullanılır.
+const Landing = lazy(() => import("./pages/landing/Landing"));
 import { DashboardLayoutSkeleton } from "@/components/DashboardLayoutSkeleton";
 import { trpc } from "@/lib/trpc";
-import { LOCAL_SIGNIN_REQUEST_EVENT, performLocalSignIn, startLogin } from "@/const";
+import { LOCAL_SIGNIN_REQUEST_EVENT, performLocalSignIn } from "@/const";
 import VerifyEmailScreen from "@/components/auth/VerifyEmailScreen";
 import { needsEmailVerification } from "@shared/const";
-import { appData, ensureLocalCacheMatchesAccount, postOnboardingNudgeKey } from "@shared/yksData";
+import { ensureLocalCacheMatchesAccount, postOnboardingNudgeKey } from "@shared/yksData";
 import { toast } from "sonner";
 import { useEffect, useState } from "react";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -173,7 +160,7 @@ function PendingApprovalScreen({ status, onLogout }: { status: "pending" | "reje
   );
 }
 
-// Gates the app: anonymous visitors only see `SignInScreen` (there is no guest
+// Gates the app: anonymous visitors only see the `Landing` page (there is no guest
 // mode), and a signed-in user who hasn't finished onboarding sees it first.
 const EMAIL_VERIFICATION_RESULTS: Record<string, { tone: "success" | "info" | "error"; text: string }> = {
   success: { tone: "success", text: "E-postan doğrulandı ✓" },
@@ -243,7 +230,7 @@ function AppGate() {
     return <Suspense fallback={<DashboardLayoutSkeleton />}><OrgApp /></Suspense>;
   }
 
-  if (!user) return <SignInScreen />;
+  if (!user) return <Suspense fallback={<div className="min-h-screen bg-paper" />}><Landing /></Suspense>;
 
   if (user && (onboarding.isLoading || !onboarding.data || memberships.isLoading)) return <DashboardLayoutSkeleton />;
 

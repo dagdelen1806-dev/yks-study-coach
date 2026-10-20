@@ -88,19 +88,20 @@ test("çıkış yapınca önceki öğrencinin verisi ekranda kalmaz", async ({ p
   await expect(page.getByRole("heading", { level: 1 }).first()).toContainText("Kerem");
   await page.locator(".profile-button").click();
   await page.getByRole("menuitem", { name: "Çıkış yap" }).click();
-  await expect(page.getByRole("button", { name: "Hesap oluştur" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Hesap oluştur", exact: true })).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
   await expect(page.locator("body")).not.toContainText("Kerem");
 });
 
-test("giriş yapmamış ziyaretçi her adreste yalnızca giriş ekranını görür", async ({ page }) => {
+test("giriş yapmamış ziyaretçi her adreste tanıtım sayfasını görür", async ({ page }) => {
   for (const path of ["/", "/denemeler", "/takvim", "/konu-haritasi", "/defter"]) {
     await page.goto(path);
-    await expect(page.getByRole("button", { name: "Hesap oluştur" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Fiyatlar" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Hesap oluştur", exact: true })).toBeVisible();
     await expect(page.locator('nav[aria-label="Bölümler"]')).toHaveCount(0);
     await expect(page.getByText("Demo verisi")).toHaveCount(0);
   }
-  await page.getByRole("button", { name: "Hesap oluştur" }).click();
+  await page.getByRole("button", { name: "Hesap oluştur", exact: true }).click();
   await expect(page.getByRole("dialog").getByRole("heading", { name: "Kayıt ol" })).toBeVisible();
 });
 
@@ -109,7 +110,7 @@ test("kurum panelinden çıkış da ilk sayfaya döner", async ({ page }) => {
   await page.goto("/kurum");
   await page.getByRole("button", { name: "Çıkış yap" }).click();
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByRole("button", { name: "Hesap oluştur" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Hesap oluştur", exact: true })).toBeVisible();
 });
 
 test("kurum yöneticisi Kurum Paneli'nde öğrencilerini görür", async ({ page }) => {
