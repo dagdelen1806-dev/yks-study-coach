@@ -93,6 +93,21 @@ test("çıkış yapınca önceki öğrencinin verisi ekranda kalmaz", async ({ p
   await expect(page.locator("body")).not.toContainText("Kerem");
 });
 
+test("misafir deneme ekler: tarayıcıda kalır, sunucuya istek gitmez", async ({ page }) => {
+  const posts: string[] = [];
+  page.on("request", (request) => { if (request.method() === "POST" && request.url().includes("/api/trpc/")) posts.push(request.url()); });
+  await page.goto("/denemeler");
+  await page.locator("main").getByRole("button", { name: "Deneme ekle" }).first().click();
+  const title = `Misafir deneme ${Date.now()}`;
+  await page.getByPlaceholder("Örn. Dershane TYT · 04").fill(title);
+  await page.getByLabel("Türkçe").first().fill("30");
+  await page.getByRole("button", { name: "Kaydet ve çalışma planına aktar" }).click();
+  await expect(page.getByText("demo modu").first()).toBeVisible();
+  await page.reload();
+  await expect(page.getByText(title).first()).toBeVisible();
+  expect(posts).toEqual([]);
+});
+
 test("kurum yöneticisi Kurum Paneli'nde öğrencilerini görür", async ({ page }) => {
   await signIn(page, ORG_ADMIN);
   await page.goto("/kurum");

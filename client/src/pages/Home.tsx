@@ -97,6 +97,7 @@ import {
   getStatusFromProgress,
   getStoredValue,
   initialExams,
+  withoutDemoExams,
   initialResources,
   initialTopics,
   localStorageKeys,
@@ -360,7 +361,7 @@ function Exams({ topics, exams, setExams, setTopics, persistExams }: { topics: T
     if (user) {
       addFocusLog.mutate({ subject: scanForm.subject, topic, studyDate, minutes, questions: questionCount, correct, wrong, blank, note: "Konu tarama testi" });
       logTopicResult.mutate({ exam: examType, subject: scanForm.subject, topic, accuracy, questionCount, studyDate });
-    } else toast.success("Konu tarama testi kaydedildi (demo modu); giriş yaptığında hesabına da aktarılır.");
+    } else toast.success("Konu tarama testi demo modunda denendi; kaydetmek için giriş yapmalısın.");
     setScanForm({ subject: scanForm.subject, topic: "", correct: "", wrong: "", blank: "", minutes: "20" });
     setOpenTopicScan(false);
   };
@@ -400,7 +401,7 @@ function Exams({ topics, exams, setExams, setTopics, persistExams }: { topics: T
     const previous = [...exams].filter((item) => (item.exam ?? "TYT") === form.exam).sort((a, b) => b.date.localeCompare(a.date))[0]?.net ?? net;
     const newExam: MockExam = { id: `mock-${Date.now()}`, title: form.title, date: form.date, exam: form.exam, net, delta: Number((net - previous).toFixed(2)), tag: net >= previous ? "Yükseliş" : "Tekrar bak", subjects, timeSpent: { Türkçe: Number(form.turkceTime) || 0, Matematik: Number(form.matematikTime) || 0, Fen: Number(form.fenTime) || 0, Sosyal: Number(form.sosyalTime) || 0 }, topicNets: Object.fromEntries(form.topicDetails.map(({ topic, net: topicNet }) => [topic, topicNet])), topicDetails: form.topicDetails, importedFrom: form.importedFrom };
     setExams((items) => [newExam, ...items]);
-    persistExams?.({ exams: [examToPersistenceInput(newExam)] });
+    if (user) persistExams?.({ exams: [examToPersistenceInput(newExam)] });
     const meaningfulDetails = form.topicDetails.filter((detail) => detail.topic.trim() && detail.questionCount > 0);
     setTopics((items) => items.map((item) => {
       const detail = meaningfulDetails.find((row) => row.topic.trim().toLocaleLowerCase("tr") === item.topic.trim().toLocaleLowerCase("tr"));
@@ -409,7 +410,8 @@ function Exams({ topics, exams, setExams, setTopics, persistExams }: { topics: T
       return { ...item, progress: detail.accuracy, status, insufficientData };
     }));
     if (user) meaningfulDetails.forEach((detail) => logTopicResult.mutate({ exam: form.exam, subject: detail.subject || "Genel", topic: detail.topic, accuracy: detail.accuracy, questionCount: detail.questionCount, studyDate: form.date }));
-    setOpen(false); setForm(createBlankExamForm(topics)); toast.success("Deneme eklendi. Zayıf konu analizin güncellendi.");
+    setOpen(false); setForm(createBlankExamForm(topics));
+    toast.success(user ? "Deneme eklendi. Zayıf konu analizin güncellendi." : "Deneme eklendi (demo modu); bu tarayıcıda saklanır, hesap açınca hesabına aktarılır.");
   };
   return <div id="exams" className="space-y-7 animate-page-in">
     <ExamsDashboard exams={exams} onAddExam={() => setOpen(true)} onAddScan={() => setOpenTopicScan(true)} onUpload={() => { setOpen(true); window.setTimeout(() => fileRef.current?.click(), 120); }} />
@@ -531,7 +533,7 @@ function Resources({ topics, exams, onSection, addBookRequest = 0, onAddBookHand
     setLogs((items) => [row, ...items]);
     if (user) addLogMutation.mutate({ bookId: logBookId, topic: logForm.topic || undefined, sessionDate: today, minutes: row.minutes, questions: row.questions, correct: row.correct, wrong: row.wrong, blank: row.blank, pageStart, pageEnd, testStart, testEnd });
     if (logForm.topic) { const book = catalog.find((item) => item.id === logBookId); const subjectName = book?.subject || topics.find((item) => item.topic === logForm.topic)?.subject || "Genel"; const mapping = { id: `mapping-${Date.now()}`, bookId: logBookId, topic: logForm.topic, subject: subjectName, pageStart, pageEnd, testStart, testEnd }; setMappings((items) => [mapping, ...items.filter((item) => !(item.bookId === logBookId && item.topic === logForm.topic))]); if (user) mappingMutation.mutate({ bookId: logBookId, topic: logForm.topic, subject: subjectName, pageStart, pageEnd, testStart, testEnd }); }
-    setLogForm({ topic: "", minutes: "45", questions: "20", correct: "12", wrong: "5", blank: "3", pageStart: "", pageEnd: "", testStart: "", testEnd: "" }); toast.success(user ? "Çözüm kaydı hesabına kaydedildi; eşleştirme güncellendi." : "Çözüm oturumu kaydedildi; giriş yaptığında hesabına da aktarılır.");
+    setLogForm({ topic: "", minutes: "45", questions: "20", correct: "12", wrong: "5", blank: "3", pageStart: "", pageEnd: "", testStart: "", testEnd: "" }); toast.success(user ? "Çözüm kaydı hesabına kaydedildi; eşleştirme güncellendi." : "Çözüm oturumu demo modunda kaydedildi; hesabına kaydetmek için giriş yapmalısın.");
   };
   const weakTopics = topics.filter((item) => item.status === "Zayıf").sort((a, b) => a.progress - b.progress).slice(0, 4);
   const topicOptions = Array.from(new Set([...topics.map((item) => item.topic), ...trackedTopics.map((item) => item.topic)]));
@@ -1436,7 +1438,10 @@ export default function Home() {
     if (!user || !examSnapshot.data || migratedExams.current) return;
     migratedExams.current = true;
     if (examSnapshot.data.length > 0) { setExams(examSnapshot.data as MockExam[]); return; }
-    if (hadPersistedExamsRef.current && exams.length > 0) { importExams.mutate({ exams: exams.map(examToPersistenceInput) }); return; }
+    // Misafirin yerel listesinde demo denemeleri de durur (ilk ziyarette localStorage'a yazılır);
+    // yalnızca misafirin kendi eklediklerini taşı, demo sabitini ayıkla.
+    const guestExams = withoutDemoExams(exams);
+    if (hadPersistedExamsRef.current && guestExams.length > 0) { setExams(guestExams); importExams.mutate({ exams: guestExams.map(examToPersistenceInput) }); return; }
     setExams([]);
   }, [user, examSnapshot.data]);
   // Konu ilerlemesi tamamen sunucudan gelir (misafir konu durumu hiçbir

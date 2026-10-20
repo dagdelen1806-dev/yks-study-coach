@@ -259,6 +259,8 @@ export const initialExams: MockExam[] = [
     topicNets: { "Paragrafta anlam": 7.5, Problemler: 4, "Maddenin halleri": 3.5, "Milli Mücadele": 4.5, Fonksiyonlar: 5 },
   },
 ];
+/** Misafirin yerel deneme listesinden demo sabitini ayıklar: kayıt olunca yalnızca kendi eklediği denemeler hesaba taşınır. */
+export const withoutDemoExams = <T extends { id: string }>(exams: T[]): T[] => exams.filter((exam) => !initialExams.some((demo) => demo.id === exam.id));
 
 export const weeklyBars = [
   { day: "Pzt", value: 62 }, { day: "Sal", value: 86 }, { day: "Çar", value: 48 },
