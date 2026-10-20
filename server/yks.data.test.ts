@@ -9,16 +9,7 @@ import {
   topicCounts,
   topicSeeds,
   trackedTopics,
-  withoutDemoExams,
 } from "../shared/yksData";
-
-describe("misafirden hesaba deneme taşıma", () => {
-  it("demo denemelerini ayıklar, misafirin kendi eklediğini bırakır", () => {
-    const own = { ...initialExams[0], id: "mock-1760000000000", title: "Benim denemem" };
-    expect(withoutDemoExams([own, ...initialExams])).toEqual([own]);
-    expect(withoutDemoExams(initialExams)).toEqual([]);
-  });
-});
 
 describe("YKS konu durumları", () => {
   it("ilerlemeyi zayıf, orta ve iyi seviyelere ayırır (%55 / %85 eşikleri)", () => {

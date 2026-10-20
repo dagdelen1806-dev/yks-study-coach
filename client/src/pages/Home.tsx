@@ -96,10 +96,7 @@ import {
   getInitials,
   getStatusFromProgress,
   getStoredValue,
-  initialExams,
-  withoutDemoExams,
   initialResources,
-  initialTopics,
   localStorageKeys,
   motivationBody,
   motivationTitle,
@@ -1159,11 +1156,7 @@ function CalendarView({ topics, onSection, onStartFocusSession }: { topics: Topi
   const [weekMode, setWeekMode] = useState<"timeline" | "cards" | null>(null);
   const activeWeekMode = weekMode ?? (classBlocks.length > 0 ? "timeline" : "cards");
   const [slotDraft, setSlotDraft] = useState<{ date: Date; start: number; max: number; subject: string; topic: string; minutes: string } | null>(null);
-  const [localSessions, setLocalSessions] = useState<CalendarSession[]>(() => getStoredValue<CalendarSession[]>(localStorageKeys.calendarSessions, [
-    { id: "demo-1", sessionDate: toLocalDateKey(), title: "Problemler · temel tur", subject: "Matematik", topic: "Problemler", kind: "Soru", plannedMinutes: 40, targetQuestions: 20, status: "completed", actualMinutes: 42, actualQuestions: 20, correct: 13, wrong: 5, blank: 2 },
-    { id: "demo-2", sessionDate: toLocalDateKey(Date.now() + 86400000), title: "Paragraf hız turu", subject: "Türkçe", topic: "Paragrafta anlam", kind: "Soru", plannedMinutes: 35, targetQuestions: 20, status: "planned" },
-    { id: "demo-3", sessionDate: toLocalDateKey(Date.now() + 2 * 86400000), title: "İntegral tekrar", subject: "Matematik", topic: "İntegral", kind: "Tekrar", plannedMinutes: 30, targetQuestions: 10, status: "planned" },
-  ]));
+  const [localSessions, setLocalSessions] = useState<CalendarSession[]>(() => getStoredValue<CalendarSession[]>(localStorageKeys.calendarSessions, []));
   const snapshot = trpc.calendar.snapshot.useQuery(undefined, { enabled: Boolean(user), retry: false });
   const coachPeriod = useMemo(() => { const date = new Date(`${selectedDate}T12:00:00`); const mondayOffset = (date.getDay() + 6) % 7; const start = new Date(date); start.setDate(date.getDate() - mondayOffset); start.setHours(0, 0, 0, 0); const end = new Date(start); end.setDate(start.getDate() + 7); return { periodStart: start.toISOString(), periodEnd: end.toISOString() }; }, [selectedDate]);
   const coachSnapshot = trpc.calendar.coachSnapshot.useQuery(coachPeriod, { enabled: Boolean(user), retry: false });
@@ -1399,21 +1392,16 @@ export default function Home() {
       }
     } catch {}
   }, []);
-  const [topics, setTopics] = useState<Topic[]>(() => getStoredValue(localStorageKeys.topics, initialTopics));
-  const [exams, setExams] = useState<MockExam[]>(() => getStoredValue(localStorageKeys.exams, initialExams));
+  // Uygulama yalnızca giriş yapmış hesaba açılır (App.tsx): demo veri yok, yeni hesap boş başlar
+  // ve sunucudaki konu/deneme verisi gelince bunların yerini alır.
+  const [topics, setTopics] = useState<Topic[]>(() => getStoredValue(localStorageKeys.topics, []));
+  const [exams, setExams] = useState<MockExam[]>(() => getStoredValue(localStorageKeys.exams, []));
   const [mobileMenu, setMobileMenu] = useState(false);
   const closeMobileMenu = useCallback(() => setMobileMenu(false), []);
   const [session, setSession] = useState(false);
   const [focusSeed, setFocusSeed] = useState<FocusSessionSeed | null>(null);
   const [showProfileEdit, setShowProfileEdit] = useState(false);
   const [showPasswordChange, setShowPasswordChange] = useState(false);
-  // `initialExams` (demo/örnek veri) yalnızca ÇIKIŞ YAPMAMIŞ ziyaretçi için bir
-  // önizleme. Bu bayrak, mount anında localStorage'da GERÇEKTEN misafir olarak
-  // birikmiş veri olup olmadığını — aşağıdaki "her değişiklikte localStorage'a
-  // yaz" efektinden ÖNCE, tek seferlik — yakalar; aksi halde her yeni oturum
-  // demo veriyi "misafirin kendi verisi" sanıp hesaba yükler (bkz. aşağıdaki
-  // exam migrasyon efekti).
-  const hadPersistedExamsRef = useRef(typeof window !== "undefined" && window.localStorage.getItem(localStorageKeys.exams) !== null);
   const examSnapshot = trpc.exams.snapshot.useQuery(undefined, { enabled: Boolean(user), retry: false });
   const importExams = trpc.exams.importMany.useMutation();
   const migratedExams = useRef(false);
@@ -1430,19 +1418,11 @@ export default function Home() {
 
   useEffect(() => { localStorage.setItem(localStorageKeys.topics, JSON.stringify(topics)); }, [topics]);
   useEffect(() => { localStorage.setItem(localStorageKeys.exams, JSON.stringify(exams)); }, [exams]);
-  // Hesabın hiç denemesi yoksa VE tarayıcıda gerçekten misafirken birikmiş
-  // (demo sabiti DEĞİL) yerel deneme varsa, o gerçek veriyi hesaba taşı;
-  // aksi halde (yeni hesap + taze tarayıcı) sıfır deneme olarak kalsın —
-  // demo sabitini asla hesaba yazma.
+  // Denemeler her zaman sunucudan gelir; yerel liste yalnızca sayfa açılırken gösterilen önbellek.
   useEffect(() => {
     if (!user || !examSnapshot.data || migratedExams.current) return;
     migratedExams.current = true;
-    if (examSnapshot.data.length > 0) { setExams(examSnapshot.data as MockExam[]); return; }
-    // Misafirin yerel listesinde demo denemeleri de durur (ilk ziyarette localStorage'a yazılır);
-    // yalnızca misafirin kendi eklediklerini taşı, demo sabitini ayıkla.
-    const guestExams = withoutDemoExams(exams);
-    if (hadPersistedExamsRef.current && guestExams.length > 0) { setExams(guestExams); importExams.mutate({ exams: guestExams.map(examToPersistenceInput) }); return; }
-    setExams([]);
+    setExams(examSnapshot.data as MockExam[]);
   }, [user, examSnapshot.data]);
   // Konu ilerlemesi tamamen sunucudan gelir (misafir konu durumu hiçbir
   // zaman hesaba yüklenmez — böyle bir mutation da yok) — bu yüzden giriş

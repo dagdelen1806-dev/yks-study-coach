@@ -259,8 +259,6 @@ export const initialExams: MockExam[] = [
     topicNets: { "Paragrafta anlam": 7.5, Problemler: 4, "Maddenin halleri": 3.5, "Milli Mücadele": 4.5, Fonksiyonlar: 5 },
   },
 ];
-/** Misafirin yerel deneme listesinden demo sabitini ayıklar: kayıt olunca yalnızca kendi eklediği denemeler hesaba taşınır. */
-export const withoutDemoExams = <T extends { id: string }>(exams: T[]): T[] => exams.filter((exam) => !initialExams.some((demo) => demo.id === exam.id));
 
 export const weeklyBars = [
   { day: "Pzt", value: 62 }, { day: "Sal", value: 86 }, { day: "Çar", value: 48 },
@@ -342,23 +340,20 @@ export const localStorageKeys = { exams: "pusula-yks-exams", topics: "pusula-yks
 const localAccountCacheMarkerKey = "pusula-yks-active-account";
 const perAccountCacheKeys = [localStorageKeys.exams, localStorageKeys.topics, localStorageKeys.studyHistory, localStorageKeys.bookInventory, localStorageKeys.bookLogs, localStorageKeys.sourceSwitches, localStorageKeys.customBooks, localStorageKeys.calendarSessions, localStorageKeys.onboardingDraft];
 /**
- * Aynı tarayıcıda art arda farklı hesaplarla giriş yapılırsa (ör. test için
- * yeni bir hesap oluşturmak), localStorage'daki kitap rafı/konu/deneme/
- * takvim verisi önceki hesaptan kalmış olabilir — ve "misafir verisini
- * hesaba taşı" efektleri bunu yanlışlıkla yeni hesaba yükler. Bu, hesap
- * kimliğini bir işaretçide tutar; işaretçi değişmişse (misafir->hesap ilk
- * girişi HARİÇ, çünkü o taşıma kasıtlı) önceki hesaba ait yerel önbelleği
- * temizler. `AppGate` bunu `Home`/`OnboardingFlow` hiç mount olmadan önce
- * çağırır ki state initializer'ları temiz localStorage okusun.
+ * Aynı tarayıcıda art arda farklı hesaplarla giriş yapılırsa (ör. ortak bir
+ * bilgisayar), localStorage'daki kitap rafı/konu/deneme/takvim verisi önceki
+ * hesaptan kalmış olabilir. Bu, hesap kimliğini bir işaretçide tutar;
+ * işaretçi değişince (başka hesap, çıkış ya da işaretçisiz eski önbellek)
+ * yerel önbelleği temizler: yeni hesap her zaman boş başlar. `AppGate` bunu
+ * `Home`/`OnboardingFlow` hiç mount olmadan önce çağırır ki state
+ * initializer'ları temiz localStorage okusun.
  */
 export function ensureLocalCacheMatchesAccount(accountId: number | null): void {
   if (typeof window === "undefined") return;
-  const marker = accountId === null ? "guest" : String(accountId);
+  const marker = accountId === null ? "signed-out" : String(accountId);
   try {
     const stored = window.localStorage.getItem(localAccountCacheMarkerKey);
-    const isGuestToAccount = stored === "guest" && marker !== "guest";
-    const isFirstEverVisit = stored === null;
-    if (stored !== marker && !isGuestToAccount && !isFirstEverVisit) {
+    if (stored !== marker) {
       for (const key of perAccountCacheKeys) window.localStorage.removeItem(key);
     }
     window.localStorage.setItem(localAccountCacheMarkerKey, marker);

@@ -22,12 +22,27 @@ function OrgSignIn() {
     </div>
   );
 }
+// Giriş yapmamış ziyaretçinin gördüğü tek sayfa: uygulama yalnızca hesapla kullanılır.
+function SignInScreen() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-paper p-6">
+      <div className="soft-card w-full max-w-sm p-7 text-center">
+        <img src="/icon.svg" alt="" className="mx-auto h-14 w-14" />
+        <h1 className="mt-4 text-[22px] font-extrabold text-ink font-display">{appData.applicationName}</h1>
+        <p className="mt-1 text-[14px] font-semibold text-brand">{appData.tagline}</p>
+        <p className="mt-3 text-[14px] leading-6 text-ink-3">Denemelerin, konu haritan, çalışma takvimin ve sana özel haftalık planın tek yerde. Başlamak için giriş yap ya da hesap oluştur.</p>
+        <button onClick={() => startLogin("login")} className="mt-6 h-11 w-full rounded-xl bg-brand text-[14px] font-semibold text-white hover:bg-brand-strong">Giriş yap</button>
+        <button onClick={() => startLogin("register")} className="mt-2.5 h-11 w-full rounded-xl border border-ink/10 text-[14px] font-semibold text-ink-2 hover:bg-paper">Hesap oluştur</button>
+      </div>
+    </div>
+  );
+}
 import { DashboardLayoutSkeleton } from "@/components/DashboardLayoutSkeleton";
 import { trpc } from "@/lib/trpc";
-import { LOCAL_SIGNIN_REQUEST_EVENT, performLocalSignIn } from "@/const";
+import { LOCAL_SIGNIN_REQUEST_EVENT, performLocalSignIn, startLogin } from "@/const";
 import VerifyEmailScreen from "@/components/auth/VerifyEmailScreen";
 import { needsEmailVerification } from "@shared/const";
-import { ensureLocalCacheMatchesAccount, postOnboardingNudgeKey } from "@shared/yksData";
+import { appData, ensureLocalCacheMatchesAccount, postOnboardingNudgeKey } from "@shared/yksData";
 import { toast } from "sonner";
 import { useEffect, useState } from "react";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -46,7 +61,11 @@ function LocalSignInDialog() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    const handler = () => setOpen(true);
+    const handler = (event: Event) => {
+      const tab = (event as CustomEvent<{ tab?: "login" | "register" } | null>).detail?.tab;
+      if (tab) { setTab(tab); setError(""); }
+      setOpen(true);
+    };
     window.addEventListener(LOCAL_SIGNIN_REQUEST_EVENT, handler);
     return () => window.removeEventListener(LOCAL_SIGNIN_REQUEST_EVENT, handler);
   }, []);
@@ -154,10 +173,8 @@ function PendingApprovalScreen({ status, onLogout }: { status: "pending" | "reje
   );
 }
 
-// Gates the app behind onboarding for a signed-in user who hasn't finished
-// it yet. Anonymous visitors go straight to `Home` (which already renders a
-// demo experience + login prompt) — onboarding only ever applies once a
-// real account exists to attach the profile to.
+// Gates the app: anonymous visitors only see `SignInScreen` (there is no guest
+// mode), and a signed-in user who hasn't finished onboarding sees it first.
 const EMAIL_VERIFICATION_RESULTS: Record<string, { tone: "success" | "info" | "error"; text: string }> = {
   success: { tone: "success", text: "E-postan doğrulandı ✓" },
   already: { tone: "info", text: "E-postan zaten doğrulanmış." },
@@ -203,8 +220,7 @@ function AppGate() {
 
   // Home/OnboardingFlow mount olmadan ÖNCE, aynı tarayıcıda önceki bir
   // hesaptan kalmış olabilecek yerel önbelleği (kitap rafı, konular,
-  // denemeler...) temizle — aksi halde state initializer'ları o eski veriyi
-  // okur ve "misafir verisini hesaba taşı" efektleri yanlış hesaba yükler.
+  // denemeler...) temizle — aksi halde state initializer'ları o eski veriyi okur.
   useEffect(() => {
     if (authLoading) return;
     ensureLocalCacheMatchesAccount(user ? user.id : null);
@@ -226,6 +242,8 @@ function AppGate() {
     if (!user) return <OrgSignIn />;
     return <Suspense fallback={<DashboardLayoutSkeleton />}><OrgApp /></Suspense>;
   }
+
+  if (!user) return <SignInScreen />;
 
   if (user && (onboarding.isLoading || !onboarding.data || memberships.isLoading)) return <DashboardLayoutSkeleton />;
 

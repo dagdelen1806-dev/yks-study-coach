@@ -82,30 +82,34 @@ test("uygulama telefona yüklenebilir: manifest, ikon ve rehber videosu sunulur"
 });
 
 test("çıkış yapınca önceki öğrencinin verisi ekranda kalmaz", async ({ page }) => {
-  // ogrenci2 = "Kerem" (misafir demosu "Ece" olduğu için ad ayırt edicidir).
+  // ogrenci2 = "Kerem": çıkıştan sonra adı hiçbir yerde kalmamalı.
   await signIn(page, "ogrenci2@test.local");
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1 }).first()).toContainText("Kerem");
   await page.locator(".profile-button").click();
   await page.getByRole("menuitem", { name: "Çıkış yap" }).click();
-  await expect(page.getByRole("button", { name: "Giriş yap" }).first()).toBeVisible();
-  await expect(page.getByRole("heading", { level: 1 }).first()).not.toContainText("Kerem");
+  await expect(page.getByRole("button", { name: "Hesap oluştur" })).toBeVisible();
+  await expect(page).toHaveURL(/\/$/);
   await expect(page.locator("body")).not.toContainText("Kerem");
 });
 
-test("misafir deneme ekler: tarayıcıda kalır, sunucuya istek gitmez", async ({ page }) => {
-  const posts: string[] = [];
-  page.on("request", (request) => { if (request.method() === "POST" && request.url().includes("/api/trpc/")) posts.push(request.url()); });
-  await page.goto("/denemeler");
-  await page.locator("main").getByRole("button", { name: "Deneme ekle" }).first().click();
-  const title = `Misafir deneme ${Date.now()}`;
-  await page.getByPlaceholder("Örn. Dershane TYT · 04").fill(title);
-  await page.getByLabel("Türkçe").first().fill("30");
-  await page.getByRole("button", { name: "Kaydet ve çalışma planına aktar" }).click();
-  await expect(page.getByText("demo modu").first()).toBeVisible();
-  await page.reload();
-  await expect(page.getByText(title).first()).toBeVisible();
-  expect(posts).toEqual([]);
+test("giriş yapmamış ziyaretçi her adreste yalnızca giriş ekranını görür", async ({ page }) => {
+  for (const path of ["/", "/denemeler", "/takvim", "/konu-haritasi", "/defter"]) {
+    await page.goto(path);
+    await expect(page.getByRole("button", { name: "Hesap oluştur" })).toBeVisible();
+    await expect(page.locator('nav[aria-label="Bölümler"]')).toHaveCount(0);
+    await expect(page.getByText("Demo verisi")).toHaveCount(0);
+  }
+  await page.getByRole("button", { name: "Hesap oluştur" }).click();
+  await expect(page.getByRole("dialog").getByRole("heading", { name: "Kayıt ol" })).toBeVisible();
+});
+
+test("kurum panelinden çıkış da ilk sayfaya döner", async ({ page }) => {
+  await signIn(page, ORG_ADMIN);
+  await page.goto("/kurum");
+  await page.getByRole("button", { name: "Çıkış yap" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("button", { name: "Hesap oluştur" })).toBeVisible();
 });
 
 test("kurum yöneticisi Kurum Paneli'nde öğrencilerini görür", async ({ page }) => {

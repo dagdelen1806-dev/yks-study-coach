@@ -42,8 +42,9 @@ export function useAuth(options?: UseAuthOptions) {
       // Çıkıştan sonra sayfa baştan yüklenir: yalnızca `auth.me` temizlenince profil, takvim, konu
       // listesi gibi önbellekteki ve sayfa belleğindeki veriler kalıyor ve ortak bir bilgisayarda
       // bir sonraki kişi önceki öğrencinin adını, hedefini ve planını görüyordu (Ekim 2026'da
-      // tarayıcı testiyle görüldü). `replace`: geri tuşu oturumlu ekranı geri getirmesin.
-      if (typeof window !== "undefined") window.location.replace(window.location.pathname.startsWith("/kurum") ? "/kurum" : "/");
+      // tarayıcı testiyle görüldü). Her çıkış ilk sayfaya (giriş ekranı) döner;
+      // `replace`: geri tuşu oturumlu ekranı geri getirmesin.
+      if (typeof window !== "undefined") window.location.replace("/");
     }
   }, [logoutMutation, utils]);
 

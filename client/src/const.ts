@@ -34,7 +34,7 @@ export async function performLocalSignIn(
   }
 }
 
-/** Giriş penceresini açar (`App.tsx` → `LocalSignInDialog`: e-posta/telefon + şifre). */
-export const startLogin = () => {
-  window.dispatchEvent(new Event(LOCAL_SIGNIN_REQUEST_EVENT));
+/** Giriş penceresini açar (`App.tsx` → `LocalSignInDialog`: e-posta/telefon + şifre); `tab` hangi sekmeyle açılacağını seçer. */
+export const startLogin = (tab: "login" | "register" = "login") => {
+  window.dispatchEvent(new CustomEvent(LOCAL_SIGNIN_REQUEST_EVENT, { detail: { tab } }));
 };
