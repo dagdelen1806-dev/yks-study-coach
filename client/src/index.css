@@ -385,6 +385,8 @@
   /* Odak üst çubuğu dar ekranda tek satır: düğme yazıları bölünmesin. */
   .focus-topbar { gap: 8px; padding: 0 12px; }
   .focus-topbar .focus-close { padding: 8px 10px; font-size: 13px; white-space: nowrap; }
+  /* Ders · konu yazısı ekranın ortasında zaten var; burada düğmelere yer açılır (duraklatınca "Devam et" de görünür). */
+  .focus-topbar .focus-brand-text { display: none; }
   .focus-setup-grid { grid-template-columns: 1fr; }
   .focus-result-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .focus-checklist { flex-direction: column; }

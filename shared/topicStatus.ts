@@ -18,3 +18,11 @@ export function deriveTopicStatus(accuracy: number, questionCount: number): Topi
     clamped < TOPIC_STATUS_THRESHOLDS.weak ? "Zayıf" : clamped < TOPIC_STATUS_THRESHOLDS.good ? "Orta" : "İyi";
   return { status, insufficientData: questionCount < MIN_RELIABLE_QUESTION_COUNT };
 }
+
+/**
+ * Süresi dolmadan bırakılan odak oturumundan sonra konunun durumu: konu "tekrar gerektiren"
+ * (Zayıf ya da Orta) olur. İyi → Orta; verisi olmayan (null) → Orta; Zayıf/Orta aynen kalır.
+ */
+export function statusAfterAbandonedSession(current: TopicStatus | null): TopicStatus {
+  return current === null || current === "İyi" ? "Orta" : current;
+}

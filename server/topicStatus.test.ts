@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { deriveTopicStatus, MIN_RELIABLE_QUESTION_COUNT } from "../shared/topicStatus";
+import { deriveTopicStatus, MIN_RELIABLE_QUESTION_COUNT, statusAfterAbandonedSession } from "../shared/topicStatus";
+
+describe("yarım bırakılan odak oturumu (statusAfterAbandonedSession)", () => {
+  it("konuyu her durumda tekrar gerektiren (Zayıf/Orta) yapar", () => {
+    expect(statusAfterAbandonedSession("İyi")).toBe("Orta");
+    expect(statusAfterAbandonedSession(null)).toBe("Orta");
+    expect(statusAfterAbandonedSession("Orta")).toBe("Orta");
+    expect(statusAfterAbandonedSession("Zayıf")).toBe("Zayıf");
+  });
+});
 
 describe("konu durumu hesaplama (deriveTopicStatus)", () => {
   it("%55 altını Zayıf olarak sınıflandırır", () => {

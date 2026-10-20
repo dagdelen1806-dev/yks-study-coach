@@ -7,7 +7,7 @@ import { calculatePlanAdherence, dedupeAlerts, type AdherenceSession } from "../
 import { rescheduleOverdueSessions, buildSessionCompletion } from "../shared/calendarLogic";
 import { normalizeIsbn } from "../shared/bookIdentity";
 import { CURRICULUM, isCurriculumOnlySlug } from "../shared/curriculum";
-import { deriveTopicStatus } from "../shared/topicStatus";
+import { deriveTopicStatus, statusAfterAbandonedSession } from "../shared/topicStatus";
 import { topicSeeds, type ExamType, type TopicStatus } from "../shared/yksData";
 import { toLocalDateKey } from "../shared/dates";
 import { NOTEBOOK_REVIEW_TASK_KIND } from "../shared/questionNotebook";
@@ -760,4 +760,21 @@ export async function upsertTopicProgress(userId: number, input: { exam: ExamTyp
     await db.insert(topicProgress).values({ userId, topicId: topicRow.id, progress: Math.round(input.accuracy), status: dbStatus, lastReviewedAt: input.studyDate });
   }
   return { slug: topicRow.slug, exam: topicRow.exam, subject: topicRow.subject, topic: topicRow.topic, unit: topicRow.unit, progress: Math.round(input.accuracy), status, insufficientData, lastReviewedAt: input.studyDate };
+}
+
+/**
+ * Süresi dolmadan bırakılan odak oturumu: konu Konu Haritası'nda "tekrar gerektiren" olur.
+ * İyi durumdaki konu Orta'ya ("Bir tur daha") çekilir; Zayıf/Orta olduğu gibi kalır; hiç verisi
+ * yoksa Orta olarak eklenir. Gerçek bir sonuç olmadığından doğruluk ve son çalışma tarihi değişmez.
+ */
+export async function markTopicForReview(userId: number, input: { exam: ExamType; subject: string; topic: string }) {
+  await ensureTopicCatalogSeeded();
+  const db = await getDb();
+  if (!db) return undefined;
+  const topicRow = await findOrCreateTopic(db, input.exam, input.subject, input.topic);
+  const [existing] = await db.select().from(topicProgress).where(and(eq(topicProgress.userId, userId), eq(topicProgress.topicId, topicRow.id))).limit(1);
+  const status = statusAfterAbandonedSession(existing ? statusFromDb[existing.status] : null);
+  if (!existing) await db.insert(topicProgress).values({ userId, topicId: topicRow.id, progress: 0, status: statusToDb[status] });
+  else if (statusToDb[status] !== existing.status) await db.update(topicProgress).set({ status: statusToDb[status], updatedAt: new Date() }).where(eq(topicProgress.id, existing.id));
+  return { slug: topicRow.slug, status };
 }

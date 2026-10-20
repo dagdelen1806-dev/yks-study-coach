@@ -54,6 +54,28 @@ test("odak oturumu açılır ve kapanır", async ({ page }) => {
   await expect(page.locator(".focus-topbar")).toHaveCount(0);
 });
 
+test("odak süresi dolmadan sonuç girilemez; çıkış yarım sayılır ve konu tekrar listesine düşer", async ({ page }) => {
+  await signIn(page, STUDENT);
+  await page.goto("/");
+  await page.getByRole("button", { name: /Bugünkü planıma başla|Serbest oturum başlat/ }).click();
+  await page.getByRole("button", { name: "Odağı başlat" }).click();
+  await expect(page.getByRole("button", { name: /Erken bitir/ })).toHaveCount(0);
+  await expect(page.getByText("Sonuçlarını süre dolunca girersin.")).toBeVisible();
+  const topic = (await page.locator(".focus-topbar .text-white\\/45").innerText()).split(" · ")[1];
+  await page.locator(".focus-topbar button", { hasText: "Çıkış" }).click();
+  const confirm = page.getByRole("alertdialog", { name: "Oturumdan çık" });
+  await expect(confirm).toBeVisible();
+  await confirm.getByRole("button", { name: "Odağa devam et" }).click();
+  await expect(confirm).toHaveCount(0);
+  await page.locator(".focus-topbar button", { hasText: "Çıkış" }).click();
+  await confirm.getByRole("button", { name: "Yarım bırak ve çık" }).click();
+  await expect(page.locator(".focus-topbar")).toHaveCount(0);
+  await expect(page.getByText(`${topic} tekrar gerektiren konulara eklendi`)).toBeVisible();
+  const progress = await page.request.get("/api/trpc/topics.progress");
+  const rows = (await progress.json()).result.data.json as Array<{ topic: string; status: string }>;
+  expect(["Zayıf", "Orta"]).toContain(rows.find((row) => row.topic === topic)?.status);
+});
+
 test("soru defterine soru eklenir; Escape pencereyi kapatır", async ({ page }) => {
   await signIn(page, STUDENT);
   await page.goto("/");
