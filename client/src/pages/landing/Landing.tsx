@@ -3,7 +3,7 @@ import { trpc } from "@/lib/trpc";
 import { tierHighlights } from "@/components/subscription/PlanComparison";
 import { PAID_TIERS, TIER_LABELS, type PlanTier } from "@shared/entitlements";
 import { appData, footerDisclaimer } from "@shared/yksData";
-import { BarChart3, Building2, CalendarClock, Check, Map, NotebookPen, PlayCircle, Sparkles, Target, Timer, Users } from "lucide-react";
+import { BarChart3, Building2, CalendarClock, Check, ChevronDown, Map, NotebookPen, PlayCircle, Sparkles, Target, Timer, Users } from "lucide-react";
 
 const formatPrice = (minorUnits: number) => `${(minorUnits / 100).toLocaleString("tr-TR", { maximumFractionDigits: 0 })} ₺`;
 
@@ -20,6 +20,18 @@ const STEPS = [
   { title: "Hesabını aç", text: "Sınıfını, hedef sınav yılını ve hedef bölümünü birkaç dakikalık kısa bir ankette paylaş." },
   { title: "Denemeni ekle", text: "Son deneme sonucunu gir; Pusula zayıf konularını çıkarıp koç önerisini hazırlar." },
   { title: "Planını uygula", text: "Haftalık planındaki oturumları odak modunda tamamla; her oturum konu haritanı günceller." },
+];
+
+const FAQ = [
+  { q: "Pusula ücretsiz mi?", a: "Hesap açmak ve temel takip (konu haritası, denemeler, takvim, odak zamanlayıcı) ücretsiz. Yapay zekâ araçları ücretsiz pakette de var ama aylık kotası düşük. Gelişmiş deneme analizleri, plan uyumu, kaynak önerileri ve raporlar ücretli paketlerde açılır; her ücretli pakette 10 gün ücretsiz deneme var." },
+  { q: "Paketler arasındaki fark ne?", a: "Temel, Premium ve Pro'da tüm özellikler açık; paketler yalnızca yapay zekâ kotalarında ayrılır: haftalık plan, deneme belgesini okuma, kitap ekleme, sesli not ve not asistanı gibi araçları ayda kaç kez kullanabileceğin." },
+  { q: "Yıllık plan nasıl işliyor?", a: "Yıllık plan, başlangıç anketinde seçtiğin sınav yılının YKS'si bitene kadar sürer. Fiyatı, sınava kalan ayların aylık toplamından %20 daha azdır; yani ne zaman alırsan al yalnızca kalan dönem için ödersin." },
+  { q: "Aboneliğimi iptal edebilir miyim?", a: "Evet, istediğin an Premium sayfasından iptal edebilirsin. Ödediğin dönem bitene kadar paketini kullanmaya devam edersin, sonra ücretsiz pakete geçersin; verilerin silinmez." },
+  { q: "Kayıt olunca hesabım hemen açılıyor mu?", a: "E-postayla kayıt olursan önce adresine gelen bağlantıyla e-postanı doğrularsın. Ardından hesabın bir yönetici tarafından onaylanır ve panele erişebilirsin." },
+  { q: "Verilerimi kimler görebilir?", a: "Varsayılan olarak yalnızca sen. Dershanen ya da okulun sana davet kodu verir ve sen onay verirsen; deneme sonuçların, konu durumun, takvimdeki planın ve hedef bilgin kurumunla paylaşılır. Notların, soru defterin, fotoğrafların, sesli notların ve iletişim bilgilerin hiçbir zaman paylaşılmaz; kurumdan istediğin an ayrılabilirsin." },
+  { q: "Telefonda kullanabilir miyim?", a: "Evet. Pusula tarayıcıda çalışır ve telefonunun ana ekranına uygulama olarak eklenebilir. İstersen yaklaşan çalışma oturumların için hatırlatma bildirimi de alırsın." },
+  { q: "Puan ya da sıralama tahmini veriyor mu?", a: "Hayır. Pusula bir çalışma takip ve planlama aracıdır; resmi puan veya sıralama tahmini sunmaz. Konu kapsamı ÖSYM ve MEB programlarına dayanır." },
+  { q: "Dershane ya da okul olarak nasıl kullanırız?", a: "Kurum Paneli ile öğretmenleriniz, onay veren öğrencilerin denemelerini, konu durumlarını ve planlarını izler. Personel, platformdan aldığı davet koduyla Kurum Paneli'ne katılır; öğrencilerinizi de kurumunuzun davet kodlarıyla eklersiniz." },
 ];
 
 const TIER_TAGLINES: Record<PlanTier, string> = {
@@ -48,6 +60,7 @@ export default function Landing() {
             <a href="#ozellikler" className="hidden rounded-lg px-3 py-2 text-ink-3 hover:text-ink md:block">Özellikler</a>
             <a href="#fiyatlar" className="hidden rounded-lg px-3 py-2 text-ink-3 hover:text-ink md:block">Fiyatlar</a>
             <a href="#kurumlar" className="hidden rounded-lg px-3 py-2 text-ink-3 hover:text-ink md:block">Kurumlar</a>
+            <a href="#sss" className="hidden rounded-lg px-3 py-2 text-ink-3 hover:text-ink lg:block">SSS</a>
             <button onClick={login} className="whitespace-nowrap rounded-lg border border-ink/10 bg-white px-3 py-2 text-ink-2 hover:bg-paper sm:border-0 sm:bg-transparent">Giriş yap</button>
             <button onClick={register} className="hidden h-9 whitespace-nowrap rounded-[10px] bg-brand px-4 text-white hover:bg-brand-strong sm:block">Hesap oluştur</button>
           </nav>
@@ -110,7 +123,7 @@ export default function Landing() {
 
         <section id="fiyatlar" className="mx-auto max-w-6xl scroll-mt-20 px-4 py-14 sm:px-6">
           <h2 className="text-center text-[28px] font-semibold font-display sm:text-[34px]">Fiyatlar</h2>
-          <p className="mx-auto mt-3 max-w-2xl text-center text-[15px] leading-7 text-ink-3">Tüm paketlerde aynı özellikler; paketler yalnızca yapay zekâ kotalarında ayrılır. Yıllık plan sınavına kadar sürer ve kalan süreye göre %20 indirimlidir.</p>
+          <p className="mx-auto mt-3 max-w-2xl text-center text-[15px] leading-7 text-ink-3">Ücretli paketlerin hepsinde tüm özellikler açık; paketler yalnızca yapay zekâ kotalarında ayrılır. Yıllık plan sınavına kadar sürer ve kalan süreye göre %20 indirimlidir.</p>
           <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {(["free", ...PAID_TIERS] as PlanTier[]).map((tier) => {
               const price = tier === "free" ? 0 : monthlyPrice(tier);
@@ -147,6 +160,21 @@ export default function Landing() {
               <p className="text-[14px] leading-6 text-ink-3">Kurum personeliyseniz davet kodunuzla Kurum Paneli'ne giriş yapın.</p>
               <a href="/kurum" className="flex h-11 items-center justify-center rounded-xl bg-brand text-[14px] font-semibold text-white hover:bg-brand-strong">Kurum girişi</a>
             </div>
+          </div>
+        </section>
+
+        <section id="sss" className="mx-auto max-w-3xl scroll-mt-20 px-4 py-14 sm:px-6">
+          <h2 className="text-center text-[28px] font-semibold font-display sm:text-[34px]">Sık sorulan sorular</h2>
+          <div className="mt-8 space-y-3">
+            {FAQ.map((item) => (
+              <details key={item.q} className="soft-card group p-0">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 text-[15px] font-semibold [&::-webkit-details-marker]:hidden">
+                  {item.q}
+                  <ChevronDown size={18} className="shrink-0 text-ink-4 transition group-open:rotate-180" />
+                </summary>
+                <p className="px-5 pb-5 text-[14px] leading-6 text-ink-3">{item.a}</p>
+              </details>
+            ))}
           </div>
         </section>
 
