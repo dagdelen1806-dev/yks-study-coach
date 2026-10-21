@@ -18,9 +18,9 @@ export const ROLE_LABELS: Record<OrgRole, string> = { owner: "Kurum sahibi", adm
 export const ORG_KINDS = ["dershane", "okul", "etut", "kocluk", "diger"] as const;
 export type OrgKind = (typeof ORG_KINDS)[number];
 export const ORG_KIND_LABELS: Record<OrgKind, string> = { dershane: "Dershane / kurs merkezi", okul: "Okul", etut: "Etüt merkezi", kocluk: "Koçluk merkezi", diger: "Diğer" };
-export const CLASS_GRADES = ["9", "10", "11", "12", "Mezun"] as const;
-export const CLASS_TRACKS = ["SAY", "EA", "SÖZ", "DİL", "TYT"] as const;
-export const CLASS_TRACK_LABELS: Record<(typeof CLASS_TRACKS)[number], string> = { SAY: "Sayısal", EA: "Eşit Ağırlık", "SÖZ": "Sözel", "DİL": "Dil", TYT: "TYT (ortak)" };
+export const CLASS_GRADES = ["7", "8", "9", "10", "11", "12", "Mezun"] as const;
+export const CLASS_TRACKS = ["SAY", "EA", "SÖZ", "DİL", "TYT", "LGS"] as const;
+export const CLASS_TRACK_LABELS: Record<(typeof CLASS_TRACKS)[number], string> = { SAY: "Sayısal", EA: "Eşit Ağırlık", "SÖZ": "Sözel", "DİL": "Dil", TYT: "TYT (ortak)", LGS: "LGS" };
 export const TEACHER_SUBJECTS = ["Türkçe", "Edebiyat", "Matematik", "Geometri", "Fizik", "Kimya", "Biyoloji", "Tarih", "Coğrafya", "Felsefe", "Din Kültürü", "İngilizce", "Rehberlik"] as const;
 /** Ayarlar → Roller: her rolün panelde neyi görüp yapabildiği (bilgilendirme; yetki kararı sunucuda). */
 export const ROLE_PERMISSIONS: Array<{ role: Exclude<OrgRole, "student">; can: string[] }> = [
@@ -158,6 +158,8 @@ export const RISK_LABELS: Record<RiskKey, string> = { inactive: "7 gündür etki
 export type StudentSummary = {
   lastTyt: { net: number; delta: number | null; date: Date } | null;
   lastAyt: { net: number; delta: number | null; date: Date } | null;
+  /** LGS öğrencisinin son denemesi (YKS öğrencisinde hep null). */
+  lastLgs: { net: number; delta: number | null; date: Date } | null;
   weekMinutes: number;
   adherence: number | null;
   plannedThisWeek: number;
@@ -177,6 +179,7 @@ function latestOf(exams: StudentSignals["exams"], kind: ExamKind) {
 export function summarizeStudent(signals: StudentSignals, now = new Date()): StudentSummary {
   const lastTyt = latestOf(signals.exams, "TYT");
   const lastAyt = latestOf(signals.exams, "AYT");
+  const lastLgs = latestOf(signals.exams, "LGS");
   const weekMinutes = signals.logs.filter((log) => now.getTime() - log.studyDate.getTime() <= 7 * DAY).reduce((sum, log) => sum + log.minutes, 0);
   // Uyum yalnızca bugüne kadar planlanmış oturumlarla hesaplanır (gelecek günler henüz yapılamaz).
   const due = signals.weekSessions.filter((session) => new Date(session.sessionDate).getTime() <= now.getTime());
@@ -188,6 +191,6 @@ export function summarizeStudent(signals: StudentSignals, now = new Date()): Stu
   const risks: RiskKey[] = [];
   if (!lastActivityAt || now.getTime() - lastActivityAt.getTime() > RISK_RULES.inactiveDays * DAY) risks.push("inactive");
   if (adherence !== null && adherence < RISK_RULES.lowAdherence) risks.push("low_adherence");
-  if ([lastTyt, lastAyt].some((exam) => exam?.delta !== null && exam?.delta !== undefined && exam.delta <= -RISK_RULES.netDrop)) risks.push("net_drop");
-  return { lastTyt, lastAyt, weekMinutes, adherence, plannedThisWeek: due.length, weakTopicCount: signals.weakTopicCount, lastActivityAt, risks };
+  if ([lastTyt, lastAyt, lastLgs].some((exam) => exam?.delta !== null && exam?.delta !== undefined && exam.delta <= -RISK_RULES.netDrop)) risks.push("net_drop");
+  return { lastTyt, lastAyt, lastLgs, weekMinutes, adherence, plannedThisWeek: due.length, weakTopicCount: signals.weakTopicCount, lastActivityAt, risks };
 }

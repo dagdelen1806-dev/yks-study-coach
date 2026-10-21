@@ -122,6 +122,7 @@ export const orgRouter = router({
         activeThisWeek: students.filter((student) => student.summary.weekMinutes > 0).length,
         averageAdherence: average(adherence),
         averageLastTyt: average(students.map((student) => student.summary.lastTyt?.net).filter((value): value is number => typeof value === "number")),
+        averageLastLgs: average(students.map((student) => student.summary.lastLgs?.net).filter((value): value is number => typeof value === "number")),
         atRisk: students.filter((student) => student.summary.risks.length).length,
         weekMinutes: students.reduce((sum, student) => sum + student.summary.weekMinutes, 0),
       },
@@ -173,7 +174,7 @@ export const orgRouter = router({
     return {
       student: { userId: input.studentUserId, name: member.name, joinedAt: member.joinedAt, consentAt: member.consentAt },
       // Profilden yalnızca koçluk için gerekenler (iletişim/kimlik bilgisi yok).
-      profile: { gradeLevel: profile.gradeLevel, examYear: profile.examYear, targetScoreType: profile.targetScoreType, targetUniversity: profile.targetUniversity, targetDepartment: profile.targetDepartment, dailyStudyDuration: profile.dailyStudyDuration, avatarStyle: profile.avatarStyle },
+      profile: { examTrack: profile.examTrack, gradeLevel: profile.gradeLevel, examYear: profile.examYear, targetScoreType: profile.targetScoreType, targetUniversity: profile.targetUniversity, targetDepartment: profile.targetDepartment, targetHighSchool: profile.targetHighSchool, targetLgsScore: profile.targetLgsScore, dailyStudyDuration: profile.dailyStudyDuration, avatarStyle: profile.avatarStyle },
       summary: summarizeStudent(signals.get(input.studentUserId)!),
       exams,
       topics: topics.filter((topic) => !topic.insufficientData),

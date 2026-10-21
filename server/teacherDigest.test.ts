@@ -7,7 +7,7 @@ import { buildTeacherDigest } from "../shared/teacherDigest";
 import { buildTeacherDigestEmail } from "./_core/emails/teacherDigestEmail";
 import { readUnsubscribeToken, createUnsubscribeToken } from "./digest/unsubscribeToken";
 
-const summary = (overrides: Partial<StudentSummary> = {}): StudentSummary => ({ lastTyt: null, lastAyt: null, weekMinutes: 0, adherence: null, plannedThisWeek: 0, weakTopicCount: 0, lastActivityAt: null, risks: [], ...overrides });
+const summary = (overrides: Partial<StudentSummary> = {}): StudentSummary => ({ lastTyt: null, lastAyt: null, lastLgs: null, weekMinutes: 0, adherence: null, plannedThisWeek: 0, weakTopicCount: 0, lastActivityAt: null, risks: [], ...overrides });
 
 describe("buildTeacherDigest", () => {
   const students = [
