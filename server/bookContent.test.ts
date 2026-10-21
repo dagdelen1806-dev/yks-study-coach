@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { CURRICULUM } from "../shared/curriculum";
+import { kindsOf } from "../shared/exams";
 import { buildBookRecommendations, computeBookCompletion, minutesForWeakness, pickStudyDay, weaknessFromAccuracy, type ContentRow } from "./bookContent/bookStudyAllocation";
 import { matchTopic, type MatchableTopic } from "./bookContent/curriculumMatcher";
 import { looksLikeTopicList, parseTableOfContents, type TocRawPage } from "./bookContent/tocParser";
@@ -11,7 +12,7 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/books/
 
 // Müfredata test için sıralı sahte ID'ler (gerçekte yks_topics.id).
 // Fixture bir YKS kitabı; üretimde de adaylar öğrencinin sınavına göre süzülür (getMatchableTopics).
-const topics: MatchableTopic[] = CURRICULUM.map((def, index) => ({ id: index + 1, ...def })).filter((def) => def.exam !== "LGS");
+const topics: MatchableTopic[] = CURRICULUM.map((def, index) => ({ id: index + 1, ...def })).filter((def) => kindsOf("YKS").includes(def.exam));
 const idOf = (topic: string) => topics.find((item) => item.topic === topic)!.id;
 
 describe("curriculum data", () => {

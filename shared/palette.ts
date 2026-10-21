@@ -49,6 +49,13 @@ export const subjectPalette: Record<string, string> = {
   "İnkılap Tarihi": "#b8741a",
   "Din Kültürü": "#8a6a3a",
   İngilizce: "#3a7ab8",
+  // KPSS / DGS dersleri
+  Tarih: "#b8741a",
+  Coğrafya: "#4a8f9c",
+  Vatandaşlık: "#6a4fb0",
+  "Güncel Bilgiler": "#8a6a3a",
+  Sayısal: "#2a5db0",
+  Sözel: "#8a4fb0",
 };
 
 /** Sırası önemli olmayan kategori listeleri için (ör. haftalık konu dağılımı). */

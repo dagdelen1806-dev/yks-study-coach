@@ -202,6 +202,25 @@ test("veli kodla bağlanır, öğrenci onaylayınca veli özeti görür ama notl
   await parentContext.close();
 });
 
+test("KPSS adayı ankette KPSS'yi seçer; yetişkin eğitim durumları, tek net ve hedef kadro sorulur", async ({ page }) => {
+  await signIn(page, "kpss1@test.local");
+  await page.goto("/");
+  await page.getByRole("radio", { name: /KPSS/ }).click();
+  await expect(page.getByText("Eğitim durumun")).toBeVisible();
+  await expect(page.locator("#onboarding-grade button")).toHaveText(["Lisans öğrencisi", "Lisans mezunu", "Önlisans mezunu", "Lise mezunu"]);
+  await expect(page.locator("#onboarding-score-type")).toHaveCount(0);
+  await page.getByLabel("Sana nasıl hitap edelim?").fill("Burak");
+  await page.getByRole("checkbox", { name: "Lisans mezunu", exact: true }).click();
+  await page.getByLabel("Hedef sınav yılın").fill(String(new Date().getFullYear() + 2));
+  await page.getByRole("button", { name: "Devam et" }).click();
+  await expect(page.getByLabel("Mevcut KPSS netin")).toBeVisible();
+  await expect(page.locator("#onboarding-strong-subjects button")).toHaveText(["Türkçe", "Matematik", "Tarih", "Coğrafya", "Vatandaşlık", "Güncel Bilgiler"]);
+  await page.getByRole("button", { name: "Devam et" }).click();
+  await expect(page.getByPlaceholder("Örn. Vergi müfettiş yardımcılığı")).toBeVisible();
+  await expect(page.getByText("Hedef KPSS puanın")).toBeVisible();
+  await expect(page.getByText("100 üzerinden; örn. 85.")).toBeVisible();
+});
+
 test("çıkış yapınca önceki öğrencinin verisi ekranda kalmaz", async ({ page }) => {
   // ogrenci2 = "Kerem": çıkıştan sonra adı hiçbir yerde kalmamalı.
   await signIn(page, "ogrenci2@test.local");

@@ -1,12 +1,12 @@
 import type { ExamTrack } from "./exams";
 
 /**
- * Sınav takvimi (YKS ve LGS) ve buna bağlı abonelik süresi. Yıllık plan "sınavına kadar" sürer
+ * Sınav takvimi (YKS, LGS, KPSS, DGS) ve buna bağlı abonelik süresi. Yıllık plan "sınavına kadar" sürer
  * (Ekim 2026 kararı): öğrencinin başlangıç anketinde seçtiği sınavın (student_profiles.examTrack)
  * ve sınav yılının (student_profiles.examYear) son günü sona erer; sınav yılı yoksa ya da o sınav
  * geçmişse o sınavın bir sonraki tarihi esas alınır.
  *
- * ÖSYM (YKS) / MEB (LGS) yeni yılın tarihini açıklayınca listeye eklenmeli. Listede olmayan bir yıl
+ * ÖSYM (YKS, KPSS, DGS) / MEB (LGS) yeni yılın tarihini açıklayınca listeye eklenmeli. Listede olmayan bir yıl
  * için son bilinen tarihin aynı günü varsayılır (`estimated: true`) — ödeme ekranı bunu belirtir.
  */
 export const YKS_EXAMS: ReadonlyArray<{ year: number; firstDay: string; lastDay: string }> = [
@@ -19,7 +19,27 @@ export const LGS_EXAMS: ReadonlyArray<{ year: number; firstDay: string; lastDay:
   { year: 2026, firstDay: "2026-06-13", lastDay: "2026-06-13" },
 ];
 
-const EXAMS_BY_TRACK: Record<ExamTrack, ReadonlyArray<{ year: number; firstDay: string; lastDay: string }>> = { YKS: YKS_EXAMS, LGS: LGS_EXAMS };
+/** KPSS lisans Genel Yetenek–Genel Kültür: iki yılda bir (çift yıllar). 2026: 6 Eylül. */
+export const KPSS_EXAMS: ReadonlyArray<{ year: number; firstDay: string; lastDay: string }> = [
+  { year: 2026, firstDay: "2026-09-06", lastDay: "2026-09-06" },
+];
+
+/** DGS her yıl, temmuzda. 2026: 19 Temmuz. 2027 henüz açıklanmadı. */
+export const DGS_EXAMS: ReadonlyArray<{ year: number; firstDay: string; lastDay: string }> = [
+  { year: 2026, firstDay: "2026-07-19", lastDay: "2026-07-19" },
+];
+
+const EXAMS_BY_TRACK: Record<ExamTrack, ReadonlyArray<{ year: number; firstDay: string; lastDay: string }>> = { YKS: YKS_EXAMS, LGS: LGS_EXAMS, KPSS: KPSS_EXAMS, DGS: DGS_EXAMS };
+/** Sınav kaç yılda bir yapılır (tahmin yalnızca bu döngüdeki yıllara yapılır). */
+const EXAM_CYCLE_YEARS: Record<ExamTrack, number> = { YKS: 1, LGS: 1, KPSS: 2, DGS: 1 };
+
+/** Bu yıl ya da sonrasındaki ilk sınav yılı (iki yılda bir yapılan KPSS'de tek yıl bir sonrakine kayar). */
+function cycleYearFrom(year: number, track: ExamTrack): number {
+  const cycle = EXAM_CYCLE_YEARS[track];
+  const anchor = EXAMS_BY_TRACK[track][0].year;
+  const offset = (((year - anchor) % cycle) + cycle) % cycle;
+  return offset === 0 ? year : year + (cycle - offset);
+}
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 // Türkiye sabit UTC+3: sınavın son günü İstanbul saatiyle 23:59:59'da biter.
@@ -27,9 +47,13 @@ const endOfIstanbulDay = (isoDate: string) => new Date(`${isoDate}T23:59:59.999+
 
 export type YksPeriodEnd = { year: number; endsAt: Date; estimated: boolean };
 
-/** Bir yılın sınav bitişi (takvimde yoksa son bilinen tarihin aynı günü, tahmini). */
-export function examEndOf(year: number, track: ExamTrack = "YKS"): YksPeriodEnd {
+/**
+ * Bir yılın sınav bitişi (takvimde yoksa son bilinen tarihin aynı günü, tahmini). O yıl sınav
+ * yapılmıyorsa (KPSS tek yıl) döngüdeki bir sonraki sınav yılı döner.
+ */
+export function examEndOf(requestedYear: number, track: ExamTrack = "YKS"): YksPeriodEnd {
   const exams = EXAMS_BY_TRACK[track];
+  const year = cycleYearFrom(requestedYear, track);
   const known = exams.find((exam) => exam.year === year);
   if (known) return { year, endsAt: endOfIstanbulDay(known.lastDay), estimated: false };
   const last = exams[exams.length - 1];
@@ -48,7 +72,7 @@ export function nextExamEnd(now: Date, examYear?: number | null, track: ExamTrac
   }
   let year = Math.min(...EXAMS_BY_TRACK[track].map((exam) => exam.year));
   let end = examEndOf(year, track);
-  while (end.endsAt.getTime() <= now.getTime()) end = examEndOf(++year, track);
+  while (end.endsAt.getTime() <= now.getTime()) { year = end.year + EXAM_CYCLE_YEARS[track]; end = examEndOf(year, track); }
   return end;
 }
 export const nextYksEnd = (now: Date, examYear?: number | null) => nextExamEnd(now, examYear, "YKS");

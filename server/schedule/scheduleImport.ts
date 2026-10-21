@@ -20,6 +20,20 @@ const LESSON_RULES: Record<ExamTrack, Array<[RegExp, string | null]>> = {
     [/MATEMAT[İI]K/, "Matematik"],
     [/T[ÜU]RK[ÇC]E/, "Türkçe"],
   ],
+  // KPSS kursu programı: Genel Yetenek–Genel Kültür dersleri.
+  KPSS: [
+    [/MATEMAT[İI]K|GEOMETR[İI]|SAYISAL/, "Matematik"],
+    [/T[ÜU]RK[ÇC]E|S[ÖO]ZEL/, "Türkçe"],
+    [/TAR[İI]H|[İI]NKILAP/, "Tarih"],
+    [/CO[ĞG]RAFYA/, "Coğrafya"],
+    [/VATANDA[ŞS]LIK|ANAYASA|HUKUK/, "Vatandaşlık"],
+    [/G[ÜU]NCEL/, "Güncel Bilgiler"],
+  ],
+  // Önlisans programındaki bölüm dersleri DGS'ye girmez; tanınmayan ad modelin seçimine kalır.
+  DGS: [
+    [/MATEMAT[İI]K|GEOMETR[İI]|SAYISAL/, "Sayısal"],
+    [/T[ÜU]RK[ÇC]E|T[ÜU]RK D[İI]L[İI]|S[ÖO]ZEL|PARAGRAF/, "Sözel"],
+  ],
   YKS: [
     [/D[İI]N K[ÜU]LT[ÜU]R|AHLAK|YABANCI D[İI]L|[İI]NG[İI]L[İI]ZCE|ALMANCA|FRANSIZCA|REHBERL[İI]K|BEDEN|SPOR|G[ÖO]RSEL SANAT|M[ÜU]Z[İI]K|SA[ĞG]LIK B[İI]LG|TRAF[İI]K|PEYGAMBER|KUR.?AN|H[İI]TABET|PROJE/, null],
     [/GEOMETR[İI]/, "Geometri"],

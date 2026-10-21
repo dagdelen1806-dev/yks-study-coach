@@ -33,6 +33,7 @@ const students = [
 
 const LGS_STUDENT = { email: "lgs1@test.local", name: "Mert" };
 const PARENT = { email: "veli1@test.local", name: "Ayten Veli" };
+const KPSS_CANDIDATE = { email: "kpss1@test.local", name: "Burak Aday" };
 
 // localAuth.ts ile aynı scrypt biçimi (tuz:anahtar).
 const hashPassword = (password: string) => { const salt = randomBytes(16).toString("hex"); return `${salt}:${scryptSync(password, salt, 64).toString("hex")}`; };
@@ -110,7 +111,9 @@ async function main() {
   const parentId = await ensureUser(PARENT.email, PARENT.name);
   await db.delete(parentLinks).where(inArray(parentLinks.studentUserId, [lgsId, ...studentIds]));
   await db.delete(parentLinks).where(eq(parentLinks.parentUserId, parentId));
-  await db.delete(studentProfiles).where(inArray(studentProfiles.userId, [lgsId, parentId]));
+  // KPSS adayı: anketi hiç doldurmamış (e2e anketi baştan yürütür).
+  const kpssId = await ensureUser(KPSS_CANDIDATE.email, KPSS_CANDIDATE.name);
+  await db.delete(studentProfiles).where(inArray(studentProfiles.userId, [lgsId, parentId, kpssId]));
   await db.delete(userMockExams).where(eq(userMockExams.userId, lgsId));
   await db.insert(studentProfiles).values({ userId: lgsId, onboardingCompleted: 1, onboardingStep: 4, preferredName: LGS_STUDENT.name, avatarStyle: "boy", examTrack: "LGS", gradeLevel: "8", examYear: new Date().getFullYear() + 1, targetGoal: "Fen Lisesi", targetScore: "450", dailyStudyDuration: 90, preferredStudyStartTime: "16:00" });
 

@@ -60,6 +60,51 @@ describe("sınav tanımları", () => {
   });
 });
 
+describe("KPSS ve DGS", () => {
+  const now = new Date("2026-10-21T12:00:00+03:00");
+  it("KPSS GY-GK 120, DGS 100 soru; ikisinde de 4 yanlış 1 doğruyu götürür, tahmini puan yok", () => {
+    expect(Object.values(subjectTotalsOf("KPSS_GYGK")).reduce((a, b) => a + b, 0)).toBe(120);
+    expect(subjectTotalsOf("DGS")).toEqual({ Sayısal: 50, Sözel: 50 });
+    expect(netFor("KPSS_GYGK", 20, 4)).toBe(19);
+    expect(estimateScore("KPSS_GYGK", subjectTotalsOf("KPSS_GYGK"))).toBeNull();
+    expect(estimateScore("DGS", subjectTotalsOf("DGS"))).toBeNull();
+  });
+
+  it("KPSS iki yılda bir: 2026 geçtiyse sıradaki 2028 (2027 değil); 2027 seçen 2028'e kayar", () => {
+    const next = nextExamEnd(now, null, "KPSS");
+    expect(next.year).toBe(2028);
+    expect(next.estimated).toBe(true);
+    expect(nextExamEnd(now, 2027, "KPSS").year).toBe(2028);
+    expect(next.endsAt.toISOString()).toBe(new Date("2028-09-06T23:59:59.999+03:00").toISOString());
+  });
+
+  it("DGS her yıl: 2027 tahmini 19 Temmuz", () => {
+    const next = nextExamEnd(now, 2027, "DGS");
+    expect(next.year).toBe(2027);
+    expect(next.endsAt.toISOString()).toBe(new Date("2027-07-19T23:59:59.999+03:00").toISOString());
+  });
+
+  it("anket: KPSS/DGS yetişkin eğitim durumları, puan türü sorulmaz, hedef puan aralığı kendi", () => {
+    expect(EXAM_TRACK_DEFS.KPSS.gradeLevels).toContain("lisans_mezun");
+    expect(EXAM_TRACK_DEFS.DGS.gradeLevels).toEqual(["onlisans", "onlisans_mezun"]);
+    expect(EXAM_TRACK_DEFS.KPSS.asksScoreType || EXAM_TRACK_DEFS.DGS.asksScoreType).toBe(false);
+    expect(EXAM_TRACK_DEFS.KPSS.targetScore?.max).toBe(100);
+  });
+
+  it("katalog: YKS kitabı KPSS/DGS konusuna eşlenmez", () => {
+    expect(catalogScopeCovers("YKS", "KPSS_GYGK")).toBe(false);
+    expect(catalogScopeCovers("GENEL", "DGS")).toBe(false);
+    expect(catalogScopeCovers("KPSS_GYGK", "KPSS_GYGK")).toBe(true);
+  });
+
+  it("ders programı: kurs ders adları KPSS/DGS derslerine eşlenir", () => {
+    expect(classifyLesson("ANAYASA HUKUKU", "KPSS")).toEqual({ known: true, subject: "Vatandaşlık" });
+    expect(classifyLesson("GEOMETRİ", "KPSS")).toEqual({ known: true, subject: "Matematik" });
+    expect(classifyLesson("SAYISAL MANTIK", "DGS")).toEqual({ known: true, subject: "Sayısal" });
+    expect(classifyLesson("PARAGRAF", "DGS")).toEqual({ known: true, subject: "Sözel" });
+  });
+});
+
 describe("hedef özeti", () => {
   it("YKS: üniversite · bölüm; LGS: hedef lise ve puan", () => {
     expect(targetSummary("YKS", { targetUniversity: "ODTÜ", targetDepartment: "Fizik", examYear: 2027, targetRanking: "5.000" })).toMatchObject({ goal: "ODTÜ · Fizik", score: null, details: ["İlk 5.000", "YKS 2027"] });

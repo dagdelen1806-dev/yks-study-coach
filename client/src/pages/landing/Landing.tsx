@@ -9,7 +9,7 @@ import { BarChart3, Building2, CalendarClock, Check, ChevronDown, GraduationCap,
 const formatPrice = (minorUnits: number) => `${(minorUnits / 100).toLocaleString("tr-TR", { maximumFractionDigits: 0 })} ₺`;
 
 const FEATURES = [
-  { icon: Map, title: "Konu Haritası", text: "TYT ve AYT (ÖSYM) ya da LGS (MEB 8. sınıf) konularını gerçek soru verine göre izle: hangisi tamam, hangisi tekrar istiyor, hangisinde henüz veri yok." },
+  { icon: Map, title: "Konu Haritası", text: "YKS, LGS, KPSS ya da DGS: hazırlandığın sınavın konularını gerçek soru verine göre izle: hangisi tamam, hangisi tekrar istiyor, hangisinde henüz veri yok." },
   { icon: BarChart3, title: "Deneme analizi", text: "Netlerini elle gir ya da sonuç belgesinin fotoğrafını yükle; ders ve konu bazında trendini, zayıf konularını tek bakışta gör." },
   { icon: Sparkles, title: "Yapay zekâ ile haftalık plan", text: "Zayıf konuların, deneme trendin ve okul saatlerine göre sana özel, gerçekçi bir haftalık çalışma planı." },
   { icon: Timer, title: "Takvim ve odak modu", text: "Günlük oturumlarını takvimden başlat; zamanlayıcı, beyaz/pembe/kahverengi gürültü ve oturum hatırlatma bildirimleriyle odaklan." },
@@ -18,7 +18,7 @@ const FEATURES = [
 ];
 
 const STEPS = [
-  { title: "Hesabını aç", text: "YKS mi LGS mi, sınıfını, hedef sınav yılını ve hedefini birkaç dakikalık kısa bir ankette paylaş." },
+  { title: "Hesabını aç", text: "Sınavını (YKS, LGS, KPSS, DGS), durumunu, hedef sınav yılını ve hedefini birkaç dakikalık kısa bir ankette paylaş." },
   { title: "Denemeni ekle", text: "Son deneme sonucunu gir; Pusula zayıf konularını çıkarıp koç önerisini hazırlar." },
   { title: "Planını uygula", text: "Haftalık planındaki oturumları odak modunda tamamla; her oturum konu haritanı günceller." },
 ];
@@ -27,12 +27,13 @@ const FAQ = [
   { q: "Pusula ücretsiz mi?", a: "Hesap açmak ve temel takip (konu haritası, denemeler, takvim, odak zamanlayıcı) ücretsiz. Yapay zekâ araçları ücretsiz pakette de var ama aylık kotası düşük. Gelişmiş deneme analizleri, plan uyumu, kaynak önerileri ve raporlar ücretli paketlerde açılır; her ücretli pakette 10 gün ücretsiz deneme var." },
   { q: "Paketler arasındaki fark ne?", a: "Temel, Premium ve Pro'da tüm özellikler açık; paketler yalnızca yapay zekâ kotalarında ayrılır: haftalık plan, deneme belgesini okuma, kitap ekleme, sesli not ve not asistanı gibi araçları ayda kaç kez kullanabileceğin." },
   { q: "LGS öğrencileri de kullanabilir mi?", a: "Evet. Kayıt olurken LGS'yi seçersen konu haritan MEB 8. sınıf programına (Türkçe, Matematik, Fen Bilimleri, İnkılap Tarihi, Din Kültürü, İngilizce) göre kurulur; denemelerde 3 yanlış 1 doğruyu götürür, yapay zekâ 4 şıklı LGS tarzında soru üretir ve dilini ortaokul öğrencisine göre ayarlar. Paketler ve fiyatlar YKS ile aynıdır." },
-  { q: "Yıllık plan nasıl işliyor?", a: "Yıllık plan, başlangıç anketinde seçtiğin sınavın (YKS ya da LGS) o yılki tarihine kadar sürer. Fiyatı, sınava kalan ayların aylık toplamından %20 daha azdır; yani ne zaman alırsan al yalnızca kalan dönem için ödersin." },
+  { q: "KPSS ve DGS için de kullanabilir miyim?", a: "Evet. KPSS'de Genel Yetenek–Genel Kültür (Türkçe, Matematik, Tarih, Coğrafya, Vatandaşlık, Güncel Bilgiler), DGS'de sayısal ve sözel bölüm için konu haritası, deneme takibi ve yapay zekâ planı hazırlanır; plan iş ya da okul temponu hesaba katar. KPSS öğretmenlik (MEB-AGS) ve alan bilgisi oturumları henüz yok." },
+  { q: "Yıllık plan nasıl işliyor?", a: "Yıllık plan, başlangıç anketinde seçtiğin sınavın (YKS, LGS, KPSS ya da DGS) o yılki tarihine kadar sürer. Fiyatı, sınava kalan ayların aylık toplamından %20 daha azdır; yani ne zaman alırsan al yalnızca kalan dönem için ödersin." },
   { q: "Aboneliğimi iptal edebilir miyim?", a: "Evet, istediğin an Premium sayfasından iptal edebilirsin. Ödediğin dönem bitene kadar paketini kullanmaya devam edersin, sonra ücretsiz pakete geçersin; verilerin silinmez." },
   { q: "Kayıt olunca hesabım hemen açılıyor mu?", a: "E-postayla kayıt olursan önce adresine gelen bağlantıyla e-postanı doğrularsın. Ardından hesabın bir yönetici tarafından onaylanır ve panele erişebilirsin." },
   { q: "Verilerimi kimler görebilir?", a: "Varsayılan olarak yalnızca sen. Dershanen ya da okulun sana davet kodu verir ve sen onay verirsen; deneme sonuçların, konu durumun, takvimdeki planın ve hedef bilgin kurumunla paylaşılır. Notların, soru defterin, fotoğrafların, sesli notların ve iletişim bilgilerin hiçbir zaman paylaşılmaz; kurumdan istediğin an ayrılabilirsin." },
   { q: "Telefonda kullanabilir miyim?", a: "Evet. Pusula tarayıcıda çalışır ve telefonunun ana ekranına uygulama olarak eklenebilir. İstersen yaklaşan çalışma oturumların için hatırlatma bildirimi de alırsın." },
-  { q: "Puan ya da sıralama tahmini veriyor mu?", a: "YKS için hayır; Pusula bir çalışma takip ve planlama aracıdır, puan veya sıralama tahmini sunmaz. LGS'de son denemendeki netlerden ağırlıklı (Türkçe, Matematik ve Fen 4 kat) hesaplanan kaba bir tahmini puan gösterir; MEB'in standart puanı değildir. Konu kapsamı ÖSYM ve MEB programlarına dayanır." },
+  { q: "Puan ya da sıralama tahmini veriyor mu?", a: "YKS, KPSS ve DGS için hayır; Pusula bir çalışma takip ve planlama aracıdır, puan veya sıralama tahmini sunmaz. LGS'de son denemendeki netlerden ağırlıklı (Türkçe, Matematik ve Fen 4 kat) hesaplanan kaba bir tahmini puan gösterir; MEB'in standart puanı değildir. Konu kapsamı ÖSYM ve MEB programlarına dayanır." },
   { q: "Dershane ya da okul olarak nasıl kullanırız?", a: "Kurum Paneli ile öğretmenleriniz, onay veren öğrencilerin denemelerini, konu durumlarını ve planlarını izler. Personel, platformdan aldığı davet koduyla Kurum Paneli'ne katılır; öğrencilerinizi de kurumunuzun davet kodlarıyla eklersiniz." },
 ];
 
@@ -79,7 +80,7 @@ export default function Landing() {
       <main>
         <section className="mx-auto grid max-w-6xl items-center gap-10 px-4 py-14 sm:px-6 lg:grid-cols-[1.15fr_0.85fr] lg:py-20">
           <div>
-            <p className="hero-pill w-fit bg-brand/10 text-brand">{lgsPage ? "Kişisel LGS koçun" : "Kişisel YKS ve LGS koçun"}</p>
+            <p className="hero-pill w-fit bg-brand/10 text-brand">{lgsPage ? "Kişisel LGS koçun" : "YKS · LGS · KPSS · DGS için kişisel koçun"}</p>
             <h1 className="mt-4 text-[36px] font-semibold leading-[1.1] font-display sm:text-[48px]">{lgsPage ? "LGS'ye planlı, sakin ve kendinden emin hazırlan." : appData.tagline}</h1>
             <p className="mt-5 max-w-xl text-[16px] leading-7 text-ink-3">Denemelerin, konu haritan, çalışma takvimin ve sana özel haftalık planın tek yerde. Pusula nerede net kaybettiğini gösterir, bugün neye çalışman gerektiğini söyler ve ilerlemeni her oturumda günceller.</p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">

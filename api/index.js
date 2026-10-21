@@ -112,10 +112,10 @@ import { eq as eq3 } from "drizzle-orm";
 import { customType, decimal, index, integer, pgTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/pg-core";
 
 // shared/exams.ts
-var EXAM_TRACKS = ["YKS", "LGS"];
-var EXAM_KINDS = ["TYT", "AYT", "LGS"];
+var EXAM_TRACKS = ["YKS", "LGS", "KPSS", "DGS"];
+var EXAM_KINDS = ["TYT", "AYT", "LGS", "KPSS_GYGK", "DGS"];
 var CATALOG_EXAM_SCOPES = [...EXAM_KINDS, "TYT_AYT", "YKS", "GENEL"];
-var GRADE_LEVELS = ["7", "8", "9", "10", "11", "12", "mezun"];
+var GRADE_LEVELS = ["7", "8", "9", "10", "11", "12", "mezun", "onlisans", "onlisans_mezun", "lisans", "lisans_mezun", "ortaogretim_mezun"];
 var EXAM_KIND_DEFS = {
   TYT: {
     kind: "TYT",
@@ -162,6 +162,37 @@ var EXAM_KIND_DEFS = {
       { name: "Matematik", questions: 20, weight: 4, session: "Say\u0131sal" },
       { name: "Fen Bilimleri", questions: 20, weight: 4, session: "Say\u0131sal" }
     ]
+  },
+  // ÖSYM KPSS Genel Yetenek–Genel Kültür: 120 soru / 130 dk. Puan (P1, P3, P93…) standart puanla
+  // hesaplandığı için tahmini puan yok.
+  KPSS_GYGK: {
+    kind: "KPSS_GYGK",
+    track: "KPSS",
+    label: "KPSS GY-GK",
+    optionCount: 5,
+    wrongsPerCorrect: 4,
+    formRows: "curriculum",
+    subjects: [
+      { name: "T\xFCrk\xE7e", questions: 30, weight: 1, session: "Genel Yetenek" },
+      { name: "Matematik", questions: 30, weight: 1, session: "Genel Yetenek" },
+      { name: "Tarih", questions: 27, weight: 1, session: "Genel K\xFClt\xFCr" },
+      { name: "Co\u011Frafya", questions: 18, weight: 1, session: "Genel K\xFClt\xFCr" },
+      { name: "Vatanda\u015Fl\u0131k", questions: 9, weight: 1, session: "Genel K\xFClt\xFCr" },
+      { name: "G\xFCncel Bilgiler", questions: 6, weight: 1, session: "Genel K\xFClt\xFCr" }
+    ]
+  },
+  // ÖSYM DGS: 100 soru / 135 dk, sayısal ve sözel bölüm eşit. Puan standart puanla; tahmini puan yok.
+  DGS: {
+    kind: "DGS",
+    track: "DGS",
+    label: "DGS",
+    optionCount: 5,
+    wrongsPerCorrect: 4,
+    formRows: "curriculum",
+    subjects: [
+      { name: "Say\u0131sal", questions: 50, weight: 1 },
+      { name: "S\xF6zel", questions: 50, weight: 1 }
+    ]
   }
 };
 var EXAM_TRACK_DEFS = {
@@ -172,6 +203,7 @@ var EXAM_TRACK_DEFS = {
     scopeNote: "Konu listesi \xD6SYM TYT/AYT kapsam\u0131na ve MEB program\u0131na dayan\u0131r",
     onboarding: { title: "YKS", description: "\xDCniversite s\u0131nav\u0131 (TYT + AYT) \xB7 lise \xF6\u011Frencisi ya da mezun" },
     gradeLevels: ["9", "10", "11", "12", "mezun"],
+    gradeQuestion: "S\u0131n\u0131f d\xFCzeyin",
     asksScoreType: true,
     goal: { kind: "university" },
     currentNet: { kind: "tytAyt" },
@@ -190,6 +222,7 @@ var EXAM_TRACK_DEFS = {
     scopeNote: "Konu listesi MEB 8. s\u0131n\u0131f \xF6\u011Fretim program\u0131na dayan\u0131r",
     onboarding: { title: "LGS", description: "Liselere ge\xE7i\u015F s\u0131nav\u0131 \xB7 7. ya da 8. s\u0131n\u0131f" },
     gradeLevels: ["7", "8"],
+    gradeQuestion: "S\u0131n\u0131f d\xFCzeyin",
     asksScoreType: false,
     goal: { kind: "custom", label: "Hedef lise", placeholder: "\xD6rn. Kabata\u015F Erkek Lisesi", options: ["Fen Lisesi", "Sosyal Bilimler Lisesi", "Anadolu Lisesi", "Proje Okulu", "Mesleki ve Teknik Anadolu Lisesi", "\u0130mam Hatip Lisesi", "Hen\xFCz karar vermedim"], emptyText: "Hedef liseni hen\xFCz yazmad\u0131n." },
     targetScore: { label: "Hedef LGS puan\u0131n", placeholder: "\xD6rn. 450", min: 100, max: 500 },
@@ -200,6 +233,46 @@ var EXAM_TRACK_DEFS = {
     questionStyle: "LGS (MEB) \xFCslubunda, beceri temelli",
     dailyPlanRule: "Her g\xFCn toplam 45-120 dakika ve 2-4 k\u0131sa oturum planla (okul ve \xF6devlerle birlikte yorucu olmas\u0131n).",
     schoolKind: "ortaokul",
+    catalogBroadScopes: []
+  },
+  KPSS: {
+    track: "KPSS",
+    label: "KPSS",
+    authority: { name: "\xD6SYM", url: "https://www.osym.gov.tr" },
+    scopeNote: "Konu listesi \xD6SYM KPSS Genel Yetenek\u2013Genel K\xFClt\xFCr kapsam\u0131na dayan\u0131r",
+    onboarding: { title: "KPSS", description: "Kamu personel se\xE7me s\u0131nav\u0131 \xB7 Genel Yetenek\u2013Genel K\xFClt\xFCr" },
+    gradeLevels: ["lisans", "lisans_mezun", "onlisans_mezun", "ortaogretim_mezun"],
+    gradeQuestion: "E\u011Fitim durumun",
+    asksScoreType: false,
+    goal: { kind: "custom", label: "Hedef kadro", placeholder: "\xD6rn. Vergi m\xFCfetti\u015F yard\u0131mc\u0131l\u0131\u011F\u0131", options: ["Memurluk (B grubu)", "A grubu kadro", "S\xF6zle\u015Fmeli personel", "Hen\xFCz karar vermedim"], emptyText: "Hedef kadronu hen\xFCz yazmad\u0131n." },
+    targetScore: { label: "Hedef KPSS puan\u0131n", placeholder: "\xD6rn. 85", min: 40, max: 100 },
+    currentNet: { kind: "single", hint: "120 soru \xFCzerinden (Genel Yetenek + Genel K\xFClt\xFCr) yakla\u015F\u0131k bir say\u0131 ya da aral\u0131k yazabilirsin (\xF6rn. 70-75).", placeholder: "\xD6rn. 70-75" },
+    studentNoun: "Bir KPSS aday\u0131",
+    studentPhrase: "Bir KPSS aday\u0131n\u0131n",
+    promptContext: "Aday KPSS Genel Yetenek\u2013Genel K\xFClt\xFCr'e (\xD6SYM) haz\u0131rlan\u0131yor; yeti\u015Fkin, \xE7o\u011Fu zaman \xE7al\u0131\u015F\u0131yor ya da okuyor. Dersler: T\xFCrk\xE7e ve Matematik (Genel Yetenek), Tarih, Co\u011Frafya, Vatanda\u015Fl\u0131k ve G\xFCncel Bilgiler (Genel K\xFClt\xFCr). Sorular 5 \u015F\u0131kl\u0131 (A-E), 4 yanl\u0131\u015F 1 do\u011Fruyu g\xF6t\xFCr\xFCr; \xD6SYM tarz\u0131. Bir yeti\u015Fkine hitap et; ger\xE7ek\xE7i, i\u015F/okul temposuna uyan \xF6neriler ver.",
+    questionStyle: "KPSS (\xD6SYM) \xFCslubunda",
+    dailyPlanRule: "Her g\xFCn toplam 60-180 dakika ve 2-4 oturum planla; aday\u0131n i\u015F/okul saatlerini zorlamayan, hafta sonu daha yo\u011Fun bir tempo kur.",
+    schoolKind: "kurs",
+    catalogBroadScopes: []
+  },
+  DGS: {
+    track: "DGS",
+    label: "DGS",
+    authority: { name: "\xD6SYM", url: "https://www.osym.gov.tr" },
+    scopeNote: "Konu listesi \xD6SYM DGS say\u0131sal ve s\xF6zel b\xF6l\xFCm kapsam\u0131na dayan\u0131r",
+    onboarding: { title: "DGS", description: "Dikey ge\xE7i\u015F s\u0131nav\u0131 \xB7 \xF6nlisans \xF6\u011Frencisi ya da mezun" },
+    gradeLevels: ["onlisans", "onlisans_mezun"],
+    gradeQuestion: "E\u011Fitim durumun",
+    asksScoreType: false,
+    goal: { kind: "custom", label: "Hedef lisans b\xF6l\xFCm\xFC", placeholder: "\xD6rn. Bilgisayar M\xFChendisli\u011Fi", options: [], emptyText: "Hedef lisans b\xF6l\xFCm\xFCn\xFC hen\xFCz yazmad\u0131n." },
+    targetScore: { label: "Hedef DGS puan\u0131n", placeholder: "\xD6rn. 300", min: 100, max: 500 },
+    currentNet: { kind: "single", hint: "100 soru \xFCzerinden (say\u0131sal + s\xF6zel) yakla\u015F\u0131k bir say\u0131 ya da aral\u0131k yazabilirsin (\xF6rn. 55-60).", placeholder: "\xD6rn. 55-60" },
+    studentNoun: "Bir DGS aday\u0131",
+    studentPhrase: "Bir DGS aday\u0131n\u0131n",
+    promptContext: "Aday DGS'ye (\xD6SYM Dikey Ge\xE7i\u015F S\u0131nav\u0131; \xF6nlisanstan lisansa ge\xE7i\u015F) haz\u0131rlan\u0131yor. B\xF6l\xFCmler: Say\u0131sal (matematik, geometri, say\u0131sal mant\u0131k) ve S\xF6zel (T\xFCrk\xE7e, paragraf, s\xF6zel mant\u0131k), 50'\u015Fer soru. Sorular 5 \u015F\u0131kl\u0131 (A-E), 4 yanl\u0131\u015F 1 do\u011Fruyu g\xF6t\xFCr\xFCr; \xD6SYM tarz\u0131. Bir yeti\u015Fkine hitap et.",
+    questionStyle: "DGS (\xD6SYM) \xFCslubunda",
+    dailyPlanRule: "Her g\xFCn toplam 60-150 dakika ve 2-4 oturum planla; \xF6nlisans dersleri ve s\u0131navlar\u0131yla \xE7ak\u0131\u015Fmayan bir tempo kur.",
+    schoolKind: "\xF6nlisans",
     catalogBroadScopes: []
   }
 };
@@ -1652,7 +1725,130 @@ function flatten(exam, tree) {
     )
   );
 }
-var TREES = { TYT, AYT, LGS };
+var KPSS_GYGK = {
+  T\u00FCrk\u00E7e: {
+    "S\xF6zc\xFCk ve C\xFCmle Anlam\u0131": [
+      { topic: "S\xF6zc\xFCkte Anlam", aliases: ["s\xF6zc\xFCk anlam\u0131", "deyim ve atas\xF6zleri"] },
+      { topic: "C\xFCmlede Anlam", aliases: ["c\xFCmle anlam\u0131", "c\xFCmle yorumu"] }
+    ],
+    Paragraf: [
+      { topic: "Paragrafta Anlam", aliases: ["paragraf", "paragrafta ana d\xFC\u015F\xFCnce", "paragrafta yard\u0131mc\u0131 d\xFC\u015F\xFCnce", "paragraf\u0131n yap\u0131s\u0131", "anlat\u0131m bi\xE7imleri"] }
+    ],
+    "Dil Bilgisi": [
+      "Ses Bilgisi",
+      { topic: "Yap\u0131 Bilgisi", aliases: ["s\xF6zc\xFCkte yap\u0131", "k\xF6k ve ekler"] },
+      { topic: "S\xF6zc\xFCk T\xFCrleri", aliases: ["isimler", "s\u0131fatlar", "zamirler", "zarflar", "edat ba\u011Fla\xE7 \xFCnlem", "fiiller", "fiilimsiler"] },
+      { topic: "C\xFCmle Bilgisi", aliases: ["c\xFCmlenin \xF6geleri", "c\xFCmle t\xFCrleri", "c\xFCmle \xE7e\u015Fitleri"] },
+      { topic: "Yaz\u0131m Kurallar\u0131", aliases: ["imla kurallar\u0131"] },
+      { topic: "Noktalama \u0130\u015Faretleri", aliases: ["noktalama"] },
+      { topic: "Anlat\u0131m Bozukluklar\u0131", aliases: ["anlat\u0131m bozuklu\u011Fu"] }
+    ],
+    "S\xF6zel Mant\u0131k": [{ topic: "S\xF6zel Mant\u0131k", aliases: ["s\xF6zel ak\u0131l y\xFCr\xFCtme"] }]
+  },
+  Matematik: {
+    "Temel Matematik": [
+      { topic: "Temel Kavramlar", aliases: ["say\u0131lar", "d\xF6rt i\u015Flem"] },
+      "Say\u0131 Basamaklar\u0131",
+      { topic: "B\xF6lme ve B\xF6l\xFCnebilme", aliases: ["b\xF6l\xFCnebilme kurallar\u0131"] },
+      { topic: "EBOB - EKOK", aliases: ["ebob ekok", "obeb okek"] },
+      { topic: "Rasyonel ve Ondal\u0131k Say\u0131lar", aliases: ["rasyonel say\u0131lar", "ondal\u0131k say\u0131lar", "kesirler"] },
+      "Basit E\u015Fitsizlikler",
+      "Mutlak De\u011Fer",
+      { topic: "\xDCsl\xFC Say\u0131lar", aliases: ["\xFCsl\xFC ifadeler"] },
+      { topic: "K\xF6kl\xFC Say\u0131lar", aliases: ["k\xF6kl\xFC ifadeler"] },
+      "\xC7arpanlara Ay\u0131rma",
+      { topic: "Oran - Orant\u0131", aliases: ["oran orant\u0131"] },
+      { topic: "Denklem \xC7\xF6zme", aliases: ["birinci dereceden denklemler"] }
+    ],
+    Problemler: [
+      "Say\u0131 Problemleri",
+      "Kesir Problemleri",
+      "Ya\u015F Problemleri",
+      "\u0130\u015F\xE7i Problemleri",
+      "Hareket Problemleri",
+      { topic: "Y\xFCzde, K\xE2r - Zarar Problemleri", aliases: ["y\xFCzde problemleri", "kar zarar problemleri"] },
+      "Kar\u0131\u015F\u0131m Problemleri",
+      { topic: "Tablo ve Grafik Yorumlama", aliases: ["grafik problemleri", "tablo grafik"] }
+    ],
+    "Cebir ve Sayma": ["K\xFCmeler", "Fonksiyonlar", { topic: "Perm\xFCtasyon, Kombinasyon ve Olas\u0131l\u0131k", aliases: ["perm\xFCtasyon", "kombinasyon", "olas\u0131l\u0131k"] }],
+    "Say\u0131sal Mant\u0131k": [{ topic: "Say\u0131sal Mant\u0131k", aliases: ["say\u0131sal ak\u0131l y\xFCr\xFCtme", "mant\u0131k muhakeme"] }],
+    Geometri: [
+      { topic: "A\xE7\u0131lar ve \xDC\xE7genler", aliases: ["\xFC\xE7genler", "a\xE7\u0131lar", "\xFC\xE7gende alan"] },
+      { topic: "D\xF6rtgenler ve \xC7okgenler", aliases: ["d\xF6rtgenler", "\xE7okgenler"] },
+      { topic: "\xC7ember ve Daire", aliases: ["\xE7ember", "daire"] },
+      { topic: "Analitik Geometri", aliases: ["noktan\u0131n analiti\u011Fi", "do\u011Frunun analiti\u011Fi"] },
+      "Kat\u0131 Cisimler"
+    ]
+  },
+  Tarih: {
+    "T\xFCrk Tarihi": [
+      { topic: "\u0130slamiyet \xD6ncesi T\xFCrk Tarihi", aliases: ["ilk t\xFCrk devletleri"] },
+      { topic: "\u0130lk T\xFCrk-\u0130slam Devletleri", aliases: ["t\xFCrk islam devletleri"] },
+      { topic: "Osmanl\u0131 Devleti Kurulu\u015F ve Y\xFCkselme", aliases: ["osmanl\u0131 kurulu\u015F", "osmanl\u0131 y\xFCkselme"] },
+      { topic: "Osmanl\u0131 K\xFClt\xFCr ve Medeniyeti", aliases: ["osmanl\u0131 k\xFClt\xFCr"] },
+      { topic: "Osmanl\u0131 Duraklama, Gerileme ve Da\u011F\u0131lma", aliases: ["osmanl\u0131 duraklama", "osmanl\u0131 gerileme", "osmanl\u0131 da\u011F\u0131lma"] },
+      "XX. Y\xFCzy\u0131l Ba\u015Flar\u0131nda Osmanl\u0131"
+    ],
+    "\u0130nk\u0131lap Tarihi": [
+      { topic: "Kurtulu\u015F Sava\u015F\u0131 Haz\u0131rl\u0131k D\xF6nemi", aliases: ["milli m\xFCcadele haz\u0131rl\u0131k", "kongreler"] },
+      { topic: "Kurtulu\u015F Sava\u015F\u0131 Cepheleri", aliases: ["cepheler", "milli m\xFCcadele"] },
+      { topic: "Atat\xFCrk \u0130lke ve \u0130nk\u0131laplar\u0131", aliases: ["ink\u0131laplar", "atat\xFCrk ilkeleri"] },
+      { topic: "Atat\xFCrk D\xF6nemi \u0130\xE7 ve D\u0131\u015F Politika", aliases: ["atat\xFCrk d\xF6nemi d\u0131\u015F politika"] },
+      { topic: "\xC7a\u011Fda\u015F T\xFCrk ve D\xFCnya Tarihi", aliases: ["\xE7a\u011Fda\u015F t\xFCrk tarihi", "yak\u0131n d\xF6nem"] }
+    ]
+  },
+  Co\u011Frafya: {
+    "T\xFCrkiye Co\u011Frafyas\u0131": [
+      { topic: "T\xFCrkiye'nin Co\u011Frafi Konumu", aliases: ["co\u011Frafi konum"] },
+      { topic: "T\xFCrkiye'nin Yer \u015Eekilleri", aliases: ["yer \u015Fekilleri"] },
+      { topic: "\u0130klim ve Bitki \xD6rt\xFCs\xFC", aliases: ["iklim", "bitki \xF6rt\xFCs\xFC"] },
+      { topic: "N\xFCfus ve Yerle\u015Fme", aliases: ["n\xFCfus", "yerle\u015Fme"] },
+      { topic: "Tar\u0131m, Hayvanc\u0131l\u0131k ve Ormanc\u0131l\u0131k", aliases: ["tar\u0131m", "hayvanc\u0131l\u0131k"] },
+      { topic: "Madenler ve Enerji Kaynaklar\u0131", aliases: ["madenler", "enerji kaynaklar\u0131"] },
+      "Sanayi",
+      { topic: "Ula\u015F\u0131m, Ticaret ve Turizm", aliases: ["ula\u015F\u0131m", "ticaret", "turizm"] },
+      { topic: "T\xFCrkiye'nin B\xF6lgeleri", aliases: ["b\xF6lgeler", "b\xF6lgesel kalk\u0131nma projeleri"] }
+    ]
+  },
+  Vatanda\u015Fl\u0131k: {
+    "Hukuk ve Anayasa": [
+      { topic: "Temel Hukuk Kavramlar\u0131", aliases: ["hukukun temel kavramlar\u0131"] },
+      { topic: "Anayasa Hukuku ve 1982 Anayasas\u0131", aliases: ["1982 anayasas\u0131", "anayasa hukuku"] },
+      { topic: "Temel Hak ve \xD6zg\xFCrl\xFCkler", aliases: ["temel haklar"] },
+      { topic: "Yasama", aliases: ["tbmm"] },
+      { topic: "Y\xFCr\xFCtme", aliases: ["cumhurba\u015Fkan\u0131"] },
+      "Yarg\u0131",
+      { topic: "\u0130dare Hukuku", aliases: ["idari te\u015Fkilat"] },
+      { topic: "Uluslararas\u0131 Kurulu\u015Flar", aliases: ["uluslararas\u0131 \xF6rg\xFCtler"] }
+    ]
+  },
+  "G\xFCncel Bilgiler": {
+    "G\xFCncel Bilgiler": [{ topic: "G\xFCncel Bilgiler", aliases: ["g\xFCncel olaylar", "k\xFClt\xFCrel ve bilimsel geli\u015Fmeler"] }]
+  }
+};
+var DGS = {
+  Say\u0131sal: {
+    "Temel Matematik": [
+      { topic: "Temel Kavramlar ve Say\u0131lar", aliases: ["temel kavramlar", "say\u0131lar"] },
+      { topic: "B\xF6l\xFCnebilme, EBOB - EKOK", aliases: ["b\xF6l\xFCnebilme", "ebob ekok"] },
+      { topic: "Rasyonel ve Ondal\u0131k Say\u0131lar", aliases: ["rasyonel say\u0131lar", "ondal\u0131k say\u0131lar"] },
+      { topic: "\xDCsl\xFC ve K\xF6kl\xFC Say\u0131lar", aliases: ["\xFCsl\xFC say\u0131lar", "k\xF6kl\xFC say\u0131lar"] },
+      { topic: "E\u015Fitsizlik ve Mutlak De\u011Fer", aliases: ["e\u015Fitsizlikler", "mutlak de\u011Fer"] },
+      { topic: "\xC7arpanlara Ay\u0131rma ve Oran - Orant\u0131", aliases: ["\xE7arpanlara ay\u0131rma", "oran orant\u0131"] }
+    ],
+    Problemler: [{ topic: "Say\u0131, Kesir ve Ya\u015F Problemleri", aliases: ["say\u0131 problemleri", "ya\u015F problemleri"] }, { topic: "Y\xFCzde, K\xE2r - Zarar ve Kar\u0131\u015F\u0131m Problemleri", aliases: ["y\xFCzde problemleri", "kar zarar"] }, { topic: "Hareket ve \u0130\u015F\xE7i Problemleri", aliases: ["hareket problemleri", "i\u015F\xE7i problemleri"] }, { topic: "Tablo ve Grafik Problemleri", aliases: ["grafik problemleri"] }],
+    "Cebir ve Sayma": ["K\xFCmeler", "Fonksiyonlar", { topic: "Perm\xFCtasyon, Kombinasyon ve Olas\u0131l\u0131k", aliases: ["olas\u0131l\u0131k"] }],
+    "Say\u0131sal Mant\u0131k": [{ topic: "Say\u0131sal Mant\u0131k", aliases: ["say\u0131sal ak\u0131l y\xFCr\xFCtme"] }],
+    Geometri: [{ topic: "A\xE7\u0131lar ve \xDC\xE7genler", aliases: ["\xFC\xE7genler"] }, { topic: "D\xF6rtgenler ve \xC7okgenler", aliases: ["d\xF6rtgenler"] }, { topic: "\xC7ember ve Daire", aliases: ["\xE7ember"] }, { topic: "Analitik Geometri", aliases: ["analitik"] }, "Kat\u0131 Cisimler"]
+  },
+  S\u00F6zel: {
+    "S\xF6zc\xFCk ve C\xFCmle Anlam\u0131": [{ topic: "S\xF6zc\xFCkte Anlam", aliases: ["s\xF6zc\xFCk anlam\u0131"] }, { topic: "C\xFCmlede Anlam", aliases: ["c\xFCmle anlam\u0131"] }],
+    Paragraf: [{ topic: "Paragrafta Anlam", aliases: ["paragraf", "ana d\xFC\u015F\xFCnce", "paragraf\u0131n yap\u0131s\u0131"] }],
+    "Dil Bilgisi": [{ topic: "Dil Bilgisi", aliases: ["s\xF6zc\xFCk t\xFCrleri", "c\xFCmle bilgisi", "yaz\u0131m kurallar\u0131", "noktalama"] }, { topic: "Anlat\u0131m Bozukluklar\u0131", aliases: ["anlat\u0131m bozuklu\u011Fu"] }],
+    "S\xF6zel Mant\u0131k": [{ topic: "S\xF6zel Mant\u0131k", aliases: ["s\xF6zel ak\u0131l y\xFCr\xFCtme"] }]
+  }
+};
+var TREES = { TYT, AYT, LGS, KPSS_GYGK, DGS };
 var CURRICULUM = Object.keys(TREES).flatMap((exam) => flatten(exam, TREES[exam]));
 var isCurriculumOnlySlug = (slug) => slug.startsWith("cur-");
 
@@ -1708,7 +1904,14 @@ var subjectPalette = {
   "Fen Bilimleri": "#2e8b6e",
   "\u0130nk\u0131lap Tarihi": "#b8741a",
   "Din K\xFClt\xFCr\xFC": "#8a6a3a",
-  \u0130ngilizce: "#3a7ab8"
+  \u0130ngilizce: "#3a7ab8",
+  // KPSS / DGS dersleri
+  Tarih: "#b8741a",
+  Co\u011Frafya: "#4a8f9c",
+  Vatanda\u015Fl\u0131k: "#6a4fb0",
+  "G\xFCncel Bilgiler": "#8a6a3a",
+  Say\u0131sal: "#2a5db0",
+  S\u00F6zel: "#8a4fb0"
 };
 
 // shared/dates.ts
@@ -4108,7 +4311,7 @@ var STAFF_ROLES = ["owner", "admin", "coordinator", "teacher"];
 var INVITABLE_ROLES = ["admin", "coordinator", "teacher", "student"];
 var ROLE_RANK = { student: 0, teacher: 1, coordinator: 2, admin: 3, owner: 4 };
 var ORG_KINDS = ["dershane", "okul", "etut", "kocluk", "diger"];
-var CLASS_GRADES = ["7", "8", "9", "10", "11", "12", "Mezun"];
+var CLASS_GRADES = ["7", "8", "9", "10", "11", "12", "Mezun", "\xD6nlisans", "Lisans"];
 var YKS_CLASS_TRACKS = ["SAY", "EA", "S\xD6Z", "D\u0130L", "TYT"];
 var CLASS_TRACKS = [...YKS_CLASS_TRACKS, ...EXAM_TRACKS.filter((track) => track !== "YKS")];
 var CLASS_TRACK_LABELS = { SAY: "Say\u0131sal", EA: "E\u015Fit A\u011F\u0131rl\u0131k", "S\xD6Z": "S\xF6zel", "D\u0130L": "Dil", TYT: "TYT (ortak)", ...EXAM_TRACK_LABELS };
@@ -5479,11 +5682,25 @@ var YKS_EXAMS = [
 var LGS_EXAMS = [
   { year: 2026, firstDay: "2026-06-13", lastDay: "2026-06-13" }
 ];
-var EXAMS_BY_TRACK = { YKS: YKS_EXAMS, LGS: LGS_EXAMS };
+var KPSS_EXAMS = [
+  { year: 2026, firstDay: "2026-09-06", lastDay: "2026-09-06" }
+];
+var DGS_EXAMS = [
+  { year: 2026, firstDay: "2026-07-19", lastDay: "2026-07-19" }
+];
+var EXAMS_BY_TRACK = { YKS: YKS_EXAMS, LGS: LGS_EXAMS, KPSS: KPSS_EXAMS, DGS: DGS_EXAMS };
+var EXAM_CYCLE_YEARS = { YKS: 1, LGS: 1, KPSS: 2, DGS: 1 };
+function cycleYearFrom(year, track) {
+  const cycle = EXAM_CYCLE_YEARS[track];
+  const anchor = EXAMS_BY_TRACK[track][0].year;
+  const offset = ((year - anchor) % cycle + cycle) % cycle;
+  return offset === 0 ? year : year + (cycle - offset);
+}
 var DAY_MS7 = 24 * 60 * 60 * 1e3;
 var endOfIstanbulDay = (isoDate2) => /* @__PURE__ */ new Date(`${isoDate2}T23:59:59.999+03:00`);
-function examEndOf(year, track = "YKS") {
+function examEndOf(requestedYear, track = "YKS") {
   const exams = EXAMS_BY_TRACK[track];
+  const year = cycleYearFrom(requestedYear, track);
   const known = exams.find((exam) => exam.year === year);
   if (known) return { year, endsAt: endOfIstanbulDay(known.lastDay), estimated: false };
   const last = exams[exams.length - 1];
@@ -5496,7 +5713,10 @@ function nextExamEnd(now, examYear, track = "YKS") {
   }
   let year = Math.min(...EXAMS_BY_TRACK[track].map((exam) => exam.year));
   let end = examEndOf(year, track);
-  while (end.endsAt.getTime() <= now.getTime()) end = examEndOf(++year, track);
+  while (end.endsAt.getTime() <= now.getTime()) {
+    year = end.year + EXAM_CYCLE_YEARS[track];
+    end = examEndOf(year, track);
+  }
   return end;
 }
 function planPeriodEnd(billingPeriod, now, examYear, track = "YKS") {
@@ -9243,7 +9463,10 @@ var LGS_SUBJECTS = ["T\xFCrk\xE7e", "Matematik", "Fen Bilimleri", "\u0130nk\u013
 var NON_LGS_PRESETS = ["Teknoloji ve Tasar\u0131m", "Bili\u015Fim Teknolojileri", "Rehberlik", "Beden E\u011Fitimi", "Sanat / M\xFCzik", "Di\u011Fer ders"];
 var SCHEDULE_SUBJECTS_BY_TRACK = {
   YKS: { subjects: YKS_SUBJECTS, nonExamPresets: NON_YKS_PRESETS },
-  LGS: { subjects: LGS_SUBJECTS, nonExamPresets: NON_LGS_PRESETS }
+  LGS: { subjects: LGS_SUBJECTS, nonExamPresets: NON_LGS_PRESETS },
+  // Yetişkin adaylar: programdaki bloklar çoğunlukla iş/kurs saatleri; ders olarak KPSS dersleri.
+  KPSS: { subjects: ["T\xFCrk\xE7e", "Matematik", "Tarih", "Co\u011Frafya", "Vatanda\u015Fl\u0131k", "G\xFCncel Bilgiler"], nonExamPresets: ["\u0130\u015F", "Kurs / dershane", "\xDCniversite dersi", "Di\u011Fer"] },
+  DGS: { subjects: ["Say\u0131sal", "S\xF6zel"], nonExamPresets: ["\xD6nlisans dersi", "\u0130\u015F", "Kurs / dershane", "Di\u011Fer"] }
 };
 var SCHEDULE_SUBJECTS = Array.from(new Set(Object.values(SCHEDULE_SUBJECTS_BY_TRACK).flatMap((entry) => entry.subjects)));
 var scheduleSubjectsFor = (track) => SCHEDULE_SUBJECTS_BY_TRACK[track].subjects;
@@ -9382,6 +9605,20 @@ var LESSON_RULES = {
     [/FEN/, "Fen Bilimleri"],
     [/MATEMAT[İI]K/, "Matematik"],
     [/T[ÜU]RK[ÇC]E/, "T\xFCrk\xE7e"]
+  ],
+  // KPSS kursu programı: Genel Yetenek–Genel Kültür dersleri.
+  KPSS: [
+    [/MATEMAT[İI]K|GEOMETR[İI]|SAYISAL/, "Matematik"],
+    [/T[ÜU]RK[ÇC]E|S[ÖO]ZEL/, "T\xFCrk\xE7e"],
+    [/TAR[İI]H|[İI]NKILAP/, "Tarih"],
+    [/CO[ĞG]RAFYA/, "Co\u011Frafya"],
+    [/VATANDA[ŞS]LIK|ANAYASA|HUKUK/, "Vatanda\u015Fl\u0131k"],
+    [/G[ÜU]NCEL/, "G\xFCncel Bilgiler"]
+  ],
+  // Önlisans programındaki bölüm dersleri DGS'ye girmez; tanınmayan ad modelin seçimine kalır.
+  DGS: [
+    [/MATEMAT[İI]K|GEOMETR[İI]|SAYISAL/, "Say\u0131sal"],
+    [/T[ÜU]RK[ÇC]E|T[ÜU]RK D[İI]L[İI]|S[ÖO]ZEL|PARAGRAF/, "S\xF6zel"]
   ],
   YKS: [
     [/D[İI]N K[ÜU]LT[ÜU]R|AHLAK|YABANCI D[İI]L|[İI]NG[İI]L[İI]ZCE|ALMANCA|FRANSIZCA|REHBERL[İI]K|BEDEN|SPOR|G[ÖO]RSEL SANAT|M[ÜU]Z[İI]K|SA[ĞG]LIK B[İI]LG|TRAF[İI]K|PEYGAMBER|KUR.?AN|H[İI]TABET|PROJE/, null],
@@ -12085,7 +12322,7 @@ var appRouter = router({
       try {
         const response = await invokeLLMWithTier({
           messages: [
-            { role: "system", content: "Sen bir kitap kapa\u011F\u0131 tan\u0131ma asistan\u0131s\u0131n. T\xFCrk\xE7e bir s\u0131nav haz\u0131rl\u0131k (YKS ya da LGS) kaynak kitab\u0131n\u0131n kapak foto\u011Fraf\u0131n\u0131 okuyup kitap ad\u0131n\u0131, yay\u0131nevini, dersini (T\xFCrk\xE7e, Matematik, Fizik, Kimya, Biyoloji, Tarih, Co\u011Frafya, Felsefe, Din K\xFClt\xFCr\xFC, Fen Bilimleri, \u0130nk\u0131lap Tarihi, \u0130ngilizce, Genel) ve s\u0131nav kapsam\u0131n\u0131 (TYT/AYT/LGS/GENEL) tahmin et. Kapakta 'LGS', '8. S\u0131n\u0131f' ya da 'Liselere Ge\xE7i\u015F' yaz\u0131yorsa exam 'LGS' olsun. Kapakta yaz\u0131yorsa yazar adlar\u0131n\u0131 (authors), ISBN numaras\u0131n\u0131 (isbn, yaln\u0131zca kapakta/arkada ger\xE7ekten g\xF6r\xFCn\xFCyorsa) ve bask\u0131 bilgisini (edition, \xF6r. 'G\xFCncellenmi\u015F Yeni Bask\u0131', '2025-2026') da \xE7\u0131kar. G\xF6rselde net okuyamad\u0131\u011F\u0131n bir alan\u0131 bo\u015F string / bo\u015F dizi b\u0131rak, uydurma. fieldConfidence her alan i\xE7in 0-1 aras\u0131 okuma g\xFCvenin; alan bo\u015Fsa 0. Kitap ad\u0131 kapakta birden \xE7ok sat\u0131ra/puntoya b\xF6l\xFCnm\xFC\u015F olabilir (\xF6r. b\xFCy\xFCk 'Paragraf' + alt\u0131nda 'SORU BANKASI'): bunlar\u0131 tek ba\u015Fl\u0131kta, kelimelerin ilk harfi b\xFCy\xFCk birle\u015Ftir ('Paragraf Soru Bankas\u0131'); 'Video \xE7\xF6z\xFCml\xFC', 'Yeni nesil', '20 deneme ilaveli' gibi slogan/\xF6zellik sat\u0131rlar\u0131n\u0131 ba\u015Fl\u0131\u011Fa katma. Ders kapakta a\xE7\u0131k\xE7a yazm\u0131yorsa kitap ad\u0131ndan \xE7\u0131kar (Paragraf, Dil Bilgisi, S\xF6zc\xFCkte Anlam \u2192 T\xFCrk\xE7e; Problemler, Temel Matematik \u2192 Matematik); o durumda subject g\xFCvenini en fazla 0.7 ver. 'TYT-AYT' ya da 'YKS' yaz\u0131yorsa ve tek bir s\u0131nava ait de\u011Filse exam 'GENEL' olsun. Foto\u011Fraf yan (90\xB0) ya da ters \xE7ekilmi\u015F, kapa\u011F\u0131n bir k\u0131sm\u0131 kadraj d\u0131\u015F\u0131nda kalm\u0131\u015F olabilir: yaz\u0131y\u0131 d\xF6nd\xFCrerek oku ve g\xF6r\xFCnen ba\u015Fl\u0131\u011F\u0131 yine \xE7\u0131kar; kapa\u011F\u0131n k\u0131smen g\xF6r\xFCnmesi onu 'other' yapmaz. Yay\u0131nevi \xE7o\u011Fu zaman yaln\u0131zca logo olarak (\xF6r. k\xF6\u015Fedeki '\xDC\xE7D\xF6rtBe\u015F') g\xF6r\xFCn\xFCr; logodaki ad\u0131 yay\u0131nevi olarak yaz. B\xFCy\xFCk dekoratif yaz\u0131lar ve rakamlar da ba\u015Fl\u0131\u011F\u0131n par\xE7as\u0131d\u0131r ('0'DAN BA\u015ELA' + 'START' + 'Matematik' \u2192 '0'dan Ba\u015Fla Start Matematik'); yazar/hoca ad\u0131 ('\u015Eenol Hoca') authors alan\u0131na gider. imageKind: g\xF6rsel bir kitap KAPA\u011EIYSA 'cover'; kitab\u0131n i\xE7indekiler / konu listesi / kitap bitirme plan\u0131 sayfas\u0131ysa 'table_of_contents'; ba\u015Fka bir \u015Feyse 'other'. `confident` alan\u0131n\u0131 yaln\u0131zca kapaktaki yaz\u0131lar\u0131 ger\xE7ekten net okuyabildiysen true yap." },
+            { role: "system", content: "Sen bir kitap kapa\u011F\u0131 tan\u0131ma asistan\u0131s\u0131n. T\xFCrk\xE7e bir s\u0131nav haz\u0131rl\u0131k (YKS ya da LGS) kaynak kitab\u0131n\u0131n kapak foto\u011Fraf\u0131n\u0131 okuyup kitap ad\u0131n\u0131, yay\u0131nevini, dersini (T\xFCrk\xE7e, Matematik, Fizik, Kimya, Biyoloji, Tarih, Co\u011Frafya, Felsefe, Din K\xFClt\xFCr\xFC, Fen Bilimleri, \u0130nk\u0131lap Tarihi, \u0130ngilizce, Vatanda\u015Fl\u0131k, G\xFCncel Bilgiler, Say\u0131sal, S\xF6zel, Genel) ve s\u0131nav kapsam\u0131n\u0131 (TYT/AYT/LGS/KPSS_GYGK/DGS/GENEL) tahmin et. Kapakta 'LGS', '8. S\u0131n\u0131f' ya da 'Liselere Ge\xE7i\u015F' yaz\u0131yorsa exam 'LGS'; 'KPSS', 'Genel Yetenek' ya da 'Genel K\xFClt\xFCr' yaz\u0131yorsa 'KPSS_GYGK'; 'DGS' ya da 'Dikey Ge\xE7i\u015F' yaz\u0131yorsa 'DGS' olsun. Kapakta yaz\u0131yorsa yazar adlar\u0131n\u0131 (authors), ISBN numaras\u0131n\u0131 (isbn, yaln\u0131zca kapakta/arkada ger\xE7ekten g\xF6r\xFCn\xFCyorsa) ve bask\u0131 bilgisini (edition, \xF6r. 'G\xFCncellenmi\u015F Yeni Bask\u0131', '2025-2026') da \xE7\u0131kar. G\xF6rselde net okuyamad\u0131\u011F\u0131n bir alan\u0131 bo\u015F string / bo\u015F dizi b\u0131rak, uydurma. fieldConfidence her alan i\xE7in 0-1 aras\u0131 okuma g\xFCvenin; alan bo\u015Fsa 0. Kitap ad\u0131 kapakta birden \xE7ok sat\u0131ra/puntoya b\xF6l\xFCnm\xFC\u015F olabilir (\xF6r. b\xFCy\xFCk 'Paragraf' + alt\u0131nda 'SORU BANKASI'): bunlar\u0131 tek ba\u015Fl\u0131kta, kelimelerin ilk harfi b\xFCy\xFCk birle\u015Ftir ('Paragraf Soru Bankas\u0131'); 'Video \xE7\xF6z\xFCml\xFC', 'Yeni nesil', '20 deneme ilaveli' gibi slogan/\xF6zellik sat\u0131rlar\u0131n\u0131 ba\u015Fl\u0131\u011Fa katma. Ders kapakta a\xE7\u0131k\xE7a yazm\u0131yorsa kitap ad\u0131ndan \xE7\u0131kar (Paragraf, Dil Bilgisi, S\xF6zc\xFCkte Anlam \u2192 T\xFCrk\xE7e; Problemler, Temel Matematik \u2192 Matematik); o durumda subject g\xFCvenini en fazla 0.7 ver. 'TYT-AYT' ya da 'YKS' yaz\u0131yorsa ve tek bir s\u0131nava ait de\u011Filse exam 'GENEL' olsun. Foto\u011Fraf yan (90\xB0) ya da ters \xE7ekilmi\u015F, kapa\u011F\u0131n bir k\u0131sm\u0131 kadraj d\u0131\u015F\u0131nda kalm\u0131\u015F olabilir: yaz\u0131y\u0131 d\xF6nd\xFCrerek oku ve g\xF6r\xFCnen ba\u015Fl\u0131\u011F\u0131 yine \xE7\u0131kar; kapa\u011F\u0131n k\u0131smen g\xF6r\xFCnmesi onu 'other' yapmaz. Yay\u0131nevi \xE7o\u011Fu zaman yaln\u0131zca logo olarak (\xF6r. k\xF6\u015Fedeki '\xDC\xE7D\xF6rtBe\u015F') g\xF6r\xFCn\xFCr; logodaki ad\u0131 yay\u0131nevi olarak yaz. B\xFCy\xFCk dekoratif yaz\u0131lar ve rakamlar da ba\u015Fl\u0131\u011F\u0131n par\xE7as\u0131d\u0131r ('0'DAN BA\u015ELA' + 'START' + 'Matematik' \u2192 '0'dan Ba\u015Fla Start Matematik'); yazar/hoca ad\u0131 ('\u015Eenol Hoca') authors alan\u0131na gider. imageKind: g\xF6rsel bir kitap KAPA\u011EIYSA 'cover'; kitab\u0131n i\xE7indekiler / konu listesi / kitap bitirme plan\u0131 sayfas\u0131ysa 'table_of_contents'; ba\u015Fka bir \u015Feyse 'other'. `confident` alan\u0131n\u0131 yaln\u0131zca kapaktaki yaz\u0131lar\u0131 ger\xE7ekten net okuyabildiysen true yap." },
             { role: "user", content: [{ type: "text", text: "Bu kitap kapa\u011F\u0131n\u0131 oku." }, { type: "image_url", image_url: { url: input.dataUrl, detail: "high" } }] }
           ],
           response_format: { type: "json_schema", json_schema: { name: "yks_book_cover", strict: true, schema: bookPhotoSchema } }

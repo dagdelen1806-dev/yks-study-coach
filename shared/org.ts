@@ -18,7 +18,7 @@ export const ROLE_LABELS: Record<OrgRole, string> = { owner: "Kurum sahibi", adm
 export const ORG_KINDS = ["dershane", "okul", "etut", "kocluk", "diger"] as const;
 export type OrgKind = (typeof ORG_KINDS)[number];
 export const ORG_KIND_LABELS: Record<OrgKind, string> = { dershane: "Dershane / kurs merkezi", okul: "Okul", etut: "Etüt merkezi", kocluk: "Koçluk merkezi", diger: "Diğer" };
-export const CLASS_GRADES = ["7", "8", "9", "10", "11", "12", "Mezun"] as const;
+export const CLASS_GRADES = ["7", "8", "9", "10", "11", "12", "Mezun", "Önlisans", "Lisans"] as const;
 // Sınıf alanı: YKS'nin puan türleri + diğer her sınavın adı (yeni sınav kendiliğinden eklenir).
 const YKS_CLASS_TRACKS = ["SAY", "EA", "SÖZ", "DİL", "TYT"] as const;
 export const CLASS_TRACKS = [...YKS_CLASS_TRACKS, ...EXAM_TRACKS.filter((track) => track !== "YKS")] as const;

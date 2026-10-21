@@ -120,7 +120,7 @@ function StepIdentity({ draft, errors, update }: { draft: OnboardingDraft; error
       <Field label="Avatarını seç" hint="Ana sayfadaki karşılama tasarımı buna göre değişir. İstersen boş bırakabilirsin." htmlFor="onboarding-avatar">
         <AvatarPicker id="onboarding-avatar" value={draft.avatarStyle} onChange={(next) => update("avatarStyle", next)} />
       </Field>
-      <Field label="Sınıf düzeyin" hint="Sana uygun konu haritasını hazırlamamız için gerekli." required error={errors.gradeLevel} htmlFor="onboarding-grade">
+      <Field label={EXAM_TRACK_DEFS[track].gradeQuestion} hint="Sana uygun konu haritasını hazırlamamız için gerekli." required error={errors.gradeLevel} htmlFor="onboarding-grade">
         <ChipGroup id="onboarding-grade" options={gradeLevelsFor(track)} labels={GRADE_LEVEL_LABELS} value={draft.gradeLevel ? [draft.gradeLevel] : []} onChange={(next) => update("gradeLevel", (next[0] ?? "") as OnboardingDraft["gradeLevel"])} />
       </Field>
       <Field label="Hedef sınav yılın" hint="Örn. 2027" required error={errors.examYear} htmlFor="onboarding-year">

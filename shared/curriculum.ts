@@ -294,8 +294,101 @@ function flatten(exam: CurriculumExam, tree: Record<string, SubjectTree>): Curri
   );
 }
 
+// KPSS Genel Yetenek–Genel Kültür: ÖSYM kapsamındaki yaygın konu başlıkları (ders adları shared/exams.ts ile aynı).
+const KPSS_GYGK: Record<string, SubjectTree> = {
+  Türkçe: {
+    "Sözcük ve Cümle Anlamı": [
+      { topic: "Sözcükte Anlam", aliases: ["sözcük anlamı", "deyim ve atasözleri"] },
+      { topic: "Cümlede Anlam", aliases: ["cümle anlamı", "cümle yorumu"] },
+    ],
+    Paragraf: [
+      { topic: "Paragrafta Anlam", aliases: ["paragraf", "paragrafta ana düşünce", "paragrafta yardımcı düşünce", "paragrafın yapısı", "anlatım biçimleri"] },
+    ],
+    "Dil Bilgisi": [
+      "Ses Bilgisi",
+      { topic: "Yapı Bilgisi", aliases: ["sözcükte yapı", "kök ve ekler"] },
+      { topic: "Sözcük Türleri", aliases: ["isimler", "sıfatlar", "zamirler", "zarflar", "edat bağlaç ünlem", "fiiller", "fiilimsiler"] },
+      { topic: "Cümle Bilgisi", aliases: ["cümlenin ögeleri", "cümle türleri", "cümle çeşitleri"] },
+      { topic: "Yazım Kuralları", aliases: ["imla kuralları"] },
+      { topic: "Noktalama İşaretleri", aliases: ["noktalama"] },
+      { topic: "Anlatım Bozuklukları", aliases: ["anlatım bozukluğu"] },
+    ],
+    "Sözel Mantık": [{ topic: "Sözel Mantık", aliases: ["sözel akıl yürütme"] }],
+  },
+  Matematik: {
+    "Temel Matematik": [
+      { topic: "Temel Kavramlar", aliases: ["sayılar", "dört işlem"] }, "Sayı Basamakları", { topic: "Bölme ve Bölünebilme", aliases: ["bölünebilme kuralları"] },
+      { topic: "EBOB - EKOK", aliases: ["ebob ekok", "obeb okek"] }, { topic: "Rasyonel ve Ondalık Sayılar", aliases: ["rasyonel sayılar", "ondalık sayılar", "kesirler"] },
+      "Basit Eşitsizlikler", "Mutlak Değer", { topic: "Üslü Sayılar", aliases: ["üslü ifadeler"] }, { topic: "Köklü Sayılar", aliases: ["köklü ifadeler"] },
+      "Çarpanlara Ayırma", { topic: "Oran - Orantı", aliases: ["oran orantı"] }, { topic: "Denklem Çözme", aliases: ["birinci dereceden denklemler"] },
+    ],
+    Problemler: [
+      "Sayı Problemleri", "Kesir Problemleri", "Yaş Problemleri", "İşçi Problemleri", "Hareket Problemleri",
+      { topic: "Yüzde, Kâr - Zarar Problemleri", aliases: ["yüzde problemleri", "kar zarar problemleri"] }, "Karışım Problemleri",
+      { topic: "Tablo ve Grafik Yorumlama", aliases: ["grafik problemleri", "tablo grafik"] },
+    ],
+    "Cebir ve Sayma": ["Kümeler", "Fonksiyonlar", { topic: "Permütasyon, Kombinasyon ve Olasılık", aliases: ["permütasyon", "kombinasyon", "olasılık"] }],
+    "Sayısal Mantık": [{ topic: "Sayısal Mantık", aliases: ["sayısal akıl yürütme", "mantık muhakeme"] }],
+    Geometri: [
+      { topic: "Açılar ve Üçgenler", aliases: ["üçgenler", "açılar", "üçgende alan"] }, { topic: "Dörtgenler ve Çokgenler", aliases: ["dörtgenler", "çokgenler"] },
+      { topic: "Çember ve Daire", aliases: ["çember", "daire"] }, { topic: "Analitik Geometri", aliases: ["noktanın analitiği", "doğrunun analitiği"] }, "Katı Cisimler",
+    ],
+  },
+  Tarih: {
+    "Türk Tarihi": [
+      { topic: "İslamiyet Öncesi Türk Tarihi", aliases: ["ilk türk devletleri"] }, { topic: "İlk Türk-İslam Devletleri", aliases: ["türk islam devletleri"] },
+      { topic: "Osmanlı Devleti Kuruluş ve Yükselme", aliases: ["osmanlı kuruluş", "osmanlı yükselme"] }, { topic: "Osmanlı Kültür ve Medeniyeti", aliases: ["osmanlı kültür"] },
+      { topic: "Osmanlı Duraklama, Gerileme ve Dağılma", aliases: ["osmanlı duraklama", "osmanlı gerileme", "osmanlı dağılma"] }, "XX. Yüzyıl Başlarında Osmanlı",
+    ],
+    "İnkılap Tarihi": [
+      { topic: "Kurtuluş Savaşı Hazırlık Dönemi", aliases: ["milli mücadele hazırlık", "kongreler"] }, { topic: "Kurtuluş Savaşı Cepheleri", aliases: ["cepheler", "milli mücadele"] },
+      { topic: "Atatürk İlke ve İnkılapları", aliases: ["inkılaplar", "atatürk ilkeleri"] }, { topic: "Atatürk Dönemi İç ve Dış Politika", aliases: ["atatürk dönemi dış politika"] },
+      { topic: "Çağdaş Türk ve Dünya Tarihi", aliases: ["çağdaş türk tarihi", "yakın dönem"] },
+    ],
+  },
+  Coğrafya: {
+    "Türkiye Coğrafyası": [
+      { topic: "Türkiye'nin Coğrafi Konumu", aliases: ["coğrafi konum"] }, { topic: "Türkiye'nin Yer Şekilleri", aliases: ["yer şekilleri"] },
+      { topic: "İklim ve Bitki Örtüsü", aliases: ["iklim", "bitki örtüsü"] }, { topic: "Nüfus ve Yerleşme", aliases: ["nüfus", "yerleşme"] },
+      { topic: "Tarım, Hayvancılık ve Ormancılık", aliases: ["tarım", "hayvancılık"] }, { topic: "Madenler ve Enerji Kaynakları", aliases: ["madenler", "enerji kaynakları"] },
+      "Sanayi", { topic: "Ulaşım, Ticaret ve Turizm", aliases: ["ulaşım", "ticaret", "turizm"] }, { topic: "Türkiye'nin Bölgeleri", aliases: ["bölgeler", "bölgesel kalkınma projeleri"] },
+    ],
+  },
+  Vatandaşlık: {
+    "Hukuk ve Anayasa": [
+      { topic: "Temel Hukuk Kavramları", aliases: ["hukukun temel kavramları"] }, { topic: "Anayasa Hukuku ve 1982 Anayasası", aliases: ["1982 anayasası", "anayasa hukuku"] },
+      { topic: "Temel Hak ve Özgürlükler", aliases: ["temel haklar"] }, { topic: "Yasama", aliases: ["tbmm"] }, { topic: "Yürütme", aliases: ["cumhurbaşkanı"] }, "Yargı",
+      { topic: "İdare Hukuku", aliases: ["idari teşkilat"] }, { topic: "Uluslararası Kuruluşlar", aliases: ["uluslararası örgütler"] },
+    ],
+  },
+  "Güncel Bilgiler": {
+    "Güncel Bilgiler": [{ topic: "Güncel Bilgiler", aliases: ["güncel olaylar", "kültürel ve bilimsel gelişmeler"] }],
+  },
+};
+
+// DGS: sayısal ve sözel bölüm (ders adları shared/exams.ts ile aynı: "Sayısal", "Sözel").
+const DGS: Record<string, SubjectTree> = {
+  Sayısal: {
+    "Temel Matematik": [
+      { topic: "Temel Kavramlar ve Sayılar", aliases: ["temel kavramlar", "sayılar"] }, { topic: "Bölünebilme, EBOB - EKOK", aliases: ["bölünebilme", "ebob ekok"] },
+      { topic: "Rasyonel ve Ondalık Sayılar", aliases: ["rasyonel sayılar", "ondalık sayılar"] }, { topic: "Üslü ve Köklü Sayılar", aliases: ["üslü sayılar", "köklü sayılar"] },
+      { topic: "Eşitsizlik ve Mutlak Değer", aliases: ["eşitsizlikler", "mutlak değer"] }, { topic: "Çarpanlara Ayırma ve Oran - Orantı", aliases: ["çarpanlara ayırma", "oran orantı"] },
+    ],
+    Problemler: [{ topic: "Sayı, Kesir ve Yaş Problemleri", aliases: ["sayı problemleri", "yaş problemleri"] }, { topic: "Yüzde, Kâr - Zarar ve Karışım Problemleri", aliases: ["yüzde problemleri", "kar zarar"] }, { topic: "Hareket ve İşçi Problemleri", aliases: ["hareket problemleri", "işçi problemleri"] }, { topic: "Tablo ve Grafik Problemleri", aliases: ["grafik problemleri"] }],
+    "Cebir ve Sayma": ["Kümeler", "Fonksiyonlar", { topic: "Permütasyon, Kombinasyon ve Olasılık", aliases: ["olasılık"] }],
+    "Sayısal Mantık": [{ topic: "Sayısal Mantık", aliases: ["sayısal akıl yürütme"] }],
+    Geometri: [{ topic: "Açılar ve Üçgenler", aliases: ["üçgenler"] }, { topic: "Dörtgenler ve Çokgenler", aliases: ["dörtgenler"] }, { topic: "Çember ve Daire", aliases: ["çember"] }, { topic: "Analitik Geometri", aliases: ["analitik"] }, "Katı Cisimler"],
+  },
+  Sözel: {
+    "Sözcük ve Cümle Anlamı": [{ topic: "Sözcükte Anlam", aliases: ["sözcük anlamı"] }, { topic: "Cümlede Anlam", aliases: ["cümle anlamı"] }],
+    Paragraf: [{ topic: "Paragrafta Anlam", aliases: ["paragraf", "ana düşünce", "paragrafın yapısı"] }],
+    "Dil Bilgisi": [{ topic: "Dil Bilgisi", aliases: ["sözcük türleri", "cümle bilgisi", "yazım kuralları", "noktalama"] }, { topic: "Anlatım Bozuklukları", aliases: ["anlatım bozukluğu"] }],
+    "Sözel Mantık": [{ topic: "Sözel Mantık", aliases: ["sözel akıl yürütme"] }],
+  },
+};
+
 /** Her oturumun konu ağacı; yeni sınav oturumu buraya eklenir (Record olduğu için TypeScript hatırlatır). */
-const TREES: Record<CurriculumExam, Record<string, SubjectTree>> = { TYT, AYT, LGS };
+const TREES: Record<CurriculumExam, Record<string, SubjectTree>> = { TYT, AYT, LGS, KPSS_GYGK, DGS };
 
 export const CURRICULUM: CurriculumTopicDef[] = (Object.keys(TREES) as CurriculumExam[]).flatMap((exam) => flatten(exam, TREES[exam]));
 

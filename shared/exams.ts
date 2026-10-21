@@ -15,10 +15,12 @@
 //     anlık görüntüsü güncellenir (drizzle-kit generate boş/tek satır üretir).
 //  5. server/exams.test.ts'teki "her sınav eksiksiz tanımlı" testi tanımları denetler.
 
-export const EXAM_TRACKS = ["YKS", "LGS"] as const;
+export const EXAM_TRACKS = ["YKS", "LGS", "KPSS", "DGS"] as const;
 export type ExamTrack = (typeof EXAM_TRACKS)[number];
 
-export const EXAM_KINDS = ["TYT", "AYT", "LGS"] as const;
+// KPSS_GYGK: Genel Yetenek–Genel Kültür (lisans/önlisans/ortaöğretim adaylarının ortak oturumu).
+// Öğretmenlik (MEB-AGS) ve A grubu alan bilgisi oturumları henüz yok.
+export const EXAM_KINDS = ["TYT", "AYT", "LGS", "KPSS_GYGK", "DGS"] as const;
 export type ExamKind = (typeof EXAM_KINDS)[number];
 
 /** Kaynak kataloğundaki kitap kapsamları: tek bir oturum ya da bir sınavın tamamını kapsayan geniş etiketler. */
@@ -26,7 +28,7 @@ export const CATALOG_EXAM_SCOPES = [...EXAM_KINDS, "TYT_AYT", "YKS", "GENEL"] as
 export type CatalogExamScope = (typeof CATALOG_EXAM_SCOPES)[number];
 
 /** Öğrencinin sınıfı/durumu (anket). Her sınav kendi listesini EXAM_TRACK_DEFS.gradeLevels ile seçer. */
-export const GRADE_LEVELS = ["7", "8", "9", "10", "11", "12", "mezun"] as const;
+export const GRADE_LEVELS = ["7", "8", "9", "10", "11", "12", "mezun", "onlisans", "onlisans_mezun", "lisans", "lisans_mezun", "ortaogretim_mezun"] as const;
 export type GradeLevel = (typeof GRADE_LEVELS)[number];
 export const GRADE_LEVEL_LABELS: Record<GradeLevel, string> = {
   "7": "7. sınıf",
@@ -36,6 +38,11 @@ export const GRADE_LEVEL_LABELS: Record<GradeLevel, string> = {
   "11": "11. sınıf",
   "12": "12. sınıf",
   mezun: "Mezun",
+  onlisans: "Önlisans öğrencisi",
+  onlisans_mezun: "Önlisans mezunu",
+  lisans: "Lisans öğrencisi",
+  lisans_mezun: "Lisans mezunu",
+  ortaogretim_mezun: "Lise mezunu",
 };
 
 export type ExamSubjectDef = {
@@ -104,6 +111,27 @@ export const EXAM_KIND_DEFS: Record<ExamKind, ExamKindDef> = {
       { name: "Fen Bilimleri", questions: 20, weight: 4, session: "Sayısal" },
     ],
   },
+  // ÖSYM KPSS Genel Yetenek–Genel Kültür: 120 soru / 130 dk. Puan (P1, P3, P93…) standart puanla
+  // hesaplandığı için tahmini puan yok.
+  KPSS_GYGK: {
+    kind: "KPSS_GYGK", track: "KPSS", label: "KPSS GY-GK", optionCount: 5, wrongsPerCorrect: 4, formRows: "curriculum",
+    subjects: [
+      { name: "Türkçe", questions: 30, weight: 1, session: "Genel Yetenek" },
+      { name: "Matematik", questions: 30, weight: 1, session: "Genel Yetenek" },
+      { name: "Tarih", questions: 27, weight: 1, session: "Genel Kültür" },
+      { name: "Coğrafya", questions: 18, weight: 1, session: "Genel Kültür" },
+      { name: "Vatandaşlık", questions: 9, weight: 1, session: "Genel Kültür" },
+      { name: "Güncel Bilgiler", questions: 6, weight: 1, session: "Genel Kültür" },
+    ],
+  },
+  // ÖSYM DGS: 100 soru / 135 dk, sayısal ve sözel bölüm eşit. Puan standart puanla; tahmini puan yok.
+  DGS: {
+    kind: "DGS", track: "DGS", label: "DGS", optionCount: 5, wrongsPerCorrect: 4, formRows: "curriculum",
+    subjects: [
+      { name: "Sayısal", questions: 50, weight: 1 },
+      { name: "Sözel", questions: 50, weight: 1 },
+    ],
+  },
 };
 
 export type ExamTrackDef = {
@@ -116,6 +144,8 @@ export type ExamTrackDef = {
   /** Anketin ilk adımındaki seçim kartı. */
   onboarding: { title: string; description: string };
   gradeLevels: readonly GradeLevel[];
+  /** Anketteki sınıf sorusunun başlığı (öğrenciye "Sınıf düzeyin", yetişkine "Eğitim durumun"). */
+  gradeQuestion: string;
   /** YKS'ye özgü puan türü sorusu (SAY/EA/SÖZ/DİL). */
   asksScoreType: boolean;
   /** Hedef: üniversite+bölüm+sıralama (YKS alanları) ya da tek bir serbest hedef (lise, kadro…). */
@@ -150,6 +180,7 @@ export const EXAM_TRACK_DEFS: Record<ExamTrack, ExamTrackDef> = {
     scopeNote: "Konu listesi ÖSYM TYT/AYT kapsamına ve MEB programına dayanır",
     onboarding: { title: "YKS", description: "Üniversite sınavı (TYT + AYT) · lise öğrencisi ya da mezun" },
     gradeLevels: ["9", "10", "11", "12", "mezun"],
+    gradeQuestion: "Sınıf düzeyin",
     asksScoreType: true,
     goal: { kind: "university" },
     currentNet: { kind: "tytAyt" },
@@ -168,6 +199,7 @@ export const EXAM_TRACK_DEFS: Record<ExamTrack, ExamTrackDef> = {
     scopeNote: "Konu listesi MEB 8. sınıf öğretim programına dayanır",
     onboarding: { title: "LGS", description: "Liselere geçiş sınavı · 7. ya da 8. sınıf" },
     gradeLevels: ["7", "8"],
+    gradeQuestion: "Sınıf düzeyin",
     asksScoreType: false,
     goal: { kind: "custom", label: "Hedef lise", placeholder: "Örn. Kabataş Erkek Lisesi", options: ["Fen Lisesi", "Sosyal Bilimler Lisesi", "Anadolu Lisesi", "Proje Okulu", "Mesleki ve Teknik Anadolu Lisesi", "İmam Hatip Lisesi", "Henüz karar vermedim"], emptyText: "Hedef liseni henüz yazmadın." },
     targetScore: { label: "Hedef LGS puanın", placeholder: "Örn. 450", min: 100, max: 500 },
@@ -178,6 +210,46 @@ export const EXAM_TRACK_DEFS: Record<ExamTrack, ExamTrackDef> = {
     questionStyle: "LGS (MEB) üslubunda, beceri temelli",
     dailyPlanRule: "Her gün toplam 45-120 dakika ve 2-4 kısa oturum planla (okul ve ödevlerle birlikte yorucu olmasın).",
     schoolKind: "ortaokul",
+    catalogBroadScopes: [],
+  },
+  KPSS: {
+    track: "KPSS",
+    label: "KPSS",
+    authority: { name: "ÖSYM", url: "https://www.osym.gov.tr" },
+    scopeNote: "Konu listesi ÖSYM KPSS Genel Yetenek–Genel Kültür kapsamına dayanır",
+    onboarding: { title: "KPSS", description: "Kamu personel seçme sınavı · Genel Yetenek–Genel Kültür" },
+    gradeLevels: ["lisans", "lisans_mezun", "onlisans_mezun", "ortaogretim_mezun"],
+    gradeQuestion: "Eğitim durumun",
+    asksScoreType: false,
+    goal: { kind: "custom", label: "Hedef kadro", placeholder: "Örn. Vergi müfettiş yardımcılığı", options: ["Memurluk (B grubu)", "A grubu kadro", "Sözleşmeli personel", "Henüz karar vermedim"], emptyText: "Hedef kadronu henüz yazmadın." },
+    targetScore: { label: "Hedef KPSS puanın", placeholder: "Örn. 85", min: 40, max: 100 },
+    currentNet: { kind: "single", hint: "120 soru üzerinden (Genel Yetenek + Genel Kültür) yaklaşık bir sayı ya da aralık yazabilirsin (örn. 70-75).", placeholder: "Örn. 70-75" },
+    studentNoun: "Bir KPSS adayı",
+    studentPhrase: "Bir KPSS adayının",
+    promptContext: "Aday KPSS Genel Yetenek–Genel Kültür'e (ÖSYM) hazırlanıyor; yetişkin, çoğu zaman çalışıyor ya da okuyor. Dersler: Türkçe ve Matematik (Genel Yetenek), Tarih, Coğrafya, Vatandaşlık ve Güncel Bilgiler (Genel Kültür). Sorular 5 şıklı (A-E), 4 yanlış 1 doğruyu götürür; ÖSYM tarzı. Bir yetişkine hitap et; gerçekçi, iş/okul temposuna uyan öneriler ver.",
+    questionStyle: "KPSS (ÖSYM) üslubunda",
+    dailyPlanRule: "Her gün toplam 60-180 dakika ve 2-4 oturum planla; adayın iş/okul saatlerini zorlamayan, hafta sonu daha yoğun bir tempo kur.",
+    schoolKind: "kurs",
+    catalogBroadScopes: [],
+  },
+  DGS: {
+    track: "DGS",
+    label: "DGS",
+    authority: { name: "ÖSYM", url: "https://www.osym.gov.tr" },
+    scopeNote: "Konu listesi ÖSYM DGS sayısal ve sözel bölüm kapsamına dayanır",
+    onboarding: { title: "DGS", description: "Dikey geçiş sınavı · önlisans öğrencisi ya da mezun" },
+    gradeLevels: ["onlisans", "onlisans_mezun"],
+    gradeQuestion: "Eğitim durumun",
+    asksScoreType: false,
+    goal: { kind: "custom", label: "Hedef lisans bölümü", placeholder: "Örn. Bilgisayar Mühendisliği", options: [], emptyText: "Hedef lisans bölümünü henüz yazmadın." },
+    targetScore: { label: "Hedef DGS puanın", placeholder: "Örn. 300", min: 100, max: 500 },
+    currentNet: { kind: "single", hint: "100 soru üzerinden (sayısal + sözel) yaklaşık bir sayı ya da aralık yazabilirsin (örn. 55-60).", placeholder: "Örn. 55-60" },
+    studentNoun: "Bir DGS adayı",
+    studentPhrase: "Bir DGS adayının",
+    promptContext: "Aday DGS'ye (ÖSYM Dikey Geçiş Sınavı; önlisanstan lisansa geçiş) hazırlanıyor. Bölümler: Sayısal (matematik, geometri, sayısal mantık) ve Sözel (Türkçe, paragraf, sözel mantık), 50'şer soru. Sorular 5 şıklı (A-E), 4 yanlış 1 doğruyu götürür; ÖSYM tarzı. Bir yetişkine hitap et.",
+    questionStyle: "DGS (ÖSYM) üslubunda",
+    dailyPlanRule: "Her gün toplam 60-150 dakika ve 2-4 oturum planla; önlisans dersleri ve sınavlarıyla çakışmayan bir tempo kur.",
+    schoolKind: "önlisans",
     catalogBroadScopes: [],
   },
 };

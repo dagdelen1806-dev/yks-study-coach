@@ -24,6 +24,9 @@ export const NON_LGS_PRESETS = ["Teknoloji ve Tasarım", "Bilişim Teknolojileri
 export const SCHEDULE_SUBJECTS_BY_TRACK: Record<ExamTrack, { subjects: readonly string[]; nonExamPresets: readonly string[] }> = {
   YKS: { subjects: YKS_SUBJECTS, nonExamPresets: NON_YKS_PRESETS },
   LGS: { subjects: LGS_SUBJECTS, nonExamPresets: NON_LGS_PRESETS },
+  // Yetişkin adaylar: programdaki bloklar çoğunlukla iş/kurs saatleri; ders olarak KPSS dersleri.
+  KPSS: { subjects: ["Türkçe", "Matematik", "Tarih", "Coğrafya", "Vatandaşlık", "Güncel Bilgiler"], nonExamPresets: ["İş", "Kurs / dershane", "Üniversite dersi", "Diğer"] },
+  DGS: { subjects: ["Sayısal", "Sözel"], nonExamPresets: ["Önlisans dersi", "İş", "Kurs / dershane", "Diğer"] },
 };
 /** Bir ders bloğunun `subject` alanında geçebilecek tüm dersler (tüm sınavların birleşimi). */
 export const SCHEDULE_SUBJECTS = Array.from(new Set(Object.values(SCHEDULE_SUBJECTS_BY_TRACK).flatMap((entry) => entry.subjects))) as [string, ...string[]];
