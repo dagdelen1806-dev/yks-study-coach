@@ -29,6 +29,13 @@
       "when": 1792591043646,
       "tag": "0003_selected_subjects",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792591184450,
+      "tag": "0004_exam_track_enrollments",
+      "breakpoints": true
     }
   ]
 }

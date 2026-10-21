@@ -16,6 +16,16 @@ import {
   validateOnboardingStep,
 } from "@shared/onboarding";
 import { EXAM_TRACKS } from "@shared/exams";
+import { TrackError, addTrack, listTracks, removeTrack, switchTrack, syncActiveTrack } from "../tracks/trackDb";
+
+const trackErrors = async <T,>(work: () => Promise<T>): Promise<T> => {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof TrackError) throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+    throw error;
+  }
+};
 import { completeOnboarding, getStudentProfile, setStudentAvatarStyle, upsertStudentProfileStep, type StudentProfilePatch } from "../db";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getWeeklyDigestEnabled, setWeeklyDigestEnabled } from "../digest/weeklyDigest";
@@ -124,12 +134,30 @@ export const onboardingRouter = router({
       throw new TRPCError({ code: "BAD_REQUEST", message: Object.values(errors)[0] });
     }
 
-    await upsertStudentProfileStep(ctx.user.id, input.step, draftToPatch(input.data));
+    const saved = await upsertStudentProfileStep(ctx.user.id, input.step, draftToPatch(input.data));
     if (input.complete) await completeOnboarding(ctx.user.id);
+    // Anketi bitmiş profilde (ya da bitirirken) aktif sınavın kaydı güncel tutulur.
+    if (input.complete || saved.onboardingCompleted) await syncActiveTrack(ctx.user.id);
     return getStudentProfile(ctx.user.id);
   }),
 
-  complete: protectedProcedure.mutation(({ ctx }) => completeOnboarding(ctx.user.id)),
+  complete: protectedProcedure.mutation(async ({ ctx }) => {
+    const profile = await completeOnboarding(ctx.user.id);
+    await syncActiveTrack(ctx.user.id);
+    return profile;
+  }),
+
+  // Birden çok sınav: liste, ekleme, aktif sınavı değiştirme, çıkarma (bkz. server/tracks/trackDb.ts).
+  tracks: protectedProcedure.query(({ ctx }) => listTracks(ctx.user.id)),
+  addTrack: protectedProcedure
+    .input(z.object({ track: z.enum(EXAM_TRACKS), gradeLevel: z.enum(GRADE_LEVELS), examYear: z.number().int().min(2020).max(2040), selectedSubjects: z.array(z.string().max(60)).max(15).optional(), activate: z.boolean().optional() }))
+    .mutation(({ ctx, input }) => trackErrors(async () => { await addTrack(ctx.user.id, input); return listTracks(ctx.user.id); })),
+  switchTrack: protectedProcedure
+    .input(z.object({ track: z.enum(EXAM_TRACKS) }))
+    .mutation(({ ctx, input }) => trackErrors(async () => { await switchTrack(ctx.user.id, input.track); return getStudentProfile(ctx.user.id); })),
+  removeTrack: protectedProcedure
+    .input(z.object({ track: z.enum(EXAM_TRACKS) }))
+    .mutation(({ ctx, input }) => trackErrors(async () => { await removeTrack(ctx.user.id, input.track); return listTracks(ctx.user.id); })),
 
   // Genel Bakış'taki tek tıkla avatar seçimi (null = nötr tasarım).
   setAvatar: protectedProcedure

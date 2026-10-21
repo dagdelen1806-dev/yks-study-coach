@@ -670,6 +670,31 @@ export const planAdherenceReports = pgTable("plan_adherence_reports", {
 // already used for `user_mock_exams.subjectsJson` / `topicNetsJson` etc.
 // ---------------------------------------------------------------------------
 
+// Öğrencinin hazırlandığı sınavlar (bir aday KPSS + MEB-AGS gibi birden çok sınava hazırlanabilir).
+// student_profiles.examTrack aktif sınavdır ve profildeki sınava özgü alanlar (yıl, hedef, net…)
+// aktif sınavın değerlerini taşır; sınav değişince bu tabloyla takas edilir (server/tracks/trackDb.ts).
+export const studentExamTracks = pgTable("student_exam_tracks", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
+  track: text("track", { enum: EXAM_TRACKS }).notNull(),
+  gradeLevel: text("gradeLevel", { enum: GRADE_LEVELS }),
+  examYear: integer("examYear"),
+  targetScoreType: text("targetScoreType", { enum: ["SAY", "EA", "SOZ", "DIL", "TYT", "belirsiz"] }),
+  currentTytNet: varchar("currentTytNet", { length: 40 }),
+  currentAytNet: varchar("currentAytNet", { length: 40 }),
+  currentNet: varchar("currentNet", { length: 40 }),
+  targetUniversity: varchar("targetUniversity", { length: 180 }),
+  targetDepartment: varchar("targetDepartment", { length: 180 }),
+  targetRanking: varchar("targetRanking", { length: 60 }),
+  targetGoal: varchar("targetGoal", { length: 180 }),
+  targetScore: varchar("targetScore", { length: 20 }),
+  selectedSubjectsJson: text("selectedSubjectsJson"),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => new Date()).notNull(),
+}, (table) => ({
+  userTrackIdx: uniqueIndex("student_exam_tracks_user_track_idx").on(table.userId, table.track),
+}));
+
 // Veli erişimi (bkz. shared/parent.ts): öğrenci kod üretir (invited) → veli kodu girer ve rıza
 // metnini onaylar (pending) → öğrenci onaylar (active) ya da iki taraftan biri kapatır (revoked).
 export const parentLinks = pgTable("parent_links", {
