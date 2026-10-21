@@ -32,7 +32,7 @@ import {
   type OnboardingDraft,
 } from "@shared/onboarding";
 import { getStoredValue, localStorageKeys, storeValue } from "@shared/yksData";
-import { EXAM_TRACK_DEFS, type ExamTrack } from "@shared/exams";
+import { EXAM_TRACK_DEFS, defaultKindOf, subjectNamesOf, type ExamTrack } from "@shared/exams";
 import type { AppRouter } from "../../../../server/routers";
 import type { inferRouterOutputs } from "@trpc/server";
 import { ArrowLeft, ArrowRight, Check, Sparkles } from "lucide-react";
@@ -126,6 +126,14 @@ function StepIdentity({ draft, errors, update }: { draft: OnboardingDraft; error
       <Field label="Hedef sınav yılın" hint="Örn. 2027" required error={errors.examYear} htmlFor="onboarding-year">
         <Input id="onboarding-year" inputMode="numeric" value={draft.examYear} onChange={(e) => update("examYear", e.target.value.replace(/[^0-9]/g, ""))} placeholder={String(new Date().getFullYear() + 1)} maxLength={4} aria-invalid={Boolean(errors.examYear)} className="max-w-[140px]" />
       </Field>
+      {EXAM_TRACK_DEFS[track].chooseSubjects && (
+        <Field label={EXAM_TRACK_DEFS[track].chooseSubjects!.label} hint={EXAM_TRACK_DEFS[track].chooseSubjects!.hint} required error={errors.selectedSubjects} htmlFor="onboarding-selected-subjects">
+          <ChipGroup id="onboarding-selected-subjects" options={subjectNamesOf(defaultKindOf(track))} value={draft.selectedSubjects} onChange={(next) => update("selectedSubjects", next)} multi />
+        </Field>
+      )}
+      {EXAM_TRACK_DEFS[track].addonOf ? (
+        <p className="rounded-xl bg-paper px-3 py-2 text-[12.5px] leading-5 text-ink-3">{EXAM_TRACK_DEFS[track].label} adayları KPSS Genel Yetenek–Genel Kültür'e de girer. Anketi bitirdikten sonra profil menüsünden KPSS'yi de ekleyebilirsin; KPSS aboneliğin varsa bu sınavın aboneliği indirimli olur.</p>
+      ) : null}
       {EXAM_TRACK_DEFS[track].asksScoreType && (
         <Field label="Hedef puan türün" hint="Henüz karar vermediysen sorun değil, sonra değiştirebilirsin." required error={errors.targetScoreType} htmlFor="onboarding-score-type">
           <ChipGroup id="onboarding-score-type" options={TARGET_SCORE_TYPES} labels={TARGET_SCORE_TYPE_LABELS} value={draft.targetScoreType ? [draft.targetScoreType] : []} onChange={(next) => update("targetScoreType", (next[0] ?? "") as OnboardingDraft["targetScoreType"])} />
@@ -303,6 +311,7 @@ function profileToDraft(profile: OnboardingProfile, fallbackName?: string | null
     currentAytNet: profile.currentAytNet ?? "",
     currentNet: profile.currentNet ?? "",
     mockExamFrequency: (profile.mockExamFrequency as OnboardingDraft["mockExamFrequency"]) ?? "",
+    selectedSubjects: profile.selectedSubjects ?? [],
     strongSubjects: profile.strongSubjects ?? [],
     weakSubjects: profile.weakSubjects ?? [],
     hasPriorStudyPlan: profile.hasPriorStudyPlan === null ? "" : profile.hasPriorStudyPlan ? "yes" : "no",
@@ -332,7 +341,7 @@ function profileToDraft(profile: OnboardingProfile, fallbackName?: string | null
 function pickStepFields(step: number, draft: OnboardingDraft): Partial<OnboardingDraft> {
   switch (step) {
     case 0:
-      return { preferredName: draft.preferredName, avatarStyle: draft.avatarStyle, examTrack: draft.examTrack, gradeLevel: draft.gradeLevel, examYear: draft.examYear, targetScoreType: draft.targetScoreType };
+      return { preferredName: draft.preferredName, avatarStyle: draft.avatarStyle, examTrack: draft.examTrack, selectedSubjects: draft.selectedSubjects, gradeLevel: draft.gradeLevel, examYear: draft.examYear, targetScoreType: draft.targetScoreType };
     case 1:
       return { currentTytNet: draft.currentTytNet, currentAytNet: draft.currentAytNet, currentNet: draft.currentNet, mockExamFrequency: draft.mockExamFrequency, strongSubjects: draft.strongSubjects, weakSubjects: draft.weakSubjects, hasPriorStudyPlan: draft.hasPriorStudyPlan };
     case 2:

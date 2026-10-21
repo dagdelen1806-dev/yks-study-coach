@@ -717,6 +717,8 @@ export const studentProfiles = pgTable("student_profiles", {
   currentAytNet: varchar("currentAytNet", { length: 40 }),
   currentNet: varchar("currentNet", { length: 40 }),
   mockExamFrequency: varchar("mockExamFrequency", { length: 60 }),
+  // Ders seçtiren sınavda (KPSS A grubu) adayın girdiği alan testleri (JSON dizi).
+  selectedSubjectsJson: text("selectedSubjectsJson"),
   strongSubjectsJson: text("strongSubjectsJson"),
   weakSubjectsJson: text("weakSubjectsJson"),
   hasPriorStudyPlan: integer("hasPriorStudyPlan"),

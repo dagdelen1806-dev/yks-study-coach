@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CURRICULUM } from "../shared/curriculum";
-import { EXAM_KIND_DEFS, EXAM_TRACK_DEFS, EXAM_TRACKS, GRADE_LEVELS, catalogScopeCovers, estimateLgsScore, estimateScore, kindsOf, netFor, optionCountOf, subjectTotalsOf, targetSummary, trackSubjects } from "../shared/exams";
+import { EXAM_KIND_DEFS, EXAM_TRACK_DEFS, EXAM_TRACKS, GRADE_LEVELS, catalogScopeCovers, estimateLgsScore, estimateScore, kindsOf, netFor, optionCountOf, subjectTotalsOf, subjectsForStudent, targetSummary, trackSubjects } from "../shared/exams";
+import { emptyOnboardingDraft, validateOnboardingStep } from "../shared/onboarding";
 import { scheduleSubjectsFor } from "../shared/classSchedule";
 import { buildLgsTemplateTopicDetails } from "../shared/curriculumExamTemplate";
 import { parseSimilarQuestion } from "../shared/questionNotebook";
@@ -102,6 +103,34 @@ describe("KPSS ve DGS", () => {
     expect(classifyLesson("GEOMETRİ", "KPSS")).toEqual({ known: true, subject: "Matematik" });
     expect(classifyLesson("SAYISAL MANTIK", "DGS")).toEqual({ known: true, subject: "Sayısal" });
     expect(classifyLesson("PARAGRAF", "DGS")).toEqual({ known: true, subject: "Sözel" });
+  });
+});
+
+describe("MEB-AGS ve KPSS A grubu", () => {
+  it("MEB-AGS 80, A grubu her alan 40 soru; ikisi de KPSS'nin branşı", () => {
+    expect(Object.values(subjectTotalsOf("MEB_AGS")).reduce((a, b) => a + b, 0)).toBe(80);
+    expect(Object.values(subjectTotalsOf("KPSS_A")).every((count) => count === 40)).toBe(true);
+    expect(EXAM_TRACK_DEFS.MEB_AGS.addonOf).toBe("KPSS");
+    expect(EXAM_TRACK_DEFS.KPSS_A.addonOf).toBe("KPSS");
+  });
+
+  it("A grubunda dersler adayın seçtiği alanlarla sınırlı; seçim yoksa hepsi", () => {
+    expect(subjectsForStudent("KPSS_A", ["Hukuk", "İktisat"])).toEqual(["Hukuk", "İktisat"]);
+    expect(subjectsForStudent("KPSS_A", [])).toHaveLength(9);
+    // Ders seçtirmeyen sınavda seçim yok sayılır.
+    expect(subjectsForStudent("TYT", ["Türkçe"])).toEqual(["Türkçe", "Matematik", "Fen", "Sosyal"]);
+  });
+
+  it("anket: A grubunda alan seçimi zorunlu", () => {
+    const draft = { ...emptyOnboardingDraft(), examTrack: "KPSS_A" as const, preferredName: "Deniz", gradeLevel: "lisans_mezun" as const, examYear: String(new Date().getFullYear() + 2) };
+    expect(validateOnboardingStep(0, draft).selectedSubjects).toBeTruthy();
+    expect(validateOnboardingStep(0, { ...draft, selectedSubjects: ["Hukuk"] }).selectedSubjects).toBeUndefined();
+  });
+
+  it("A grubu KPSS ile aynı iki yıllık döngüde; MEB-AGS her yıl", () => {
+    const now = new Date("2026-10-21T12:00:00+03:00");
+    expect(nextExamEnd(now, null, "KPSS_A").year).toBe(2028);
+    expect(nextExamEnd(now, null, "MEB_AGS").year).toBe(2027);
   });
 });
 

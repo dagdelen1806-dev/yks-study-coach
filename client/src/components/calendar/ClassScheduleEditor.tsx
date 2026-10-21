@@ -21,6 +21,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { compressImage } from "../books/imageCompression";
 import { useExamTrack } from "@/hooks/useExamTrack";
+import { EXAM_TRACK_DEFS } from "@shared/exams";
 
 // Ders programım: okul programı gün × ders saati tablosu (fotoğraftaki okul çizelgesi gibi)
 // + dershane/özel ders blokları. Kaydet tüm programı birlikte değiştirir.
@@ -39,8 +40,9 @@ const decode = (value: string): Cell => {
 };
 /** Ders seçenekleri (öğrencinin sınavına göre); hücrede listede olmayan bir etiket varsa (ör. fotoğraftan okunan seçmeli ders) o da seçenek olur. */
 function SubjectOptions({ current }: { current?: Cell }) {
-  const { track } = useExamTrack();
-  const subjects = scheduleSubjectsFor(track);
+  const { track, selectedSubjects } = useExamTrack();
+  // Ders seçtiren sınavda (KPSS A grubu) yalnızca seçilen alanlar.
+  const subjects = scheduleSubjectsFor(track).filter((subject) => !EXAM_TRACK_DEFS[track].chooseSubjects || !selectedSubjects.length || selectedSubjects.includes(subject));
   const presets = nonExamPresetsFor(track);
   const standard = new Set([...subjects.map((subject) => encode({ subject, label: subject })), ...presets.map((label) => encode({ subject: null, label }))]);
   const extra = current && !standard.has(encode(current)) ? current : null;

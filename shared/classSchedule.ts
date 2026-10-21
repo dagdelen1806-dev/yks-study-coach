@@ -27,6 +27,8 @@ export const SCHEDULE_SUBJECTS_BY_TRACK: Record<ExamTrack, { subjects: readonly 
   // Yetişkin adaylar: programdaki bloklar çoğunlukla iş/kurs saatleri; ders olarak KPSS dersleri.
   KPSS: { subjects: ["Türkçe", "Matematik", "Tarih", "Coğrafya", "Vatandaşlık", "Güncel Bilgiler"], nonExamPresets: ["İş", "Kurs / dershane", "Üniversite dersi", "Diğer"] },
   DGS: { subjects: ["Sayısal", "Sözel"], nonExamPresets: ["Önlisans dersi", "İş", "Kurs / dershane", "Diğer"] },
+  MEB_AGS: { subjects: ["Eğitim Bilimleri", "Sözel Yetenek", "Sayısal Yetenek", "Mevzuat", "Tarih", "Türkiye Coğrafyası"], nonExamPresets: ["Üniversite dersi", "Staj / okul uygulaması", "İş", "Kurs / dershane", "Diğer"] },
+  KPSS_A: { subjects: ["Hukuk", "İktisat", "Maliye", "Muhasebe", "İşletme", "Çalışma Ekonomisi", "İstatistik", "Kamu Yönetimi", "Uluslararası İlişkiler"], nonExamPresets: ["İş", "Kurs / dershane", "Diğer"] },
 };
 /** Bir ders bloğunun `subject` alanında geçebilecek tüm dersler (tüm sınavların birleşimi). */
 export const SCHEDULE_SUBJECTS = Array.from(new Set(Object.values(SCHEDULE_SUBJECTS_BY_TRACK).flatMap((entry) => entry.subjects))) as [string, ...string[]];

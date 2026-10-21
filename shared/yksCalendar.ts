@@ -29,9 +29,19 @@ export const DGS_EXAMS: ReadonlyArray<{ year: number; firstDay: string; lastDay:
   { year: 2026, firstDay: "2026-07-19", lastDay: "2026-07-19" },
 ];
 
-const EXAMS_BY_TRACK: Record<ExamTrack, ReadonlyArray<{ year: number; firstDay: string; lastDay: string }>> = { YKS: YKS_EXAMS, LGS: LGS_EXAMS, KPSS: KPSS_EXAMS, DGS: DGS_EXAMS };
+/** MEB-AGS her yıl (ilki 2025). 2026: 26 Temmuz (ÖSYM kılavuzu). */
+export const MEB_AGS_EXAMS: ReadonlyArray<{ year: number; firstDay: string; lastDay: string }> = [
+  { year: 2026, firstDay: "2026-07-26", lastDay: "2026-07-26" },
+];
+
+/** KPSS A grubu alan bilgisi: lisans KPSS ile aynı döngüde (iki yılda bir). 2026: 12–13 Eylül. */
+export const KPSS_A_EXAMS: ReadonlyArray<{ year: number; firstDay: string; lastDay: string }> = [
+  { year: 2026, firstDay: "2026-09-12", lastDay: "2026-09-13" },
+];
+
+const EXAMS_BY_TRACK: Record<ExamTrack, ReadonlyArray<{ year: number; firstDay: string; lastDay: string }>> = { YKS: YKS_EXAMS, LGS: LGS_EXAMS, KPSS: KPSS_EXAMS, DGS: DGS_EXAMS, MEB_AGS: MEB_AGS_EXAMS, KPSS_A: KPSS_A_EXAMS };
 /** Sınav kaç yılda bir yapılır (tahmin yalnızca bu döngüdeki yıllara yapılır). */
-const EXAM_CYCLE_YEARS: Record<ExamTrack, number> = { YKS: 1, LGS: 1, KPSS: 2, DGS: 1 };
+const EXAM_CYCLE_YEARS: Record<ExamTrack, number> = { YKS: 1, LGS: 1, KPSS: 2, DGS: 1, MEB_AGS: 1, KPSS_A: 2 };
 
 /** Bu yıl ya da sonrasındaki ilk sınav yılı (iki yılda bir yapılan KPSS'de tek yıl bir sonrakine kayar). */
 function cycleYearFrom(year: number, track: ExamTrack): number {

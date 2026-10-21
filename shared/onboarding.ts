@@ -114,6 +114,8 @@ export type OnboardingDraft = {
   currentAytNet: string;
   currentNet: string;
   mockExamFrequency: MockExamFrequency | "";
+  /** Ders seçtiren sınavda (KPSS A grubu) girilecek alan testleri. */
+  selectedSubjects: string[];
   strongSubjects: string[];
   weakSubjects: string[];
   hasPriorStudyPlan: "yes" | "no" | "";
@@ -149,6 +151,7 @@ export const emptyOnboardingDraft = (): OnboardingDraft => ({
   currentAytNet: "",
   currentNet: "",
   mockExamFrequency: "",
+  selectedSubjects: [],
   strongSubjects: [],
   weakSubjects: [],
   hasPriorStudyPlan: "",
@@ -188,6 +191,7 @@ export function validateOnboardingStep(step: number, draft: OnboardingDraft): Fi
   if (step === 0) {
     if (!draft.preferredName.trim()) errors.preferredName = "Sana nasıl hitap edelim, yazar mısın?";
     if (!draft.examTrack) errors.examTrack = "Hangi sınava hazırlandığını seç.";
+    if (draft.examTrack && EXAM_TRACK_DEFS[draft.examTrack].chooseSubjects && draft.selectedSubjects.length === 0) errors.selectedSubjects = "Gireceğin en az bir alan testini seç.";
     if (!draft.gradeLevel) errors.gradeLevel = "Sınıf düzeyini seç.";
     else if (draft.examTrack && !gradeLevelsFor(draft.examTrack).includes(draft.gradeLevel)) errors.gradeLevel = "Bu sınav için sınıf düzeyini yeniden seç.";
     if (!draft.examYear.trim()) errors.examYear = "Hedef sınav yılını gir.";

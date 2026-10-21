@@ -15,12 +15,13 @@
 //     anlık görüntüsü güncellenir (drizzle-kit generate boş/tek satır üretir).
 //  5. server/exams.test.ts'teki "her sınav eksiksiz tanımlı" testi tanımları denetler.
 
-export const EXAM_TRACKS = ["YKS", "LGS", "KPSS", "DGS"] as const;
+export const EXAM_TRACKS = ["YKS", "LGS", "KPSS", "DGS", "MEB_AGS", "KPSS_A"] as const;
 export type ExamTrack = (typeof EXAM_TRACKS)[number];
 
 // KPSS_GYGK: Genel Yetenek–Genel Kültür (lisans/önlisans/ortaöğretim adaylarının ortak oturumu).
-// Öğretmenlik (MEB-AGS) ve A grubu alan bilgisi oturumları henüz yok.
-export const EXAM_KINDS = ["TYT", "AYT", "LGS", "KPSS_GYGK", "DGS"] as const;
+// MEB_AGS: öğretmen adayları (Millî Eğitim Akademisi Giriş Sınavı). KPSS_A: A grubu alan bilgisi
+// (aday girdiği alan testlerini seçer; bkz. ExamTrackDef.chooseSubjects).
+export const EXAM_KINDS = ["TYT", "AYT", "LGS", "KPSS_GYGK", "DGS", "MEB_AGS", "KPSS_A"] as const;
 export type ExamKind = (typeof EXAM_KINDS)[number];
 
 /** Kaynak kataloğundaki kitap kapsamları: tek bir oturum ya da bir sınavın tamamını kapsayan geniş etiketler. */
@@ -132,6 +133,34 @@ export const EXAM_KIND_DEFS: Record<ExamKind, ExamKindDef> = {
       { name: "Sözel", questions: 50, weight: 1 },
     ],
   },
+  // ÖSYM MEB-AGS: 80 soru / 110 dk. Puan standart puanla; tahmini puan yok.
+  MEB_AGS: {
+    kind: "MEB_AGS", track: "MEB_AGS", label: "MEB-AGS", optionCount: 5, wrongsPerCorrect: 4, formRows: "curriculum",
+    subjects: [
+      { name: "Eğitim Bilimleri", questions: 30, weight: 1 },
+      { name: "Sözel Yetenek", questions: 15, weight: 1 },
+      { name: "Sayısal Yetenek", questions: 15, weight: 1 },
+      { name: "Mevzuat", questions: 8, weight: 1 },
+      { name: "Tarih", questions: 6, weight: 1 },
+      { name: "Türkiye Coğrafyası", questions: 6, weight: 1 },
+    ],
+  },
+  // ÖSYM KPSS A grubu alan bilgisi: her test 40 soru (istatistik 60 dk, diğerleri 50 dk). Aday
+  // yalnızca girdiği testleri seçer; deneme ve konu haritası seçilen alanlarla sınırlanır.
+  KPSS_A: {
+    kind: "KPSS_A", track: "KPSS_A", label: "KPSS A grubu", optionCount: 5, wrongsPerCorrect: 4, formRows: "curriculum",
+    subjects: [
+      { name: "Hukuk", questions: 40, weight: 1 },
+      { name: "İktisat", questions: 40, weight: 1 },
+      { name: "Maliye", questions: 40, weight: 1 },
+      { name: "Muhasebe", questions: 40, weight: 1 },
+      { name: "İşletme", questions: 40, weight: 1 },
+      { name: "Çalışma Ekonomisi", questions: 40, weight: 1 },
+      { name: "İstatistik", questions: 40, weight: 1 },
+      { name: "Kamu Yönetimi", questions: 40, weight: 1 },
+      { name: "Uluslararası İlişkiler", questions: 40, weight: 1 },
+    ],
+  },
 };
 
 export type ExamTrackDef = {
@@ -170,6 +199,13 @@ export type ExamTrackDef = {
   schoolKind: string;
   /** Bu sınavın tüm oturumlarını kapsayan geniş katalog etiketleri (tek oturum etiketi zaten kapsar). */
   catalogBroadScopes: readonly CatalogExamScope[];
+  /**
+   * Bir ana sınavın branşı (ör. MEB-AGS ve KPSS A grubu → KPSS). Ana sınava aktif aboneliği olan
+   * aday branşı sonradan alırsa branş aboneliği indirimli olur (shared/checkoutQuote.ts).
+   */
+  addonOf?: ExamTrack;
+  /** Aday sınavın derslerinden (alan testlerinden) girdiklerini seçer (KPSS A grubu). */
+  chooseSubjects?: { label: string; hint: string };
 };
 
 export const EXAM_TRACK_DEFS: Record<ExamTrack, ExamTrackDef> = {
@@ -252,6 +288,49 @@ export const EXAM_TRACK_DEFS: Record<ExamTrack, ExamTrackDef> = {
     schoolKind: "önlisans",
     catalogBroadScopes: [],
   },
+  MEB_AGS: {
+    track: "MEB_AGS",
+    label: "MEB-AGS",
+    authority: { name: "ÖSYM", url: "https://www.osym.gov.tr" },
+    scopeNote: "Konu listesi ÖSYM MEB Akademi Giriş Sınavı kapsamına dayanır",
+    onboarding: { title: "MEB-AGS", description: "Öğretmen adayları · Millî Eğitim Akademisi Giriş Sınavı (KPSS ile birlikte)" },
+    gradeLevels: ["lisans", "lisans_mezun"],
+    gradeQuestion: "Eğitim durumun",
+    asksScoreType: false,
+    goal: { kind: "custom", label: "Öğretmenlik alanın", placeholder: "Örn. İlköğretim Matematik Öğretmenliği", options: ["Sınıf Öğretmenliği", "Okul Öncesi", "Türkçe", "Matematik", "Fen Bilimleri", "İngilizce", "Rehberlik"], emptyText: "Öğretmenlik alanını henüz yazmadın." },
+    targetScore: { label: "Hedef AGS puanın", placeholder: "Örn. 80", min: 40, max: 100 },
+    currentNet: { kind: "single", hint: "80 soru üzerinden yaklaşık bir sayı ya da aralık yazabilirsin (örn. 55-60).", placeholder: "Örn. 55-60" },
+    studentNoun: "Bir öğretmen adayı (MEB-AGS)",
+    studentPhrase: "Bir öğretmen adayının (MEB-AGS)",
+    promptContext: "Aday MEB-AGS'ye (ÖSYM, Millî Eğitim Akademisi Giriş Sınavı) hazırlanan bir öğretmen adayı; KPSS'ye de giriyor olabilir. Alt testler: Eğitim Bilimleri ve Türk Millî Eğitim Sistemi (30), Sözel Yetenek (15), Sayısal Yetenek (15), Mevzuat (8), Tarih (6), Türkiye Coğrafyası (6). Sorular 5 şıklı (A-E), 4 yanlış 1 doğruyu götürür; ÖSYM tarzı. Bir yetişkine hitap et.",
+    questionStyle: "MEB-AGS (ÖSYM) üslubunda",
+    dailyPlanRule: "Her gün toplam 60-180 dakika ve 2-4 oturum planla; Eğitim Bilimleri'ne ağırlık ver, adayın okul/staj ya da iş temposunu zorlama.",
+    schoolKind: "üniversite",
+    catalogBroadScopes: [],
+    addonOf: "KPSS",
+  },
+  KPSS_A: {
+    track: "KPSS_A",
+    label: "KPSS A grubu",
+    authority: { name: "ÖSYM", url: "https://www.osym.gov.tr" },
+    scopeNote: "Konu listesi ÖSYM KPSS A grubu alan bilgisi testlerinin kapsamına dayanır",
+    onboarding: { title: "KPSS A grubu", description: "Alan bilgisi testleri · hukuk, iktisat, maliye… (KPSS ile birlikte)" },
+    gradeLevels: ["lisans", "lisans_mezun"],
+    gradeQuestion: "Eğitim durumun",
+    asksScoreType: false,
+    goal: { kind: "custom", label: "Hedef kadro", placeholder: "Örn. Sayıştay denetçi yardımcılığı", options: ["Kaymakamlık", "Müfettiş yardımcılığı", "Uzman yardımcılığı", "Denetçi yardımcılığı", "Henüz karar vermedim"], emptyText: "Hedef kadronu henüz yazmadın." },
+    targetScore: { label: "Hedef A grubu puanın", placeholder: "Örn. 85", min: 40, max: 100 },
+    currentNet: { kind: "single", hint: "Girdiğin alan testlerinin toplam netini yaklaşık yazabilirsin (her test 40 soru).", placeholder: "Örn. 25-30 / test" },
+    studentNoun: "Bir KPSS A grubu adayı",
+    studentPhrase: "Bir KPSS A grubu adayının",
+    promptContext: "Aday KPSS A grubu alan bilgisi testlerine (ÖSYM) hazırlanıyor; her test 40 soru. Yalnızca adayın seçtiği alan testlerine (ders listesindekiler) odaklan. Sorular 5 şıklı (A-E), 4 yanlış 1 doğruyu götürür; ÖSYM tarzı, kavram ve mevzuat ağırlıklı. Bir yetişkine hitap et.",
+    questionStyle: "KPSS A grubu (ÖSYM) üslubunda",
+    dailyPlanRule: "Her gün toplam 90-240 dakika ve 2-4 oturum planla; seçilen alan testleri arasında dengeli dağıt, adayın iş temposunu zorlama.",
+    schoolKind: "kurs",
+    catalogBroadScopes: [],
+    addonOf: "KPSS",
+    chooseSubjects: { label: "Gireceğin alan testleri", hint: "Konu haritan, denemelerin ve AI planın yalnızca seçtiğin testlere göre kurulur." },
+  },
 };
 
 export const trackDef = (track: ExamTrack): ExamTrackDef => EXAM_TRACK_DEFS[track];
@@ -325,4 +404,15 @@ export function targetSummary(track: ExamTrack, profile: TargetFields): { goal: 
     details: [score ? `Hedef ${score}` : null, year].filter((value): value is string => Boolean(value)),
     emptyText: def.goal.emptyText,
   };
+}
+
+/**
+ * Bir oturumun aday için geçerli dersleri: sınav ders seçtiriyorsa (KPSS A grubu) seçilenler,
+ * seçim boşsa ya da sınav ders seçtirmiyorsa tüm dersler.
+ */
+export function subjectsForStudent(kind: ExamKind, selected?: readonly string[] | null): string[] {
+  const all = subjectNamesOf(kind);
+  if (!EXAM_TRACK_DEFS[trackOf(kind)].chooseSubjects || !selected?.length) return all;
+  const chosen = all.filter((name) => selected.includes(name));
+  return chosen.length ? chosen : all;
 }

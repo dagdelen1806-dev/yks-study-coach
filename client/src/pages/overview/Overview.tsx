@@ -120,8 +120,7 @@ export default function Overview({ topics, exams, onSection, onStartSession, onE
   const summitAvailable = useIllustrationAvailable(ILLUSTRATIONS.summit);
   const coverAvailable = useIllustrationAvailable(ILLUSTRATIONS.heroGirl);
   const coverDesign = avatarStyle === "girl" && coverAvailable;
-  const { track, kinds } = useExamTrack();
-  const subjectOrder = trackSubjects(track);
+  const { track, kinds, trackSubjectList: subjectOrder } = useExamTrack();
   const [netExam, setNetExam] = useState<ExamKind>(kinds[0]);
   const [masteryExam, setMasteryExam] = useState<ExamKind>(kinds[0]);
   useEffect(() => { setNetExam(kinds[0]); setMasteryExam(kinds[0]); }, [kinds[0]]);

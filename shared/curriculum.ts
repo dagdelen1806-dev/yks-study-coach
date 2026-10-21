@@ -387,8 +387,51 @@ const DGS: Record<string, SubjectTree> = {
   },
 };
 
+// MEB-AGS: 6 alt test (ders adları shared/exams.ts ile aynı).
+const MEB_AGS: Record<string, SubjectTree> = {
+  "Eğitim Bilimleri": {
+    "Eğitim Bilimleri ve Türk Millî Eğitim Sistemi": [
+      { topic: "Gelişim Psikolojisi", aliases: ["gelişim"] }, { topic: "Öğrenme Psikolojisi", aliases: ["öğrenme kuramları"] },
+      { topic: "Öğretim İlke ve Yöntemleri", aliases: ["öğretim yöntem ve teknikleri", "öğretim stratejileri"] }, { topic: "Program Geliştirme", aliases: ["eğitimde program geliştirme"] },
+      { topic: "Ölçme ve Değerlendirme", aliases: ["ölçme değerlendirme"] }, { topic: "Rehberlik ve Özel Eğitim", aliases: ["rehberlik", "özel eğitim"] },
+      { topic: "Sınıf Yönetimi", aliases: ["sınıf yönetimi"] }, { topic: "Türk Millî Eğitim Sistemi", aliases: ["türk eğitim sistemi", "eğitim tarihi"] },
+    ],
+  },
+  "Sözel Yetenek": {
+    "Sözel Yetenek": [{ topic: "Sözcük ve Cümlede Anlam", aliases: ["sözcükte anlam", "cümlede anlam"] }, { topic: "Paragraf", aliases: ["paragrafta anlam"] }, { topic: "Sözel Mantık", aliases: ["sözel akıl yürütme"] }],
+  },
+  "Sayısal Yetenek": {
+    "Sayısal Yetenek": [{ topic: "Temel Matematik", aliases: ["sayılar", "temel kavramlar"] }, { topic: "Problemler", aliases: ["sayı problemleri", "yüzde problemleri"] }, { topic: "Tablo ve Grafik Yorumlama", aliases: ["grafik"] }, { topic: "Sayısal Mantık", aliases: ["mantıksal muhakeme"] }],
+  },
+  Mevzuat: {
+    Mevzuat: [
+      { topic: "Anayasa'nın Eğitimle İlgili Hükümleri", aliases: ["anayasa"] }, { topic: "1739 Sayılı Millî Eğitim Temel Kanunu", aliases: ["milli eğitim temel kanunu", "1739"] },
+      { topic: "222 Sayılı İlköğretim ve Eğitim Kanunu", aliases: ["ilköğretim ve eğitim kanunu", "222"] }, { topic: "7528 Sayılı Öğretmenlik Mesleği Kanunu", aliases: ["öğretmenlik mesleği kanunu", "7528"] },
+    ],
+  },
+  Tarih: {
+    Tarih: [{ topic: "Osmanlı ve Türk Tarihi", aliases: ["osmanlı tarihi", "türk tarihi"] }, { topic: "Kurtuluş Savaşı ve Atatürk İlkeleri", aliases: ["milli mücadele", "atatürk ilke ve inkılapları"] }],
+  },
+  "Türkiye Coğrafyası": {
+    "Türkiye Coğrafyası": [{ topic: "Fiziki Coğrafya", aliases: ["yer şekilleri", "iklim"] }, { topic: "Beşeri ve Ekonomik Coğrafya", aliases: ["nüfus", "ekonomik faaliyetler"] }],
+  },
+};
+
+// KPSS A grubu: 9 alan testi (ders adları shared/exams.ts ile aynı); ana konu başlıkları.
+const KPSS_A: Record<string, SubjectTree> = {
+  Hukuk: { Hukuk: ["Anayasa Hukuku", "İdare Hukuku", "Ceza Hukuku", "Medeni Hukuk", "Borçlar Hukuku", "Ticaret Hukuku", "İcra ve İflas Hukuku"] },
+  İktisat: { İktisat: [{ topic: "Mikro İktisat", aliases: ["mikroekonomi"] }, { topic: "Makro İktisat", aliases: ["makroekonomi"] }, "Para, Banka ve Kredi", "Uluslararası İktisat", "Büyüme ve Kalkınma", "İktisadi Düşünceler Tarihi", "Türkiye Ekonomisi"] },
+  Maliye: { Maliye: ["Maliye Teorisi", "Kamu Harcamaları", "Kamu Gelirleri", { topic: "Bütçe", aliases: ["5018 sayılı kanun"] }, "Maliye Politikası", "Vergi Hukuku", "Türk Vergi Sistemi"] },
+  Muhasebe: { Muhasebe: ["Genel Muhasebe", "Bilanço Analizi", { topic: "Mali Tablolar Analizi", aliases: ["mali analiz"] }, "Maliyet Muhasebesi", "Muhasebe Denetimi", "Şirketler Muhasebesi"] },
+  İşletme: { İşletme: ["İşletme Yönetimi", "Üretim Yönetimi", "Pazarlama", "Finansal Yönetim", "İnsan Kaynakları Yönetimi", "Örgütsel Davranış"] },
+  "Çalışma Ekonomisi": { "Çalışma Ekonomisi": ["Çalışma Ekonomisi", "Endüstri İlişkileri", "İş Hukuku", "Sosyal Güvenlik Hukuku"] },
+  İstatistik: { İstatistik: ["Tanımlayıcı İstatistik", "Olasılık", "Olasılık Dağılımları", "Tahmin ve Hipotez Testleri", "Regresyon ve Korelasyon"] },
+  "Kamu Yönetimi": { "Kamu Yönetimi": ["Siyaset Bilimi", "Yönetim Bilimleri", "Türk Yönetim Tarihi", "Yönetim Hukuku", "Kentleşme ve Çevre Sorunları", "Türk Siyasal Hayatı"] },
+  "Uluslararası İlişkiler": { "Uluslararası İlişkiler": ["Uluslararası İlişkiler Teorisi", "Siyasi Tarih", "Uluslararası Hukuk", "Uluslararası Örgütler", "Türk Dış Politikası", "Güncel Uluslararası Sorunlar"] },
+};
+
 /** Her oturumun konu ağacı; yeni sınav oturumu buraya eklenir (Record olduğu için TypeScript hatırlatır). */
-const TREES: Record<CurriculumExam, Record<string, SubjectTree>> = { TYT, AYT, LGS, KPSS_GYGK, DGS };
+const TREES: Record<CurriculumExam, Record<string, SubjectTree>> = { TYT, AYT, LGS, KPSS_GYGK, DGS, MEB_AGS, KPSS_A };
 
 export const CURRICULUM: CurriculumTopicDef[] = (Object.keys(TREES) as CurriculumExam[]).flatMap((exam) => flatten(exam, TREES[exam]));
 

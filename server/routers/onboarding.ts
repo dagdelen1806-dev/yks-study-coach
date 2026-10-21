@@ -38,6 +38,7 @@ const draftSchema = z.object({
   currentAytNet: z.string().trim().max(40).optional(),
   currentNet: z.string().trim().max(40).optional(),
   mockExamFrequency: enumOrBlank(MOCK_EXAM_FREQUENCIES).optional(),
+  selectedSubjects: z.array(z.string().max(60)).max(15).optional(),
   strongSubjects: z.array(z.string().max(40)).max(15).optional(),
   weakSubjects: z.array(z.string().max(40)).max(15).optional(),
   hasPriorStudyPlan: enumOrBlank(["yes", "no"]).optional(),
@@ -79,6 +80,7 @@ function draftToPatch(data: z.infer<typeof draftSchema>): StudentProfilePatch {
   if (data.currentAytNet !== undefined) patch.currentAytNet = data.currentAytNet || null;
   if (data.currentNet !== undefined) patch.currentNet = data.currentNet || null;
   if (data.mockExamFrequency !== undefined) patch.mockExamFrequency = data.mockExamFrequency || null;
+  if (data.selectedSubjects !== undefined) patch.selectedSubjects = data.selectedSubjects;
   if (data.strongSubjects !== undefined) patch.strongSubjects = data.strongSubjects;
   if (data.weakSubjects !== undefined) patch.weakSubjects = data.weakSubjects;
   if (data.hasPriorStudyPlan !== undefined) patch.hasPriorStudyPlan = data.hasPriorStudyPlan === "yes" ? true : data.hasPriorStudyPlan === "no" ? false : null;

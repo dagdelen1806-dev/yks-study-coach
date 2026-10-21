@@ -139,6 +139,7 @@ export type StudentProfileView = {
   currentAytNet: string | null;
   currentNet: string | null;
   mockExamFrequency: string | null;
+  selectedSubjects: string[];
   strongSubjects: string[];
   weakSubjects: string[];
   hasPriorStudyPlan: boolean | null;
@@ -175,6 +176,7 @@ export type StudentProfilePatch = Partial<{
   currentAytNet: string | null;
   currentNet: string | null;
   mockExamFrequency: string | null;
+  selectedSubjects: string[];
   strongSubjects: string[];
   weakSubjects: string[];
   hasPriorStudyPlan: boolean | null;
@@ -221,6 +223,7 @@ const defaultStudentProfileView: StudentProfileView = {
   currentAytNet: null,
   currentNet: null,
   mockExamFrequency: null,
+  selectedSubjects: [],
   strongSubjects: [],
   weakSubjects: [],
   hasPriorStudyPlan: null,
@@ -258,6 +261,7 @@ const toStudentProfileView = (row: typeof studentProfiles.$inferSelect): Student
   currentAytNet: row.currentAytNet,
   currentNet: row.currentNet,
   mockExamFrequency: row.mockExamFrequency,
+  selectedSubjects: parseJsonArray(row.selectedSubjectsJson),
   strongSubjects: parseJsonArray(row.strongSubjectsJson),
   weakSubjects: parseJsonArray(row.weakSubjectsJson),
   hasPriorStudyPlan: row.hasPriorStudyPlan === null ? null : row.hasPriorStudyPlan === 1,
@@ -295,7 +299,8 @@ const patchToRowValues = (patch: StudentProfilePatch) => {
   const values: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(patch)) {
     if (value === undefined) continue;
-    if (key === "strongSubjects") values.strongSubjectsJson = JSON.stringify(value);
+    if (key === "selectedSubjects") values.selectedSubjectsJson = JSON.stringify(value);
+    else if (key === "strongSubjects") values.strongSubjectsJson = JSON.stringify(value);
     else if (key === "weakSubjects") values.weakSubjectsJson = JSON.stringify(value);
     else if (key === "availableStudyDays") values.availableStudyDaysJson = JSON.stringify(value);
     else if (key === "preferredStudyTimes") values.preferredStudyTimesJson = JSON.stringify(value);

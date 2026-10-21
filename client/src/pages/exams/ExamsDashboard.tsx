@@ -22,8 +22,7 @@ export function previousOfSameKind(exams: MockExam[], exam: MockExam) {
 
 export default function ExamsDashboard({ exams, onAddExam, onAddScan, onUpload }: { exams: MockExam[]; onAddExam: () => void; onAddScan: () => void; onUpload: () => void }) {
   const profile = trpc.onboarding.get.useQuery(undefined, { retry: false }).data;
-  const { track, kinds } = useExamTrack();
-  const subjectOrder = trackSubjects(track);
+  const { track, kinds, trackSubjectList: subjectOrder } = useExamTrack();
   const [kind, setKind] = useState<ExamKind>(() => kinds.find((candidate) => exams.some((exam) => kindOf(exam) === candidate)) ?? kinds[0]);
   useEffect(() => { if (!kinds.includes(kind)) setKind(kinds[0]); }, [kinds[0]]);
   const [subject, setSubject] = useState("Toplam");
