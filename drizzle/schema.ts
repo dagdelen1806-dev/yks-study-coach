@@ -980,6 +980,8 @@ export const subscriptionPlans = pgTable("subscription_plans", {
   description: text("description"),
   // basic = Temel, premium = Premium, premium_plus = Pro (bkz. shared/entitlements.ts).
   tier: text("tier", { enum: ["free", "basic", "premium", "premium_plus"] }).default("free").notNull(),
+  // Planın sınavı (her sınavın ayrı aboneliği vardır). FREE planı tüm sınavlarda ortaktır (null).
+  track: text("track", { enum: EXAM_TRACKS }),
   billingPeriod: text("billingPeriod", { enum: ["none", "monthly", "yearly"] }).default("none").notNull(),
   // Kuruş cinsinden (minor unit) — ondalık/float fiyat yuvarlama hatalarından kaçınmak için.
   price: integer("price").default(0).notNull(),
@@ -999,7 +1001,9 @@ export const subscriptionPlans = pgTable("subscription_plans", {
 // silinmemesine dayanır.
 export const subscriptions = pgTable("subscriptions", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
-  userId: integer("userId").notNull().unique(),
+  userId: integer("userId").notNull(),
+  // Kullanıcı başına sınav başına TEK satır (bkz. aşağıdaki user_track tekil indeksi).
+  track: text("track", { enum: EXAM_TRACKS }).default("YKS").notNull(),
   planId: integer("planId").notNull(),
   status: text("status", { enum: ["trialing", "active", "past_due", "grace_period", "canceled", "expired", "paused", "incomplete"] }).default("active").notNull(),
   trialStartedAt: timestamp("trialStartedAt", { withTimezone: true }),
@@ -1023,12 +1027,15 @@ export const subscriptions = pgTable("subscriptions", {
   statusIdx: index("subscriptions_status_idx").on(table.status),
   periodEndIdx: index("subscriptions_current_period_end_idx").on(table.currentPeriodEnd),
   providerSubIdx: index("subscriptions_provider_subscription_idx").on(table.providerSubscriptionId),
+  userTrackIdx: uniqueIndex("subscriptions_user_track_idx").on(table.userId, table.track),
 }));
 
 export const payments = pgTable("payments", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   userId: integer("userId").notNull(),
   subscriptionId: integer("subscriptionId"),
+  // Ödemenin sınavı (paket ödemesinde her sınav ayrı satır; metadata.checkoutId ortak).
+  track: text("track", { enum: EXAM_TRACKS }),
   provider: varchar("provider", { length: 40 }).notNull(),
   providerPaymentId: varchar("providerPaymentId", { length: 180 }),
   providerTransactionId: varchar("providerTransactionId", { length: 180 }),
@@ -1087,10 +1094,12 @@ export const subscriptionAuditLogs = pgTable("subscription_audit_logs", {
 export const featureUsageLogs = pgTable("feature_usage_logs", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   userId: integer("userId").notNull(),
+  // Kota sınav başına: her aboneliğin kendi yapay zekâ hakları (kullanım o anki aktif sınava yazılır).
+  track: text("track", { enum: EXAM_TRACKS }).default("YKS").notNull(),
   featureKey: varchar("featureKey", { length: 60 }).notNull(),
   usedAt: timestamp("usedAt", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
-  userFeatureIdx: index("feature_usage_logs_user_feature_idx").on(table.userId, table.featureKey, table.usedAt),
+  userFeatureIdx: index("feature_usage_logs_user_feature_idx").on(table.userId, table.track, table.featureKey, table.usedAt),
 }));
 
 // Uygulama hataları (Admin → Hatalar). Aynı hata tek satırda toplanır: `fingerprint`

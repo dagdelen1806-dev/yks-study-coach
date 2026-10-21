@@ -47,7 +47,8 @@ const TIER_TAGLINES: Record<PlanTier, string> = {
 /** Giriş yapmamış ziyaretçinin gördüğü tanıtım sayfası (uygulama yalnızca hesapla kullanılır, bkz. App.tsx). */
 export default function Landing() {
   const plans = trpc.subscription.getPlans.useQuery(undefined, { retry: 1 }).data ?? [];
-  const monthlyPrice = (tier: PlanTier) => plans.find((plan) => plan.tier === tier && plan.billingPeriod === "monthly")?.price;
+  // Plan listesinde her sınavın planı var; vitrin YKS fiyatını gösterir (sınava göre fiyat panelden).
+  const monthlyPrice = (tier: PlanTier) => plans.find((plan) => (plan.track === "YKS" || plan.track === null) && plan.tier === tier && plan.billingPeriod === "monthly")?.price;
   // Onaylı gerçek yorum yoksa (ya da yüklenemezse) açıkça "örnek" etiketli yorumlar gösterilir; yüklenirken hiçbiri.
   const published = trpc.testimonials.published.useQuery(undefined, { retry: 1 });
   const showingSamples = !published.isLoading && (published.data?.length ?? 0) === 0;

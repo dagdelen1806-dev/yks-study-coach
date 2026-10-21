@@ -6,6 +6,7 @@ import { RateLimitExceededError, checkRateLimit } from "./rateLimit";
 import { PremiumRequiredError, UsageLimitExceededError, assertUsageAvailable, hasEntitlement, recordFeatureUsage } from "../subscriptions/entitlementService";
 import type { TrpcContext } from "./context";
 import { findOrgCreditSource, recordOrgCredit } from "../org/orgCredits";
+import { getStudentExamTrack } from "../subscriptions/subscriptionDb";
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
@@ -79,7 +80,7 @@ export function entitlementProcedure(feature: FeatureKey) {
     t.middleware(async opts => {
       const { ctx, next } = opts;
       if (!ctx.user) throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
-      const allowed = await hasEntitlement(ctx.user.id, feature);
+      const allowed = await hasEntitlement(ctx.user.id, feature, await getStudentExamTrack(ctx.user.id));
       if (!allowed) {
         throw new TRPCError({ code: "FORBIDDEN", message: PREMIUM_REQUIRED_ERR_MSG });
       }
@@ -108,8 +109,10 @@ export function metredFeatureProcedure(feature: FeatureKey, rateLimit: { maxRequ
       // Kuruma bağlı öğrencide işlem önce kurumun AI kredi havuzundan karşılanır;
       // havuz yoksa/bittiyse öğrencinin kendi kotası (aşağıdaki kontrol) geçerlidir.
       const orgCredit = await findOrgCreditSource(ctx.user.id, feature).catch(() => null);
+      // Her sınavın ayrı aboneliği ve kotası var: işlem öğrencinin o anki aktif sınavından düşer.
+      const track = await getStudentExamTrack(ctx.user.id);
       if (!orgCredit) try {
-        await assertUsageAvailable(ctx.user.id, feature);
+        await assertUsageAvailable(ctx.user.id, feature, track);
       } catch (error) {
         if (error instanceof PremiumRequiredError) throw new TRPCError({ code: "FORBIDDEN", message: PREMIUM_REQUIRED_ERR_MSG });
         if (error instanceof UsageLimitExceededError) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: error.message });
@@ -119,7 +122,7 @@ export function metredFeatureProcedure(feature: FeatureKey, rateLimit: { maxRequ
       // sayılır (spec §50/§51) — `next()` bir hata ile reddederse (örn.
       // LLM çağrısı patlarsa) buraya hiç gelinmez, kota yanlışlıkla tüketilmez.
       const result = await next({ ctx });
-      if (result.ok) await (orgCredit ? recordOrgCredit(orgCredit, ctx.user.id, feature) : recordFeatureUsage(ctx.user.id, feature));
+      if (result.ok) await (orgCredit ? recordOrgCredit(orgCredit, ctx.user.id, feature) : recordFeatureUsage(ctx.user.id, feature, track));
       return result;
     })
   );

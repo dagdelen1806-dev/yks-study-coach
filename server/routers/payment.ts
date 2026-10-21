@@ -3,7 +3,10 @@ import { protectedProcedure, router } from "../_core/trpc";
 import { ENV } from "../_core/env";
 import { getPlanByCode, listPaymentsForUser } from "../subscriptions/subscriptionDb";
 import { paymentProviderFactory } from "../subscriptions/paymentProviders/factory";
-import { processWebhookEvent } from "../subscriptions/webhookProcessor";
+import { completeMockCheckoutForUser, itemFromPlanCode } from "../subscriptions/checkout";
+import { QuoteError } from "../../shared/checkoutQuote";
+import { TRPCError } from "@trpc/server";
+import { quoteItemsInput } from "./subscription";
 
 export const paymentRouter = router({
   createCheckout: protectedProcedure.input(z.object({ planCode: z.string().min(1), successUrl: z.string().url(), cancelUrl: z.string().url() })).mutation(async ({ ctx, input }) => {
@@ -26,21 +29,20 @@ export const paymentRouter = router({
    * `PAYMENT_PROVIDER` gerçek bir sağlayıcıya çevrildiğinde bu uç nokta
    * otomatik olarak devre dışı kalır.
    */
-  completeMockCheckout: protectedProcedure.input(z.object({ planCode: z.string().min(1) })).mutation(async ({ ctx, input }) => {
+  // Sepet (`items`: bir ya da birden çok sınav) ya da eski istemciler için tek `planCode`.
+  // Tutar sunucuda hesaplanır: paket (2+ sınav) ve branş indirimi (shared/checkoutQuote.ts).
+  completeMockCheckout: protectedProcedure.input(z.object({ planCode: z.string().min(1).optional(), items: quoteItemsInput.optional() })).mutation(async ({ ctx, input }) => {
     if (ENV.paymentProvider !== "mock") {
       throw new Error("Bu uç nokta yalnızca PAYMENT_PROVIDER=mock iken kullanılabilir.");
     }
-    const plan = await getPlanByCode(input.planCode);
-    if (!plan || !plan.isActive) throw new Error("Geçersiz veya pasif plan.");
-
-    const result = await processWebhookEvent({
-      provider: "mock",
-      eventId: `mock_manual_${ctx.user.id}_${Date.now()}`,
-      eventType: "checkout.completed",
-      payload: { userId: ctx.user.id, planCode: input.planCode },
-      rawPayloadForAudit: { userId: ctx.user.id, planCode: input.planCode, source: "completeMockCheckout" },
-    });
-    if (result.status === "failed") throw new Error(result.reason ?? "Sandbox ödemesi işlenemedi.");
-    return result;
+    const items = input.items ?? (input.planCode ? [await itemFromPlanCode(input.planCode)] : null);
+    if (!items) throw new Error("Sepet boş.");
+    try {
+      const { quote, checkoutId } = await completeMockCheckoutForUser(ctx.user.id, items);
+      return { status: "processed" as const, checkoutId, total: quote.total, lines: quote.lines };
+    } catch (error) {
+      if (error instanceof QuoteError) throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+      throw error;
+    }
   }),
 });

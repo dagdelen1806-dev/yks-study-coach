@@ -8,6 +8,8 @@ vi.mock("./subscriptions/entitlementService", async (importOriginal) => ({
   assertUsageAvailable: vi.fn(async () => undefined),
   recordFeatureUsage: (...args: unknown[]) => (recordFeatureUsage as (...a: unknown[]) => unknown)(...args),
 }));
+// Yerel veritabanında id 9 kurumlu bir öğrenci olabilir; kişisel kota yolu test edilsin diye kurum havuzu yok.
+vi.mock("./org/orgCredits", async (importOriginal) => ({ ...(await importOriginal<typeof import("./org/orgCredits")>()), findOrgCreditSource: vi.fn(async () => null) }));
 vi.mock("./notes/questionsDb", async (importOriginal) => ({ ...(await importOriginal<typeof import("./notes/questionsDb")>()), getNotebookPlanSignal: vi.fn(async () => null) }));
 vi.mock("./schedule/classScheduleDb", async (importOriginal) => ({ ...(await importOriginal<typeof import("./schedule/classScheduleDb")>()), getPlanScheduleContext: vi.fn(async () => null) }));
 const aiInvoke = vi.fn();

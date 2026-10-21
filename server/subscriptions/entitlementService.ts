@@ -1,8 +1,11 @@
 import { FEATURE_KEYS, FREE_TIER_LIMITS, featuresForTier, usageLimitFor, type FeatureKey, type PlanTier } from "../../shared/entitlements";
 import { resolveEffectiveStatus, statusGrantsPremiumAccess, type SubscriptionStatus } from "../../shared/subscriptionStateMachine";
-import { countFeatureUsage, ensureFreeSubscription, getPlanById, getSubscriptionByUserId, recordFeatureUsage, updateSubscription, writeAuditLog } from "./subscriptionDb";
+import type { ExamTrack } from "../../shared/exams";
+import { countFeatureUsage, ensureFreeSubscription, getPlanById, updateSubscription, writeAuditLog } from "./subscriptionDb";
 
+/** Bir sınavın aboneliğinin anlık durumu (her sınavın ayrı aboneliği vardır). */
 export type EntitlementSnapshot = {
+  track: ExamTrack;
   tier: PlanTier;
   planCode: string;
   status: SubscriptionStatus;
@@ -21,8 +24,8 @@ export type EntitlementSnapshot = {
  * cron/webhook gelmese bile dönem/trial/grace bitişinin bir sonraki
  * istekte otomatik yansımasını sağlar (spec §7: "Fresh Subscription Query").
  */
-export async function getCurrentSubscription(userId: number) {
-  const subscription = await ensureFreeSubscription(userId);
+export async function getCurrentSubscription(userId: number, track: ExamTrack) {
+  const subscription = await ensureFreeSubscription(userId, track);
   const now = new Date();
   const effectiveStatus = resolveEffectiveStatus(
     {
@@ -37,22 +40,23 @@ export async function getCurrentSubscription(userId: number) {
 
   if (effectiveStatus !== subscription.status) {
     const oldState = { status: subscription.status };
-    const updated = await updateSubscription(userId, { status: effectiveStatus });
-    await writeAuditLog({ userId, action: "status_auto_transitioned", oldState, newState: { status: effectiveStatus }, reason: "resolveEffectiveStatus (zaman bazlı otomatik geçiş)" });
+    const updated = await updateSubscription(userId, track, { status: effectiveStatus });
+    await writeAuditLog({ userId, action: "status_auto_transitioned", oldState, newState: { status: effectiveStatus, track }, reason: "resolveEffectiveStatus (zaman bazlı otomatik geçiş)" });
     return updated;
   }
 
   return subscription;
 }
 
-export async function getEntitlements(userId: number): Promise<EntitlementSnapshot> {
-  const subscription = await getCurrentSubscription(userId);
+export async function getEntitlements(userId: number, track: ExamTrack): Promise<EntitlementSnapshot> {
+  const subscription = await getCurrentSubscription(userId, track);
   const plan = await getPlanById(subscription.planId);
   const tier: PlanTier = plan?.tier ?? "free";
   const status = subscription.status as SubscriptionStatus;
   const isPremium = tier !== "free" && statusGrantsPremiumAccess(status);
 
   return {
+    track,
     tier,
     planCode: plan?.code ?? "FREE",
     status,
@@ -66,28 +70,28 @@ export async function getEntitlements(userId: number): Promise<EntitlementSnapsh
   };
 }
 
-export async function isPremium(userId: number): Promise<boolean> {
-  const snapshot = await getEntitlements(userId);
+export async function isPremium(userId: number, track: ExamTrack): Promise<boolean> {
+  const snapshot = await getEntitlements(userId, track);
   return snapshot.isPremium;
 }
 
-export async function isTrialing(userId: number): Promise<boolean> {
-  const snapshot = await getEntitlements(userId);
+export async function isTrialing(userId: number, track: ExamTrack): Promise<boolean> {
+  const snapshot = await getEntitlements(userId, track);
   return snapshot.isTrial;
 }
 
-export async function isInGracePeriod(userId: number): Promise<boolean> {
-  const subscription = await getCurrentSubscription(userId);
+export async function isInGracePeriod(userId: number, track: ExamTrack): Promise<boolean> {
+  const subscription = await getCurrentSubscription(userId, track);
   return subscription.status === "grace_period";
 }
 
-export async function getSubscriptionState(userId: number): Promise<SubscriptionStatus> {
-  const subscription = await getCurrentSubscription(userId);
+export async function getSubscriptionState(userId: number, track: ExamTrack): Promise<SubscriptionStatus> {
+  const subscription = await getCurrentSubscription(userId, track);
   return subscription.status as SubscriptionStatus;
 }
 
-export async function hasEntitlement(userId: number, feature: FeatureKey): Promise<boolean> {
-  const snapshot = await getEntitlements(userId);
+export async function hasEntitlement(userId: number, feature: FeatureKey, track: ExamTrack): Promise<boolean> {
+  const snapshot = await getEntitlements(userId, track);
   return snapshot.entitlements.includes(feature);
 }
 
@@ -105,8 +109,8 @@ export class UsageLimitExceededError extends Error {
   }
 }
 
-export async function requireEntitlement(userId: number, feature: FeatureKey): Promise<void> {
-  const has = await hasEntitlement(userId, feature);
+export async function requireEntitlement(userId: number, feature: FeatureKey, track: ExamTrack): Promise<void> {
+  const has = await hasEntitlement(userId, feature, track);
   if (!has) throw new PremiumRequiredError(feature);
 }
 
@@ -132,14 +136,14 @@ function limitForSnapshot(feature: FeatureKey, snapshot: EntitlementSnapshot) {
  * kullanıcı senaryosu için orantısız karmaşıklık katar, bkz.
  * docs/admin/ADMIN-COMMAND-CENTER.md "Known limitations".
  */
-export async function assertUsageAvailable(userId: number, feature: FeatureKey): Promise<{ isPremium: boolean }> {
-  const snapshot = await getEntitlements(userId);
+export async function assertUsageAvailable(userId: number, feature: FeatureKey, track: ExamTrack): Promise<{ isPremium: boolean }> {
+  const snapshot = await getEntitlements(userId, track);
   if (!snapshot.isPremium && !FREE_TIER_LIMITS[feature]) {
     throw new PremiumRequiredError(feature);
   }
   const limit = limitForSnapshot(feature, snapshot);
   if (limit) {
-    const used = await countFeatureUsage(userId, feature, limit.windowDays);
+    const used = await countFeatureUsage(userId, feature, limit.windowDays, track);
     if (used >= limit.maxUses) throw new UsageLimitExceededError(feature, limit.maxUses, limit.windowDays);
   }
   return { isPremium: snapshot.isPremium };
@@ -156,8 +160,8 @@ export type FeatureUsageSummary = {
 };
 
 /** Admin "Usage" kartı ve olası müşteri-yüzü kota göstergesi için — her feature'ın kullanım/kalan/sınırsız durumu. */
-export async function getUsageSummaryForUser(userId: number): Promise<FeatureUsageSummary[]> {
-  const snapshot = await getEntitlements(userId);
+export async function getUsageSummaryForUser(userId: number, track: ExamTrack): Promise<FeatureUsageSummary[]> {
+  const snapshot = await getEntitlements(userId, track);
   const summaries: FeatureUsageSummary[] = [];
   for (const feature of FEATURE_KEYS) {
     const limit = limitForSnapshot(feature, snapshot);
@@ -168,7 +172,7 @@ export async function getUsageSummaryForUser(userId: number): Promise<FeatureUsa
       summaries.push({ feature, used: 0, limit: null, remaining: null, windowDays: null, periodStart: null, periodEnd: null });
       continue;
     }
-    const used = await countFeatureUsage(userId, feature, limit.windowDays);
+    const used = await countFeatureUsage(userId, feature, limit.windowDays, track);
     const periodStart = new Date(Date.now() - limit.windowDays * 24 * 60 * 60 * 1000);
     summaries.push({ feature, used, limit: limit.maxUses, remaining: Math.max(0, limit.maxUses - used), windowDays: limit.windowDays, periodStart: periodStart.toISOString(), periodEnd: new Date().toISOString() });
   }

@@ -1,5 +1,5 @@
 {
-  "id": "936de878-e3c0-49a0-b07e-f500ae1f7975",
+  "id": "faa39010-6291-4005-8368-09e8b304f3cd",
   "prevId": "8ee081d0-efaf-4807-a4df-ca2fb1e9a55e",
   "version": "7",
   "dialect": "postgresql",
@@ -1549,6 +1549,13 @@
           "primaryKey": false,
           "notNull": true
         },
+        "track": {
+          "name": "track",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'YKS'"
+        },
         "featureKey": {
           "name": "featureKey",
           "type": "varchar(60)",
@@ -1569,6 +1576,12 @@
           "columns": [
             {
               "expression": "userId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "track",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -3631,6 +3644,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "track": {
+          "name": "track",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "provider": {
           "name": "provider",
           "type": "varchar(40)",
@@ -4627,6 +4646,156 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.student_exam_tracks": {
+      "name": "student_exam_tracks",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "byDefault",
+            "name": "student_exam_tracks_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "2147483647",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "userId": {
+          "name": "userId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "track": {
+          "name": "track",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "gradeLevel": {
+          "name": "gradeLevel",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "examYear": {
+          "name": "examYear",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "targetScoreType": {
+          "name": "targetScoreType",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "currentTytNet": {
+          "name": "currentTytNet",
+          "type": "varchar(40)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "currentAytNet": {
+          "name": "currentAytNet",
+          "type": "varchar(40)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "currentNet": {
+          "name": "currentNet",
+          "type": "varchar(40)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "targetUniversity": {
+          "name": "targetUniversity",
+          "type": "varchar(180)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "targetDepartment": {
+          "name": "targetDepartment",
+          "type": "varchar(180)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "targetRanking": {
+          "name": "targetRanking",
+          "type": "varchar(60)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "targetGoal": {
+          "name": "targetGoal",
+          "type": "varchar(180)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "targetScore": {
+          "name": "targetScore",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "selectedSubjectsJson": {
+          "name": "selectedSubjectsJson",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "student_exam_tracks_user_track_idx": {
+          "name": "student_exam_tracks_user_track_idx",
+          "columns": [
+            {
+              "expression": "userId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "track",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.student_profiles": {
       "name": "student_profiles",
       "schema": "",
@@ -4726,6 +4895,12 @@
         "mockExamFrequency": {
           "name": "mockExamFrequency",
           "type": "varchar(60)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "selectedSubjectsJson": {
+          "name": "selectedSubjectsJson",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -5412,6 +5587,12 @@
           "notNull": true,
           "default": "'free'"
         },
+        "track": {
+          "name": "track",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "billingPeriod": {
           "name": "billingPeriod",
           "type": "text",
@@ -5522,6 +5703,13 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true
+        },
+        "track": {
+          "name": "track",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'YKS'"
         },
         "planId": {
           "name": "planId",
@@ -5670,19 +5858,32 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "subscriptions_user_track_idx": {
+          "name": "subscriptions_user_track_idx",
+          "columns": [
+            {
+              "expression": "userId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "track",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "subscriptions_userId_unique": {
-          "name": "subscriptions_userId_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "userId"
-          ]
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

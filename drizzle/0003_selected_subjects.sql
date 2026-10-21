@@ -1,1 +1,0 @@
-ALTER TABLE "student_profiles" ADD COLUMN "selectedSubjectsJson" text;

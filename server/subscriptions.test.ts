@@ -6,11 +6,19 @@ import type { Subscription, SubscriptionPlan } from "../drizzle/schema";
 // module, exercise the real business logic on top of it). Keeps these
 // tests fast/deterministic and never touches the real dev database.
 const plans = new Map<string, SubscriptionPlan>();
-const subscriptionsByUser = new Map<number, Subscription>();
+// Abonelikler (userId, track) başına; testlerdeki .get(userId) / .set(userId, row) YKS satırını okur/yazar.
+const subscriptionRows = new Map<string, Subscription>();
+const subKey = (userId: number, track = "YKS") => `${userId}|${track}`;
+const subscriptionsByUser = {
+  get: (userId: number, track = "YKS") => subscriptionRows.get(subKey(userId, track)),
+  set: (userId: number, row: Subscription, track = "YKS") => subscriptionRows.set(subKey(userId, track), row),
+  clear: () => subscriptionRows.clear(),
+  values: () => subscriptionRows.values(),
+};
 const events = new Map<string, { status: string }>();
 const eventRowIdToKey = new Map<number, string>();
 const auditLogs: Array<{ userId: number; adminId: number | null; action: string }> = [];
-const usageLogs: Array<{ userId: number; featureKey: string; usedAt: Date }> = [];
+const usageLogs: Array<{ userId: number; featureKey: string; track: string; usedAt: Date }> = [];
 let nextId = 1;
 
 function seedPlan(plan: Partial<SubscriptionPlan> & { code: string; tier: SubscriptionPlan["tier"]; trialDays: number; billingPeriod: "none" | "monthly" | "yearly" }) {
@@ -24,25 +32,27 @@ const examYears = new Map<number, number>();
 
 vi.mock("./subscriptions/subscriptionDb", () => ({
   getStudentExamYear: vi.fn(async (userId: number) => examYears.get(userId) ?? null),
+  getStudentExamYearFor: vi.fn(async (userId: number) => examYears.get(userId) ?? null),
   getStudentExamTrack: vi.fn(async () => "YKS"),
+  listSubscriptionsForUser: vi.fn(async (userId: number) => Array.from(subscriptionRows.values()).filter((row) => row.userId === userId)),
   getPlanByCode: vi.fn(async (code: string) => plans.get(code)),
   getPlanById: vi.fn(async (id: number) => Array.from(plans.values()).find((p) => p.id === id)),
   listActivePlans: vi.fn(async () => Array.from(plans.values())),
   upsertPlan: vi.fn(async () => undefined),
-  getSubscriptionByUserId: vi.fn(async (userId: number) => subscriptionsByUser.get(userId)),
-  ensureFreeSubscription: vi.fn(async (userId: number) => {
-    const existing = subscriptionsByUser.get(userId);
+  getSubscriptionByUserId: vi.fn(async (userId: number, track: string) => subscriptionsByUser.get(userId, track)),
+  ensureFreeSubscription: vi.fn(async (userId: number, track: string) => {
+    const existing = subscriptionsByUser.get(userId, track);
     if (existing) return existing;
     const freePlan = plans.get("FREE")!;
-    const row: Subscription = { id: nextId++, userId, planId: freePlan.id, status: "active", trialStartedAt: null, trialEndsAt: null, currentPeriodStart: null, currentPeriodEnd: null, canceledAt: null, cancelAtPeriodEnd: 0, gracePeriodEndsAt: null, provider: null, providerSubscriptionId: null, providerCustomerId: null, latestPaymentId: null, isManualOverride: 0, createdAt: new Date(), updatedAt: new Date() };
-    subscriptionsByUser.set(userId, row);
+    const row: Subscription = { id: nextId++, userId, track: track as Subscription["track"], planId: freePlan.id, status: "active", trialStartedAt: null, trialEndsAt: null, currentPeriodStart: null, currentPeriodEnd: null, canceledAt: null, cancelAtPeriodEnd: 0, gracePeriodEndsAt: null, provider: null, providerSubscriptionId: null, providerCustomerId: null, latestPaymentId: null, isManualOverride: 0, createdAt: new Date(), updatedAt: new Date() };
+    subscriptionsByUser.set(userId, row, track);
     return row;
   }),
-  updateSubscription: vi.fn(async (userId: number, patch: Partial<Subscription>) => {
-    const existing = subscriptionsByUser.get(userId);
+  updateSubscription: vi.fn(async (userId: number, track: string, patch: Partial<Subscription>) => {
+    const existing = subscriptionsByUser.get(userId, track);
     if (!existing) throw new Error("not found");
     const updated = { ...existing, ...patch, updatedAt: new Date() };
-    subscriptionsByUser.set(userId, updated);
+    subscriptionsByUser.set(userId, updated, track);
     return updated;
   }),
   listAllSubscriptionsForAdmin: vi.fn(async () => Array.from(subscriptionsByUser.values())),
@@ -65,10 +75,10 @@ vi.mock("./subscriptions/subscriptionDb", () => ({
     auditLogs.push({ userId: input.userId, adminId: input.adminId ?? null, action: input.action });
   }),
   listAuditLogsForUser: vi.fn(async (userId: number) => auditLogs.filter((a) => a.userId === userId)),
-  recordFeatureUsage: vi.fn(async (userId: number, featureKey: string) => {
-    usageLogs.push({ userId, featureKey, usedAt: new Date() });
+  recordFeatureUsage: vi.fn(async (userId: number, featureKey: string, track: string) => {
+    usageLogs.push({ userId, featureKey, track, usedAt: new Date() });
   }),
-  countFeatureUsage: vi.fn(async (userId: number, featureKey: string) => usageLogs.filter((u) => u.userId === userId && u.featureKey === featureKey).length),
+  countFeatureUsage: vi.fn(async (userId: number, featureKey: string, _windowDays: number, track: string) => usageLogs.filter((u) => u.userId === userId && u.featureKey === featureKey && u.track === track).length),
   listPendingUsers: vi.fn(async () => []),
   approveUser: vi.fn(async () => undefined),
   rejectUser: vi.fn(async () => undefined),
@@ -81,9 +91,9 @@ const { nextYksEnd } = await import("../shared/yksCalendar");
 // Prod akışında `metredFeatureProcedure` (server/_core/trpc.ts) bunu iki adımda
 // yapar: önce kota kontrolü, GERÇEK işlem başarılı olursa kayıt (spec §50/§51 —
 // başarısız çağrı kotayı yanlışlıkla tüketmesin diye). Testler aynı iki adımı simüle eder.
-async function simulateSuccessfulUsage(userId: number, feature: Parameters<typeof assertUsageAvailable>[1]) {
-  await assertUsageAvailable(userId, feature);
-  await recordFeatureUsage(userId, feature);
+async function simulateSuccessfulUsage(userId: number, feature: Parameters<typeof assertUsageAvailable>[1], track: "YKS" | "KPSS" | "MEB_AGS" = "YKS") {
+  await assertUsageAvailable(userId, feature, track);
+  await recordFeatureUsage(userId, feature, track);
 }
 
 beforeEach(() => {
@@ -99,7 +109,7 @@ beforeEach(() => {
 
 describe("ENTITLEMENT — free/trial/premium", () => {
   it("yeni kullanıcı otomatik FREE planına sahip olur, premium değildir", async () => {
-    const snapshot = await getEntitlements(1);
+    const snapshot = await getEntitlements(1, "YKS");
     expect(snapshot.tier).toBe("free");
     expect(snapshot.isPremium).toBe(false);
     expect(snapshot.entitlements).toEqual([]);
@@ -107,7 +117,7 @@ describe("ENTITLEMENT — free/trial/premium", () => {
 
   it("checkout.completed sonrası kullanıcı trialing olur ve premium erişim kazanır", async () => {
     await processWebhookEvent({ provider: "mock", eventId: "evt-1", eventType: "checkout.completed", payload: { userId: 2, planCode: "PREMIUM_MONTHLY" }, rawPayloadForAudit: {} });
-    const snapshot = await getEntitlements(2);
+    const snapshot = await getEntitlements(2, "YKS");
     expect(snapshot.status).toBe("trialing");
     expect(snapshot.isPremium).toBe(true);
     expect(snapshot.isTrial).toBe(true);
@@ -118,16 +128,16 @@ describe("ENTITLEMENT — free/trial/premium", () => {
     await processWebhookEvent({ provider: "mock", eventId: "evt-2", eventType: "checkout.completed", payload: { userId: 3, planCode: "PREMIUM_MONTHLY" }, rawPayloadForAudit: {} });
     const sub = subscriptionsByUser.get(3)!;
     subscriptionsByUser.set(3, { ...sub, trialEndsAt: new Date(Date.now() - 1000) }); // geçmişte bitmiş gibi ayarla
-    const snapshot = await getEntitlements(3);
+    const snapshot = await getEntitlements(3, "YKS");
     expect(snapshot.status).toBe("expired");
     expect(snapshot.isPremium).toBe(false);
   });
 
   it("aynı kullanıcı trial'ı ikinci kez başlatamaz (trialStartedAt zaten dolu)", async () => {
     await processWebhookEvent({ provider: "mock", eventId: "evt-3a", eventType: "checkout.completed", payload: { userId: 4, planCode: "PREMIUM_MONTHLY" }, rawPayloadForAudit: {} });
-    const afterFirst = await getCurrentSubscription(4);
+    const afterFirst = await getCurrentSubscription(4, "YKS");
     await processWebhookEvent({ provider: "mock", eventId: "evt-3b", eventType: "checkout.completed", payload: { userId: 4, planCode: "PREMIUM_MONTHLY" }, rawPayloadForAudit: {} });
-    const afterSecond = await getEntitlements(4);
+    const afterSecond = await getEntitlements(4, "YKS");
     // İkinci "satın alma" trial DEĞİL, doğrudan active olmalı (aynı trialStartedAt korunur).
     expect(afterSecond.status).toBe("active");
     expect(afterSecond.isTrial).toBe(false);
@@ -138,33 +148,33 @@ describe("ENTITLEMENT — free/trial/premium", () => {
     await processWebhookEvent({ provider: "mock", eventId: "evt-4", eventType: "checkout.completed", payload: { userId: 5, planCode: "PREMIUM_MONTHLY" }, rawPayloadForAudit: {} });
     await processWebhookEvent({ provider: "mock", eventId: "evt-5", eventType: "subscription.renewed", payload: { userId: 5, planCode: "PREMIUM_MONTHLY" }, rawPayloadForAudit: {} });
     await processWebhookEvent({ provider: "mock", eventId: "evt-6", eventType: "subscription.payment_failed", payload: { userId: 5 }, rawPayloadForAudit: {} });
-    expect((await getEntitlements(5)).isPremium).toBe(false); // past_due
+    expect((await getEntitlements(5, "YKS")).isPremium).toBe(false); // past_due
 
     await processWebhookEvent({ provider: "mock", eventId: "evt-7", eventType: "subscription.grace_period_started", payload: { userId: 5, gracePeriodDays: 3 }, rawPayloadForAudit: {} });
-    expect((await getEntitlements(5)).isPremium).toBe(true); // grace_period
+    expect((await getEntitlements(5, "YKS")).isPremium).toBe(true); // grace_period
   });
 
   it("cancelAtPeriodEnd sonrası dönem bitene kadar premium devam eder", async () => {
     await processWebhookEvent({ provider: "mock", eventId: "evt-8", eventType: "checkout.completed", payload: { userId: 6, planCode: "PREMIUM_MONTHLY" }, rawPayloadForAudit: {} });
     await processWebhookEvent({ provider: "mock", eventId: "evt-9", eventType: "subscription.renewed", payload: { userId: 6, planCode: "PREMIUM_MONTHLY" }, rawPayloadForAudit: {} });
     await processWebhookEvent({ provider: "mock", eventId: "evt-10", eventType: "subscription.canceled", payload: { userId: 6, immediate: false }, rawPayloadForAudit: {} });
-    expect((await getEntitlements(6)).isPremium).toBe(true);
+    expect((await getEntitlements(6, "YKS")).isPremium).toBe(true);
 
     const sub = subscriptionsByUser.get(6)!;
     subscriptionsByUser.set(6, { ...sub, currentPeriodEnd: new Date(Date.now() - 1000) });
-    expect((await getEntitlements(6)).isPremium).toBe(false);
-    expect((await getEntitlements(6)).status).toBe("expired");
+    expect((await getEntitlements(6, "YKS")).isPremium).toBe(false);
+    expect((await getEntitlements(6, "YKS")).status).toBe("expired");
   });
 });
 
 describe("WEBHOOK — idempotency", () => {
   it("aynı (provider, eventId) ikinci kez gelirse durum İKİNCİ KEZ değiştirilmez", async () => {
     await processWebhookEvent({ provider: "mock", eventId: "dup-1", eventType: "checkout.completed", payload: { userId: 7, planCode: "PREMIUM_MONTHLY" }, rawPayloadForAudit: {} });
-    const first = await getEntitlements(7);
+    const first = await getEntitlements(7, "YKS");
     const auditCountAfterFirst = auditLogs.filter((a) => a.userId === 7).length;
 
     const secondResult = await processWebhookEvent({ provider: "mock", eventId: "dup-1", eventType: "checkout.completed", payload: { userId: 7, planCode: "PREMIUM_MONTHLY" }, rawPayloadForAudit: {} });
-    const second = await getEntitlements(7);
+    const second = await getEntitlements(7, "YKS");
 
     expect(secondResult.status).toBe("ignored");
     expect(second).toEqual(first);
@@ -172,9 +182,9 @@ describe("WEBHOOK — idempotency", () => {
   });
 
   it("bilinmeyen event tipi 'failed' olarak işaretlenir, state değişmez", async () => {
-    const before = await getEntitlements(8);
+    const before = await getEntitlements(8, "YKS");
     const result = await processWebhookEvent({ provider: "mock", eventId: "unknown-1", eventType: "not.a.real.event", payload: { userId: 8 }, rawPayloadForAudit: {} });
-    const after = await getEntitlements(8);
+    const after = await getEntitlements(8, "YKS");
     expect(result.status).toBe("failed");
     expect(after).toEqual(before);
   });
@@ -190,7 +200,7 @@ describe("PAYMENT — refund", () => {
     await processWebhookEvent({ provider: "mock", eventId: "pay-1", eventType: "checkout.completed", payload: { userId: 9, planCode: "PREMIUM_MONTHLY" }, rawPayloadForAudit: {} });
     await processWebhookEvent({ provider: "mock", eventId: "pay-2", eventType: "subscription.renewed", payload: { userId: 9, planCode: "PREMIUM_MONTHLY" }, rawPayloadForAudit: {} });
     await processWebhookEvent({ provider: "mock", eventId: "pay-3", eventType: "payment.refunded", payload: { userId: 9 }, rawPayloadForAudit: {} });
-    const snapshot = await getEntitlements(9);
+    const snapshot = await getEntitlements(9, "YKS");
     expect(snapshot.status).toBe("canceled");
     expect(snapshot.isPremium).toBe(false);
   });
@@ -199,17 +209,17 @@ describe("PAYMENT — refund", () => {
 describe("USAGE LIMITS — free vs premium kotası", () => {
   it("free kullanıcı kota aşınca UsageLimitExceededError alır", async () => {
     for (let i = 0; i < 3; i++) await simulateSuccessfulUsage(10, "AI_STUDY_PLAN"); // FREE_TIER_LIMITS.AI_STUDY_PLAN.maxUses = 3
-    await expect(assertUsageAvailable(10, "AI_STUDY_PLAN")).rejects.toThrow(UsageLimitExceededError);
+    await expect(assertUsageAvailable(10, "AI_STUDY_PLAN", "YKS")).rejects.toThrow(UsageLimitExceededError);
   });
 
   it("premium kullanıcı çok daha yüksek bir kotaya tabidir (free kotasından fazla kullanabilir)", async () => {
     await processWebhookEvent({ provider: "mock", eventId: "usage-1", eventType: "checkout.completed", payload: { userId: 11, planCode: "PREMIUM_MONTHLY" }, rawPayloadForAudit: {} });
     for (let i = 0; i < 3; i++) await simulateSuccessfulUsage(11, "AI_STUDY_PLAN");
-    await expect(assertUsageAvailable(11, "AI_STUDY_PLAN")).resolves.toBeDefined(); // free limiti (3) aşıldı ama premium'da sorun yok
+    await expect(assertUsageAvailable(11, "AI_STUDY_PLAN", "YKS")).resolves.toBeDefined(); // free limiti (3) aşıldı ama premium'da sorun yok
   });
 
   it("free kullanıcı premium-exclusive bir özelliği (limiti tanımsız) kullanamaz", async () => {
-    await expect(assertUsageAvailable(12, "ADVANCED_ANALYTICS" as never)).rejects.toThrow(PremiumRequiredError);
+    await expect(assertUsageAvailable(12, "ADVANCED_ANALYTICS" as never, "YKS")).rejects.toThrow(PremiumRequiredError);
   });
 });
 
@@ -224,9 +234,9 @@ describe("KADEMELER — kotalar ve YKS'ye kadar süren yıllık", () => {
     await processWebhookEvent({ provider: "mock", eventId: "tier-1", eventType: "checkout.completed", payload: { userId: 30, planCode: "BASIC_MONTHLY" }, rawPayloadForAudit: {} });
     await processWebhookEvent({ provider: "mock", eventId: "tier-2", eventType: "checkout.completed", payload: { userId: 31, planCode: "PRO_MONTHLY" }, rawPayloadForAudit: {} });
     for (let i = 0; i < 8; i++) { await simulateSuccessfulUsage(30, "AI_STUDY_PLAN"); await simulateSuccessfulUsage(31, "AI_STUDY_PLAN"); }
-    await expect(assertUsageAvailable(30, "AI_STUDY_PLAN")).rejects.toThrow(UsageLimitExceededError); // Temel: ayda 8
-    await expect(assertUsageAvailable(31, "AI_STUDY_PLAN")).resolves.toBeDefined(); // Pro: ayda 150
-    expect((await getEntitlements(30)).entitlements).toContain("ADVANCED_ANALYTICS"); // kademeler yalnız kotada ayrılır
+    await expect(assertUsageAvailable(30, "AI_STUDY_PLAN", "YKS")).rejects.toThrow(UsageLimitExceededError); // Temel: ayda 8
+    await expect(assertUsageAvailable(31, "AI_STUDY_PLAN", "YKS")).resolves.toBeDefined(); // Pro: ayda 150
+    expect((await getEntitlements(30, "YKS")).entitlements).toContain("ADVANCED_ANALYTICS"); // kademeler yalnız kotada ayrılır
   });
 
   it("yıllık plan, sınav yılı yoksa bir sonraki YKS'nin son günü sona erer", async () => {
@@ -244,17 +254,17 @@ describe("KADEMELER — kotalar ve YKS'ye kadar süren yıllık", () => {
 describe("SECURITY — cross-user izolasyon", () => {
   it("bir kullanıcının abonelik durumu başka bir userId ile karışmaz", async () => {
     await processWebhookEvent({ provider: "mock", eventId: "iso-1", eventType: "checkout.completed", payload: { userId: 20, planCode: "PREMIUM_MONTHLY" }, rawPayloadForAudit: {} });
-    const userA = await getEntitlements(20);
-    const userB = await getEntitlements(21);
+    const userA = await getEntitlements(20, "YKS");
+    const userB = await getEntitlements(21, "YKS");
     expect(userA.isPremium).toBe(true);
     expect(userB.isPremium).toBe(false);
-    expect(await hasEntitlement(21, "AI_STUDY_PLAN")).toBe(false);
+    expect(await hasEntitlement(21, "AI_STUDY_PLAN", "YKS")).toBe(false);
   });
 
-  it("isPremium(userId) her zaman DB'den taze okur, çağıranın verdiği bir bayrağa güvenmez", async () => {
+  it("isPremium(userId, track) her zaman DB'den taze okur, çağıranın verdiği bir bayrağa güvenmez", async () => {
     // Bu testin asıl amacı: fonksiyon imzasında "istemciden gelen isPremium"
     // diye bir parametre YOK — yalnızca userId alıyor, dönüş değeri her
     // zaman subscriptionDb'den geliyor.
-    expect(await isPremium(999)).toBe(false);
+    expect(await isPremium(999, "YKS")).toBe(false);
   });
 });

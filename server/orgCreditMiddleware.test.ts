@@ -40,7 +40,8 @@ describe("kurum AI kredi havuzu ara katmanı", () => {
     await expect(caller().run()).rejects.toMatchObject({ code: "FORBIDDEN" });
     assertUsageAvailable.mockResolvedValue({ isPremium: true });
     await expect(caller().run()).resolves.toBe("ok");
-    expect(recordFeatureUsage).toHaveBeenCalledWith(7, "NOTE_AI");
+    // Kişisel kota öğrencinin aktif sınavına (profili yoksa YKS) yazılır.
+    expect(recordFeatureUsage).toHaveBeenCalledWith(7, "NOTE_AI", "YKS");
     expect(recordOrgCredit).not.toHaveBeenCalled();
   });
 

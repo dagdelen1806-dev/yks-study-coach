@@ -13,7 +13,7 @@ import { randomBytes, scryptSync } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { getDb } from "../server/db";
 import { parseIdentifier } from "../server/_core/loginIdentifier";
-import { classStudents, counselingNotes, organizationCreditUsage, organizationAuditLogs, organizationClasses, organizationInvitations, organizationMembers, organizations, parentLinks, studentProfiles, teacherAssignments, topicStudyLogs, userMockExams, users } from "../drizzle/schema";
+import { classStudents, counselingNotes, featureUsageLogs, organizationCreditUsage, organizationAuditLogs, organizationClasses, organizationInvitations, organizationMembers, organizations, parentLinks, payments, studentExamTracks, studentProfiles, subscriptions, teacherAssignments, topicStudyLogs, userMockExams, users } from "../drizzle/schema";
 
 const SLUG = "test-dershanesi";
 const PASSWORD = "test1234";
@@ -34,6 +34,7 @@ const students = [
 const LGS_STUDENT = { email: "lgs1@test.local", name: "Mert" };
 const PARENT = { email: "veli1@test.local", name: "Ayten Veli" };
 const KPSS_CANDIDATE = { email: "kpss1@test.local", name: "Burak Aday" };
+const AGS_CANDIDATE = { email: "ags1@test.local", name: "Elif Öğretmen Adayı" };
 
 // localAuth.ts ile aynı scrypt biçimi (tuz:anahtar).
 const hashPassword = (password: string) => { const salt = randomBytes(16).toString("hex"); return `${salt}:${scryptSync(password, salt, 64).toString("hex")}`; };
@@ -117,8 +118,18 @@ async function main() {
   await db.delete(userMockExams).where(eq(userMockExams.userId, lgsId));
   await db.insert(studentProfiles).values({ userId: lgsId, onboardingCompleted: 1, onboardingStep: 4, preferredName: LGS_STUDENT.name, avatarStyle: "boy", examTrack: "LGS", gradeLevel: "8", examYear: new Date().getFullYear() + 1, targetGoal: "Fen Lisesi", targetScore: "450", dailyStudyDuration: 90, preferredStudyStartTime: "16:00" });
 
+  // Öğretmen adayı: KPSS ve MEB-AGS'ye hazırlanıyor, hiç aboneliği yok (sınav başına abonelik ve paket indirimi).
+  const agsId = await ensureUser(AGS_CANDIDATE.email, AGS_CANDIDATE.name);
+  for (const table of [featureUsageLogs, payments, subscriptions, studentExamTracks, studentProfiles]) await db.delete(table).where(eq(table.userId, agsId));
+  const agsYear = new Date().getFullYear() + 1;
+  await db.insert(studentProfiles).values({ userId: agsId, onboardingCompleted: 1, onboardingStep: 4, preferredName: AGS_CANDIDATE.name, examTrack: "KPSS", gradeLevel: "lisans_mezun", examYear: agsYear + (agsYear % 2), dailyStudyDuration: 120, preferredStudyStartTime: "19:00" });
+  await db.insert(studentExamTracks).values([
+    { userId: agsId, track: "KPSS", gradeLevel: "lisans_mezun", examYear: agsYear + (agsYear % 2) },
+    { userId: agsId, track: "MEB_AGS", gradeLevel: "lisans_mezun", examYear: agsYear },
+  ]);
+
   console.log(`\nKurum hazır (id ${orgId}). Şifre: ${PASSWORD}`);
-  console.log(`  LGS öğrencisi: ${LGS_STUDENT.email} · Veli: ${PARENT.email}`);
+  console.log(`  LGS öğrencisi: ${LGS_STUDENT.email} · Veli: ${PARENT.email} · KPSS + MEB-AGS adayı: ${AGS_CANDIDATE.email}`);
   console.log(`  Yönetici: ${staff[0].email}\n  Öğretmenler: ${staff[1].email} (12-A), ${staff[2].email} (12-B)\n  Öğrenciler: ${students.map((student) => student.email).join(", ")}`);
   process.exit(0);
 }

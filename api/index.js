@@ -112,8 +112,8 @@ import { eq as eq3 } from "drizzle-orm";
 import { customType, decimal, index, integer, pgTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/pg-core";
 
 // shared/exams.ts
-var EXAM_TRACKS = ["YKS", "LGS", "KPSS", "DGS"];
-var EXAM_KINDS = ["TYT", "AYT", "LGS", "KPSS_GYGK", "DGS"];
+var EXAM_TRACKS = ["YKS", "LGS", "KPSS", "DGS", "MEB_AGS", "KPSS_A"];
+var EXAM_KINDS = ["TYT", "AYT", "LGS", "KPSS_GYGK", "DGS", "MEB_AGS", "KPSS_A"];
 var CATALOG_EXAM_SCOPES = [...EXAM_KINDS, "TYT_AYT", "YKS", "GENEL"];
 var GRADE_LEVELS = ["7", "8", "9", "10", "11", "12", "mezun", "onlisans", "onlisans_mezun", "lisans", "lisans_mezun", "ortaogretim_mezun"];
 var EXAM_KIND_DEFS = {
@@ -192,6 +192,44 @@ var EXAM_KIND_DEFS = {
     subjects: [
       { name: "Say\u0131sal", questions: 50, weight: 1 },
       { name: "S\xF6zel", questions: 50, weight: 1 }
+    ]
+  },
+  // ÖSYM MEB-AGS: 80 soru / 110 dk. Puan standart puanla; tahmini puan yok.
+  MEB_AGS: {
+    kind: "MEB_AGS",
+    track: "MEB_AGS",
+    label: "MEB-AGS",
+    optionCount: 5,
+    wrongsPerCorrect: 4,
+    formRows: "curriculum",
+    subjects: [
+      { name: "E\u011Fitim Bilimleri", questions: 30, weight: 1 },
+      { name: "S\xF6zel Yetenek", questions: 15, weight: 1 },
+      { name: "Say\u0131sal Yetenek", questions: 15, weight: 1 },
+      { name: "Mevzuat", questions: 8, weight: 1 },
+      { name: "Tarih", questions: 6, weight: 1 },
+      { name: "T\xFCrkiye Co\u011Frafyas\u0131", questions: 6, weight: 1 }
+    ]
+  },
+  // ÖSYM KPSS A grubu alan bilgisi: her test 40 soru (istatistik 60 dk, diğerleri 50 dk). Aday
+  // yalnızca girdiği testleri seçer; deneme ve konu haritası seçilen alanlarla sınırlanır.
+  KPSS_A: {
+    kind: "KPSS_A",
+    track: "KPSS_A",
+    label: "KPSS A grubu",
+    optionCount: 5,
+    wrongsPerCorrect: 4,
+    formRows: "curriculum",
+    subjects: [
+      { name: "Hukuk", questions: 40, weight: 1 },
+      { name: "\u0130ktisat", questions: 40, weight: 1 },
+      { name: "Maliye", questions: 40, weight: 1 },
+      { name: "Muhasebe", questions: 40, weight: 1 },
+      { name: "\u0130\u015Fletme", questions: 40, weight: 1 },
+      { name: "\xC7al\u0131\u015Fma Ekonomisi", questions: 40, weight: 1 },
+      { name: "\u0130statistik", questions: 40, weight: 1 },
+      { name: "Kamu Y\xF6netimi", questions: 40, weight: 1 },
+      { name: "Uluslararas\u0131 \u0130li\u015Fkiler", questions: 40, weight: 1 }
     ]
   }
 };
@@ -274,6 +312,49 @@ var EXAM_TRACK_DEFS = {
     dailyPlanRule: "Her g\xFCn toplam 60-150 dakika ve 2-4 oturum planla; \xF6nlisans dersleri ve s\u0131navlar\u0131yla \xE7ak\u0131\u015Fmayan bir tempo kur.",
     schoolKind: "\xF6nlisans",
     catalogBroadScopes: []
+  },
+  MEB_AGS: {
+    track: "MEB_AGS",
+    label: "MEB-AGS",
+    authority: { name: "\xD6SYM", url: "https://www.osym.gov.tr" },
+    scopeNote: "Konu listesi \xD6SYM MEB Akademi Giri\u015F S\u0131nav\u0131 kapsam\u0131na dayan\u0131r",
+    onboarding: { title: "MEB-AGS", description: "\xD6\u011Fretmen adaylar\u0131 \xB7 Mill\xEE E\u011Fitim Akademisi Giri\u015F S\u0131nav\u0131 (KPSS ile birlikte)" },
+    gradeLevels: ["lisans", "lisans_mezun"],
+    gradeQuestion: "E\u011Fitim durumun",
+    asksScoreType: false,
+    goal: { kind: "custom", label: "\xD6\u011Fretmenlik alan\u0131n", placeholder: "\xD6rn. \u0130lk\xF6\u011Fretim Matematik \xD6\u011Fretmenli\u011Fi", options: ["S\u0131n\u0131f \xD6\u011Fretmenli\u011Fi", "Okul \xD6ncesi", "T\xFCrk\xE7e", "Matematik", "Fen Bilimleri", "\u0130ngilizce", "Rehberlik"], emptyText: "\xD6\u011Fretmenlik alan\u0131n\u0131 hen\xFCz yazmad\u0131n." },
+    targetScore: { label: "Hedef AGS puan\u0131n", placeholder: "\xD6rn. 80", min: 40, max: 100 },
+    currentNet: { kind: "single", hint: "80 soru \xFCzerinden yakla\u015F\u0131k bir say\u0131 ya da aral\u0131k yazabilirsin (\xF6rn. 55-60).", placeholder: "\xD6rn. 55-60" },
+    studentNoun: "Bir \xF6\u011Fretmen aday\u0131 (MEB-AGS)",
+    studentPhrase: "Bir \xF6\u011Fretmen aday\u0131n\u0131n (MEB-AGS)",
+    promptContext: "Aday MEB-AGS'ye (\xD6SYM, Mill\xEE E\u011Fitim Akademisi Giri\u015F S\u0131nav\u0131) haz\u0131rlanan bir \xF6\u011Fretmen aday\u0131; KPSS'ye de giriyor olabilir. Alt testler: E\u011Fitim Bilimleri ve T\xFCrk Mill\xEE E\u011Fitim Sistemi (30), S\xF6zel Yetenek (15), Say\u0131sal Yetenek (15), Mevzuat (8), Tarih (6), T\xFCrkiye Co\u011Frafyas\u0131 (6). Sorular 5 \u015F\u0131kl\u0131 (A-E), 4 yanl\u0131\u015F 1 do\u011Fruyu g\xF6t\xFCr\xFCr; \xD6SYM tarz\u0131. Bir yeti\u015Fkine hitap et.",
+    questionStyle: "MEB-AGS (\xD6SYM) \xFCslubunda",
+    dailyPlanRule: "Her g\xFCn toplam 60-180 dakika ve 2-4 oturum planla; E\u011Fitim Bilimleri'ne a\u011F\u0131rl\u0131k ver, aday\u0131n okul/staj ya da i\u015F temposunu zorlama.",
+    schoolKind: "\xFCniversite",
+    catalogBroadScopes: [],
+    addonOf: "KPSS"
+  },
+  KPSS_A: {
+    track: "KPSS_A",
+    label: "KPSS A grubu",
+    authority: { name: "\xD6SYM", url: "https://www.osym.gov.tr" },
+    scopeNote: "Konu listesi \xD6SYM KPSS A grubu alan bilgisi testlerinin kapsam\u0131na dayan\u0131r",
+    onboarding: { title: "KPSS A grubu", description: "Alan bilgisi testleri \xB7 hukuk, iktisat, maliye\u2026 (KPSS ile birlikte)" },
+    gradeLevels: ["lisans", "lisans_mezun"],
+    gradeQuestion: "E\u011Fitim durumun",
+    asksScoreType: false,
+    goal: { kind: "custom", label: "Hedef kadro", placeholder: "\xD6rn. Say\u0131\u015Ftay denet\xE7i yard\u0131mc\u0131l\u0131\u011F\u0131", options: ["Kaymakaml\u0131k", "M\xFCfetti\u015F yard\u0131mc\u0131l\u0131\u011F\u0131", "Uzman yard\u0131mc\u0131l\u0131\u011F\u0131", "Denet\xE7i yard\u0131mc\u0131l\u0131\u011F\u0131", "Hen\xFCz karar vermedim"], emptyText: "Hedef kadronu hen\xFCz yazmad\u0131n." },
+    targetScore: { label: "Hedef A grubu puan\u0131n", placeholder: "\xD6rn. 85", min: 40, max: 100 },
+    currentNet: { kind: "single", hint: "Girdi\u011Fin alan testlerinin toplam netini yakla\u015F\u0131k yazabilirsin (her test 40 soru).", placeholder: "\xD6rn. 25-30 / test" },
+    studentNoun: "Bir KPSS A grubu aday\u0131",
+    studentPhrase: "Bir KPSS A grubu aday\u0131n\u0131n",
+    promptContext: "Aday KPSS A grubu alan bilgisi testlerine (\xD6SYM) haz\u0131rlan\u0131yor; her test 40 soru. Yaln\u0131zca aday\u0131n se\xE7ti\u011Fi alan testlerine (ders listesindekiler) odaklan. Sorular 5 \u015F\u0131kl\u0131 (A-E), 4 yanl\u0131\u015F 1 do\u011Fruyu g\xF6t\xFCr\xFCr; \xD6SYM tarz\u0131, kavram ve mevzuat a\u011F\u0131rl\u0131kl\u0131. Bir yeti\u015Fkine hitap et.",
+    questionStyle: "KPSS A grubu (\xD6SYM) \xFCslubunda",
+    dailyPlanRule: "Her g\xFCn toplam 90-240 dakika ve 2-4 oturum planla; se\xE7ilen alan testleri aras\u0131nda dengeli da\u011F\u0131t, aday\u0131n i\u015F temposunu zorlama.",
+    schoolKind: "kurs",
+    catalogBroadScopes: [],
+    addonOf: "KPSS",
+    chooseSubjects: { label: "Girece\u011Fin alan testleri", hint: "Konu haritan, denemelerin ve AI plan\u0131n yaln\u0131zca se\xE7ti\u011Fin testlere g\xF6re kurulur." }
   }
 };
 var EXAM_TRACK_LABELS = Object.fromEntries(EXAM_TRACKS.map((track) => [track, EXAM_TRACK_DEFS[track].label]));
@@ -873,6 +954,27 @@ var planAdherenceReports = pgTable("plan_adherence_reports", {
   snapshotJson: text("snapshotJson").notNull(),
   createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
 });
+var studentExamTracks = pgTable("student_exam_tracks", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
+  track: text("track", { enum: EXAM_TRACKS }).notNull(),
+  gradeLevel: text("gradeLevel", { enum: GRADE_LEVELS }),
+  examYear: integer("examYear"),
+  targetScoreType: text("targetScoreType", { enum: ["SAY", "EA", "SOZ", "DIL", "TYT", "belirsiz"] }),
+  currentTytNet: varchar("currentTytNet", { length: 40 }),
+  currentAytNet: varchar("currentAytNet", { length: 40 }),
+  currentNet: varchar("currentNet", { length: 40 }),
+  targetUniversity: varchar("targetUniversity", { length: 180 }),
+  targetDepartment: varchar("targetDepartment", { length: 180 }),
+  targetRanking: varchar("targetRanking", { length: 60 }),
+  targetGoal: varchar("targetGoal", { length: 180 }),
+  targetScore: varchar("targetScore", { length: 20 }),
+  selectedSubjectsJson: text("selectedSubjectsJson"),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull()
+}, (table) => ({
+  userTrackIdx: uniqueIndex("student_exam_tracks_user_track_idx").on(table.userId, table.track)
+}));
 var parentLinks = pgTable("parent_links", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   studentUserId: integer("studentUserId").notNull(),
@@ -914,6 +1016,8 @@ var studentProfiles = pgTable("student_profiles", {
   currentAytNet: varchar("currentAytNet", { length: 40 }),
   currentNet: varchar("currentNet", { length: 40 }),
   mockExamFrequency: varchar("mockExamFrequency", { length: 60 }),
+  // Ders seçtiren sınavda (KPSS A grubu) adayın girdiği alan testleri (JSON dizi).
+  selectedSubjectsJson: text("selectedSubjectsJson"),
   strongSubjectsJson: text("strongSubjectsJson"),
   weakSubjectsJson: text("weakSubjectsJson"),
   hasPriorStudyPlan: integer("hasPriorStudyPlan"),
@@ -1115,6 +1219,8 @@ var subscriptionPlans = pgTable("subscription_plans", {
   description: text("description"),
   // basic = Temel, premium = Premium, premium_plus = Pro (bkz. shared/entitlements.ts).
   tier: text("tier", { enum: ["free", "basic", "premium", "premium_plus"] }).default("free").notNull(),
+  // Planın sınavı (her sınavın ayrı aboneliği vardır). FREE planı tüm sınavlarda ortaktır (null).
+  track: text("track", { enum: EXAM_TRACKS }),
   billingPeriod: text("billingPeriod", { enum: ["none", "monthly", "yearly"] }).default("none").notNull(),
   // Kuruş cinsinden (minor unit) — ondalık/float fiyat yuvarlama hatalarından kaçınmak için.
   price: integer("price").default(0).notNull(),
@@ -1129,7 +1235,9 @@ var subscriptionPlans = pgTable("subscription_plans", {
 });
 var subscriptions = pgTable("subscriptions", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
-  userId: integer("userId").notNull().unique(),
+  userId: integer("userId").notNull(),
+  // Kullanıcı başına sınav başına TEK satır (bkz. aşağıdaki user_track tekil indeksi).
+  track: text("track", { enum: EXAM_TRACKS }).default("YKS").notNull(),
   planId: integer("planId").notNull(),
   status: text("status", { enum: ["trialing", "active", "past_due", "grace_period", "canceled", "expired", "paused", "incomplete"] }).default("active").notNull(),
   trialStartedAt: timestamp("trialStartedAt", { withTimezone: true }),
@@ -1152,12 +1260,15 @@ var subscriptions = pgTable("subscriptions", {
 }, (table) => ({
   statusIdx: index("subscriptions_status_idx").on(table.status),
   periodEndIdx: index("subscriptions_current_period_end_idx").on(table.currentPeriodEnd),
-  providerSubIdx: index("subscriptions_provider_subscription_idx").on(table.providerSubscriptionId)
+  providerSubIdx: index("subscriptions_provider_subscription_idx").on(table.providerSubscriptionId),
+  userTrackIdx: uniqueIndex("subscriptions_user_track_idx").on(table.userId, table.track)
 }));
 var payments = pgTable("payments", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   userId: integer("userId").notNull(),
   subscriptionId: integer("subscriptionId"),
+  // Ödemenin sınavı (paket ödemesinde her sınav ayrı satır; metadata.checkoutId ortak).
+  track: text("track", { enum: EXAM_TRACKS }),
   provider: varchar("provider", { length: 40 }).notNull(),
   providerPaymentId: varchar("providerPaymentId", { length: 180 }),
   providerTransactionId: varchar("providerTransactionId", { length: 180 }),
@@ -1208,10 +1319,12 @@ var subscriptionAuditLogs = pgTable("subscription_audit_logs", {
 var featureUsageLogs = pgTable("feature_usage_logs", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   userId: integer("userId").notNull(),
+  // Kota sınav başına: her aboneliğin kendi yapay zekâ hakları (kullanım o anki aktif sınava yazılır).
+  track: text("track", { enum: EXAM_TRACKS }).default("YKS").notNull(),
   featureKey: varchar("featureKey", { length: 60 }).notNull(),
   usedAt: timestamp("usedAt", { withTimezone: true }).defaultNow().notNull()
 }, (table) => ({
-  userFeatureIdx: index("feature_usage_logs_user_feature_idx").on(table.userId, table.featureKey, table.usedAt)
+  userFeatureIdx: index("feature_usage_logs_user_feature_idx").on(table.userId, table.track, table.featureKey, table.usedAt)
 }));
 var testimonials = pgTable("testimonials", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
@@ -1848,7 +1961,52 @@ var DGS = {
     "S\xF6zel Mant\u0131k": [{ topic: "S\xF6zel Mant\u0131k", aliases: ["s\xF6zel ak\u0131l y\xFCr\xFCtme"] }]
   }
 };
-var TREES = { TYT, AYT, LGS, KPSS_GYGK, DGS };
+var MEB_AGS = {
+  "E\u011Fitim Bilimleri": {
+    "E\u011Fitim Bilimleri ve T\xFCrk Mill\xEE E\u011Fitim Sistemi": [
+      { topic: "Geli\u015Fim Psikolojisi", aliases: ["geli\u015Fim"] },
+      { topic: "\xD6\u011Frenme Psikolojisi", aliases: ["\xF6\u011Frenme kuramlar\u0131"] },
+      { topic: "\xD6\u011Fretim \u0130lke ve Y\xF6ntemleri", aliases: ["\xF6\u011Fretim y\xF6ntem ve teknikleri", "\xF6\u011Fretim stratejileri"] },
+      { topic: "Program Geli\u015Ftirme", aliases: ["e\u011Fitimde program geli\u015Ftirme"] },
+      { topic: "\xD6l\xE7me ve De\u011Ferlendirme", aliases: ["\xF6l\xE7me de\u011Ferlendirme"] },
+      { topic: "Rehberlik ve \xD6zel E\u011Fitim", aliases: ["rehberlik", "\xF6zel e\u011Fitim"] },
+      { topic: "S\u0131n\u0131f Y\xF6netimi", aliases: ["s\u0131n\u0131f y\xF6netimi"] },
+      { topic: "T\xFCrk Mill\xEE E\u011Fitim Sistemi", aliases: ["t\xFCrk e\u011Fitim sistemi", "e\u011Fitim tarihi"] }
+    ]
+  },
+  "S\xF6zel Yetenek": {
+    "S\xF6zel Yetenek": [{ topic: "S\xF6zc\xFCk ve C\xFCmlede Anlam", aliases: ["s\xF6zc\xFCkte anlam", "c\xFCmlede anlam"] }, { topic: "Paragraf", aliases: ["paragrafta anlam"] }, { topic: "S\xF6zel Mant\u0131k", aliases: ["s\xF6zel ak\u0131l y\xFCr\xFCtme"] }]
+  },
+  "Say\u0131sal Yetenek": {
+    "Say\u0131sal Yetenek": [{ topic: "Temel Matematik", aliases: ["say\u0131lar", "temel kavramlar"] }, { topic: "Problemler", aliases: ["say\u0131 problemleri", "y\xFCzde problemleri"] }, { topic: "Tablo ve Grafik Yorumlama", aliases: ["grafik"] }, { topic: "Say\u0131sal Mant\u0131k", aliases: ["mant\u0131ksal muhakeme"] }]
+  },
+  Mevzuat: {
+    Mevzuat: [
+      { topic: "Anayasa'n\u0131n E\u011Fitimle \u0130lgili H\xFCk\xFCmleri", aliases: ["anayasa"] },
+      { topic: "1739 Say\u0131l\u0131 Mill\xEE E\u011Fitim Temel Kanunu", aliases: ["milli e\u011Fitim temel kanunu", "1739"] },
+      { topic: "222 Say\u0131l\u0131 \u0130lk\xF6\u011Fretim ve E\u011Fitim Kanunu", aliases: ["ilk\xF6\u011Fretim ve e\u011Fitim kanunu", "222"] },
+      { topic: "7528 Say\u0131l\u0131 \xD6\u011Fretmenlik Mesle\u011Fi Kanunu", aliases: ["\xF6\u011Fretmenlik mesle\u011Fi kanunu", "7528"] }
+    ]
+  },
+  Tarih: {
+    Tarih: [{ topic: "Osmanl\u0131 ve T\xFCrk Tarihi", aliases: ["osmanl\u0131 tarihi", "t\xFCrk tarihi"] }, { topic: "Kurtulu\u015F Sava\u015F\u0131 ve Atat\xFCrk \u0130lkeleri", aliases: ["milli m\xFCcadele", "atat\xFCrk ilke ve ink\u0131laplar\u0131"] }]
+  },
+  "T\xFCrkiye Co\u011Frafyas\u0131": {
+    "T\xFCrkiye Co\u011Frafyas\u0131": [{ topic: "Fiziki Co\u011Frafya", aliases: ["yer \u015Fekilleri", "iklim"] }, { topic: "Be\u015Feri ve Ekonomik Co\u011Frafya", aliases: ["n\xFCfus", "ekonomik faaliyetler"] }]
+  }
+};
+var KPSS_A = {
+  Hukuk: { Hukuk: ["Anayasa Hukuku", "\u0130dare Hukuku", "Ceza Hukuku", "Medeni Hukuk", "Bor\xE7lar Hukuku", "Ticaret Hukuku", "\u0130cra ve \u0130flas Hukuku"] },
+  \u0130ktisat: { \u0130ktisat: [{ topic: "Mikro \u0130ktisat", aliases: ["mikroekonomi"] }, { topic: "Makro \u0130ktisat", aliases: ["makroekonomi"] }, "Para, Banka ve Kredi", "Uluslararas\u0131 \u0130ktisat", "B\xFCy\xFCme ve Kalk\u0131nma", "\u0130ktisadi D\xFC\u015F\xFCnceler Tarihi", "T\xFCrkiye Ekonomisi"] },
+  Maliye: { Maliye: ["Maliye Teorisi", "Kamu Harcamalar\u0131", "Kamu Gelirleri", { topic: "B\xFCt\xE7e", aliases: ["5018 say\u0131l\u0131 kanun"] }, "Maliye Politikas\u0131", "Vergi Hukuku", "T\xFCrk Vergi Sistemi"] },
+  Muhasebe: { Muhasebe: ["Genel Muhasebe", "Bilan\xE7o Analizi", { topic: "Mali Tablolar Analizi", aliases: ["mali analiz"] }, "Maliyet Muhasebesi", "Muhasebe Denetimi", "\u015Eirketler Muhasebesi"] },
+  \u0130\u015Fletme: { \u0130\u015Fletme: ["\u0130\u015Fletme Y\xF6netimi", "\xDCretim Y\xF6netimi", "Pazarlama", "Finansal Y\xF6netim", "\u0130nsan Kaynaklar\u0131 Y\xF6netimi", "\xD6rg\xFCtsel Davran\u0131\u015F"] },
+  "\xC7al\u0131\u015Fma Ekonomisi": { "\xC7al\u0131\u015Fma Ekonomisi": ["\xC7al\u0131\u015Fma Ekonomisi", "End\xFCstri \u0130li\u015Fkileri", "\u0130\u015F Hukuku", "Sosyal G\xFCvenlik Hukuku"] },
+  \u0130statistik: { \u0130statistik: ["Tan\u0131mlay\u0131c\u0131 \u0130statistik", "Olas\u0131l\u0131k", "Olas\u0131l\u0131k Da\u011F\u0131l\u0131mlar\u0131", "Tahmin ve Hipotez Testleri", "Regresyon ve Korelasyon"] },
+  "Kamu Y\xF6netimi": { "Kamu Y\xF6netimi": ["Siyaset Bilimi", "Y\xF6netim Bilimleri", "T\xFCrk Y\xF6netim Tarihi", "Y\xF6netim Hukuku", "Kentle\u015Fme ve \xC7evre Sorunlar\u0131", "T\xFCrk Siyasal Hayat\u0131"] },
+  "Uluslararas\u0131 \u0130li\u015Fkiler": { "Uluslararas\u0131 \u0130li\u015Fkiler": ["Uluslararas\u0131 \u0130li\u015Fkiler Teorisi", "Siyasi Tarih", "Uluslararas\u0131 Hukuk", "Uluslararas\u0131 \xD6rg\xFCtler", "T\xFCrk D\u0131\u015F Politikas\u0131", "G\xFCncel Uluslararas\u0131 Sorunlar"] }
+};
+var TREES = { TYT, AYT, LGS, KPSS_GYGK, DGS, MEB_AGS, KPSS_A };
 var CURRICULUM = Object.keys(TREES).flatMap((exam) => flatten(exam, TREES[exam]));
 var isCurriculumOnlySlug = (slug) => slug.startsWith("cur-");
 
@@ -2188,6 +2346,7 @@ var defaultStudentProfileView = {
   currentAytNet: null,
   currentNet: null,
   mockExamFrequency: null,
+  selectedSubjects: [],
   strongSubjects: [],
   weakSubjects: [],
   hasPriorStudyPlan: null,
@@ -2224,6 +2383,7 @@ var toStudentProfileView = (row) => ({
   currentAytNet: row.currentAytNet,
   currentNet: row.currentNet,
   mockExamFrequency: row.mockExamFrequency,
+  selectedSubjects: parseJsonArray(row.selectedSubjectsJson),
   strongSubjects: parseJsonArray(row.strongSubjectsJson),
   weakSubjects: parseJsonArray(row.weakSubjectsJson),
   hasPriorStudyPlan: row.hasPriorStudyPlan === null ? null : row.hasPriorStudyPlan === 1,
@@ -2257,7 +2417,8 @@ var patchToRowValues = (patch) => {
   const values = {};
   for (const [key, value] of Object.entries(patch)) {
     if (value === void 0) continue;
-    if (key === "strongSubjects") values.strongSubjectsJson = JSON.stringify(value);
+    if (key === "selectedSubjects") values.selectedSubjectsJson = JSON.stringify(value);
+    else if (key === "strongSubjects") values.strongSubjectsJson = JSON.stringify(value);
     else if (key === "weakSubjects") values.weakSubjectsJson = JSON.stringify(value);
     else if (key === "availableStudyDays") values.availableStudyDaysJson = JSON.stringify(value);
     else if (key === "preferredStudyTimes") values.preferredStudyTimesJson = JSON.stringify(value);
@@ -5688,8 +5849,14 @@ var KPSS_EXAMS = [
 var DGS_EXAMS = [
   { year: 2026, firstDay: "2026-07-19", lastDay: "2026-07-19" }
 ];
-var EXAMS_BY_TRACK = { YKS: YKS_EXAMS, LGS: LGS_EXAMS, KPSS: KPSS_EXAMS, DGS: DGS_EXAMS };
-var EXAM_CYCLE_YEARS = { YKS: 1, LGS: 1, KPSS: 2, DGS: 1 };
+var MEB_AGS_EXAMS = [
+  { year: 2026, firstDay: "2026-07-26", lastDay: "2026-07-26" }
+];
+var KPSS_A_EXAMS = [
+  { year: 2026, firstDay: "2026-09-12", lastDay: "2026-09-13" }
+];
+var EXAMS_BY_TRACK = { YKS: YKS_EXAMS, LGS: LGS_EXAMS, KPSS: KPSS_EXAMS, DGS: DGS_EXAMS, MEB_AGS: MEB_AGS_EXAMS, KPSS_A: KPSS_A_EXAMS };
+var EXAM_CYCLE_YEARS = { YKS: 1, LGS: 1, KPSS: 2, DGS: 1, MEB_AGS: 1, KPSS_A: 2 };
 function cycleYearFrom(year, track) {
   const cycle = EXAM_CYCLE_YEARS[track];
   const anchor = EXAMS_BY_TRACK[track][0].year;
@@ -5740,10 +5907,12 @@ async function listActivePlans() {
   if (!db) return [];
   return db.select().from(subscriptionPlans).where(eq16(subscriptionPlans.isActive, 1));
 }
-async function getStudentExamYear(userId) {
+async function getStudentExamYearFor(userId, track) {
   const db = await getDb();
   if (!db) return null;
-  const [row] = await db.select({ examYear: studentProfiles.examYear }).from(studentProfiles).where(eq16(studentProfiles.userId, userId)).limit(1);
+  const [profile] = await db.select({ examTrack: studentProfiles.examTrack, examYear: studentProfiles.examYear }).from(studentProfiles).where(eq16(studentProfiles.userId, userId)).limit(1);
+  if (profile?.examTrack === track) return profile.examYear ?? null;
+  const [row] = await db.select({ examYear: studentExamTracks.examYear }).from(studentExamTracks).where(and14(eq16(studentExamTracks.userId, userId), eq16(studentExamTracks.track, track))).limit(1);
   return row?.examYear ?? null;
 }
 async function getStudentExamTrack(userId) {
@@ -5764,31 +5933,48 @@ async function getPlanById(id5) {
   const rows = await db.select().from(subscriptionPlans).where(eq16(subscriptionPlans.id, id5)).limit(1);
   return rows[0];
 }
-async function upsertPlan(input) {
+async function upsertPlan(input, options = {}) {
   const db = await getDb();
   if (!db) return;
   const existing = await getPlanByCode(input.code);
   if (existing) {
-    await db.update(subscriptionPlans).set({ name: input.name, description: input.description ?? null, tier: input.tier, billingPeriod: input.billingPeriod, price: input.price, currency: input.currency ?? "TRY", trialDays: input.trialDays ?? 0, storeProductId: input.storeProductId ?? null, provider: input.provider ?? null }).where(eq16(subscriptionPlans.id, existing.id));
+    const priceFields = options.keepPrice ? {} : { price: input.price, trialDays: input.trialDays ?? 0 };
+    await db.update(subscriptionPlans).set({ name: input.name, description: input.description ?? null, tier: input.tier, track: input.track ?? null, billingPeriod: input.billingPeriod, currency: input.currency ?? "TRY", storeProductId: input.storeProductId ?? null, provider: input.provider ?? null, ...priceFields }).where(eq16(subscriptionPlans.id, existing.id));
     return;
   }
-  await db.insert(subscriptionPlans).values({ code: input.code, name: input.name, description: input.description ?? null, tier: input.tier, billingPeriod: input.billingPeriod, price: input.price, currency: input.currency ?? "TRY", trialDays: input.trialDays ?? 0, storeProductId: input.storeProductId ?? null, provider: input.provider ?? null });
+  await db.insert(subscriptionPlans).values({ code: input.code, name: input.name, description: input.description ?? null, tier: input.tier, track: input.track ?? null, billingPeriod: input.billingPeriod, price: input.price, currency: input.currency ?? "TRY", trialDays: input.trialDays ?? 0, storeProductId: input.storeProductId ?? null, provider: input.provider ?? null });
 }
-async function getSubscriptionByUserId(userId) {
+async function listAllPlans() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(subscriptionPlans).orderBy(subscriptionPlans.code);
+}
+async function updatePlanPricing(id5, patch) {
   const db = await getDb();
   if (!db) return void 0;
-  const rows = await db.select().from(subscriptions).where(eq16(subscriptions.userId, userId)).limit(1);
+  await db.update(subscriptionPlans).set({ ...patch.price !== void 0 ? { price: patch.price } : {}, ...patch.trialDays !== void 0 ? { trialDays: patch.trialDays } : {}, ...patch.isActive !== void 0 ? { isActive: patch.isActive ? 1 : 0 } : {} }).where(eq16(subscriptionPlans.id, id5));
+  return getPlanById(id5);
+}
+async function getSubscriptionByUserId(userId, track) {
+  const db = await getDb();
+  if (!db) return void 0;
+  const rows = await db.select().from(subscriptions).where(and14(eq16(subscriptions.userId, userId), eq16(subscriptions.track, track))).limit(1);
   return rows[0];
 }
-async function ensureFreeSubscription(userId) {
+async function listSubscriptionsForUser(userId) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(subscriptions).where(eq16(subscriptions.userId, userId));
+}
+async function ensureFreeSubscription(userId, track) {
   const db = await getDb();
   if (!db) throw new Error("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok");
-  const existing = await getSubscriptionByUserId(userId);
+  const existing = await getSubscriptionByUserId(userId, track);
   if (existing) return existing;
   const freePlan = await getPlanByCode("FREE");
   if (!freePlan) throw new Error("FREE plan\u0131 bulunamad\u0131 \u2014 \xF6nce seedSubscriptionPlans() \xE7al\u0131\u015Ft\u0131r\u0131lmal\u0131");
-  await db.insert(subscriptions).values({ userId, planId: freePlan.id, status: "active", provider: null }).onConflictDoUpdate({ target: subscriptions.userId, set: { updatedAt: /* @__PURE__ */ new Date() } });
-  const created = await getSubscriptionByUserId(userId);
+  await db.insert(subscriptions).values({ userId, track, planId: freePlan.id, status: "active", provider: null }).onConflictDoUpdate({ target: [subscriptions.userId, subscriptions.track], set: { updatedAt: /* @__PURE__ */ new Date() } });
+  const created = await getSubscriptionByUserId(userId, track);
   if (!created) throw new Error("Free subscription olu\u015Fturulamad\u0131");
   return created;
 }
@@ -5797,6 +5983,7 @@ async function listAllSubscriptionsForAdmin() {
   if (!db) return [];
   return db.select({
     userId: subscriptions.userId,
+    track: subscriptions.track,
     userName: users.name,
     userEmail: users.email,
     status: subscriptions.status,
@@ -5810,11 +5997,11 @@ async function listAllSubscriptionsForAdmin() {
     updatedAt: subscriptions.updatedAt
   }).from(subscriptions).innerJoin(users, eq16(users.id, subscriptions.userId)).innerJoin(subscriptionPlans, eq16(subscriptionPlans.id, subscriptions.planId)).orderBy(desc10(subscriptions.updatedAt));
 }
-async function updateSubscription(userId, patch) {
+async function updateSubscription(userId, track, patch) {
   const db = await getDb();
   if (!db) throw new Error("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok");
-  await db.update(subscriptions).set(patch).where(eq16(subscriptions.userId, userId));
-  const updated = await getSubscriptionByUserId(userId);
+  await db.update(subscriptions).set(patch).where(and14(eq16(subscriptions.userId, userId), eq16(subscriptions.track, track)));
+  const updated = await getSubscriptionByUserId(userId, track);
   if (!updated) throw new Error("Abonelik bulunamad\u0131");
   return updated;
 }
@@ -5884,24 +6071,24 @@ async function listAllAuditLogs(limit = 100) {
   if (!db) return [];
   return db.select().from(subscriptionAuditLogs).orderBy(desc10(subscriptionAuditLogs.createdAt)).limit(Math.min(500, Math.max(1, limit)));
 }
-async function recordFeatureUsage(userId, featureKey) {
+async function recordFeatureUsage(userId, featureKey, track) {
   const db = await getDb();
   if (!db) return;
-  await db.insert(featureUsageLogs).values({ userId, featureKey });
+  await db.insert(featureUsageLogs).values({ userId, featureKey, track });
 }
-async function countFeatureUsage(userId, featureKey, windowDays) {
+async function countFeatureUsage(userId, featureKey, windowDays, track) {
   const db = await getDb();
   if (!db) return 0;
   const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1e3);
-  const rows = await db.select({ id: featureUsageLogs.id }).from(featureUsageLogs).where(and14(eq16(featureUsageLogs.userId, userId), eq16(featureUsageLogs.featureKey, featureKey), gte10(featureUsageLogs.usedAt, since)));
+  const rows = await db.select({ id: featureUsageLogs.id }).from(featureUsageLogs).where(and14(eq16(featureUsageLogs.userId, userId), eq16(featureUsageLogs.track, track), eq16(featureUsageLogs.featureKey, featureKey), gte10(featureUsageLogs.usedAt, since)));
   return rows.length;
 }
-async function resetFeatureUsage(userId, featureKey, windowDays, adminId) {
+async function resetFeatureUsage(userId, featureKey, windowDays, adminId, track) {
   const db = await getDb();
   if (!db) return;
   const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1e3);
-  await db.delete(featureUsageLogs).where(and14(eq16(featureUsageLogs.userId, userId), eq16(featureUsageLogs.featureKey, featureKey), gte10(featureUsageLogs.usedAt, since)));
-  await writeAuditLog({ userId, adminId, action: "usage_reset", newState: { featureKey, windowDays } });
+  await db.delete(featureUsageLogs).where(and14(eq16(featureUsageLogs.userId, userId), eq16(featureUsageLogs.featureKey, featureKey), gte10(featureUsageLogs.usedAt, since), ...track ? [eq16(featureUsageLogs.track, track)] : []));
+  await writeAuditLog({ userId, adminId, action: "usage_reset", newState: { featureKey, windowDays, track: track ?? "all" } });
 }
 async function listPendingUsers() {
   const db = await getDb();
@@ -5980,6 +6167,15 @@ async function applyCanonicalEvent(eventType, payload) {
       throw new Error(`Bilinmeyen event tipi: ${eventType}`);
   }
 }
+async function trackOfEvent(payload, plan) {
+  if (payload.track) return payload.track;
+  if (plan?.track) return plan.track;
+  if (payload.planCode) {
+    const byCode = await getPlanByCode(payload.planCode);
+    if (byCode?.track) return byCode.track;
+  }
+  return "YKS";
+}
 async function chargeAmountFor(plan, now, examYear, track) {
   if (plan.billingPeriod !== "yearly") return plan.price;
   const monthly = await getPlanByCode(plan.code.replace(/_YEARLY$/, "_MONTHLY"));
@@ -5989,10 +6185,10 @@ async function handleCheckoutCompleted(payload) {
   if (!payload.planCode) throw new Error("payload.planCode eksik");
   const plan = await getPlanByCode(payload.planCode);
   if (!plan) throw new Error(`Plan bulunamad\u0131: ${payload.planCode}`);
-  const existing = await ensureFreeSubscription(payload.userId);
+  const track = await trackOfEvent(payload, plan);
+  const existing = await ensureFreeSubscription(payload.userId, track);
   const now = /* @__PURE__ */ new Date();
-  const examYear = await getStudentExamYear(payload.userId);
-  const track = await getStudentExamTrack(payload.userId);
+  const examYear = await getStudentExamYearFor(payload.userId, track);
   const periodEnd = payload.periodDays ? new Date(now.getTime() + payload.periodDays * 24 * 60 * 60 * 1e3) : planPeriodEnd(plan.billingPeriod, now, examYear, track);
   const eligibleForTrial = plan.trialDays > 0 && !existing?.trialStartedAt;
   const nextStatus = eligibleForTrial ? "trialing" : "active";
@@ -6007,10 +6203,12 @@ async function handleCheckoutCompleted(payload) {
     currency: payload.currency ?? plan.currency,
     status: eligibleForTrial ? "authorized" : "paid",
     paymentType: eligibleForTrial ? "trial_start" : "initial",
-    paidAt: eligibleForTrial ? null : now
+    paidAt: eligibleForTrial ? null : now,
+    track,
+    metadata: payload.checkoutId ? JSON.stringify({ checkoutId: payload.checkoutId, discountReason: payload.discountReason ?? null }) : null
   });
   const oldState = existing ? { status: existing.status } : null;
-  await updateSubscription(payload.userId, {
+  await updateSubscription(payload.userId, track, {
     planId: plan.id,
     status: nextStatus,
     trialStartedAt: eligibleForTrial ? now : existing?.trialStartedAt ?? null,
@@ -6024,51 +6222,55 @@ async function handleCheckoutCompleted(payload) {
     providerCustomerId: payload.providerCustomerId ?? null,
     latestPaymentId: paymentId
   });
-  await writeAuditLog({ userId: payload.userId, action: "checkout_completed", oldState, newState: { status: nextStatus, planCode: plan.code }, metadata: { paymentId } });
+  await writeAuditLog({ userId: payload.userId, action: "checkout_completed", oldState, newState: { status: nextStatus, planCode: plan.code, track }, metadata: { paymentId, checkoutId: payload.checkoutId ?? null } });
 }
 async function handleSubscriptionRenewed(payload) {
-  const existing = await getSubscriptionByUserId(payload.userId);
-  if (!existing) throw new Error("Yenilenecek abonelik bulunamad\u0131");
   const plan = await getPlanByCode(payload.planCode ?? "");
+  const track = await trackOfEvent(payload, plan);
+  const existing = await getSubscriptionByUserId(payload.userId, track);
+  if (!existing) throw new Error("Yenilenecek abonelik bulunamad\u0131");
   assertValidSubscriptionTransition(existing.status, "active");
   const now = /* @__PURE__ */ new Date();
-  const examYear = await getStudentExamYear(payload.userId);
-  const track = await getStudentExamTrack(payload.userId);
+  const examYear = await getStudentExamYearFor(payload.userId, track);
   const periodEnd = payload.periodDays ? new Date(now.getTime() + payload.periodDays * 24 * 60 * 60 * 1e3) : planPeriodEnd(plan?.billingPeriod ?? "monthly", now, examYear, track);
-  const paymentId = await createPayment({ userId: payload.userId, subscriptionId: existing.id, provider: "web", providerPaymentId: payload.providerPaymentId ?? null, amount: payload.amount ?? (plan ? await chargeAmountFor(plan, now, examYear, track) : 0), currency: payload.currency ?? plan?.currency ?? "TRY", status: "paid", paymentType: "renewal", paidAt: now });
-  await updateSubscription(payload.userId, { status: "active", currentPeriodStart: now, currentPeriodEnd: periodEnd, latestPaymentId: paymentId });
+  const paymentId = await createPayment({ userId: payload.userId, subscriptionId: existing.id, provider: "web", providerPaymentId: payload.providerPaymentId ?? null, amount: payload.amount ?? (plan ? await chargeAmountFor(plan, now, examYear, track) : 0), currency: payload.currency ?? plan?.currency ?? "TRY", status: "paid", paymentType: "renewal", paidAt: now, track });
+  await updateSubscription(payload.userId, track, { status: "active", currentPeriodStart: now, currentPeriodEnd: periodEnd, latestPaymentId: paymentId });
   await writeAuditLog({ userId: payload.userId, action: "subscription_renewed", oldState: { status: existing.status }, newState: { status: "active" }, metadata: { paymentId } });
 }
 async function handlePaymentFailed(payload) {
-  const existing = await getSubscriptionByUserId(payload.userId);
+  const track = await trackOfEvent(payload);
+  const existing = await getSubscriptionByUserId(payload.userId, track);
   if (!existing) throw new Error("Abonelik bulunamad\u0131");
   assertValidSubscriptionTransition(existing.status, "past_due");
-  await updateSubscription(payload.userId, { status: "past_due" });
+  await updateSubscription(payload.userId, track, { status: "past_due" });
   await writeAuditLog({ userId: payload.userId, action: "payment_failed", oldState: { status: existing.status }, newState: { status: "past_due" } });
 }
 async function handleGracePeriodStarted(payload) {
-  const existing = await getSubscriptionByUserId(payload.userId);
+  const track = await trackOfEvent(payload);
+  const existing = await getSubscriptionByUserId(payload.userId, track);
   if (!existing) throw new Error("Abonelik bulunamad\u0131");
   assertValidSubscriptionTransition(existing.status, "grace_period");
   const days = payload.gracePeriodDays ?? 3;
   const gracePeriodEndsAt = new Date(Date.now() + days * 24 * 60 * 60 * 1e3);
-  await updateSubscription(payload.userId, { status: "grace_period", gracePeriodEndsAt });
+  await updateSubscription(payload.userId, track, { status: "grace_period", gracePeriodEndsAt });
   await writeAuditLog({ userId: payload.userId, action: "grace_period_started", oldState: { status: existing.status }, newState: { status: "grace_period", gracePeriodEndsAt } });
 }
 async function handleSubscriptionCanceled(payload) {
-  const existing = await getSubscriptionByUserId(payload.userId);
+  const track = await trackOfEvent(payload);
+  const existing = await getSubscriptionByUserId(payload.userId, track);
   if (!existing) throw new Error("Abonelik bulunamad\u0131");
   const nextStatus = payload.immediate ? "canceled" : existing.status;
   if (payload.immediate) assertValidSubscriptionTransition(existing.status, "canceled");
-  await updateSubscription(payload.userId, { status: nextStatus, cancelAtPeriodEnd: payload.immediate ? 0 : 1, canceledAt: /* @__PURE__ */ new Date() });
+  await updateSubscription(payload.userId, track, { status: nextStatus, cancelAtPeriodEnd: payload.immediate ? 0 : 1, canceledAt: /* @__PURE__ */ new Date() });
   await writeAuditLog({ userId: payload.userId, action: "subscription_canceled", oldState: { status: existing.status }, newState: { status: nextStatus, cancelAtPeriodEnd: !payload.immediate } });
 }
 async function handleRefund(payload) {
-  const existing = await getSubscriptionByUserId(payload.userId);
+  const track = await trackOfEvent(payload);
+  const existing = await getSubscriptionByUserId(payload.userId, track);
   if (!existing) throw new Error("Abonelik bulunamad\u0131");
   if (existing.latestPaymentId) await updatePaymentStatus(existing.latestPaymentId, { status: "refunded", refundedAt: /* @__PURE__ */ new Date() });
   assertValidSubscriptionTransition(existing.status, "canceled");
-  await updateSubscription(payload.userId, { status: "canceled", canceledAt: /* @__PURE__ */ new Date(), cancelAtPeriodEnd: 0 });
+  await updateSubscription(payload.userId, track, { status: "canceled", canceledAt: /* @__PURE__ */ new Date(), cancelAtPeriodEnd: 0 });
   await writeAuditLog({ userId: payload.userId, action: "payment_refunded", oldState: { status: existing.status }, newState: { status: "canceled" } });
 }
 
@@ -6105,7 +6307,7 @@ function registerWebhookRoutes(app2) {
 }
 
 // server/routers.ts
-import { TRPCError as TRPCError14 } from "@trpc/server";
+import { TRPCError as TRPCError16 } from "@trpc/server";
 
 // server/_core/systemRouter.ts
 import { z as z2 } from "zod";
@@ -6163,8 +6365,8 @@ function usageLimitFor(tier, feature) {
 }
 
 // server/subscriptions/entitlementService.ts
-async function getCurrentSubscription(userId) {
-  const subscription = await ensureFreeSubscription(userId);
+async function getCurrentSubscription(userId, track) {
+  const subscription = await ensureFreeSubscription(userId, track);
   const now = /* @__PURE__ */ new Date();
   const effectiveStatus = resolveEffectiveStatus(
     {
@@ -6178,19 +6380,20 @@ async function getCurrentSubscription(userId) {
   );
   if (effectiveStatus !== subscription.status) {
     const oldState = { status: subscription.status };
-    const updated = await updateSubscription(userId, { status: effectiveStatus });
-    await writeAuditLog({ userId, action: "status_auto_transitioned", oldState, newState: { status: effectiveStatus }, reason: "resolveEffectiveStatus (zaman bazl\u0131 otomatik ge\xE7i\u015F)" });
+    const updated = await updateSubscription(userId, track, { status: effectiveStatus });
+    await writeAuditLog({ userId, action: "status_auto_transitioned", oldState, newState: { status: effectiveStatus, track }, reason: "resolveEffectiveStatus (zaman bazl\u0131 otomatik ge\xE7i\u015F)" });
     return updated;
   }
   return subscription;
 }
-async function getEntitlements(userId) {
-  const subscription = await getCurrentSubscription(userId);
+async function getEntitlements(userId, track) {
+  const subscription = await getCurrentSubscription(userId, track);
   const plan = await getPlanById(subscription.planId);
   const tier = plan?.tier ?? "free";
   const status = subscription.status;
   const isPremium = tier !== "free" && statusGrantsPremiumAccess(status);
   return {
+    track,
     tier,
     planCode: plan?.code ?? "FREE",
     status,
@@ -6218,20 +6421,20 @@ var UsageLimitExceededError = class extends Error {
 function limitForSnapshot(feature, snapshot) {
   return usageLimitFor(snapshot.isPremium ? snapshot.tier : "free", feature);
 }
-async function assertUsageAvailable(userId, feature) {
-  const snapshot = await getEntitlements(userId);
+async function assertUsageAvailable(userId, feature, track) {
+  const snapshot = await getEntitlements(userId, track);
   if (!snapshot.isPremium && !FREE_TIER_LIMITS[feature]) {
     throw new PremiumRequiredError(feature);
   }
   const limit = limitForSnapshot(feature, snapshot);
   if (limit) {
-    const used = await countFeatureUsage(userId, feature, limit.windowDays);
+    const used = await countFeatureUsage(userId, feature, limit.windowDays, track);
     if (used >= limit.maxUses) throw new UsageLimitExceededError(feature, limit.maxUses, limit.windowDays);
   }
   return { isPremium: snapshot.isPremium };
 }
-async function getUsageSummaryForUser(userId) {
-  const snapshot = await getEntitlements(userId);
+async function getUsageSummaryForUser(userId, track) {
+  const snapshot = await getEntitlements(userId, track);
   const summaries = [];
   for (const feature of FEATURE_KEYS) {
     const limit = limitForSnapshot(feature, snapshot);
@@ -6241,7 +6444,7 @@ async function getUsageSummaryForUser(userId) {
       summaries.push({ feature, used: 0, limit: null, remaining: null, windowDays: null, periodStart: null, periodEnd: null });
       continue;
     }
-    const used = await countFeatureUsage(userId, feature, limit.windowDays);
+    const used = await countFeatureUsage(userId, feature, limit.windowDays, track);
     const periodStart = new Date(Date.now() - limit.windowDays * 24 * 60 * 60 * 1e3);
     summaries.push({ feature, used, limit: limit.maxUses, remaining: Math.max(0, limit.maxUses - used), windowDays: limit.windowDays, periodStart: periodStart.toISOString(), periodEnd: (/* @__PURE__ */ new Date()).toISOString() });
   }
@@ -6351,15 +6554,16 @@ function metredFeatureProcedure(feature, rateLimit = { maxRequests: 5, windowMs:
         throw error;
       }
       const orgCredit = await findOrgCreditSource(ctx.user.id, feature).catch(() => null);
+      const track = await getStudentExamTrack(ctx.user.id);
       if (!orgCredit) try {
-        await assertUsageAvailable(ctx.user.id, feature);
+        await assertUsageAvailable(ctx.user.id, feature, track);
       } catch (error) {
         if (error instanceof PremiumRequiredError) throw new TRPCError({ code: "FORBIDDEN", message: PREMIUM_REQUIRED_ERR_MSG });
         if (error instanceof UsageLimitExceededError) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: error.message });
         throw error;
       }
       const result = await next({ ctx });
-      if (result.ok) await (orgCredit ? recordOrgCredit(orgCredit, ctx.user.id, feature) : recordFeatureUsage(ctx.user.id, feature));
+      if (result.ok) await (orgCredit ? recordOrgCredit(orgCredit, ctx.user.id, feature) : recordFeatureUsage(ctx.user.id, feature, track));
       return result;
     })
   );
@@ -9466,7 +9670,9 @@ var SCHEDULE_SUBJECTS_BY_TRACK = {
   LGS: { subjects: LGS_SUBJECTS, nonExamPresets: NON_LGS_PRESETS },
   // Yetişkin adaylar: programdaki bloklar çoğunlukla iş/kurs saatleri; ders olarak KPSS dersleri.
   KPSS: { subjects: ["T\xFCrk\xE7e", "Matematik", "Tarih", "Co\u011Frafya", "Vatanda\u015Fl\u0131k", "G\xFCncel Bilgiler"], nonExamPresets: ["\u0130\u015F", "Kurs / dershane", "\xDCniversite dersi", "Di\u011Fer"] },
-  DGS: { subjects: ["Say\u0131sal", "S\xF6zel"], nonExamPresets: ["\xD6nlisans dersi", "\u0130\u015F", "Kurs / dershane", "Di\u011Fer"] }
+  DGS: { subjects: ["Say\u0131sal", "S\xF6zel"], nonExamPresets: ["\xD6nlisans dersi", "\u0130\u015F", "Kurs / dershane", "Di\u011Fer"] },
+  MEB_AGS: { subjects: ["E\u011Fitim Bilimleri", "S\xF6zel Yetenek", "Say\u0131sal Yetenek", "Mevzuat", "Tarih", "T\xFCrkiye Co\u011Frafyas\u0131"], nonExamPresets: ["\xDCniversite dersi", "Staj / okul uygulamas\u0131", "\u0130\u015F", "Kurs / dershane", "Di\u011Fer"] },
+  KPSS_A: { subjects: ["Hukuk", "\u0130ktisat", "Maliye", "Muhasebe", "\u0130\u015Fletme", "\xC7al\u0131\u015Fma Ekonomisi", "\u0130statistik", "Kamu Y\xF6netimi", "Uluslararas\u0131 \u0130li\u015Fkiler"], nonExamPresets: ["\u0130\u015F", "Kurs / dershane", "Di\u011Fer"] }
 };
 var SCHEDULE_SUBJECTS = Array.from(new Set(Object.values(SCHEDULE_SUBJECTS_BY_TRACK).flatMap((entry) => entry.subjects)));
 var scheduleSubjectsFor = (track) => SCHEDULE_SUBJECTS_BY_TRACK[track].subjects;
@@ -9619,6 +9825,25 @@ var LESSON_RULES = {
   DGS: [
     [/MATEMAT[İI]K|GEOMETR[İI]|SAYISAL/, "Say\u0131sal"],
     [/T[ÜU]RK[ÇC]E|T[ÜU]RK D[İI]L[İI]|S[ÖO]ZEL|PARAGRAF/, "S\xF6zel"]
+  ],
+  MEB_AGS: [
+    [/E[ĞG][İI]T[İI]M B[İI]L|GEL[İI][ŞS][İI]M|[ÖO][ĞG]RENME PS[İI]KOLOJ|PROGRAM GEL[İI][ŞS]T|[ÖO]L[ÇC]ME|REHBERL[İI]K|S[İI]N[İI]F Y[ÖO]NET|[ÖO]ZEL E[ĞG][İI]T[İI]M|[ÖO][ĞG]RET[İI]M Y[ÖO]NTEM/, "E\u011Fitim Bilimleri"],
+    [/MEVZUAT|M[İI]LL[İI] E[ĞG][İI]T[İI]M TEMEL|KANUN/, "Mevzuat"],
+    [/MATEMAT[İI]K|SAYISAL/, "Say\u0131sal Yetenek"],
+    [/T[ÜU]RK[ÇC]E|S[ÖO]ZEL|PARAGRAF/, "S\xF6zel Yetenek"],
+    [/CO[ĞG]RAFYA/, "T\xFCrkiye Co\u011Frafyas\u0131"],
+    [/TAR[İI]H|[İI]NKILAP/, "Tarih"]
+  ],
+  KPSS_A: [
+    [/HUKUK|ANAYASA|[İI]DARE/, "Hukuk"],
+    [/MAL[İI]YE|VERG[İI]|B[ÜU]T[ÇC]E/, "Maliye"],
+    [/MUHASEBE/, "Muhasebe"],
+    [/[İI]STAT[İI]ST[İI]K/, "\u0130statistik"],
+    [/[ÇC]ALI[ŞS]MA EKONOM/, "\xC7al\u0131\u015Fma Ekonomisi"],
+    [/[İI]KT[İI]SAT|EKONOM[İI]/, "\u0130ktisat"],
+    [/[İI][ŞS]LETME/, "\u0130\u015Fletme"],
+    [/KAMU Y[ÖO]NET/, "Kamu Y\xF6netimi"],
+    [/ULUSLARARASI/, "Uluslararas\u0131 \u0130li\u015Fkiler"]
   ],
   YKS: [
     [/D[İI]N K[ÜU]LT[ÜU]R|AHLAK|YABANCI D[İI]L|[İI]NG[İI]L[İI]ZCE|ALMANCA|FRANSIZCA|REHBERL[İI]K|BEDEN|SPOR|G[ÖO]RSEL SANAT|M[ÜU]Z[İI]K|SA[ĞG]LIK B[İI]LG|TRAF[İI]K|PEYGAMBER|KUR.?AN|H[İI]TABET|PROJE/, null],
@@ -11279,6 +11504,7 @@ var emptyOnboardingDraft = () => ({
   currentAytNet: "",
   currentNet: "",
   mockExamFrequency: "",
+  selectedSubjects: [],
   strongSubjects: [],
   weakSubjects: [],
   hasPriorStudyPlan: "",
@@ -11307,6 +11533,7 @@ function validateOnboardingStep(step, draft) {
   if (step === 0) {
     if (!draft.preferredName.trim()) errors.preferredName = "Sana nas\u0131l hitap edelim, yazar m\u0131s\u0131n?";
     if (!draft.examTrack) errors.examTrack = "Hangi s\u0131nava haz\u0131rland\u0131\u011F\u0131n\u0131 se\xE7.";
+    if (draft.examTrack && EXAM_TRACK_DEFS[draft.examTrack].chooseSubjects && draft.selectedSubjects.length === 0) errors.selectedSubjects = "Girece\u011Fin en az bir alan testini se\xE7.";
     if (!draft.gradeLevel) errors.gradeLevel = "S\u0131n\u0131f d\xFCzeyini se\xE7.";
     else if (draft.examTrack && !gradeLevelsFor(draft.examTrack).includes(draft.gradeLevel)) errors.gradeLevel = "Bu s\u0131nav i\xE7in s\u0131n\u0131f d\xFCzeyini yeniden se\xE7.";
     if (!draft.examYear.trim()) errors.examYear = "Hedef s\u0131nav y\u0131l\u0131n\u0131 gir.";
@@ -11343,7 +11570,82 @@ function validateOnboardingStep(step, draft) {
   return errors;
 }
 
+// server/tracks/trackDb.ts
+import { and as and21, asc as asc5, eq as eq24 } from "drizzle-orm";
+var TrackError = class extends Error {
+};
+var TRACK_FIELDS = ["gradeLevel", "examYear", "targetScoreType", "currentTytNet", "currentAytNet", "currentNet", "targetUniversity", "targetDepartment", "targetRanking", "targetGoal", "targetScore", "selectedSubjectsJson"];
+var pick2 = (row) => Object.fromEntries(TRACK_FIELDS.map((key) => [key, row[key] ?? null]));
+var emptyFields = () => Object.fromEntries(TRACK_FIELDS.map((key) => [key, null]));
+async function requireDb7() {
+  const db = await getDb();
+  if (!db) throw new Error("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
+  return db;
+}
+async function syncActiveTrack(userId) {
+  const db = await getDb();
+  if (!db) return;
+  const [profile] = await db.select().from(studentProfiles).where(eq24(studentProfiles.userId, userId)).limit(1);
+  if (!profile) return;
+  const fields2 = pick2(profile);
+  await db.insert(studentExamTracks).values({ userId, track: profile.examTrack, ...fields2 }).onConflictDoUpdate({ target: [studentExamTracks.userId, studentExamTracks.track], set: fields2 });
+}
+async function listTracks(userId) {
+  const db = await requireDb7();
+  const [profile] = await db.select({ examTrack: studentProfiles.examTrack, onboardingCompleted: studentProfiles.onboardingCompleted }).from(studentProfiles).where(eq24(studentProfiles.userId, userId)).limit(1);
+  if (!profile) return [];
+  let rows = await db.select().from(studentExamTracks).where(eq24(studentExamTracks.userId, userId)).orderBy(asc5(studentExamTracks.createdAt));
+  if (!rows.some((row) => row.track === profile.examTrack) && profile.onboardingCompleted) {
+    await syncActiveTrack(userId);
+    rows = await db.select().from(studentExamTracks).where(eq24(studentExamTracks.userId, userId)).orderBy(asc5(studentExamTracks.createdAt));
+  }
+  return rows.map((row) => ({ track: row.track, active: row.track === profile.examTrack, examYear: row.examYear, gradeLevel: row.gradeLevel, selectedSubjects: parseList(row.selectedSubjectsJson) })).sort((a, b) => Number(b.active) - Number(a.active));
+}
+var parseList = (value) => {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+};
+async function addTrack(userId, input) {
+  const db = await requireDb7();
+  const def = EXAM_TRACK_DEFS[input.track];
+  if (!def.gradeLevels.includes(input.gradeLevel)) throw new TrackError("Bu s\u0131nav i\xE7in e\u011Fitim durumunu yeniden se\xE7.");
+  const validSubjects = subjectNamesOf(defaultKindOf(input.track));
+  const selected = (input.selectedSubjects ?? []).filter((subject2) => validSubjects.includes(subject2));
+  if (def.chooseSubjects && selected.length === 0) throw new TrackError("Girece\u011Fin en az bir alan testini se\xE7.");
+  await syncActiveTrack(userId);
+  const [existing] = await db.select({ id: studentExamTracks.id }).from(studentExamTracks).where(and21(eq24(studentExamTracks.userId, userId), eq24(studentExamTracks.track, input.track))).limit(1);
+  if (existing) throw new TrackError(`${def.label} zaten s\u0131navlar\u0131n aras\u0131nda.`);
+  await db.insert(studentExamTracks).values({ userId, track: input.track, ...emptyFields(), gradeLevel: input.gradeLevel, examYear: input.examYear, selectedSubjectsJson: selected.length ? JSON.stringify(selected) : null });
+  if (input.activate) await switchTrack(userId, input.track);
+}
+async function switchTrack(userId, track) {
+  const db = await requireDb7();
+  await syncActiveTrack(userId);
+  const [target] = await db.select().from(studentExamTracks).where(and21(eq24(studentExamTracks.userId, userId), eq24(studentExamTracks.track, track))).limit(1);
+  if (!target) throw new TrackError("Bu s\u0131nav hen\xFCz eklenmemi\u015F.");
+  await db.update(studentProfiles).set({ examTrack: track, ...pick2(target) }).where(eq24(studentProfiles.userId, userId));
+}
+async function removeTrack(userId, track) {
+  const db = await requireDb7();
+  const [profile] = await db.select({ examTrack: studentProfiles.examTrack }).from(studentProfiles).where(eq24(studentProfiles.userId, userId)).limit(1);
+  if (profile?.examTrack === track) throw new TrackError("Aktif s\u0131nav\u0131 \xE7\u0131karamazs\u0131n; \xF6nce ba\u015Fka bir s\u0131nava ge\xE7.");
+  await db.delete(studentExamTracks).where(and21(eq24(studentExamTracks.userId, userId), eq24(studentExamTracks.track, track)));
+}
+
 // server/routers/onboarding.ts
+var trackErrors = async (work) => {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof TrackError) throw new TRPCError13({ code: "BAD_REQUEST", message: error.message });
+    throw error;
+  }
+};
 var enumOrBlank = (values) => z15.union([z15.enum(values), z15.literal("")]);
 var draftSchema = z15.object({
   preferredName: z15.string().trim().max(120).optional(),
@@ -11356,6 +11658,7 @@ var draftSchema = z15.object({
   currentAytNet: z15.string().trim().max(40).optional(),
   currentNet: z15.string().trim().max(40).optional(),
   mockExamFrequency: enumOrBlank(MOCK_EXAM_FREQUENCIES).optional(),
+  selectedSubjects: z15.array(z15.string().max(60)).max(15).optional(),
   strongSubjects: z15.array(z15.string().max(40)).max(15).optional(),
   weakSubjects: z15.array(z15.string().max(40)).max(15).optional(),
   hasPriorStudyPlan: enumOrBlank(["yes", "no"]).optional(),
@@ -11395,6 +11698,7 @@ function draftToPatch(data) {
   if (data.currentAytNet !== void 0) patch.currentAytNet = data.currentAytNet || null;
   if (data.currentNet !== void 0) patch.currentNet = data.currentNet || null;
   if (data.mockExamFrequency !== void 0) patch.mockExamFrequency = data.mockExamFrequency || null;
+  if (data.selectedSubjects !== void 0) patch.selectedSubjects = data.selectedSubjects;
   if (data.strongSubjects !== void 0) patch.strongSubjects = data.strongSubjects;
   if (data.weakSubjects !== void 0) patch.weakSubjects = data.weakSubjects;
   if (data.hasPriorStudyPlan !== void 0) patch.hasPriorStudyPlan = data.hasPriorStudyPlan === "yes" ? true : data.hasPriorStudyPlan === "no" ? false : null;
@@ -11426,11 +11730,30 @@ var onboardingRouter = router({
     if (Object.keys(errors).length > 0) {
       throw new TRPCError13({ code: "BAD_REQUEST", message: Object.values(errors)[0] });
     }
-    await upsertStudentProfileStep(ctx.user.id, input.step, draftToPatch(input.data));
+    const saved = await upsertStudentProfileStep(ctx.user.id, input.step, draftToPatch(input.data));
     if (input.complete) await completeOnboarding(ctx.user.id);
+    if (input.complete || saved.onboardingCompleted) await syncActiveTrack(ctx.user.id);
     return getStudentProfile(ctx.user.id);
   }),
-  complete: protectedProcedure.mutation(({ ctx }) => completeOnboarding(ctx.user.id)),
+  complete: protectedProcedure.mutation(async ({ ctx }) => {
+    const profile = await completeOnboarding(ctx.user.id);
+    await syncActiveTrack(ctx.user.id);
+    return profile;
+  }),
+  // Birden çok sınav: liste, ekleme, aktif sınavı değiştirme, çıkarma (bkz. server/tracks/trackDb.ts).
+  tracks: protectedProcedure.query(({ ctx }) => listTracks(ctx.user.id)),
+  addTrack: protectedProcedure.input(z15.object({ track: z15.enum(EXAM_TRACKS), gradeLevel: z15.enum(GRADE_LEVELS), examYear: z15.number().int().min(2020).max(2040), selectedSubjects: z15.array(z15.string().max(60)).max(15).optional(), activate: z15.boolean().optional() })).mutation(({ ctx, input }) => trackErrors(async () => {
+    await addTrack(ctx.user.id, input);
+    return listTracks(ctx.user.id);
+  })),
+  switchTrack: protectedProcedure.input(z15.object({ track: z15.enum(EXAM_TRACKS) })).mutation(({ ctx, input }) => trackErrors(async () => {
+    await switchTrack(ctx.user.id, input.track);
+    return getStudentProfile(ctx.user.id);
+  })),
+  removeTrack: protectedProcedure.input(z15.object({ track: z15.enum(EXAM_TRACKS) })).mutation(({ ctx, input }) => trackErrors(async () => {
+    await removeTrack(ctx.user.id, input.track);
+    return listTracks(ctx.user.id);
+  })),
   // Genel Bakış'taki tek tıkla avatar seçimi (null = nötr tasarım).
   setAvatar: protectedProcedure.input(z15.object({ avatarStyle: z15.enum(AVATAR_STYLES).nullable() })).mutation(({ ctx, input }) => setStudentAvatarStyle(ctx.user.id, input.avatarStyle)),
   // Pazar akşamı giden haftalık ilerleme e-postası (profil menüsündeki seçenek).
@@ -11440,38 +11763,140 @@ var onboardingRouter = router({
 
 // server/routers/subscription.ts
 import { z as z16 } from "zod";
+
+// server/subscriptions/checkout.ts
+import { randomUUID as randomUUID2 } from "node:crypto";
+
+// shared/checkoutQuote.ts
+var BUNDLE_DISCOUNT = 0.2;
+var ADDON_DISCOUNT = 0.2;
+var TIER_CODES = { basic: "BASIC", premium: "PREMIUM", premium_plus: "PRO" };
+var planCodeFor = (track, tier, period) => `${track === "YKS" ? "" : `${track}_`}${TIER_CODES[tier]}_${period.toUpperCase()}`;
+var QuoteError = class extends Error {
+};
+function quoteCheckout(input) {
+  const tracks = input.items.map((item) => item.track);
+  if (!input.items.length) throw new QuoteError("Sepet bo\u015F.");
+  if (new Set(tracks).size !== tracks.length) throw new QuoteError("Ayn\u0131 s\u0131nav sepette iki kez olamaz.");
+  const bundle = input.items.length >= 2;
+  const lines = input.items.map((item) => {
+    const plan = input.plans.find((candidate) => candidate.code === planCodeFor(item.track, item.tier, item.period));
+    if (!plan) throw new QuoteError("Bu plan \u015Fu an sat\u0131\u015Fta de\u011Fil.");
+    let basePrice = plan.price;
+    let months = 1;
+    if (item.period === "yearly") {
+      const monthly = input.plans.find((candidate) => candidate.code === planCodeFor(item.track, item.tier, "monthly"));
+      if (monthly) {
+        const term = yksTermPrice({ monthlyPrice: monthly.price, now: input.now, examYear: input.examYearByTrack[item.track] ?? null, track: item.track });
+        basePrice = term.price;
+        months = term.months;
+      }
+    }
+    const parent = EXAM_TRACK_DEFS[item.track].addonOf;
+    const addon = Boolean(parent && (input.activeTracks.includes(parent) || tracks.includes(parent)));
+    const discountReason = bundle ? "bundle" : addon ? "addon" : null;
+    const discountRate = discountReason === "bundle" ? BUNDLE_DISCOUNT : discountReason === "addon" ? ADDON_DISCOUNT : 0;
+    const price = discountRate ? Math.floor(basePrice * (1 - discountRate) / 100) * 100 : basePrice;
+    return { track: item.track, planCode: plan.code, basePrice, discountRate, discountReason, price, currency: plan.currency, months };
+  });
+  const total = lines.reduce((sum, line) => sum + line.price, 0);
+  return { lines, total, currency: lines[0].currency, discountTotal: lines.reduce((sum, line) => sum + (line.basePrice - line.price), 0) };
+}
+
+// server/subscriptions/checkout.ts
+async function paidActiveTracks(userId) {
+  const rows = await listSubscriptionsForUser(userId);
+  const tracks = [];
+  for (const row of rows) {
+    const snapshot = await getEntitlements(userId, row.track);
+    if (snapshot.isPremium && !snapshot.isTrial) tracks.push(row.track);
+  }
+  return tracks;
+}
+async function quoteForUser(userId, items, now = /* @__PURE__ */ new Date()) {
+  const [plans, activeTracks] = await Promise.all([listActivePlans(), paidActiveTracks(userId)]);
+  const examYearByTrack = {};
+  for (const item of items) examYearByTrack[item.track] = await getStudentExamYearFor(userId, item.track);
+  return quoteCheckout({ items, plans: plans.map((plan) => ({ code: plan.code, track: plan.track, tier: plan.tier, billingPeriod: plan.billingPeriod, price: plan.price, currency: plan.currency })), activeTracks, examYearByTrack, now });
+}
+async function itemFromPlanCode(planCode) {
+  const plan = await getPlanByCode(planCode);
+  if (!plan || !plan.isActive || plan.tier === "free" || plan.billingPeriod === "none") throw new Error("Ge\xE7ersiz veya pasif plan.");
+  if (!PAID_TIERS.includes(plan.tier)) throw new Error("Ge\xE7ersiz plan.");
+  return { track: plan.track ?? "YKS", tier: plan.tier, period: plan.billingPeriod };
+}
+async function completeMockCheckoutForUser(userId, items) {
+  const quote = await quoteForUser(userId, items);
+  const checkoutId = randomUUID2();
+  for (const line of quote.lines) {
+    const result = await processWebhookEvent({
+      provider: "mock",
+      eventId: `mock_manual_${userId}_${checkoutId}_${line.track}`,
+      eventType: "checkout.completed",
+      payload: { userId, planCode: line.planCode, track: line.track, amount: line.price, currency: line.currency, checkoutId, discountReason: line.discountReason },
+      rawPayloadForAudit: { userId, planCode: line.planCode, track: line.track, amount: line.price, checkoutId, source: "completeMockCheckout" }
+    });
+    if (result.status === "failed") throw new Error(result.reason ?? "Sandbox \xF6demesi i\u015Flenemedi.");
+  }
+  return { quote, checkoutId };
+}
+
+// server/routers/subscription.ts
+import { TRPCError as TRPCError14 } from "@trpc/server";
+var trackInput = z16.object({ track: z16.enum(EXAM_TRACKS).optional() }).optional();
+var resolveTrack = async (userId, track) => track ?? await getStudentExamTrack(userId);
+var quoteItemsInput = z16.array(z16.object({ track: z16.enum(EXAM_TRACKS), tier: z16.enum(PAID_TIERS), period: z16.enum(["monthly", "yearly"]) })).min(1).max(EXAM_TRACKS.length);
 var subscriptionRouter = router({
   getPlans: publicProcedure.query(() => listActivePlans()),
-  // Client'ın useEntitlement() hook'unun okuduğu tek snapshot (spec §8).
-  getCurrent: protectedProcedure.query(({ ctx }) => getEntitlements(ctx.user.id)),
-  getEntitlements: protectedProcedure.query(({ ctx }) => getEntitlements(ctx.user.id)),
-  cancel: protectedProcedure.input(z16.object({ immediate: z16.boolean().optional() })).mutation(async ({ ctx, input }) => {
-    const current = await getCurrentSubscription(ctx.user.id);
+  // Client'ın useEntitlement() hook'unun okuduğu tek snapshot (spec §8) — bir sınavın aboneliği.
+  getCurrent: protectedProcedure.input(trackInput).query(async ({ ctx, input }) => getEntitlements(ctx.user.id, await resolveTrack(ctx.user.id, input?.track))),
+  getEntitlements: protectedProcedure.input(trackInput).query(async ({ ctx, input }) => getEntitlements(ctx.user.id, await resolveTrack(ctx.user.id, input?.track))),
+  /** Adayın sınavlarındaki (eklediği ve aboneliği olan) tüm abonelikler. */
+  mine: protectedProcedure.query(async ({ ctx }) => {
+    const [enrolled, rows] = await Promise.all([listTracks(ctx.user.id).catch(() => []), listSubscriptionsForUser(ctx.user.id)]);
+    const tracks = Array.from(/* @__PURE__ */ new Set([...enrolled.map((row) => row.track), ...rows.map((row) => row.track)]));
+    if (!tracks.length) tracks.push(await getStudentExamTrack(ctx.user.id));
+    return Promise.all(tracks.map((track) => getEntitlements(ctx.user.id, track)));
+  }),
+  /** Sepet tutarı: paket (2+ sınav) ya da branş (KPSS aboneliği varken MEB-AGS / A grubu) indirimiyle. */
+  quote: protectedProcedure.input(z16.object({ items: quoteItemsInput })).query(async ({ ctx, input }) => {
+    try {
+      return await quoteForUser(ctx.user.id, input.items);
+    } catch (error) {
+      if (error instanceof QuoteError) throw new TRPCError14({ code: "BAD_REQUEST", message: error.message });
+      throw error;
+    }
+  }),
+  cancel: protectedProcedure.input(z16.object({ immediate: z16.boolean().optional(), track: z16.enum(EXAM_TRACKS).optional() })).mutation(async ({ ctx, input }) => {
+    const track = await resolveTrack(ctx.user.id, input.track);
+    const current = await getCurrentSubscription(ctx.user.id, track);
     const nextStatus = input.immediate ? "canceled" : current.status;
     if (input.immediate) assertValidSubscriptionTransition(current.status, "canceled");
-    await updateSubscription(ctx.user.id, { status: nextStatus, cancelAtPeriodEnd: input.immediate ? 0 : 1, canceledAt: /* @__PURE__ */ new Date() });
-    await writeAuditLog({ userId: ctx.user.id, action: "user_canceled", oldState: { status: current.status }, newState: { status: nextStatus, cancelAtPeriodEnd: !input.immediate } });
-    return getEntitlements(ctx.user.id);
+    await updateSubscription(ctx.user.id, track, { status: nextStatus, cancelAtPeriodEnd: input.immediate ? 0 : 1, canceledAt: /* @__PURE__ */ new Date() });
+    await writeAuditLog({ userId: ctx.user.id, action: "user_canceled", oldState: { status: current.status }, newState: { status: nextStatus, cancelAtPeriodEnd: !input.immediate, track } });
+    return getEntitlements(ctx.user.id, track);
   }),
-  resume: protectedProcedure.mutation(async ({ ctx }) => {
-    const current = await getCurrentSubscription(ctx.user.id);
-    if (!current.cancelAtPeriodEnd && current.status !== "canceled") return getEntitlements(ctx.user.id);
+  resume: protectedProcedure.input(trackInput).mutation(async ({ ctx, input }) => {
+    const track = await resolveTrack(ctx.user.id, input?.track);
+    const current = await getCurrentSubscription(ctx.user.id, track);
+    if (!current.cancelAtPeriodEnd && current.status !== "canceled") return getEntitlements(ctx.user.id, track);
     assertValidSubscriptionTransition(current.status, "active");
-    await updateSubscription(ctx.user.id, { status: "active", cancelAtPeriodEnd: 0, canceledAt: null });
-    await writeAuditLog({ userId: ctx.user.id, action: "user_resumed", oldState: { status: current.status }, newState: { status: "active" } });
-    return getEntitlements(ctx.user.id);
+    await updateSubscription(ctx.user.id, track, { status: "active", cancelAtPeriodEnd: 0, canceledAt: null });
+    await writeAuditLog({ userId: ctx.user.id, action: "user_resumed", oldState: { status: current.status }, newState: { status: "active", track } });
+    return getEntitlements(ctx.user.id, track);
   }),
   restore: protectedProcedure.input(z16.object({ providerToken: z16.string().min(1) })).mutation(async ({ ctx, input }) => {
     const provider = paymentProviderFactory();
     const result = await provider.restorePurchase({ userId: ctx.user.id, providerToken: input.providerToken });
     if (!result.valid) throw new Error(result.reason ?? "Sat\u0131n alma do\u011Frulanamad\u0131");
     await writeAuditLog({ userId: ctx.user.id, action: "purchase_restored", newState: { providerSubscriptionId: result.providerSubscriptionId } });
-    return getEntitlements(ctx.user.id);
+    return getEntitlements(ctx.user.id, await getStudentExamTrack(ctx.user.id));
   })
 });
 
 // server/routers/payment.ts
 import { z as z17 } from "zod";
+import { TRPCError as TRPCError15 } from "@trpc/server";
 var paymentRouter = router({
   createCheckout: protectedProcedure.input(z17.object({ planCode: z17.string().min(1), successUrl: z17.string().url(), cancelUrl: z17.string().url() })).mutation(async ({ ctx, input }) => {
     const plan = await getPlanByCode(input.planCode);
@@ -11491,26 +11916,26 @@ var paymentRouter = router({
    * `PAYMENT_PROVIDER` gerçek bir sağlayıcıya çevrildiğinde bu uç nokta
    * otomatik olarak devre dışı kalır.
    */
-  completeMockCheckout: protectedProcedure.input(z17.object({ planCode: z17.string().min(1) })).mutation(async ({ ctx, input }) => {
+  // Sepet (`items`: bir ya da birden çok sınav) ya da eski istemciler için tek `planCode`.
+  // Tutar sunucuda hesaplanır: paket (2+ sınav) ve branş indirimi (shared/checkoutQuote.ts).
+  completeMockCheckout: protectedProcedure.input(z17.object({ planCode: z17.string().min(1).optional(), items: quoteItemsInput.optional() })).mutation(async ({ ctx, input }) => {
     if (ENV.paymentProvider !== "mock") {
       throw new Error("Bu u\xE7 nokta yaln\u0131zca PAYMENT_PROVIDER=mock iken kullan\u0131labilir.");
     }
-    const plan = await getPlanByCode(input.planCode);
-    if (!plan || !plan.isActive) throw new Error("Ge\xE7ersiz veya pasif plan.");
-    const result = await processWebhookEvent({
-      provider: "mock",
-      eventId: `mock_manual_${ctx.user.id}_${Date.now()}`,
-      eventType: "checkout.completed",
-      payload: { userId: ctx.user.id, planCode: input.planCode },
-      rawPayloadForAudit: { userId: ctx.user.id, planCode: input.planCode, source: "completeMockCheckout" }
-    });
-    if (result.status === "failed") throw new Error(result.reason ?? "Sandbox \xF6demesi i\u015Flenemedi.");
-    return result;
+    const items = input.items ?? (input.planCode ? [await itemFromPlanCode(input.planCode)] : null);
+    if (!items) throw new Error("Sepet bo\u015F.");
+    try {
+      const { quote, checkoutId } = await completeMockCheckoutForUser(ctx.user.id, items);
+      return { status: "processed", checkoutId, total: quote.total, lines: quote.lines };
+    } catch (error) {
+      if (error instanceof QuoteError) throw new TRPCError15({ code: "BAD_REQUEST", message: error.message });
+      throw error;
+    }
   })
 });
 
 // server/admin/analyticsService.ts
-import { and as and21, count as count2, eq as eq24, gte as gte14, isNotNull as isNotNull7, lt as lt10, sql as sql10 } from "drizzle-orm";
+import { and as and22, count as count2, countDistinct, eq as eq25, gte as gte14, isNotNull as isNotNull7, lt as lt10, ne as ne4, sql as sql10 } from "drizzle-orm";
 async function getAdminDashboardKpis() {
   const db = await getDb();
   const empty = {
@@ -11538,18 +11963,20 @@ async function getAdminDashboardKpis() {
   todayStart.setHours(0, 0, 0, 0);
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1e3);
   const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1e3);
-  const [approvalCounts, accountStatusCounts, planStatusCounts, activeTodayRow, activeWeekRow, inactive7Row, inactive30Row, totalRow, trialStartedRow, stillTrialingRow, convertedRow] = await Promise.all([
+  const [approvalCounts, accountStatusCounts, planStatusCounts, activeTodayRow, activeWeekRow, inactive7Row, inactive30Row, totalRow, trialStartedRow, stillTrialingRow, convertedRow, premiumUsersRow] = await Promise.all([
     db.select({ approvalStatus: users.approvalStatus, total: count2() }).from(users).groupBy(users.approvalStatus),
     db.select({ accountStatus: users.accountStatus, total: count2() }).from(users).groupBy(users.accountStatus),
-    db.select({ tier: subscriptionPlans.tier, billingPeriod: subscriptionPlans.billingPeriod, status: subscriptions.status, total: count2() }).from(subscriptions).innerJoin(subscriptionPlans, eq24(subscriptionPlans.id, subscriptions.planId)).groupBy(subscriptionPlans.tier, subscriptionPlans.billingPeriod, subscriptions.status),
+    db.select({ tier: subscriptionPlans.tier, billingPeriod: subscriptionPlans.billingPeriod, status: subscriptions.status, total: count2() }).from(subscriptions).innerJoin(subscriptionPlans, eq25(subscriptionPlans.id, subscriptions.planId)).groupBy(subscriptionPlans.tier, subscriptionPlans.billingPeriod, subscriptions.status),
     db.select({ total: count2() }).from(users).where(gte14(users.lastSignedIn, todayStart)),
     db.select({ total: count2() }).from(users).where(gte14(users.lastSignedIn, weekAgo)),
     db.select({ total: count2() }).from(users).where(lt10(users.lastSignedIn, weekAgo)),
     db.select({ total: count2() }).from(users).where(lt10(users.lastSignedIn, monthAgo)),
     db.select({ total: count2() }).from(users),
     db.select({ total: count2() }).from(subscriptions).where(isNotNull7(subscriptions.trialStartedAt)),
-    db.select({ total: count2() }).from(subscriptions).where(eq24(subscriptions.status, "trialing")),
-    db.select({ total: count2() }).from(subscriptions).where(and21(isNotNull7(subscriptions.trialStartedAt), sql10`${subscriptions.status} in ('active','past_due','grace_period')`))
+    db.select({ total: count2() }).from(subscriptions).where(eq25(subscriptions.status, "trialing")),
+    db.select({ total: count2() }).from(subscriptions).where(and22(isNotNull7(subscriptions.trialStartedAt), sql10`${subscriptions.status} in ('active','past_due','grace_period')`)),
+    // Üye sayıları kişi başına: her sınavın aboneliği ayrı satır, bir aday birden fazla sınava abone olabilir.
+    db.select({ total: countDistinct(subscriptions.userId) }).from(subscriptions).innerJoin(subscriptionPlans, eq25(subscriptionPlans.id, subscriptions.planId)).where(and22(ne4(subscriptionPlans.tier, "free"), sql10`${subscriptions.status} in ('active','trialing','grace_period')`))
   ]);
   const kpis = { ...empty, totalUsers: totalRow[0]?.total ?? 0, activeToday: activeTodayRow[0]?.total ?? 0, activeThisWeek: activeWeekRow[0]?.total ?? 0, inactive7Plus: inactive7Row[0]?.total ?? 0, inactive30Plus: inactive30Row[0]?.total ?? 0 };
   for (const row of approvalCounts) {
@@ -11560,9 +11987,7 @@ async function getAdminDashboardKpis() {
     if (row.accountStatus === "suspended") kpis.suspendedAccounts = row.total;
   }
   for (const row of planStatusCounts) {
-    if (row.tier === "free") kpis.freeUsers += row.total;
     if (row.status === "trialing") kpis.trialUsers += row.total;
-    if (row.tier !== "free" && (row.status === "active" || row.status === "trialing" || row.status === "grace_period")) kpis.premiumUsers += row.total;
     if (row.tier !== "free" && row.billingPeriod === "monthly") kpis.monthlySubscribers += row.total;
     if (row.tier !== "free" && row.billingPeriod === "yearly") kpis.yearlySubscribers += row.total;
     if (row.status === "past_due") kpis.pastDue += row.total;
@@ -11570,6 +11995,8 @@ async function getAdminDashboardKpis() {
     if (row.status === "expired") kpis.expiredSubscriptions += row.total;
     if (row.status === "canceled") kpis.canceledSubscriptions += row.total;
   }
+  kpis.premiumUsers = premiumUsersRow[0]?.total ?? 0;
+  kpis.freeUsers = Math.max(0, kpis.totalUsers - kpis.premiumUsers);
   const started = trialStartedRow[0]?.total ?? 0;
   const stillTrialing = stillTrialingRow[0]?.total ?? 0;
   const converted = convertedRow[0]?.total ?? 0;
@@ -11609,11 +12036,13 @@ var adminPaymentsRouter = router({
 
 // server/routers/admin/subscriptions.ts
 import { z as z21 } from "zod";
+var trackField = z21.enum(EXAM_TRACKS).default("YKS");
 var adminSubscriptionsRouter = router({
   list: adminProcedure.query(() => listAllSubscriptionsForAdmin()),
   get: adminProcedure.input(z21.object({ userId: z21.number().int() })).query(async ({ input }) => {
-    const [subscription, payments2, auditLogs] = await Promise.all([getSubscriptionByUserId(input.userId), listPaymentsForUser(input.userId), listAuditLogsForUser(input.userId)]);
-    return { subscription, payments: payments2, auditLogs };
+    const [subscriptions2, payments2, auditLogs] = await Promise.all([listSubscriptionsForUser(input.userId), listPaymentsForUser(input.userId), listAuditLogsForUser(input.userId)]);
+    const subscription = subscriptions2.find((row) => row.track === "YKS") ?? subscriptions2[0];
+    return { subscription, subscriptions: subscriptions2, payments: payments2, auditLogs };
   }),
   /**
    * Elle erişim verme — spec §24/§9/§28/§29: "Manual entitlement ile
@@ -11629,39 +12058,49 @@ var adminSubscriptionsRouter = router({
   grant: adminProcedure.input(z21.object({ userId: z21.number().int(), planCode: z21.string().min(1), days: z21.number().int().min(1).max(3650), reason: z21.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
     const plan = await getPlanByCode(input.planCode);
     if (!plan) throw new Error(`Plan bulunamad\u0131: ${input.planCode}`);
-    const existing = await getSubscriptionByUserId(input.userId);
+    const track = plan.track ?? "YKS";
+    const existing = await getSubscriptionByUserId(input.userId, track);
+    await ensureFreeSubscription(input.userId, track);
     const now = /* @__PURE__ */ new Date();
     const periodEnd = new Date(now.getTime() + input.days * 24 * 60 * 60 * 1e3);
     if (existing) assertValidSubscriptionTransition(existing.status, "active");
-    await updateSubscription(input.userId, { planId: plan.id, status: "active", currentPeriodStart: now, currentPeriodEnd: periodEnd, cancelAtPeriodEnd: 0, canceledAt: null, isManualOverride: 1, provider: null, providerSubscriptionId: null, providerCustomerId: null });
-    await writeAuditLog({ userId: input.userId, adminId: ctx.user.id, action: "manual_grant", oldState: existing ? { status: existing.status } : null, newState: { status: "active", planCode: plan.code, until: periodEnd.toISOString() }, reason: input.reason });
-    return getSubscriptionByUserId(input.userId);
+    await updateSubscription(input.userId, track, { planId: plan.id, status: "active", currentPeriodStart: now, currentPeriodEnd: periodEnd, cancelAtPeriodEnd: 0, canceledAt: null, isManualOverride: 1, provider: null, providerSubscriptionId: null, providerCustomerId: null });
+    await writeAuditLog({ userId: input.userId, adminId: ctx.user.id, action: "manual_grant", oldState: existing ? { status: existing.status } : null, newState: { status: "active", planCode: plan.code, track, until: periodEnd.toISOString() }, reason: input.reason });
+    return getSubscriptionByUserId(input.userId, track);
   }),
-  revoke: adminProcedure.input(z21.object({ userId: z21.number().int(), reason: z21.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
-    const existing = await getSubscriptionByUserId(input.userId);
+  revoke: adminProcedure.input(z21.object({ userId: z21.number().int(), track: trackField, reason: z21.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
+    const existing = await getSubscriptionByUserId(input.userId, input.track);
     if (!existing) throw new Error("Abonelik bulunamad\u0131");
     const freePlan = await getPlanByCode("FREE");
     if (!freePlan) throw new Error("FREE plan\u0131 bulunamad\u0131");
     assertValidSubscriptionTransition(existing.status, "canceled");
-    await updateSubscription(input.userId, { planId: freePlan.id, status: "canceled", cancelAtPeriodEnd: 0, canceledAt: /* @__PURE__ */ new Date(), isManualOverride: 0 });
-    await writeAuditLog({ userId: input.userId, adminId: ctx.user.id, action: "manual_revoke", oldState: { status: existing.status }, newState: { status: "canceled", planCode: "FREE" }, reason: input.reason });
-    return getSubscriptionByUserId(input.userId);
+    await updateSubscription(input.userId, input.track, { planId: freePlan.id, status: "canceled", cancelAtPeriodEnd: 0, canceledAt: /* @__PURE__ */ new Date(), isManualOverride: 0 });
+    await writeAuditLog({ userId: input.userId, adminId: ctx.user.id, action: "manual_revoke", oldState: { status: existing.status }, newState: { status: "canceled", planCode: "FREE", track: input.track }, reason: input.reason });
+    return getSubscriptionByUserId(input.userId, input.track);
   }),
-  cancel: adminProcedure.input(z21.object({ userId: z21.number().int(), reason: z21.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
-    const existing = await getSubscriptionByUserId(input.userId);
+  cancel: adminProcedure.input(z21.object({ userId: z21.number().int(), track: trackField, reason: z21.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
+    const existing = await getSubscriptionByUserId(input.userId, input.track);
     if (!existing) throw new Error("Abonelik bulunamad\u0131");
     assertValidSubscriptionTransition(existing.status, "canceled");
-    await updateSubscription(input.userId, { status: "canceled", canceledAt: /* @__PURE__ */ new Date(), cancelAtPeriodEnd: 0 });
-    await writeAuditLog({ userId: input.userId, adminId: ctx.user.id, action: "admin_canceled", oldState: { status: existing.status }, newState: { status: "canceled" }, reason: input.reason });
-    return getSubscriptionByUserId(input.userId);
+    await updateSubscription(input.userId, input.track, { status: "canceled", canceledAt: /* @__PURE__ */ new Date(), cancelAtPeriodEnd: 0 });
+    await writeAuditLog({ userId: input.userId, adminId: ctx.user.id, action: "admin_canceled", oldState: { status: existing.status }, newState: { status: "canceled", track: input.track }, reason: input.reason });
+    return getSubscriptionByUserId(input.userId, input.track);
   }),
-  resume: adminProcedure.input(z21.object({ userId: z21.number().int() })).mutation(async ({ ctx, input }) => {
-    const existing = await getSubscriptionByUserId(input.userId);
+  resume: adminProcedure.input(z21.object({ userId: z21.number().int(), track: trackField })).mutation(async ({ ctx, input }) => {
+    const existing = await getSubscriptionByUserId(input.userId, input.track);
     if (!existing) throw new Error("Abonelik bulunamad\u0131");
     assertValidSubscriptionTransition(existing.status, "active");
-    await updateSubscription(input.userId, { status: "active", cancelAtPeriodEnd: 0, canceledAt: null });
-    await writeAuditLog({ userId: input.userId, adminId: ctx.user.id, action: "admin_resumed", oldState: { status: existing.status }, newState: { status: "active" } });
-    return getSubscriptionByUserId(input.userId);
+    await updateSubscription(input.userId, input.track, { status: "active", cancelAtPeriodEnd: 0, canceledAt: null });
+    await writeAuditLog({ userId: input.userId, adminId: ctx.user.id, action: "admin_resumed", oldState: { status: existing.status }, newState: { status: "active", track: input.track } });
+    return getSubscriptionByUserId(input.userId, input.track);
+  }),
+  // Fiyatlar: her sınavın planları (satışta olmayanlar dahil) ve fiyat/deneme/satış durumu düzenleme.
+  plans: adminProcedure.query(() => listAllPlans()),
+  updatePlan: adminProcedure.input(z21.object({ planId: z21.number().int().positive(), price: z21.number().int().min(0).max(1e8).optional(), trialDays: z21.number().int().min(0).max(60).optional(), isActive: z21.boolean().optional() })).mutation(async ({ ctx, input }) => {
+    const plan = await updatePlanPricing(input.planId, { price: input.price, trialDays: input.trialDays, isActive: input.isActive });
+    if (!plan) throw new Error("Plan bulunamad\u0131");
+    await writeAuditLog({ userId: ctx.user.id, adminId: ctx.user.id, action: "plan_pricing_updated", newState: { planCode: plan.code, price: plan.price, trialDays: plan.trialDays, isActive: plan.isActive } });
+    return plan;
   })
 });
 
@@ -11738,16 +12177,16 @@ var adminSystemRouter = router({
 import { z as z22 } from "zod";
 
 // server/testimonials/testimonials.ts
-import { desc as desc14, eq as eq25 } from "drizzle-orm";
+import { desc as desc14, eq as eq26 } from "drizzle-orm";
 async function listPublishedTestimonials(limit = 9) {
   const db = await getDb();
   if (!db) return [];
-  return db.select({ id: testimonials.id, displayName: testimonials.displayName, detail: testimonials.detail, rating: testimonials.rating, body: testimonials.body }).from(testimonials).where(eq25(testimonials.status, "approved")).orderBy(desc14(testimonials.reviewedAt)).limit(limit);
+  return db.select({ id: testimonials.id, displayName: testimonials.displayName, detail: testimonials.detail, rating: testimonials.rating, body: testimonials.body }).from(testimonials).where(eq26(testimonials.status, "approved")).orderBy(desc14(testimonials.reviewedAt)).limit(limit);
 }
 async function getMyTestimonial(userId) {
   const db = await getDb();
   if (!db) return null;
-  const [row] = await db.select().from(testimonials).where(eq25(testimonials.userId, userId)).limit(1);
+  const [row] = await db.select().from(testimonials).where(eq26(testimonials.userId, userId)).limit(1);
   return row ?? null;
 }
 async function saveMyTestimonial(userId, input) {
@@ -11760,17 +12199,17 @@ async function saveMyTestimonial(userId, input) {
 async function deleteMyTestimonial(userId) {
   const db = await getDb();
   if (!db) return;
-  await db.delete(testimonials).where(eq25(testimonials.userId, userId));
+  await db.delete(testimonials).where(eq26(testimonials.userId, userId));
 }
 async function listTestimonialsForAdmin(status) {
   const db = await getDb();
   if (!db) return [];
-  return db.select({ id: testimonials.id, displayName: testimonials.displayName, detail: testimonials.detail, rating: testimonials.rating, body: testimonials.body, status: testimonials.status, updatedAt: testimonials.updatedAt, userId: testimonials.userId, userName: users.name, userEmail: users.email }).from(testimonials).leftJoin(users, eq25(users.id, testimonials.userId)).where(eq25(testimonials.status, status)).orderBy(desc14(testimonials.updatedAt)).limit(200);
+  return db.select({ id: testimonials.id, displayName: testimonials.displayName, detail: testimonials.detail, rating: testimonials.rating, body: testimonials.body, status: testimonials.status, updatedAt: testimonials.updatedAt, userId: testimonials.userId, userName: users.name, userEmail: users.email }).from(testimonials).leftJoin(users, eq26(users.id, testimonials.userId)).where(eq26(testimonials.status, status)).orderBy(desc14(testimonials.updatedAt)).limit(200);
 }
 async function reviewTestimonial(id5, status, reviewerId) {
   const db = await getDb();
   if (!db) return;
-  await db.update(testimonials).set({ status, reviewedAt: /* @__PURE__ */ new Date(), reviewedBy: reviewerId }).where(eq25(testimonials.id, id5));
+  await db.update(testimonials).set({ status, reviewedAt: /* @__PURE__ */ new Date(), reviewedBy: reviewerId }).where(eq26(testimonials.id, id5));
 }
 
 // server/routers/admin/testimonials.ts
@@ -11785,7 +12224,7 @@ var adminTestimonialsRouter = router({
 // server/routers/admin/usage.ts
 import { z as z23 } from "zod";
 var adminUsageRouter = router({
-  get: adminProcedure.input(z23.object({ userId: z23.number().int() })).query(({ input }) => getUsageSummaryForUser(input.userId)),
+  get: adminProcedure.input(z23.object({ userId: z23.number().int(), track: z23.enum(EXAM_TRACKS).default("YKS") })).query(({ input }) => getUsageSummaryForUser(input.userId, input.track)),
   reset: adminProcedure.input(z23.object({ userId: z23.number().int(), featureKey: z23.enum(FEATURE_KEYS) })).mutation(({ ctx, input }) => resetFeatureUsage(input.userId, input.featureKey, USAGE_WINDOW_DAYS, ctx.user.id))
 });
 
@@ -11793,10 +12232,10 @@ var adminUsageRouter = router({
 import { z as z24 } from "zod";
 
 // server/admin/adminUserDb.ts
-import { and as and23, count as count3, desc as desc15, eq as eq27, gte as gte16, inArray as inArray11, isNull as isNull13, ilike as ilike3, lt as lt11, or as or5, sql as sql11 } from "drizzle-orm";
+import { and as and24, count as count3, desc as desc15, eq as eq28, gte as gte16, inArray as inArray11, isNull as isNull13, ilike as ilike3, lt as lt11, or as or5, sql as sql11 } from "drizzle-orm";
 
 // server/admin/progressService.ts
-import { and as and22, eq as eq26, gte as gte15 } from "drizzle-orm";
+import { and as and23, eq as eq27, gte as gte15 } from "drizzle-orm";
 
 // shared/progressScore.ts
 var PROGRESS_SCORE_CONFIG = {
@@ -11835,14 +12274,14 @@ async function getStudyProgressScore(userId) {
   const db = await getDb();
   const generatedAt = (/* @__PURE__ */ new Date()).toISOString();
   if (!db) return { overallScore: null, insufficientData: true, components: emptyComponents(), generatedAt };
-  const [userRow] = await db.select({ createdAt: users.createdAt }).from(users).where(eq26(users.id, userId)).limit(1);
+  const [userRow] = await db.select({ createdAt: users.createdAt }).from(users).where(eq27(users.id, userId)).limit(1);
   const accountAgeDays = userRow ? Math.max(0, Math.floor((Date.now() - userRow.createdAt.getTime()) / 864e5)) : 0;
   const windowStart = new Date(Date.now() - CONSISTENCY_WINDOW_DAYS * 864e5);
   const [recentLogs, allLogs, topicRows, examRows] = await Promise.all([
-    db.select({ studyDate: topicStudyLogs.studyDate }).from(topicStudyLogs).where(and22(eq26(topicStudyLogs.userId, userId), gte15(topicStudyLogs.studyDate, windowStart))),
-    db.select({ questions: topicStudyLogs.questions, correct: topicStudyLogs.correct }).from(topicStudyLogs).where(eq26(topicStudyLogs.userId, userId)),
-    db.select({ progress: topicProgress.progress }).from(topicProgress).where(eq26(topicProgress.userId, userId)),
-    db.select({ net: userMockExams.net }).from(userMockExams).where(eq26(userMockExams.userId, userId))
+    db.select({ studyDate: topicStudyLogs.studyDate }).from(topicStudyLogs).where(and23(eq27(topicStudyLogs.userId, userId), gte15(topicStudyLogs.studyDate, windowStart))),
+    db.select({ questions: topicStudyLogs.questions, correct: topicStudyLogs.correct }).from(topicStudyLogs).where(eq27(topicStudyLogs.userId, userId)),
+    db.select({ progress: topicProgress.progress }).from(topicProgress).where(eq27(topicProgress.userId, userId)),
+    db.select({ net: userMockExams.net }).from(userMockExams).where(eq27(userMockExams.userId, userId))
   ]);
   const activeDaysInWindow = new Set(recentLogs.map((row) => toLocalDateKey(row.studyDate))).size;
   const totalQuestions = allLogs.reduce((sum, row) => sum + row.questions, 0);
@@ -11894,15 +12333,16 @@ async function listUsersForAdminPaginated(filters) {
     const digits = filters.search.replace(/\D/g, "").replace(/^0/, "");
     conditions.push(or5(ilike3(users.name, term), ilike3(users.email, term), ...digits.length >= 4 ? [ilike3(users.openId, `dev_phone_%${digits}%`)] : []));
   }
-  if (filters.approvalStatus) conditions.push(eq27(users.approvalStatus, filters.approvalStatus));
-  if (filters.accountStatus) conditions.push(eq27(users.accountStatus, filters.accountStatus));
-  if (filters.planCode) conditions.push(eq27(subscriptionPlans.code, filters.planCode));
-  if (filters.subscriptionStatus) conditions.push(eq27(subscriptions.status, filters.subscriptionStatus));
+  if (filters.approvalStatus) conditions.push(eq28(users.approvalStatus, filters.approvalStatus));
+  if (filters.accountStatus) conditions.push(eq28(users.accountStatus, filters.accountStatus));
+  if (filters.planCode) conditions.push(eq28(subscriptionPlans.code, filters.planCode));
+  if (filters.subscriptionStatus) conditions.push(eq28(subscriptions.status, filters.subscriptionStatus));
   if (filters.activity === "today") conditions.push(gte16(users.lastSignedIn, startOfToday2()));
   else if (filters.activity === "week") conditions.push(gte16(users.lastSignedIn, daysAgo(7)));
   else if (filters.activity === "inactive") conditions.push(lt11(users.lastSignedIn, daysAgo(7)));
-  const whereClause = conditions.length ? and23(...conditions) : void 0;
-  const countQuery = db.select({ total: count3() }).from(users).leftJoin(subscriptions, eq27(subscriptions.userId, users.id)).leftJoin(subscriptionPlans, eq27(subscriptionPlans.id, subscriptions.planId));
+  const whereClause = conditions.length ? and24(...conditions) : void 0;
+  const activeSubscription = and24(eq28(subscriptions.userId, users.id), eq28(subscriptions.track, sql11`coalesce((select sp."examTrack" from student_profiles sp where sp."userId" = ${users.id}), 'YKS')`));
+  const countQuery = db.select({ total: count3() }).from(users).leftJoin(subscriptions, activeSubscription).leftJoin(subscriptionPlans, eq28(subscriptionPlans.id, subscriptions.planId));
   const [{ total }] = await (whereClause ? countQuery.where(whereClause) : countQuery);
   const pageQuery = db.select({
     id: users.id,
@@ -11921,7 +12361,7 @@ async function listUsersForAdminPaginated(filters) {
     subscriptionStatus: subscriptions.status,
     trialEndsAt: subscriptions.trialEndsAt,
     currentPeriodEnd: subscriptions.currentPeriodEnd
-  }).from(users).leftJoin(subscriptions, eq27(subscriptions.userId, users.id)).leftJoin(subscriptionPlans, eq27(subscriptionPlans.id, subscriptions.planId)).orderBy(desc15(users.createdAt)).limit(pageSize).offset((page2 - 1) * pageSize);
+  }).from(users).leftJoin(subscriptions, activeSubscription).leftJoin(subscriptionPlans, eq28(subscriptionPlans.id, subscriptions.planId)).orderBy(desc15(users.createdAt)).limit(pageSize).offset((page2 - 1) * pageSize);
   const pageRows = await (whereClause ? pageQuery.where(whereClause) : pageQuery);
   const ids = pageRows.map((row) => row.id);
   const [topicAgg, examAgg, studyAgg] = ids.length ? await Promise.all([
@@ -11961,19 +12401,19 @@ var daysAgo = (days) => new Date(Date.now() - days * 24 * 60 * 60 * 1e3);
 async function suspendUser(userId, adminId, reason) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ accountStatus: "suspended" }).where(eq27(users.id, userId));
+  await db.update(users).set({ accountStatus: "suspended" }).where(eq28(users.id, userId));
   await writeAuditLog({ userId, adminId, action: "user_suspended", newState: { accountStatus: "suspended" }, reason });
 }
 async function reactivateUser(userId, adminId) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ accountStatus: "active" }).where(eq27(users.id, userId));
+  await db.update(users).set({ accountStatus: "active" }).where(eq28(users.id, userId));
   await writeAuditLog({ userId, adminId, action: "user_reactivated", newState: { accountStatus: "active" } });
 }
 async function verifyUserEmailManually(userId, adminId) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ emailVerifiedAt: /* @__PURE__ */ new Date() }).where(and23(eq27(users.id, userId), isNull13(users.emailVerifiedAt)));
+  await db.update(users).set({ emailVerifiedAt: /* @__PURE__ */ new Date() }).where(and24(eq28(users.id, userId), isNull13(users.emailVerifiedAt)));
   await writeAuditLog({ userId, adminId, action: "email_verified_by_admin", newState: { emailVerified: true } });
 }
 function maskId2(value) {
@@ -11984,19 +12424,20 @@ function maskId2(value) {
 async function getUserDetailForAdmin(userId) {
   const db = await getDb();
   if (!db) return null;
-  const [userRow] = await db.select().from(users).where(eq27(users.id, userId)).limit(1);
+  const [userRow] = await db.select().from(users).where(eq28(users.id, userId)).limit(1);
   if (!userRow) return null;
+  const activeTrack = await getStudentExamTrack(userId);
   const [entitlements, usage, progressScore, payments2, recentExams, topicRows, recentStudyLogs, auditLogs, profile, bookContentRows, notebook] = await Promise.all([
-    getEntitlements(userId),
-    getUsageSummaryForUser(userId),
+    getEntitlements(userId, activeTrack),
+    getUsageSummaryForUser(userId, activeTrack),
     getStudyProgressScore(userId),
     listPaymentsForUser(userId),
-    db.select().from(userMockExams).where(eq27(userMockExams.userId, userId)).orderBy(desc15(userMockExams.examDate)).limit(10),
-    db.select().from(topicProgress).where(eq27(topicProgress.userId, userId)),
-    db.select().from(topicStudyLogs).where(eq27(topicStudyLogs.userId, userId)).orderBy(desc15(topicStudyLogs.studyDate)).limit(20),
+    db.select().from(userMockExams).where(eq28(userMockExams.userId, userId)).orderBy(desc15(userMockExams.examDate)).limit(10),
+    db.select().from(topicProgress).where(eq28(topicProgress.userId, userId)),
+    db.select().from(topicStudyLogs).where(eq28(topicStudyLogs.userId, userId)).orderBy(desc15(topicStudyLogs.studyDate)).limit(20),
     listAuditLogsForUser(userId),
     getStudentProfile(userId),
-    db.select({ bookId: userBookContents.bookId, mappingStatus: userBookContents.mappingStatus, mappingMethod: userBookContents.mappingMethod, mappingConfidence: userBookContents.mappingConfidence, source: userBookContents.source, createdAt: userBookContents.createdAt }).from(userBookContents).where(eq27(userBookContents.userId, userId)),
+    db.select({ bookId: userBookContents.bookId, mappingStatus: userBookContents.mappingStatus, mappingMethod: userBookContents.mappingMethod, mappingConfidence: userBookContents.mappingConfidence, source: userBookContents.source, createdAt: userBookContents.createdAt }).from(userBookContents).where(eq28(userBookContents.userId, userId)),
     // Defter: yalnızca sayılar — öğrencinin not içeriği admin tarafından görülmez.
     getNoteStatsForAdmin(userId)
   ]);
@@ -12013,13 +12454,15 @@ async function getUserDetailForAdmin(userId) {
   const bookIds = bookContents.map((book) => book.bookId);
   const numericIds = bookIds.filter((id5) => /^\d+$/.test(id5)).map(Number);
   const [customTitles, catalogTitles] = bookIds.length ? await Promise.all([
-    db.select({ bookId: userResourceBooks.bookId, title: userResourceBooks.title }).from(userResourceBooks).where(and23(eq27(userResourceBooks.userId, userId), inArray11(userResourceBooks.bookId, bookIds))),
+    db.select({ bookId: userResourceBooks.bookId, title: userResourceBooks.title }).from(userResourceBooks).where(and24(eq28(userResourceBooks.userId, userId), inArray11(userResourceBooks.bookId, bookIds))),
     numericIds.length ? db.select({ id: catalogBooks.id, name: catalogBooks.name }).from(catalogBooks).where(inArray11(catalogBooks.id, numericIds)) : Promise.resolve([])
   ]) : [[], []];
   const titleById = new Map([...customTitles.map((row) => [row.bookId, row.title]), ...catalogTitles.map((row) => [String(row.id), row.name])]);
   const bookContentsWithTitles = bookContents.map((book) => ({ ...book, title: titleById.get(book.bookId) ?? null }));
-  const [subscriptionRow] = await db.select().from(subscriptions).where(eq27(subscriptions.userId, userId)).limit(1);
+  const allSubscriptions = await listSubscriptionsForUser(userId);
+  const subscriptionRow = allSubscriptions.find((row) => row.track === activeTrack);
   const plan = subscriptionRow ? await getPlanById(subscriptionRow.planId) : null;
+  const subscriptionsByTrack = await Promise.all(allSubscriptions.map(async (row) => ({ track: row.track, status: row.status, planCode: (await getPlanById(row.planId))?.code ?? "FREE", currentPeriodEnd: row.currentPeriodEnd, trialEndsAt: row.trialEndsAt, cancelAtPeriodEnd: row.cancelAtPeriodEnd, isManualOverride: row.isManualOverride })));
   const { passwordHash: _passwordHash, ...safeUser } = userRow;
   return {
     user: { ...safeUser, phone: phoneFromOpenId(safeUser.openId) },
@@ -12027,6 +12470,8 @@ async function getUserDetailForAdmin(userId) {
     bookContents: bookContentsWithTitles,
     notebook,
     subscription: subscriptionRow ? { ...subscriptionRow, providerSubscriptionId: maskId2(subscriptionRow.providerSubscriptionId), providerCustomerId: maskId2(subscriptionRow.providerCustomerId), planCode: plan?.code ?? "FREE", planName: plan?.name ?? "\xDCcretsiz", planTier: plan?.tier ?? "free" } : null,
+    subscriptions: subscriptionsByTrack,
+    activeTrack,
     entitlements,
     usage,
     progressScore,
@@ -12273,13 +12718,13 @@ var appRouter = router({
       try {
         checkRateLimit(`change-password:${ctx.user.id}`, 5, 15 * 6e4);
       } catch {
-        throw new TRPCError14({ code: "TOO_MANY_REQUESTS", message: "\xC7ok fazla deneme yapt\u0131n. 15 dakika sonra tekrar dener misin?" });
+        throw new TRPCError16({ code: "TOO_MANY_REQUESTS", message: "\xC7ok fazla deneme yapt\u0131n. 15 dakika sonra tekrar dener misin?" });
       }
       try {
         await changeLocalPassword(ctx.user.id, input.currentPassword, input.newPassword);
         return { success: true };
       } catch (error) {
-        if (error instanceof PasswordChangeError) throw new TRPCError14({ code: "BAD_REQUEST", message: error.message });
+        if (error instanceof PasswordChangeError) throw new TRPCError16({ code: "BAD_REQUEST", message: error.message });
         throw error;
       }
     }),
@@ -12290,7 +12735,7 @@ var appRouter = router({
         return await sendVerificationEmail(ctx.user, ctx.req);
       } catch (error) {
         console.error("[EmailVerification] resend failed:", error instanceof Error ? error.message : error);
-        throw new TRPCError14({ code: "INTERNAL_SERVER_ERROR", message: "Do\u011Frulama maili \u015Fu an g\xF6nderilemedi. Birka\xE7 dakika sonra tekrar dener misin?" });
+        throw new TRPCError16({ code: "INTERNAL_SERVER_ERROR", message: "Do\u011Frulama maili \u015Fu an g\xF6nderilemedi. Birka\xE7 dakika sonra tekrar dener misin?" });
       }
     })
   }),
@@ -12395,6 +12840,9 @@ var appRouter = router({
       const targetContext = customGoal ? customTargetContext : profile && (profile.targetScoreType || profile.targetUniversity || profile.targetDepartment || profile.targetRanking || profile.examYear) ? `
 
 \xD6\u011Frencinin hedefi (onboarding'den \u2014 plan\u0131n \xF6nceliklerini buna g\xF6re kur, ama kesin bir s\u0131ralama/puan garantisi verme, sadece bu hedefe uygun bir tempo ve odak \xF6ner): hedef s\u0131nav y\u0131l\u0131 ${profile.examYear ?? "belirtilmemi\u015F"}, hedef puan t\xFCr\xFC ${profile.targetScoreType ?? "belirtilmemi\u015F"}, hedef \xFCniversite ${profile.targetUniversity || "belirtilmemi\u015F"}, hedef b\xF6l\xFCm ${profile.targetDepartment || "belirtilmemi\u015F"}, tahmini hedef s\u0131ralama ${profile.targetRanking || "belirtilmemi\u015F"}.` : "";
+      const chosenSubjectsContext = trackInfo.chooseSubjects && serverProfile?.selectedSubjects.length ? `
+
+Aday\u0131n girece\u011Fi alan testleri (plan\u0131 YALNIZCA bunlara kur): ${serverProfile.selectedSubjects.join(", ")}.` : "";
       const coachingContext = profile && (profile.dailyStudyDuration || profile.preferredStudyMethods?.length || profile.studyObstacles || profile.coachingStyle || profile.mainGoal) ? `
 
 \xD6\u011Frencinin ko\xE7luk tercihleri (varsa bunlara uy \u2014 \xF6rn. tercih etti\u011Fi \xE7al\u0131\u015Fma y\xF6ntemine a\u011F\u0131rl\u0131k ver, ileti\u015Fim tarz\u0131na uygun bir dille yaz): ${JSON.stringify({ dailyStudyDuration: profile.dailyStudyDuration, preferredStudyMethods: profile.preferredStudyMethods, studyObstacles: profile.studyObstacles, coachingStyle: profile.coachingStyle, mainGoal: profile.mainGoal })}` : "";
@@ -12425,7 +12873,7 @@ Son denemeler:
 ${JSON.stringify(recentExams)}
 
 Ki\u015Fisel raf ve \xE7\xF6z\xFCm durumu:
-${JSON.stringify(input.books)}${targetContext}${coachingContext}${notebookContext}${scheduleContext}`;
+${JSON.stringify(input.books)}${targetContext}${chosenSubjectsContext}${coachingContext}${notebookContext}${scheduleContext}`;
       try {
         const response = await invokeLLM({
           reasoningEffort: "low",
@@ -12458,14 +12906,14 @@ ${JSON.stringify(input.books)}${targetContext}${coachingContext}${notebookContex
         const normalized = normalizeAiPlan(parsed, fallbackPlan);
         if (normalized === fallbackPlan) {
           console.warn("[AI Plan] Unusable AI response; keys:", parsed && typeof parsed === "object" ? Object.keys(parsed).join(",") : typeof parsed);
-          throw new TRPCError14({ code: "INTERNAL_SERVER_ERROR", message: "AI plan\u0131 okunamad\u0131. Tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi." });
+          throw new TRPCError16({ code: "INTERNAL_SERVER_ERROR", message: "AI plan\u0131 okunamad\u0131. Tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi." });
         }
         return normalized;
       } catch (error) {
-        if (error instanceof TRPCError14) throw error;
+        if (error instanceof TRPCError16) throw error;
         console.warn("[AI Plan] LLM failed:", error);
         const quota = error instanceof LlmUnavailableError && error.reason === "quota";
-        throw new TRPCError14({
+        throw new TRPCError16({
           code: quota ? "TOO_MANY_REQUESTS" : "INTERNAL_SERVER_ERROR",
           message: quota ? "Yapay zek\xE2 servisinin kotas\u0131 \u015Fu an dolu; AI plan\u0131n\u0131 birka\xE7 saat sonra tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi." : "AI plan\u0131 \u015Fu an haz\u0131rlanamad\u0131; biraz sonra tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi."
         });
@@ -13280,25 +13728,26 @@ function createApiApp() {
 
 // server/subscriptions/seedPlans.ts
 var PAID_PRICES = {
-  basic: { code: "BASIC", monthly: 24900, yearly: 239900 },
-  premium: { code: "PREMIUM", monthly: 99900, yearly: 959900 },
-  premium_plus: { code: "PRO", monthly: 249900, yearly: 2399900 }
+  basic: { monthly: 24900, yearly: 239900 },
+  premium: { monthly: 99900, yearly: 959900 },
+  premium_plus: { monthly: 249900, yearly: 2399900 }
 };
 var TRIAL_DAYS = 10;
 var DEFAULT_PLANS = [
-  { code: "FREE", name: "\xDCcretsiz", description: "Temel \xE7al\u0131\u015Fma takibi, konu haritas\u0131 ve odak zamanlay\u0131c\u0131.", tier: "free", billingPeriod: "none", price: 0, trialDays: 0 },
-  ...PAID_TIERS.flatMap((tier) => {
-    const { code, monthly, yearly } = PAID_PRICES[tier];
+  { code: "FREE", name: "\xDCcretsiz", description: "Temel \xE7al\u0131\u015Fma takibi, konu haritas\u0131 ve odak zamanlay\u0131c\u0131.", tier: "free", track: null, billingPeriod: "none", price: 0, trialDays: 0 },
+  ...EXAM_TRACKS.flatMap((track) => PAID_TIERS.flatMap((tier) => {
+    const { monthly, yearly } = PAID_PRICES[tier];
     const label = TIER_LABELS[tier];
+    const exam = EXAM_TRACK_DEFS[track].label;
     return [
-      { code: `${code}_MONTHLY`, name: `${label} (Ayl\u0131k)`, description: `${label} kotalar\u0131yla t\xFCm \xF6zellikler, ayl\u0131k.`, tier, billingPeriod: "monthly", price: monthly, trialDays: TRIAL_DAYS },
-      { code: `${code}_YEARLY`, name: `${label} (Y\u0131ll\u0131k)`, description: `${label} kotalar\u0131yla t\xFCm \xF6zellikler, YKS bitene kadar.`, tier, billingPeriod: "yearly", price: yearly, trialDays: TRIAL_DAYS }
+      { code: planCodeFor(track, tier, "monthly"), name: `${exam} ${label} (Ayl\u0131k)`, description: `${exam} i\xE7in ${label} kotalar\u0131yla t\xFCm \xF6zellikler, ayl\u0131k.`, tier, track, billingPeriod: "monthly", price: monthly, trialDays: TRIAL_DAYS },
+      { code: planCodeFor(track, tier, "yearly"), name: `${exam} ${label} (Y\u0131ll\u0131k)`, description: `${exam} i\xE7in ${label} kotalar\u0131yla t\xFCm \xF6zellikler, s\u0131nav bitene kadar.`, tier, track, billingPeriod: "yearly", price: yearly, trialDays: TRIAL_DAYS }
     ];
-  })
+  }))
 ];
 async function seedSubscriptionPlans() {
   for (const plan of DEFAULT_PLANS) {
-    await upsertPlan(plan);
+    await upsertPlan(plan, { keepPrice: true });
   }
 }
 

@@ -4,6 +4,7 @@ import { Loader2, X } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { COACHING_EXPECTATION_LABELS, COACHING_STYLE_LABELS, GRADE_LEVEL_LABELS, MOCK_EXAM_FREQUENCY_LABELS, NOTIFICATION_PREFERENCE_LABELS, STUDY_METHOD_LABELS, STUDY_TIME_LABELS, TARGET_SCORE_TYPE_LABELS } from "@shared/onboarding";
+import { EXAM_TRACK_LABELS } from "@shared/exams";
 import EmailVerifiedBadge from "./EmailVerifiedBadge";
 import { accountStatusLabel, accountStatusTone, approvalLabel, approvalTone, formatDate, formatDateTime, paymentStatusLabel, subscriptionStatusLabel, subscriptionStatusTone } from "./adminFormat";
 
@@ -74,7 +75,7 @@ export default function AdminUserDetail({ userId, onClose }: { userId: number; o
                 ) : detail.data.user.accountStatus === "suspended" ? (
                   <Button onClick={() => reactivate.mutate({ userId })} disabled={reactivate.isPending} variant="outline" className="h-8 rounded-lg border-brand/25 px-3 text-[12px] font-semibold text-brand">Yeniden aktifleştir</Button>
                 ) : null}
-                {detail.data.entitlements.planCode !== "FREE" && <Button onClick={() => revoke.mutate({ userId })} disabled={revoke.isPending} variant="outline" className="h-8 rounded-lg border-danger/25 px-3 text-[12px] font-semibold text-danger">Premium erişimi geri al</Button>}
+                {detail.data.entitlements.planCode !== "FREE" && <Button onClick={() => revoke.mutate({ userId, track: detail.data?.activeTrack ?? "YKS" })} disabled={revoke.isPending} variant="outline" className="h-8 rounded-lg border-danger/25 px-3 text-[12px] font-semibold text-danger">Premium erişimi geri al</Button>}
               </div>
             </div>
 
@@ -155,8 +156,24 @@ export default function AdminUserDetail({ userId, onClose }: { userId: number; o
                 </div>
               )}
 
+              {tab === "Abonelik" && detail.data.subscriptions.length > 0 && (
+                <Section title="Sınavlara göre abonelikler">
+                  <div className="space-y-2 text-[13px]">
+                    {detail.data.subscriptions.map((row) => (
+                      <div key={row.track} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-paper px-3 py-2">
+                        <div>
+                          <span className="font-semibold text-ink">{EXAM_TRACK_LABELS[row.track]}{row.track === detail.data?.activeTrack ? " (aktif sınav)" : ""}</span>
+                          <span className="ml-2 text-ink-3">{row.planCode} · {subscriptionStatusLabel[row.status] ?? row.status} · bitiş {formatDate(row.trialEndsAt ?? row.currentPeriodEnd)}{row.isManualOverride ? " · manuel" : ""}{row.cancelAtPeriodEnd ? " · dönem sonunda iptal" : ""}</span>
+                        </div>
+                        {row.planCode !== "FREE" && <button onClick={() => revoke.mutate({ userId, track: row.track })} disabled={revoke.isPending} className="text-[12px] font-semibold text-danger">Erişimi geri al</button>}
+                      </div>
+                    ))}
+                  </div>
+                </Section>
+              )}
               {tab === "Abonelik" && detail.data.subscription && (
-                <div className="space-y-2 text-[13px]">
+                <div className="mt-4 space-y-2 text-[13px]">
+                  <div className="text-[12px] font-semibold text-ink-4">Aktif sınavın aboneliği ({EXAM_TRACK_LABELS[detail.data.activeTrack]})</div>
                   <Row label="Plan" value={`${detail.data.subscription.planName} (${detail.data.subscription.planTier})`} />
                   <Row label="Durum" value={subscriptionStatusLabel[detail.data.subscription.status] ?? detail.data.subscription.status} />
                   <Row label="Trial başlangıç" value={formatDateTime(detail.data.subscription.trialStartedAt)} />

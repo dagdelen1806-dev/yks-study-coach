@@ -4,7 +4,7 @@ import { getDb, getStudentProfile } from "../db";
 import { getNoteStatsForAdmin } from "../notes/notesDb";
 import { catalogBooks, subscriptionPlans, subscriptions, topicProgress, topicStudyLogs, userBookContents, userMockExams, userResourceBooks, users } from "../../drizzle/schema";
 import { getEntitlements, getUsageSummaryForUser } from "../subscriptions/entitlementService";
-import { getPlanById, listAuditLogsForUser, listPaymentsForUser, writeAuditLog } from "../subscriptions/subscriptionDb";
+import { getPlanById, getStudentExamTrack, listAuditLogsForUser, listPaymentsForUser, listSubscriptionsForUser, writeAuditLog } from "../subscriptions/subscriptionDb";
 import { getStudyProgressScore } from "./progressService";
 
 export type AdminUserListFilters = {
@@ -73,7 +73,9 @@ export async function listUsersForAdminPaginated(filters: AdminUserListFilters):
 
   const whereClause = conditions.length ? and(...conditions) : undefined;
 
-  const countQuery = db.select({ total: count() }).from(users).leftJoin(subscriptions, eq(subscriptions.userId, users.id)).leftJoin(subscriptionPlans, eq(subscriptionPlans.id, subscriptions.planId));
+  // Üyenin birden çok sınav aboneliği olabilir: listede aktif sınavının aboneliği (satır çoğalmaz).
+  const activeSubscription = and(eq(subscriptions.userId, users.id), eq(subscriptions.track, sql`coalesce((select sp."examTrack" from student_profiles sp where sp."userId" = ${users.id}), 'YKS')`));
+  const countQuery = db.select({ total: count() }).from(users).leftJoin(subscriptions, activeSubscription).leftJoin(subscriptionPlans, eq(subscriptionPlans.id, subscriptions.planId));
   const [{ total }] = await (whereClause ? countQuery.where(whereClause) : countQuery);
 
   const pageQuery = db
@@ -82,7 +84,7 @@ export async function listUsersForAdminPaginated(filters: AdminUserListFilters):
       planCode: subscriptionPlans.code, planName: subscriptionPlans.name, subscriptionStatus: subscriptions.status, trialEndsAt: subscriptions.trialEndsAt, currentPeriodEnd: subscriptions.currentPeriodEnd,
     })
     .from(users)
-    .leftJoin(subscriptions, eq(subscriptions.userId, users.id))
+    .leftJoin(subscriptions, activeSubscription)
     .leftJoin(subscriptionPlans, eq(subscriptionPlans.id, subscriptions.planId))
     .orderBy(desc(users.createdAt))
     .limit(pageSize)
@@ -171,9 +173,11 @@ export async function getUserDetailForAdmin(userId: number) {
   const [userRow] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
   if (!userRow) return null;
 
+  // Abonelik ve kota üyenin aktif sınavı için (diğer sınavların abonelikleri `subscriptions` listesinde).
+  const activeTrack = await getStudentExamTrack(userId);
   const [entitlements, usage, progressScore, payments, recentExams, topicRows, recentStudyLogs, auditLogs, profile, bookContentRows, notebook] = await Promise.all([
-    getEntitlements(userId),
-    getUsageSummaryForUser(userId),
+    getEntitlements(userId, activeTrack),
+    getUsageSummaryForUser(userId, activeTrack),
     getStudyProgressScore(userId),
     listPaymentsForUser(userId),
     db.select().from(userMockExams).where(eq(userMockExams.userId, userId)).orderBy(desc(userMockExams.examDate)).limit(10),
@@ -210,8 +214,11 @@ export async function getUserDetailForAdmin(userId: number) {
   const titleById = new Map<string, string>([...customTitles.map((row) => [row.bookId, row.title] as [string, string]), ...catalogTitles.map((row) => [String(row.id), row.name] as [string, string])]);
   const bookContentsWithTitles = bookContents.map((book) => ({ ...book, title: titleById.get(book.bookId) ?? null }));
 
-  const [subscriptionRow] = await db.select().from(subscriptions).where(eq(subscriptions.userId, userId)).limit(1);
+  // Aktif sınavın aboneliği ayrıntılı; tüm sınavların abonelikleri ayrıca liste olarak.
+  const allSubscriptions = await listSubscriptionsForUser(userId);
+  const subscriptionRow = allSubscriptions.find((row) => row.track === activeTrack);
   const plan = subscriptionRow ? await getPlanById(subscriptionRow.planId) : null;
+  const subscriptionsByTrack = await Promise.all(allSubscriptions.map(async (row) => ({ track: row.track, status: row.status, planCode: (await getPlanById(row.planId))?.code ?? "FREE", currentPeriodEnd: row.currentPeriodEnd, trialEndsAt: row.trialEndsAt, cancelAtPeriodEnd: row.cancelAtPeriodEnd, isManualOverride: row.isManualOverride })));
 
   const { passwordHash: _passwordHash, ...safeUser } = userRow;
 
@@ -223,6 +230,8 @@ export async function getUserDetailForAdmin(userId: number) {
     subscription: subscriptionRow
       ? { ...subscriptionRow, providerSubscriptionId: maskId(subscriptionRow.providerSubscriptionId), providerCustomerId: maskId(subscriptionRow.providerCustomerId), planCode: plan?.code ?? "FREE", planName: plan?.name ?? "Ücretsiz", planTier: plan?.tier ?? "free" }
       : null,
+    subscriptions: subscriptionsByTrack,
+    activeTrack,
     entitlements,
     usage,
     progressScore,

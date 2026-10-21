@@ -4,7 +4,9 @@ import { Loader2 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { EXAM_TRACK_LABELS } from "@shared/exams";
 import { formatDate, subscriptionStatusLabel } from "./adminFormat";
+import AdminPricesPanel from "./AdminPricesPanel";
 
 /**
  * /admin/subscriptions (spec §26). NOT: bu liste (mevcut abonelik kaydı olan
@@ -52,6 +54,8 @@ export default function AdminSubscriptionsPage() {
         </div>
       </Card>
 
+      <AdminPricesPanel />
+
       <Card className="soft-card overflow-hidden">
         {list.isLoading ? (
           <div className="flex justify-center p-10"><Loader2 className="animate-spin text-brand" size={20} /></div>
@@ -60,18 +64,19 @@ export default function AdminSubscriptionsPage() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[860px] text-left text-[13px]">
-              <thead className="border-b border-ink/[0.06] bg-paper text-[12px] text-ink-4"><tr><th className="px-4 py-2.5">ID</th><th className="px-4 py-2.5">Kullanıcı</th><th className="px-4 py-2.5">Plan</th><th className="px-4 py-2.5">Durum</th><th className="px-4 py-2.5">Trial bitiş</th><th className="px-4 py-2.5">Dönem bitiş</th><th className="px-4 py-2.5">Manuel mi</th><th className="px-4 py-2.5" /></tr></thead>
+              <thead className="border-b border-ink/[0.06] bg-paper text-[12px] text-ink-4"><tr><th className="px-4 py-2.5">ID</th><th className="px-4 py-2.5">Kullanıcı</th><th className="px-4 py-2.5">Sınav</th><th className="px-4 py-2.5">Plan</th><th className="px-4 py-2.5">Durum</th><th className="px-4 py-2.5">Trial bitiş</th><th className="px-4 py-2.5">Dönem bitiş</th><th className="px-4 py-2.5">Manuel mi</th><th className="px-4 py-2.5" /></tr></thead>
               <tbody className="divide-y divide-ink/[0.06]">
                 {list.data.map((row) => (
-                  <tr key={row.userId}>
+                  <tr key={`${row.userId}-${row.track}`}>
                     <td className="px-4 py-2.5"><button onClick={() => { setGrantUserId(String(row.userId)); toast("Kullanıcı ID formda dolduruldu."); }} title="Elle Premium ver formuna doldur" className="rounded-md bg-paper px-2 py-1 font-mono text-[12px] font-semibold text-brand hover:bg-brand-soft">#{row.userId}</button></td>
                     <td className="px-4 py-2.5 font-medium text-ink-2">{row.userName || row.userEmail || `#${row.userId}`}</td>
+                    <td className="px-4 py-2.5 text-ink-3">{EXAM_TRACK_LABELS[row.track]}</td>
                     <td className="px-4 py-2.5">{row.planName}</td>
                     <td className="px-4 py-2.5 text-ink-3">{subscriptionStatusLabel[row.status] ?? row.status}</td>
                     <td className="px-4 py-2.5 text-ink-3">{formatDate(row.trialEndsAt)}</td>
                     <td className="px-4 py-2.5 text-ink-3">{formatDate(row.currentPeriodEnd)}</td>
                     <td className="px-4 py-2.5 text-ink-3">{row.isManualOverride ? "Evet" : "Hayır"}</td>
-                    <td className="px-4 py-2.5 text-right">{row.planCode !== "FREE" && <button onClick={() => revoke.mutate({ userId: row.userId })} className="text-[12px] font-semibold text-danger">Erişimi geri al</button>}</td>
+                    <td className="px-4 py-2.5 text-right">{row.planCode !== "FREE" && <button onClick={() => revoke.mutate({ userId: row.userId, track: row.track })} className="text-[12px] font-semibold text-danger">Erişimi geri al</button>}</td>
                   </tr>
                 ))}
               </tbody>

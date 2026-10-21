@@ -205,7 +205,8 @@ test("veli kodla bağlanır, öğrenci onaylayınca veli özeti görür ama notl
 test("KPSS adayı ankette KPSS'yi seçer; yetişkin eğitim durumları, tek net ve hedef kadro sorulur", async ({ page }) => {
   await signIn(page, "kpss1@test.local");
   await page.goto("/");
-  await page.getByRole("radio", { name: /KPSS/ }).click();
+  // MEB-AGS ve KPSS A grubu seçeneklerinin açıklamasında da "KPSS" geçer.
+  await page.getByRole("radio", { name: /^KPSS(?! A grubu)/ }).click();
   await expect(page.getByText("Eğitim durumun")).toBeVisible();
   await expect(page.locator("#onboarding-grade button")).toHaveText(["Lisans öğrencisi", "Lisans mezunu", "Önlisans mezunu", "Lise mezunu"]);
   await expect(page.locator("#onboarding-score-type")).toHaveCount(0);
@@ -219,6 +220,20 @@ test("KPSS adayı ankette KPSS'yi seçer; yetişkin eğitim durumları, tek net 
   await expect(page.getByPlaceholder("Örn. Vergi müfettiş yardımcılığı")).toBeVisible();
   await expect(page.getByText("Hedef KPSS puanın")).toBeVisible();
   await expect(page.getByText("100 üzerinden; örn. 85.")).toBeVisible();
+});
+
+test("KPSS + MEB-AGS adayı iki sınavı birlikte alır: paket indirimi, iki ayrı abonelik", async ({ page }) => {
+  await signIn(page, "ags1@test.local");
+  await page.goto("/premium");
+  await expect(page.getByText("Hangi sınavlar için?")).toBeVisible();
+  await page.getByRole("button", { name: "MEB-AGS" }).click();
+  const summary = page.locator("main").getByText("Ödeme özeti").locator("..");
+  await expect(summary.getByText("Paket indirimi %20")).toHaveCount(2);
+  await expect(summary).toContainText("799 ₺");
+  await summary.getByRole("button", { name: /Ücretsiz denemeyi başlat|Ödemeyi tamamla/ }).click();
+  const subscriptionsCard = page.locator("main").getByText("Aboneliklerin").locator("../../..");
+  await expect(subscriptionsCard).toContainText("KPSS · Premium");
+  await expect(subscriptionsCard).toContainText("MEB-AGS · Premium");
 });
 
 test("çıkış yapınca önceki öğrencinin verisi ekranda kalmaz", async ({ page }) => {

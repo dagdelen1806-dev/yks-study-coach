@@ -7,6 +7,7 @@ import {
   featureUsageLogs,
   paymentEvents,
   payments,
+  studentExamTracks,
   studentProfiles,
   subscriptionAuditLogs,
   subscriptionPlans,
@@ -40,6 +41,19 @@ export async function getStudentExamYear(userId: number): Promise<number | null>
   return row?.examYear ?? null;
 }
 
+/**
+ * Bir sınavın hedef yılı: aktif sınavsa profilden, değilse adayın o sınavın kaydından
+ * (student_exam_tracks). Yıllık planın süresi ve fiyatı buna göre.
+ */
+export async function getStudentExamYearFor(userId: number, track: ExamTrack): Promise<number | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [profile] = await db.select({ examTrack: studentProfiles.examTrack, examYear: studentProfiles.examYear }).from(studentProfiles).where(eq(studentProfiles.userId, userId)).limit(1);
+  if (profile?.examTrack === track) return profile.examYear ?? null;
+  const [row] = await db.select({ examYear: studentExamTracks.examYear }).from(studentExamTracks).where(and(eq(studentExamTracks.userId, userId), eq(studentExamTracks.track, track))).limit(1);
+  return row?.examYear ?? null;
+}
+
 /** Öğrencinin hazırlandığı sınav (yıllık planın bitişi buna göre); profili yoksa YKS. */
 export async function getStudentExamTrack(userId: number): Promise<ExamTrack> {
   const db = await getDb();
@@ -62,40 +76,66 @@ export async function getPlanById(id: number): Promise<SubscriptionPlan | undefi
   return rows[0];
 }
 
-/** Idempotent — var olan bir plan kodu tekrar seed edilirse günceller, çoğaltmaz. */
-export async function upsertPlan(input: { code: string; name: string; description?: string | null; tier: PlanTier; billingPeriod: "none" | "monthly" | "yearly"; price: number; currency?: string; trialDays?: number; storeProductId?: string | null; provider?: string | null }): Promise<void> {
+/**
+ * Idempotent — var olan bir plan kodu tekrar seed edilirse günceller, çoğaltmaz. `keepPrice`:
+ * var olan planın fiyatı, deneme süresi ve satış durumu korunur (yönetim panelinde değiştirilmiş olabilir).
+ */
+export async function upsertPlan(input: { code: string; name: string; description?: string | null; tier: PlanTier; track?: ExamTrack | null; billingPeriod: "none" | "monthly" | "yearly"; price: number; currency?: string; trialDays?: number; storeProductId?: string | null; provider?: string | null }, options: { keepPrice?: boolean } = {}): Promise<void> {
   const db = await getDb();
   if (!db) return;
   const existing = await getPlanByCode(input.code);
   if (existing) {
-    await db.update(subscriptionPlans).set({ name: input.name, description: input.description ?? null, tier: input.tier, billingPeriod: input.billingPeriod, price: input.price, currency: input.currency ?? "TRY", trialDays: input.trialDays ?? 0, storeProductId: input.storeProductId ?? null, provider: input.provider ?? null }).where(eq(subscriptionPlans.id, existing.id));
+    const priceFields = options.keepPrice ? {} : { price: input.price, trialDays: input.trialDays ?? 0 };
+    await db.update(subscriptionPlans).set({ name: input.name, description: input.description ?? null, tier: input.tier, track: input.track ?? null, billingPeriod: input.billingPeriod, currency: input.currency ?? "TRY", storeProductId: input.storeProductId ?? null, provider: input.provider ?? null, ...priceFields }).where(eq(subscriptionPlans.id, existing.id));
     return;
   }
-  await db.insert(subscriptionPlans).values({ code: input.code, name: input.name, description: input.description ?? null, tier: input.tier, billingPeriod: input.billingPeriod, price: input.price, currency: input.currency ?? "TRY", trialDays: input.trialDays ?? 0, storeProductId: input.storeProductId ?? null, provider: input.provider ?? null });
+  await db.insert(subscriptionPlans).values({ code: input.code, name: input.name, description: input.description ?? null, tier: input.tier, track: input.track ?? null, billingPeriod: input.billingPeriod, price: input.price, currency: input.currency ?? "TRY", trialDays: input.trialDays ?? 0, storeProductId: input.storeProductId ?? null, provider: input.provider ?? null });
+}
+
+/** Yönetim → Fiyatlar: satışta olmayanlar dahil tüm planlar. */
+export async function listAllPlans(): Promise<SubscriptionPlan[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(subscriptionPlans).orderBy(subscriptionPlans.code);
+}
+
+/** Yönetim → Fiyatlar: bir planın fiyatı (kuruş), deneme süresi ve satış durumu. */
+export async function updatePlanPricing(id: number, patch: { price?: number; trialDays?: number; isActive?: boolean }): Promise<SubscriptionPlan | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  await db.update(subscriptionPlans).set({ ...(patch.price !== undefined ? { price: patch.price } : {}), ...(patch.trialDays !== undefined ? { trialDays: patch.trialDays } : {}), ...(patch.isActive !== undefined ? { isActive: patch.isActive ? 1 : 0 } : {}) }).where(eq(subscriptionPlans.id, id));
+  return getPlanById(id);
 }
 
 // ---------------------------------------------------------------------------
-// Subscriptions — bkz. shared/subscriptionStateMachine.ts: kullanıcı başına
-// TEK satır, hep bu satır üzerinde güncellenir.
+// Subscriptions — bkz. shared/subscriptionStateMachine.ts: kullanıcı başına SINAV başına
+// TEK satır, hep bu satır üzerinde güncellenir (her sınavın ayrı aboneliği vardır).
 // ---------------------------------------------------------------------------
 
-export async function getSubscriptionByUserId(userId: number): Promise<Subscription | undefined> {
+export async function getSubscriptionByUserId(userId: number, track: ExamTrack): Promise<Subscription | undefined> {
   const db = await getDb();
   if (!db) return undefined;
-  const rows = await db.select().from(subscriptions).where(eq(subscriptions.userId, userId)).limit(1);
+  const rows = await db.select().from(subscriptions).where(and(eq(subscriptions.userId, userId), eq(subscriptions.track, track))).limit(1);
   return rows[0];
 }
 
-/** Kullanıcının hiç subscription satırı yoksa FREE planına, "active" (süresiz) olarak provizyonlar. */
-export async function ensureFreeSubscription(userId: number): Promise<Subscription> {
+/** Kullanıcının tüm sınavlarındaki abonelik satırları (ödeme ekranı, yönetim). */
+export async function listSubscriptionsForUser(userId: number): Promise<Subscription[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(subscriptions).where(eq(subscriptions.userId, userId));
+}
+
+/** Kullanıcının o sınavda hiç subscription satırı yoksa FREE planına, "active" (süresiz) olarak provizyonlar. */
+export async function ensureFreeSubscription(userId: number, track: ExamTrack): Promise<Subscription> {
   const db = await getDb();
   if (!db) throw new Error("Veritabanı bağlantısı yok");
-  const existing = await getSubscriptionByUserId(userId);
+  const existing = await getSubscriptionByUserId(userId, track);
   if (existing) return existing;
   const freePlan = await getPlanByCode("FREE");
   if (!freePlan) throw new Error("FREE planı bulunamadı — önce seedSubscriptionPlans() çalıştırılmalı");
-  await db.insert(subscriptions).values({ userId, planId: freePlan.id, status: "active", provider: null }).onConflictDoUpdate({ target: subscriptions.userId, set: { updatedAt: new Date() } });
-  const created = await getSubscriptionByUserId(userId);
+  await db.insert(subscriptions).values({ userId, track, planId: freePlan.id, status: "active", provider: null }).onConflictDoUpdate({ target: [subscriptions.userId, subscriptions.track], set: { updatedAt: new Date() } });
+  const created = await getSubscriptionByUserId(userId, track);
   if (!created) throw new Error("Free subscription oluşturulamadı");
   return created;
 }
@@ -107,6 +147,7 @@ export async function listAllSubscriptionsForAdmin() {
   return db
     .select({
       userId: subscriptions.userId,
+      track: subscriptions.track,
       userName: users.name,
       userEmail: users.email,
       status: subscriptions.status,
@@ -168,7 +209,12 @@ export async function listAllUsersForAdmin(): Promise<AdminUserOverview[]> {
   const topicMap = new Map(topicAgg.map((row) => [row.userId, row]));
   const examMap = new Map(examAgg.map((row) => [row.userId, row]));
   const studyMap = new Map(studyAgg.map((row) => [row.userId, row]));
-  const subMap = new Map(subs.map((row) => [row.userId, row]));
+  // Birden çok sınav aboneliği olan üyede listede ücretli olanı (varsa) gösterilir.
+  const subMap = new Map<number, (typeof subs)[number]>();
+  for (const row of subs) {
+    const current = subMap.get(row.userId);
+    if (!current || (current.planCode === "FREE" && row.planCode !== "FREE")) subMap.set(row.userId, row);
+  }
 
   return allUsers.map((user) => {
     const topic = topicMap.get(user.id);
@@ -188,11 +234,11 @@ export async function listAllUsersForAdmin(): Promise<AdminUserOverview[]> {
   });
 }
 
-export async function updateSubscription(userId: number, patch: Partial<InsertSubscription>): Promise<Subscription> {
+export async function updateSubscription(userId: number, track: ExamTrack, patch: Partial<InsertSubscription>): Promise<Subscription> {
   const db = await getDb();
   if (!db) throw new Error("Veritabanı bağlantısı yok");
-  await db.update(subscriptions).set(patch).where(eq(subscriptions.userId, userId));
-  const updated = await getSubscriptionByUserId(userId);
+  await db.update(subscriptions).set(patch).where(and(eq(subscriptions.userId, userId), eq(subscriptions.track, track)));
+  const updated = await getSubscriptionByUserId(userId, track);
   if (!updated) throw new Error("Abonelik bulunamadı");
   return updated;
 }
@@ -298,17 +344,18 @@ export async function listAllAuditLogs(limit: number = 100) {
 // Feature usage (rolling-window limitler, spec §32)
 // ---------------------------------------------------------------------------
 
-export async function recordFeatureUsage(userId: number, featureKey: string): Promise<void> {
+/** Kullanım o anki aktif sınavın aboneliğine yazılır (her aboneliğin kendi kotası). */
+export async function recordFeatureUsage(userId: number, featureKey: string, track: ExamTrack): Promise<void> {
   const db = await getDb();
   if (!db) return;
-  await db.insert(featureUsageLogs).values({ userId, featureKey });
+  await db.insert(featureUsageLogs).values({ userId, featureKey, track });
 }
 
-export async function countFeatureUsage(userId: number, featureKey: string, windowDays: number): Promise<number> {
+export async function countFeatureUsage(userId: number, featureKey: string, windowDays: number, track: ExamTrack): Promise<number> {
   const db = await getDb();
   if (!db) return 0;
   const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
-  const rows = await db.select({ id: featureUsageLogs.id }).from(featureUsageLogs).where(and(eq(featureUsageLogs.userId, userId), eq(featureUsageLogs.featureKey, featureKey), gte(featureUsageLogs.usedAt, since)));
+  const rows = await db.select({ id: featureUsageLogs.id }).from(featureUsageLogs).where(and(eq(featureUsageLogs.userId, userId), eq(featureUsageLogs.track, track), eq(featureUsageLogs.featureKey, featureKey), gte(featureUsageLogs.usedAt, since)));
   return rows.length;
 }
 
@@ -319,12 +366,13 @@ export async function countFeatureUsage(userId: number, featureKey: string, wind
  * kapsamındaki satırlar silinir (tüm geçmiş değil) — böylece uzun vadeli
  * kullanım geçmişi/denetim izi korunur.
  */
-export async function resetFeatureUsage(userId: number, featureKey: string, windowDays: number, adminId: number): Promise<void> {
+export async function resetFeatureUsage(userId: number, featureKey: string, windowDays: number, adminId: number, track?: ExamTrack): Promise<void> {
   const db = await getDb();
   if (!db) return;
   const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
-  await db.delete(featureUsageLogs).where(and(eq(featureUsageLogs.userId, userId), eq(featureUsageLogs.featureKey, featureKey), gte(featureUsageLogs.usedAt, since)));
-  await writeAuditLog({ userId, adminId, action: "usage_reset", newState: { featureKey, windowDays } });
+  // Sınav verilmezse kullanıcının tüm sınavlarındaki kullanım sıfırlanır.
+  await db.delete(featureUsageLogs).where(and(eq(featureUsageLogs.userId, userId), eq(featureUsageLogs.featureKey, featureKey), gte(featureUsageLogs.usedAt, since), ...(track ? [eq(featureUsageLogs.track, track)] : [])));
+  await writeAuditLog({ userId, adminId, action: "usage_reset", newState: { featureKey, windowDays, track: track ?? "all" } });
 }
 
 // ---------------------------------------------------------------------------

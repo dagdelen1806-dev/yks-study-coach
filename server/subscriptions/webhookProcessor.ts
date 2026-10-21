@@ -5,8 +5,7 @@ import {
   createPayment,
   ensureFreeSubscription,
   getPlanByCode,
-  getStudentExamTrack,
-  getStudentExamYear,
+  getStudentExamYearFor,
   getSubscriptionByUserId,
   isDuplicateEvent,
   markEventProcessed,
@@ -35,6 +34,11 @@ export type CanonicalWebhookEventType =
 export type CanonicalWebhookPayload = {
   userId: number;
   planCode?: string;
+  /** Aboneliğin sınavı; verilmezse plan kodunun sınavı (o da yoksa YKS). */
+  track?: ExamTrack;
+  /** Paket ödemesinde aynı ödemeye ait satırların ortak kimliği ve indirim nedeni (kayıt için). */
+  checkoutId?: string;
+  discountReason?: "bundle" | "addon" | null;
   amount?: number;
   currency?: string;
   providerSubscriptionId?: string;
@@ -113,6 +117,14 @@ async function applyCanonicalEvent(eventType: CanonicalWebhookEventType, payload
  * Tahsil edilecek tutar: aylık plan kayıtlı fiyatından; yıllık ("sınavına kadar") plan öğrencinin
  * sınavına kalan süreye göre (shared/yksCalendar.ts yksTermPrice) — ödeme ekranında gösterilenle aynı hesap.
  */
+/** Olayın sınavı: payload'da açıkça varsa o, yoksa plan kodunun sınavı, o da yoksa YKS. */
+async function trackOfEvent(payload: CanonicalWebhookPayload, plan?: { track: ExamTrack | null } | undefined): Promise<ExamTrack> {
+  if (payload.track) return payload.track;
+  if (plan?.track) return plan.track;
+  if (payload.planCode) { const byCode = await getPlanByCode(payload.planCode); if (byCode?.track) return byCode.track; }
+  return "YKS";
+}
+
 async function chargeAmountFor(plan: { code: string; billingPeriod: string; price: number }, now: Date, examYear: number | null, track: ExamTrack): Promise<number> {
   if (plan.billingPeriod !== "yearly") return plan.price;
   const monthly = await getPlanByCode(plan.code.replace(/_YEARLY$/, "_MONTHLY"));
@@ -128,11 +140,11 @@ async function handleCheckoutCompleted(payload: CanonicalWebhookPayload): Promis
   // önce satırın var olduğundan emin ol (FREE olarak), sonra üstüne yaz.
   // `updateSubscription` yalnızca UPDATE yapar, INSERT yapmaz — satır yoksa
   // sessizce hiçbir şey değiştirmez.
-  const existing = await ensureFreeSubscription(payload.userId);
+  const track = await trackOfEvent(payload, plan);
+  const existing = await ensureFreeSubscription(payload.userId, track);
   const now = new Date();
-  // Yıllık plan öğrencinin ankette seçtiği sınavın sonuna kadar sürer (shared/yksCalendar.ts); sağlayıcı süreyi açıkça verdiyse o geçerli.
-  const examYear = await getStudentExamYear(payload.userId);
-  const track = await getStudentExamTrack(payload.userId);
+  // Yıllık plan o sınavın hedef yılının sonuna kadar sürer (shared/yksCalendar.ts); sağlayıcı süreyi açıkça verdiyse o geçerli.
+  const examYear = await getStudentExamYearFor(payload.userId, track);
   const periodEnd = payload.periodDays ? new Date(now.getTime() + payload.periodDays * 24 * 60 * 60 * 1000) : planPeriodEnd(plan.billingPeriod, now, examYear, track);
 
   // "trial yalnızca bir kez" (spec §11) — bu abonelik satırı DAHA ÖNCE hiç
@@ -154,10 +166,12 @@ async function handleCheckoutCompleted(payload: CanonicalWebhookPayload): Promis
     status: eligibleForTrial ? "authorized" : "paid",
     paymentType: eligibleForTrial ? "trial_start" : "initial",
     paidAt: eligibleForTrial ? null : now,
+    track,
+    metadata: payload.checkoutId ? JSON.stringify({ checkoutId: payload.checkoutId, discountReason: payload.discountReason ?? null }) : null,
   });
 
   const oldState = existing ? { status: existing.status } : null;
-  await updateSubscription(payload.userId, {
+  await updateSubscription(payload.userId, track, {
     planId: plan.id,
     status: nextStatus,
     trialStartedAt: eligibleForTrial ? now : existing?.trialStartedAt ?? null,
@@ -171,58 +185,62 @@ async function handleCheckoutCompleted(payload: CanonicalWebhookPayload): Promis
     providerCustomerId: payload.providerCustomerId ?? null,
     latestPaymentId: paymentId,
   });
-  await writeAuditLog({ userId: payload.userId, action: "checkout_completed", oldState, newState: { status: nextStatus, planCode: plan.code }, metadata: { paymentId } });
+  await writeAuditLog({ userId: payload.userId, action: "checkout_completed", oldState, newState: { status: nextStatus, planCode: plan.code, track }, metadata: { paymentId, checkoutId: payload.checkoutId ?? null } });
 }
 
 async function handleSubscriptionRenewed(payload: CanonicalWebhookPayload): Promise<void> {
-  const existing = await getSubscriptionByUserId(payload.userId);
-  if (!existing) throw new Error("Yenilenecek abonelik bulunamadı");
   const plan = await getPlanByCode(payload.planCode ?? "");
+  const track = await trackOfEvent(payload, plan);
+  const existing = await getSubscriptionByUserId(payload.userId, track);
+  if (!existing) throw new Error("Yenilenecek abonelik bulunamadı");
   assertValidSubscriptionTransition(existing.status as SubscriptionStatus, "active");
 
   const now = new Date();
-  const examYear = await getStudentExamYear(payload.userId);
-  const track = await getStudentExamTrack(payload.userId);
+  const examYear = await getStudentExamYearFor(payload.userId, track);
   const periodEnd = payload.periodDays ? new Date(now.getTime() + payload.periodDays * 24 * 60 * 60 * 1000) : planPeriodEnd(plan?.billingPeriod ?? "monthly", now, examYear, track);
 
-  const paymentId = await createPayment({ userId: payload.userId, subscriptionId: existing.id, provider: "web", providerPaymentId: payload.providerPaymentId ?? null, amount: payload.amount ?? (plan ? await chargeAmountFor(plan, now, examYear, track) : 0), currency: payload.currency ?? plan?.currency ?? "TRY", status: "paid", paymentType: "renewal", paidAt: now });
+  const paymentId = await createPayment({ userId: payload.userId, subscriptionId: existing.id, provider: "web", providerPaymentId: payload.providerPaymentId ?? null, amount: payload.amount ?? (plan ? await chargeAmountFor(plan, now, examYear, track) : 0), currency: payload.currency ?? plan?.currency ?? "TRY", status: "paid", paymentType: "renewal", paidAt: now, track });
 
-  await updateSubscription(payload.userId, { status: "active", currentPeriodStart: now, currentPeriodEnd: periodEnd, latestPaymentId: paymentId });
+  await updateSubscription(payload.userId, track, { status: "active", currentPeriodStart: now, currentPeriodEnd: periodEnd, latestPaymentId: paymentId });
   await writeAuditLog({ userId: payload.userId, action: "subscription_renewed", oldState: { status: existing.status }, newState: { status: "active" }, metadata: { paymentId } });
 }
 
 async function handlePaymentFailed(payload: CanonicalWebhookPayload): Promise<void> {
-  const existing = await getSubscriptionByUserId(payload.userId);
+  const track = await trackOfEvent(payload);
+  const existing = await getSubscriptionByUserId(payload.userId, track);
   if (!existing) throw new Error("Abonelik bulunamadı");
   assertValidSubscriptionTransition(existing.status as SubscriptionStatus, "past_due");
-  await updateSubscription(payload.userId, { status: "past_due" });
+  await updateSubscription(payload.userId, track, { status: "past_due" });
   await writeAuditLog({ userId: payload.userId, action: "payment_failed", oldState: { status: existing.status }, newState: { status: "past_due" } });
 }
 
 async function handleGracePeriodStarted(payload: CanonicalWebhookPayload): Promise<void> {
-  const existing = await getSubscriptionByUserId(payload.userId);
+  const track = await trackOfEvent(payload);
+  const existing = await getSubscriptionByUserId(payload.userId, track);
   if (!existing) throw new Error("Abonelik bulunamadı");
   assertValidSubscriptionTransition(existing.status as SubscriptionStatus, "grace_period");
   const days = payload.gracePeriodDays ?? 3;
   const gracePeriodEndsAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
-  await updateSubscription(payload.userId, { status: "grace_period", gracePeriodEndsAt });
+  await updateSubscription(payload.userId, track, { status: "grace_period", gracePeriodEndsAt });
   await writeAuditLog({ userId: payload.userId, action: "grace_period_started", oldState: { status: existing.status }, newState: { status: "grace_period", gracePeriodEndsAt } });
 }
 
 async function handleSubscriptionCanceled(payload: CanonicalWebhookPayload): Promise<void> {
-  const existing = await getSubscriptionByUserId(payload.userId);
+  const track = await trackOfEvent(payload);
+  const existing = await getSubscriptionByUserId(payload.userId, track);
   if (!existing) throw new Error("Abonelik bulunamadı");
   const nextStatus: SubscriptionStatus = payload.immediate ? "canceled" : existing.status as SubscriptionStatus;
   if (payload.immediate) assertValidSubscriptionTransition(existing.status as SubscriptionStatus, "canceled");
-  await updateSubscription(payload.userId, { status: nextStatus, cancelAtPeriodEnd: payload.immediate ? 0 : 1, canceledAt: new Date() });
+  await updateSubscription(payload.userId, track, { status: nextStatus, cancelAtPeriodEnd: payload.immediate ? 0 : 1, canceledAt: new Date() });
   await writeAuditLog({ userId: payload.userId, action: "subscription_canceled", oldState: { status: existing.status }, newState: { status: nextStatus, cancelAtPeriodEnd: !payload.immediate } });
 }
 
 async function handleRefund(payload: CanonicalWebhookPayload): Promise<void> {
-  const existing = await getSubscriptionByUserId(payload.userId);
+  const track = await trackOfEvent(payload);
+  const existing = await getSubscriptionByUserId(payload.userId, track);
   if (!existing) throw new Error("Abonelik bulunamadı");
   if (existing.latestPaymentId) await updatePaymentStatus(existing.latestPaymentId, { status: "refunded", refundedAt: new Date() });
   assertValidSubscriptionTransition(existing.status as SubscriptionStatus, "canceled");
-  await updateSubscription(payload.userId, { status: "canceled", canceledAt: new Date(), cancelAtPeriodEnd: 0 });
+  await updateSubscription(payload.userId, track, { status: "canceled", canceledAt: new Date(), cancelAtPeriodEnd: 0 });
   await writeAuditLog({ userId: payload.userId, action: "payment_refunded", oldState: { status: existing.status }, newState: { status: "canceled" } });
 }

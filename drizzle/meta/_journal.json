@@ -19,22 +19,8 @@
     {
       "idx": 2,
       "version": "7",
-      "when": 1792587867500,
-      "tag": "0002_exam_tracks_and_parents",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1792591043646,
-      "tag": "0003_selected_subjects",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1792591184450,
-      "tag": "0004_exam_track_enrollments",
+      "when": 1792592101604,
+      "tag": "0002_exam_tracks_and_subscriptions",
       "breakpoints": true
     }
   ]

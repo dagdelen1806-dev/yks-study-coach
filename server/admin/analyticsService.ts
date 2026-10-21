@@ -1,4 +1,4 @@
-import { and, count, eq, gte, isNotNull, lt, sql } from "drizzle-orm";
+import { and, count, countDistinct, eq, gte, isNotNull, lt, ne, sql } from "drizzle-orm";
 import { getDb } from "../db";
 import { subscriptionPlans, subscriptions, users } from "../../drizzle/schema";
 
@@ -44,7 +44,7 @@ export async function getAdminDashboardKpis(): Promise<AdminDashboardKpis> {
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
   const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-  const [approvalCounts, accountStatusCounts, planStatusCounts, activeTodayRow, activeWeekRow, inactive7Row, inactive30Row, totalRow, trialStartedRow, stillTrialingRow, convertedRow] = await Promise.all([
+  const [approvalCounts, accountStatusCounts, planStatusCounts, activeTodayRow, activeWeekRow, inactive7Row, inactive30Row, totalRow, trialStartedRow, stillTrialingRow, convertedRow, premiumUsersRow] = await Promise.all([
     db.select({ approvalStatus: users.approvalStatus, total: count() }).from(users).groupBy(users.approvalStatus),
     db.select({ accountStatus: users.accountStatus, total: count() }).from(users).groupBy(users.accountStatus),
     db.select({ tier: subscriptionPlans.tier, billingPeriod: subscriptionPlans.billingPeriod, status: subscriptions.status, total: count() }).from(subscriptions).innerJoin(subscriptionPlans, eq(subscriptionPlans.id, subscriptions.planId)).groupBy(subscriptionPlans.tier, subscriptionPlans.billingPeriod, subscriptions.status),
@@ -56,6 +56,8 @@ export async function getAdminDashboardKpis(): Promise<AdminDashboardKpis> {
     db.select({ total: count() }).from(subscriptions).where(isNotNull(subscriptions.trialStartedAt)),
     db.select({ total: count() }).from(subscriptions).where(eq(subscriptions.status, "trialing")),
     db.select({ total: count() }).from(subscriptions).where(and(isNotNull(subscriptions.trialStartedAt), sql`${subscriptions.status} in ('active','past_due','grace_period')`)),
+    // Üye sayıları kişi başına: her sınavın aboneliği ayrı satır, bir aday birden fazla sınava abone olabilir.
+    db.select({ total: countDistinct(subscriptions.userId) }).from(subscriptions).innerJoin(subscriptionPlans, eq(subscriptionPlans.id, subscriptions.planId)).where(and(ne(subscriptionPlans.tier, "free"), sql`${subscriptions.status} in ('active','trialing','grace_period')`)),
   ]);
 
   const kpis: AdminDashboardKpis = { ...empty, totalUsers: totalRow[0]?.total ?? 0, activeToday: activeTodayRow[0]?.total ?? 0, activeThisWeek: activeWeekRow[0]?.total ?? 0, inactive7Plus: inactive7Row[0]?.total ?? 0, inactive30Plus: inactive30Row[0]?.total ?? 0 };
@@ -68,9 +70,7 @@ export async function getAdminDashboardKpis(): Promise<AdminDashboardKpis> {
     if (row.accountStatus === "suspended") kpis.suspendedAccounts = row.total;
   }
   for (const row of planStatusCounts) {
-    if (row.tier === "free") kpis.freeUsers += row.total;
     if (row.status === "trialing") kpis.trialUsers += row.total;
-    if (row.tier !== "free" && (row.status === "active" || row.status === "trialing" || row.status === "grace_period")) kpis.premiumUsers += row.total;
     if (row.tier !== "free" && row.billingPeriod === "monthly") kpis.monthlySubscribers += row.total;
     if (row.tier !== "free" && row.billingPeriod === "yearly") kpis.yearlySubscribers += row.total;
     if (row.status === "past_due") kpis.pastDue += row.total;
@@ -78,6 +78,9 @@ export async function getAdminDashboardKpis(): Promise<AdminDashboardKpis> {
     if (row.status === "expired") kpis.expiredSubscriptions += row.total;
     if (row.status === "canceled") kpis.canceledSubscriptions += row.total;
   }
+
+  kpis.premiumUsers = premiumUsersRow[0]?.total ?? 0;
+  kpis.freeUsers = Math.max(0, kpis.totalUsers - kpis.premiumUsers);
 
   const started = trialStartedRow[0]?.total ?? 0;
   const stillTrialing = stillTrialingRow[0]?.total ?? 0;
