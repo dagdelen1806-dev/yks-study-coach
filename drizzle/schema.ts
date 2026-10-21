@@ -565,6 +565,23 @@ export const classStudents = pgTable("class_students", {
   classStudentUnique: uniqueIndex("class_students_class_student_unique").on(table.classId, table.studentUserId),
 }));
 
+// Kurumun ders programı: sınıfın haftalık bir dersi (shared/orgTimetable.ts). dayOfWeek 1=Pazartesi.
+export const classTimetableSlots = pgTable("class_timetable_slots", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  orgId: integer("orgId").notNull(),
+  classId: integer("classId").notNull(),
+  dayOfWeek: integer("dayOfWeek").notNull(),
+  startTime: varchar("startTime", { length: 5 }).notNull(),
+  endTime: varchar("endTime", { length: 5 }).notNull(),
+  subject: varchar("subject", { length: 60 }).notNull(),
+  teacherUserId: integer("teacherUserId"),
+  room: varchar("room", { length: 40 }),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  orgClassIdx: index("class_timetable_slots_org_class_idx").on(table.orgId, table.classId),
+  orgTeacherIdx: index("class_timetable_slots_org_teacher_idx").on(table.orgId, table.teacherUserId),
+}));
+
 export const teacherAssignments = pgTable("teacher_assignments", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   orgId: integer("orgId").notNull(),

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getStaffDigestEnabled, setStaffDigestEnabled } from "../digest/teacherDigest";
 import { findClassConflict, toMinutes } from "../../shared/classSchedule";
 import { effectiveKvkk } from "../../shared/kvkk";
+import { MAX_TIMETABLE_SLOTS_PER_CLASS, branchMismatch, describeConflict, findCrossClassConflicts, sortSlots, validateClassTimetable } from "../../shared/orgTimetable";
 import { EXAM_KINDS, type ExamKind } from "../../shared/exams";
 import { CLASS_GRADES, CLASS_TRACKS, INVITABLE_ROLES, ORG_KINDS, ORG_PLANS, ORG_PLAN_DEFAULT_CREDITS, ORG_PLAN_LABELS, ORG_ROLES, canRequestPlan, membershipState, renewedMembershipEnd, canAssignRole, canInviteRole, generateInviteCode, hasRole, invitationProblem, isStaffRole, normalizeInviteCode, seesAllStudents, summarizeStudent, type RiskKey, type StudentSummary } from "../../shared/org";
 import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
@@ -33,6 +34,9 @@ import {
   listMyMemberships,
   listNotes,
   listOrganizations,
+  listOrgTimetable,
+  listStudentTimetable,
+  replaceClassTimetable,
   listStudentFeedback,
   loadStudentSignals,
   revokeInvitation,
@@ -91,14 +95,23 @@ async function visibleStudentsWithSummary(ctx: OrgContext) {
 const optionalText = (max: number) => z.string().trim().max(max).optional().transform((value) => value || null);
 const classInput = z.object({ name: z.string().trim().min(1).max(80), gradeLevel: z.enum(CLASS_GRADES).nullable().optional(), track: z.enum(CLASS_TRACKS).nullable().optional(), advisorUserId: id.nullable().optional() });
 
-/** Sınıf danışmanı kurumun aktif personeli olmalı. */
+/** Sınıfın sorumlu öğretmeni kurumun aktif personeli olmalı. */
 async function classFields(orgId: number, input: z.infer<typeof classInput>) {
   if (input.advisorUserId) {
     const role = await getMemberRole(orgId, input.advisorUserId);
-    if (!role || !isStaffRole(role)) throw new TRPCError({ code: "NOT_FOUND", message: "Danışman öğretmen bulunamadı." });
+    if (!role || !isStaffRole(role)) throw new TRPCError({ code: "NOT_FOUND", message: "Sorumlu öğretmen bulunamadı." });
   }
   return { name: input.name, gradeLevel: input.gradeLevel ?? null, track: input.track ?? null, advisorUserId: input.advisorUserId ?? null };
 }
+
+const timetableSlotInput = z.object({
+  dayOfWeek: z.number().int().min(1).max(7),
+  startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  subject: z.string().trim().min(1).max(60),
+  teacherUserId: id.nullable(),
+  room: optionalText(40),
+});
 
 const average = (values: number[]) => (values.length ? Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 10) / 10 : null);
 
@@ -322,6 +335,44 @@ export const orgRouter = router({
     }),
   }),
 
+  /**
+   * Ders programı: tüm sınıfların haftalık dersleri. Personel (öğretmen dahil) görür; öğrenci verisi
+   * içermez. Kaydı koordinatör+ yapar; öğretmen ve derslik çakışması kaydı engeller, branş
+   * uyuşmazlığı yalnız uyarıdır.
+   */
+  timetable: router({
+    get: orgProcedure("teacher").query(async ({ ctx }) => {
+      const [slots, classes, members] = await Promise.all([listOrgTimetable(ctx.membership.orgId), listClasses(ctx.membership.orgId), listMembers(ctx.membership.orgId)]);
+      return {
+        slots,
+        classes: classes.map((item) => ({ id: item.id, name: item.name, gradeLevel: item.gradeLevel, track: item.track, advisorUserId: item.advisorUserId, studentCount: item.studentUserIds.length })),
+        teachers: members.filter((member) => isStaffRole(member.role)).map((member) => ({ userId: member.userId, name: member.name, role: member.role, subject: member.subject })),
+      };
+    }),
+    saveClass: orgProcedure("coordinator")
+      .input(z.object({ classId: id, slots: z.array(timetableSlotInput).max(MAX_TIMETABLE_SLOTS_PER_CLASS) }))
+      .mutation(async ({ ctx, input }) => {
+        const orgId = ctx.membership.orgId;
+        const slots = sortSlots(input.slots.map((slot) => ({ ...slot, room: slot.room ?? null })));
+        const problem = validateClassTimetable(slots);
+        if (problem) throw new TRPCError({ code: "BAD_REQUEST", message: problem });
+        const [members, classes, current] = await Promise.all([listMembers(orgId), listClasses(orgId), listOrgTimetable(orgId)]);
+        const staff = new Map(members.filter((member) => isStaffRole(member.role)).map((member) => [member.userId, member]));
+        if (!classes.some((item) => item.id === input.classId)) throw new TRPCError({ code: "NOT_FOUND", message: "Sınıf bulunamadı." });
+        if (slots.some((slot) => slot.teacherUserId && !staff.has(slot.teacherUserId))) throw new TRPCError({ code: "NOT_FOUND", message: "Öğretmen bulunamadı." });
+        const conflicts = findCrossClassConflicts(input.classId, slots, current.map((slot) => ({ ...slot, room: slot.room ?? null })));
+        if (conflicts.length) {
+          const names = { teacher: (userId: number) => staff.get(userId)?.name ?? "Öğretmen", className: (classId: number) => classes.find((item) => item.id === classId)?.name ?? "başka bir" };
+          throw new TRPCError({ code: "CONFLICT", message: conflicts.slice(0, 3).map((conflict) => describeConflict(conflict, names)).join(" ") });
+        }
+        await replaceClassTimetable(orgId, input.classId, slots);
+        await audit(ctx, "timetable.update", { type: "class", id: input.classId }, { slots: slots.length });
+        const warnings = slots.filter((slot) => slot.teacherUserId && branchMismatch(slot.subject, staff.get(slot.teacherUserId)?.subject ?? null))
+          .map((slot) => `${staff.get(slot.teacherUserId!)?.name} (${staff.get(slot.teacherUserId!)?.subject}) ${slot.subject} dersine atandı.`);
+        return { ok: true, warnings: Array.from(new Set(warnings)) };
+      }),
+  }),
+
   assignments: router({
     list: orgProcedure("coordinator").query(({ ctx }) => listAssignments(ctx.membership.orgId)),
     setTeacherStudents: orgProcedure("coordinator").input(z.object({ teacherUserId: id, studentUserIds: z.array(id).max(500) })).mutation(async ({ ctx, input }) => {
@@ -408,6 +459,9 @@ export const orgRouter = router({
     return { ok: true };
   }),
   myFeedback: protectedProcedure.query(({ ctx }) => listStudentFeedback(ctx.user.id)),
+
+  /** Öğrencinin dershane programı (sınıflarının dersleri). */
+  myTimetable: protectedProcedure.query(({ ctx }) => listStudentTimetable(ctx.user.id)),
   /** Üyenin bağlı olduğu kurumun KVKK metinleri ve kendi onayladığı sürüm ("Kurumum"). */
   myKvkk: protectedProcedure.input(z.object({ orgId: id })).query(async ({ ctx, input }) => {
     const membership = (await listMyMemberships(ctx.user.id)).find((row) => row.orgId === input.orgId);

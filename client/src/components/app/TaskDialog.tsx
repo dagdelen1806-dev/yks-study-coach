@@ -25,7 +25,7 @@ export default function TaskDialog({ draft, description, onChange, onClose }: { 
     if (!/^\d{2}:\d{2}$/.test(draft.time) || Number.isNaN(day.getTime())) { toast.error("Tarih ve saati kontrol et."); return; }
     const start = toMinutes(draft.time);
     if (start + minutes > 23 * 60 + 30) { toast.error("Görev 23:30'dan önce bitmeli."); return; }
-    const conflict = findClassConflict(schedule.data?.blocks ?? [], day, start, minutes);
+    const conflict = findClassConflict([...(schedule.data?.blocks ?? []), ...(schedule.data?.courseBlocks ?? [])], day, start, minutes);
     if (conflict) { toast.error(`Bu saat ${conflict.label} (${conflict.startTime}–${conflict.endTime}) ile çakışıyor.`); return; }
     const startsAt = new Date(`${draft.date}T${draft.time}:00`);
     const weekEnd = new Date(startsAt); weekEnd.setDate(weekEnd.getDate() + 1);

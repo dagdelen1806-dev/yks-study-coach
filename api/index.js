@@ -867,6 +867,21 @@ var classStudents = pgTable("class_students", {
 }, (table) => ({
   classStudentUnique: uniqueIndex("class_students_class_student_unique").on(table.classId, table.studentUserId)
 }));
+var classTimetableSlots = pgTable("class_timetable_slots", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  orgId: integer("orgId").notNull(),
+  classId: integer("classId").notNull(),
+  dayOfWeek: integer("dayOfWeek").notNull(),
+  startTime: varchar("startTime", { length: 5 }).notNull(),
+  endTime: varchar("endTime", { length: 5 }).notNull(),
+  subject: varchar("subject", { length: 60 }).notNull(),
+  teacherUserId: integer("teacherUserId"),
+  room: varchar("room", { length: 40 }),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
+}, (table) => ({
+  orgClassIdx: index("class_timetable_slots_org_class_idx").on(table.orgId, table.classId),
+  orgTeacherIdx: index("class_timetable_slots_org_teacher_idx").on(table.orgId, table.teacherUserId)
+}));
 var teacherAssignments = pgTable("teacher_assignments", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   orgId: integer("orgId").notNull(),
@@ -3759,12 +3774,12 @@ function pickStudyDay(input) {
 var PlanTaskError = class extends Error {
 };
 var isoDate = (date) => date.toISOString().slice(0, 10);
-async function pickDayForTask(userId, minutes, when) {
+async function pickDayForTask(userId, minutes, when2) {
   const db = await getDb();
   if (!db) throw new PlanTaskError("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
   const today = /* @__PURE__ */ new Date();
   today.setUTCHours(0, 0, 0, 0);
-  if (when === "today") return isoDate(today);
+  if (when2 === "today") return isoDate(today);
   const horizonEnd = new Date(today.getTime() + 7 * 864e5);
   const [profile] = await db.select({ daily: studentProfiles.dailyStudyDuration }).from(studentProfiles).where(eq5(studentProfiles.userId, userId)).limit(1);
   const sessions = await db.select({ sessionDate: studyPlanSessions.sessionDate, minutes: studyPlanSessions.plannedMinutes, sourceBookId: studyPlanSessions.sourceBookId }).from(studyPlanSessions).where(and3(eq5(studyPlanSessions.userId, userId), eq5(studyPlanSessions.status, "planned"), gte2(studyPlanSessions.sessionDate, today), lte(studyPlanSessions.sessionDate, horizonEnd)));
@@ -4476,6 +4491,14 @@ var CLASS_GRADES = ["7", "8", "9", "10", "11", "12", "Mezun", "\xD6nlisans", "Li
 var YKS_CLASS_TRACKS = ["SAY", "EA", "S\xD6Z", "D\u0130L", "TYT"];
 var CLASS_TRACKS = [...YKS_CLASS_TRACKS, ...EXAM_TRACKS.filter((track) => track !== "YKS")];
 var CLASS_TRACK_LABELS = { SAY: "Say\u0131sal", EA: "E\u015Fit A\u011F\u0131rl\u0131k", "S\xD6Z": "S\xF6zel", "D\u0130L": "Dil", TYT: "TYT (ortak)", ...EXAM_TRACK_LABELS };
+var TEACHER_SUBJECT_GROUPS = [
+  { label: "YKS ve ortak dersler", subjects: ["T\xFCrk\xE7e", "Edebiyat", "Matematik", "Geometri", "Fizik", "Kimya", "Biyoloji", "Tarih", "Co\u011Frafya", "Felsefe", "Din K\xFClt\xFCr\xFC", "\u0130ngilizce"] },
+  { label: "LGS", subjects: ["Fen Bilimleri", "\u0130nk\u0131lap Tarihi"] },
+  { label: "KPSS ve MEB-AGS", subjects: ["Vatanda\u015Fl\u0131k", "G\xFCncel Bilgiler", "E\u011Fitim Bilimleri", "Mevzuat"] },
+  { label: "KPSS A grubu", subjects: ["Hukuk", "\u0130ktisat", "Maliye", "Muhasebe", "\u0130\u015Fletme", "\xC7al\u0131\u015Fma Ekonomisi", "\u0130statistik", "Kamu Y\xF6netimi", "Uluslararas\u0131 \u0130li\u015Fkiler"] },
+  { label: "Di\u011Fer", subjects: ["Rehberlik"] }
+];
+var TEACHER_SUBJECTS = TEACHER_SUBJECT_GROUPS.flatMap((group) => group.subjects);
 var isStaffRole = (role) => role !== "student";
 var hasRole = (role, minimum) => ROLE_RANK[role] >= ROLE_RANK[minimum];
 var seesAllStudents = (role) => hasRole(role, "coordinator");
@@ -4674,10 +4697,16 @@ async function listMyMemberships(userId) {
   const rows = await db.select({ ...membershipColumns, kvkkVersion: organizationMembers.kvkkVersion, consentAt: organizationMembers.consentAt }).from(organizationMembers).innerJoin(organizations, eq8(organizations.id, organizationMembers.orgId)).where(and6(eq8(organizationMembers.userId, userId), eq8(organizationMembers.status, "active"), eq8(organizations.status, "active")));
   return rows.map((row) => ({ ...toMembership(row), kvkkVersion: row.kvkkVersion, consentAt: row.consentAt }));
 }
-async function hasActiveAssignment(orgId, teacherUserId, studentUserId) {
+async function teacherStudentIds(orgId, teacherUserId) {
   const db = await requireDb4();
-  const [row] = await db.select({ id: teacherAssignments.id }).from(teacherAssignments).where(and6(eq8(teacherAssignments.orgId, orgId), eq8(teacherAssignments.teacherUserId, teacherUserId), eq8(teacherAssignments.studentUserId, studentUserId), eq8(teacherAssignments.active, 1))).limit(1);
-  return Boolean(row);
+  const [assigned, advised] = await Promise.all([
+    db.select({ studentUserId: teacherAssignments.studentUserId }).from(teacherAssignments).where(and6(eq8(teacherAssignments.orgId, orgId), eq8(teacherAssignments.teacherUserId, teacherUserId), eq8(teacherAssignments.active, 1))),
+    db.select({ studentUserId: classStudents.studentUserId }).from(classStudents).innerJoin(organizationClasses, eq8(organizationClasses.id, classStudents.classId)).where(and6(eq8(organizationClasses.orgId, orgId), eq8(organizationClasses.advisorUserId, teacherUserId)))
+  ]);
+  return Array.from(new Set([...assigned, ...advised].map((row) => row.studentUserId)));
+}
+async function hasActiveAssignment(orgId, teacherUserId, studentUserId) {
+  return (await teacherStudentIds(orgId, teacherUserId)).includes(studentUserId);
 }
 async function isActiveStudent(orgId, studentUserId) {
   const db = await requireDb4();
@@ -4689,9 +4718,9 @@ async function listMembers(orgId, options = {}) {
   const conditions = [eq8(organizationMembers.orgId, orgId), eq8(organizationMembers.status, "active")];
   if (options.role) conditions.push(eq8(organizationMembers.role, options.role));
   if (options.teacherUserId) {
-    const assigned = await db.select({ studentUserId: teacherAssignments.studentUserId }).from(teacherAssignments).where(and6(eq8(teacherAssignments.orgId, orgId), eq8(teacherAssignments.teacherUserId, options.teacherUserId), eq8(teacherAssignments.active, 1)));
-    if (!assigned.length) return [];
-    conditions.push(inArray4(organizationMembers.userId, assigned.map((row) => row.studentUserId)));
+    const visible = await teacherStudentIds(orgId, options.teacherUserId);
+    if (!visible.length) return [];
+    conditions.push(inArray4(organizationMembers.userId, visible));
   }
   const rows = await db.select({ userId: organizationMembers.userId, preferredName: studentProfiles.preferredName, name: users.name, email: users.email, role: organizationMembers.role, subject: organizationMembers.subject, joinedAt: organizationMembers.joinedAt, consentAt: organizationMembers.consentAt, lastSignedIn: users.lastSignedIn }).from(organizationMembers).innerJoin(users, eq8(users.id, organizationMembers.userId)).leftJoin(studentProfiles, eq8(studentProfiles.userId, organizationMembers.userId)).where(and6(...conditions)).orderBy(users.name);
   return rows.map((row) => ({ userId: row.userId, name: row.preferredName || row.name || "\u0130simsiz", email: row.email, role: row.role, subject: row.subject, joinedAt: row.joinedAt, consentAt: row.consentAt, lastSignedIn: row.lastSignedIn }));
@@ -4716,6 +4745,8 @@ async function endMembership(orgId, userId, status) {
   await db.update(teacherAssignments).set({ active: 0 }).where(and6(eq8(teacherAssignments.orgId, orgId), sql5`(${teacherAssignments.studentUserId} = ${userId} OR ${teacherAssignments.teacherUserId} = ${userId})`));
   const classes = await db.select({ id: organizationClasses.id }).from(organizationClasses).where(eq8(organizationClasses.orgId, orgId));
   if (classes.length) await db.delete(classStudents).where(and6(eq8(classStudents.studentUserId, userId), inArray4(classStudents.classId, classes.map((row) => row.id))));
+  await db.update(organizationClasses).set({ advisorUserId: null }).where(and6(eq8(organizationClasses.orgId, orgId), eq8(organizationClasses.advisorUserId, userId)));
+  await db.update(classTimetableSlots).set({ teacherUserId: null }).where(and6(eq8(classTimetableSlots.orgId, orgId), eq8(classTimetableSlots.teacherUserId, userId)));
 }
 async function createInvitation(input) {
   const db = await requireDb4();
@@ -4768,6 +4799,7 @@ async function deleteClass(orgId, classId) {
   const [row] = await db.select({ id: organizationClasses.id }).from(organizationClasses).where(and6(eq8(organizationClasses.orgId, orgId), eq8(organizationClasses.id, classId))).limit(1);
   if (!row) return false;
   await db.delete(classStudents).where(eq8(classStudents.classId, classId));
+  await db.delete(classTimetableSlots).where(and6(eq8(classTimetableSlots.orgId, orgId), eq8(classTimetableSlots.classId, classId)));
   await db.delete(organizationClasses).where(eq8(organizationClasses.id, classId));
   return true;
 }
@@ -4792,6 +4824,25 @@ async function setTeacherStudents(orgId, teacherUserId, studentUserIds) {
     await db.insert(teacherAssignments).values({ orgId, teacherUserId, studentUserId, active: 1 }).onConflictDoUpdate({ target: [teacherAssignments.orgId, teacherAssignments.teacherUserId, teacherAssignments.studentUserId], set: { active: 1 } });
   }
   return valid;
+}
+var slotColumns = { id: classTimetableSlots.id, classId: classTimetableSlots.classId, dayOfWeek: classTimetableSlots.dayOfWeek, startTime: classTimetableSlots.startTime, endTime: classTimetableSlots.endTime, subject: classTimetableSlots.subject, teacherUserId: classTimetableSlots.teacherUserId, room: classTimetableSlots.room };
+async function listOrgTimetable(orgId) {
+  const db = await requireDb4();
+  return db.select(slotColumns).from(classTimetableSlots).where(eq8(classTimetableSlots.orgId, orgId)).orderBy(classTimetableSlots.dayOfWeek, classTimetableSlots.startTime);
+}
+async function replaceClassTimetable(orgId, classId, slots) {
+  const db = await requireDb4();
+  const [row] = await db.select({ id: organizationClasses.id }).from(organizationClasses).where(and6(eq8(organizationClasses.orgId, orgId), eq8(organizationClasses.id, classId))).limit(1);
+  if (!row) return false;
+  await db.transaction(async (tx) => {
+    await tx.delete(classTimetableSlots).where(and6(eq8(classTimetableSlots.orgId, orgId), eq8(classTimetableSlots.classId, classId)));
+    if (slots.length) await tx.insert(classTimetableSlots).values(slots.map((slot) => ({ ...slot, orgId, classId })));
+  });
+  return true;
+}
+async function listStudentTimetable(studentUserId) {
+  const db = await requireDb4();
+  return db.select({ orgName: organizations.name, className: organizationClasses.name, dayOfWeek: classTimetableSlots.dayOfWeek, startTime: classTimetableSlots.startTime, endTime: classTimetableSlots.endTime, subject: classTimetableSlots.subject, room: classTimetableSlots.room, teacherName: users.name }).from(classStudents).innerJoin(organizationClasses, eq8(organizationClasses.id, classStudents.classId)).innerJoin(organizationMembers, and6(eq8(organizationMembers.orgId, organizationClasses.orgId), eq8(organizationMembers.userId, classStudents.studentUserId), eq8(organizationMembers.role, "student"), eq8(organizationMembers.status, "active"))).innerJoin(organizations, eq8(organizations.id, organizationClasses.orgId)).innerJoin(classTimetableSlots, eq8(classTimetableSlots.classId, organizationClasses.id)).leftJoin(users, eq8(users.id, classTimetableSlots.teacherUserId)).where(eq8(classStudents.studentUserId, studentUserId)).orderBy(classTimetableSlots.dayOfWeek, classTimetableSlots.startTime);
 }
 async function listNotes2(orgId, studentUserId) {
   const db = await requireDb4();
@@ -9783,7 +9834,11 @@ async function getPlanScheduleContext(userId, startDate) {
   if (!db) return null;
   const [profile] = await db.select({ start: studentProfiles.preferredStudyStartTime }).from(studentProfiles).where(eq20(studentProfiles.userId, userId)).limit(1);
   const { blocks } = await getClassSchedule(userId);
-  return describeWeekForPlan(blocks, startDate, profile?.start && isValidTime(profile.start) ? profile.start : "16:00");
+  return describeWeekForPlan([...blocks, ...await getCourseBlocks(userId)], startDate, profile?.start && isValidTime(profile.start) ? profile.start : "16:00");
+}
+async function getCourseBlocks(userId) {
+  const rows = await listStudentTimetable(userId).catch(() => []);
+  return rows.map((slot) => ({ source: "course", dayOfWeek: slot.dayOfWeek, startTime: slot.startTime, endTime: slot.endTime, subject: slot.subject, label: `${slot.className} \xB7 ${slot.subject}`, orgName: slot.orgName, teacherName: slot.teacherName, room: slot.room }));
 }
 async function saveClassSchedule(userId, schedule) {
   const problem = validateSchedule(schedule);
@@ -9951,7 +10006,11 @@ async function readScheduleFromImage(dataUrl, invoke = invokeLLM, track = "YKS")
 // server/routers/classSchedule.ts
 var time = z7.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Saat SS:dd bi\xE7iminde olmal\u0131.");
 var classScheduleRouter = router({
-  get: protectedProcedure.query(({ ctx }) => getClassSchedule(ctx.user.id)),
+  // `courseBlocks`: kurumun (dershane) sınıf programı; salt okunur, kaydedilen programa girmez.
+  get: protectedProcedure.query(async ({ ctx }) => {
+    const [schedule, courseBlocks] = await Promise.all([getClassSchedule(ctx.user.id), getCourseBlocks(ctx.user.id)]);
+    return { ...schedule, courseBlocks };
+  }),
   save: protectedProcedure.input(z7.object({
     periods: z7.array(z7.object({ start: time, end: time })).max(MAX_SCHOOL_PERIODS),
     blocks: z7.array(z7.object({
@@ -10152,6 +10211,48 @@ function effectiveKvkk(org) {
   };
 }
 
+// shared/orgTimetable.ts
+var MAX_TIMETABLE_SLOTS_PER_CLASS = 80;
+var overlaps2 = (a, b) => a.dayOfWeek === b.dayOfWeek && toMinutes(a.startTime) < toMinutes(b.endTime) && toMinutes(b.startTime) < toMinutes(a.endTime);
+var when = (slot) => `${DAY_LABELS[slot.dayOfWeek - 1]} ${slot.startTime}\u2013${slot.endTime}`;
+function validateClassTimetable(slots) {
+  if (slots.length > MAX_TIMETABLE_SLOTS_PER_CLASS) return `Bir s\u0131n\u0131fa en fazla ${MAX_TIMETABLE_SLOTS_PER_CLASS} ders eklenebilir.`;
+  for (const slot of slots) {
+    if (!Number.isInteger(slot.dayOfWeek) || slot.dayOfWeek < 1 || slot.dayOfWeek > 7) return "Ge\xE7ersiz g\xFCn.";
+    if (!isValidTime(slot.startTime) || !isValidTime(slot.endTime)) return "Saatler SS:DD bi\xE7iminde olmal\u0131.";
+    if (toMinutes(slot.endTime) <= toMinutes(slot.startTime)) return `${when(slot)}: biti\u015F saati ba\u015Flang\u0131\xE7tan sonra olmal\u0131.`;
+    if (!slot.subject.trim()) return `${when(slot)}: ders ad\u0131 bo\u015F olamaz.`;
+  }
+  for (let i = 0; i < slots.length; i += 1) {
+    for (let j = i + 1; j < slots.length; j += 1) {
+      if (overlaps2(slots[i], slots[j])) return `${when(slots[i])} saatinde s\u0131n\u0131f\u0131n iki dersi \xE7ak\u0131\u015F\u0131yor (${slots[i].subject}, ${slots[j].subject}).`;
+    }
+  }
+  return null;
+}
+function findCrossClassConflicts(classId, slots, others) {
+  const conflicts = [];
+  for (const slot of slots) {
+    for (const other of others) {
+      if (other.classId === classId || !overlaps2(slot, other)) continue;
+      if (slot.teacherUserId && slot.teacherUserId === other.teacherUserId) conflicts.push({ kind: "teacher", slot, other });
+      else if (slot.room && other.room && slot.room.trim().toLocaleLowerCase("tr") === other.room.trim().toLocaleLowerCase("tr")) conflicts.push({ kind: "room", slot, other });
+    }
+  }
+  return conflicts;
+}
+function describeConflict(conflict, names) {
+  const target = conflict.kind === "teacher" ? `${names.teacher(conflict.slot.teacherUserId)} ayn\u0131 saatte ${names.className(conflict.other.classId)} s\u0131n\u0131f\u0131nda ${conflict.other.subject} dersinde` : `${conflict.slot.room} dersli\u011Fi ayn\u0131 saatte ${names.className(conflict.other.classId)} s\u0131n\u0131f\u0131na verilmi\u015F`;
+  return `${when(conflict.slot)}: ${target}.`;
+}
+var branchMismatch = (subject2, teacherBranch) => Boolean(teacherBranch && teacherBranch !== "Rehberlik" && !sameBranch(subject2, teacherBranch));
+var BRANCH_FAMILIES = [["Matematik", "Geometri", "Say\u0131sal Yetenek", "Say\u0131sal"], ["T\xFCrk\xE7e", "Edebiyat", "S\xF6zel Yetenek", "S\xF6zel"], ["Fen Bilimleri", "Fizik", "Kimya", "Biyoloji", "Fen"], ["Tarih", "\u0130nk\u0131lap Tarihi"], ["Co\u011Frafya", "T\xFCrkiye Co\u011Frafyas\u0131"], ["Vatanda\u015Fl\u0131k", "Mevzuat"]];
+function sameBranch(subject2, branch) {
+  if (subject2 === branch) return true;
+  return BRANCH_FAMILIES.some((family) => family.includes(subject2) && family.includes(branch));
+}
+var sortSlots = (slots) => slots.slice().sort((a, b) => a.dayOfWeek - b.dayOfWeek || toMinutes(a.startTime) - toMinutes(b.startTime));
+
 // server/org/orgAccess.ts
 import { TRPCError as TRPCError8 } from "@trpc/server";
 import { z as z10 } from "zod";
@@ -10209,10 +10310,18 @@ var classInput = z11.object({ name: z11.string().trim().min(1).max(80), gradeLev
 async function classFields(orgId, input) {
   if (input.advisorUserId) {
     const role = await getMemberRole(orgId, input.advisorUserId);
-    if (!role || !isStaffRole(role)) throw new TRPCError9({ code: "NOT_FOUND", message: "Dan\u0131\u015Fman \xF6\u011Fretmen bulunamad\u0131." });
+    if (!role || !isStaffRole(role)) throw new TRPCError9({ code: "NOT_FOUND", message: "Sorumlu \xF6\u011Fretmen bulunamad\u0131." });
   }
   return { name: input.name, gradeLevel: input.gradeLevel ?? null, track: input.track ?? null, advisorUserId: input.advisorUserId ?? null };
 }
+var timetableSlotInput = z11.object({
+  dayOfWeek: z11.number().int().min(1).max(7),
+  startTime: z11.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  endTime: z11.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  subject: z11.string().trim().min(1).max(60),
+  teacherUserId: id3.nullable(),
+  room: optionalText(40)
+});
 var average = (values) => values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length * 10) / 10 : null;
 var orgRouter = router({
   /** Kullanıcının aktif kurum üyelikleri: panel yönlendirmesi ve kurum seçici. */
@@ -10411,6 +10520,40 @@ var orgRouter = router({
       return { ok: true };
     })
   }),
+  /**
+   * Ders programı: tüm sınıfların haftalık dersleri. Personel (öğretmen dahil) görür; öğrenci verisi
+   * içermez. Kaydı koordinatör+ yapar; öğretmen ve derslik çakışması kaydı engeller, branş
+   * uyuşmazlığı yalnız uyarıdır.
+   */
+  timetable: router({
+    get: orgProcedure("teacher").query(async ({ ctx }) => {
+      const [slots, classes, members] = await Promise.all([listOrgTimetable(ctx.membership.orgId), listClasses(ctx.membership.orgId), listMembers(ctx.membership.orgId)]);
+      return {
+        slots,
+        classes: classes.map((item) => ({ id: item.id, name: item.name, gradeLevel: item.gradeLevel, track: item.track, advisorUserId: item.advisorUserId, studentCount: item.studentUserIds.length })),
+        teachers: members.filter((member) => isStaffRole(member.role)).map((member) => ({ userId: member.userId, name: member.name, role: member.role, subject: member.subject }))
+      };
+    }),
+    saveClass: orgProcedure("coordinator").input(z11.object({ classId: id3, slots: z11.array(timetableSlotInput).max(MAX_TIMETABLE_SLOTS_PER_CLASS) })).mutation(async ({ ctx, input }) => {
+      const orgId = ctx.membership.orgId;
+      const slots = sortSlots(input.slots.map((slot) => ({ ...slot, room: slot.room ?? null })));
+      const problem = validateClassTimetable(slots);
+      if (problem) throw new TRPCError9({ code: "BAD_REQUEST", message: problem });
+      const [members, classes, current] = await Promise.all([listMembers(orgId), listClasses(orgId), listOrgTimetable(orgId)]);
+      const staff = new Map(members.filter((member) => isStaffRole(member.role)).map((member) => [member.userId, member]));
+      if (!classes.some((item) => item.id === input.classId)) throw new TRPCError9({ code: "NOT_FOUND", message: "S\u0131n\u0131f bulunamad\u0131." });
+      if (slots.some((slot) => slot.teacherUserId && !staff.has(slot.teacherUserId))) throw new TRPCError9({ code: "NOT_FOUND", message: "\xD6\u011Fretmen bulunamad\u0131." });
+      const conflicts = findCrossClassConflicts(input.classId, slots, current.map((slot) => ({ ...slot, room: slot.room ?? null })));
+      if (conflicts.length) {
+        const names = { teacher: (userId) => staff.get(userId)?.name ?? "\xD6\u011Fretmen", className: (classId) => classes.find((item) => item.id === classId)?.name ?? "ba\u015Fka bir" };
+        throw new TRPCError9({ code: "CONFLICT", message: conflicts.slice(0, 3).map((conflict) => describeConflict(conflict, names)).join(" ") });
+      }
+      await replaceClassTimetable(orgId, input.classId, slots);
+      await audit(ctx, "timetable.update", { type: "class", id: input.classId }, { slots: slots.length });
+      const warnings = slots.filter((slot) => slot.teacherUserId && branchMismatch(slot.subject, staff.get(slot.teacherUserId)?.subject ?? null)).map((slot) => `${staff.get(slot.teacherUserId)?.name} (${staff.get(slot.teacherUserId)?.subject}) ${slot.subject} dersine atand\u0131.`);
+      return { ok: true, warnings: Array.from(new Set(warnings)) };
+    })
+  }),
   assignments: router({
     list: orgProcedure("coordinator").query(({ ctx }) => listAssignments(ctx.membership.orgId)),
     setTeacherStudents: orgProcedure("coordinator").input(z11.object({ teacherUserId: id3, studentUserIds: z11.array(id3).max(500) })).mutation(async ({ ctx, input }) => {
@@ -10489,6 +10632,8 @@ var orgRouter = router({
     return { ok: true };
   }),
   myFeedback: protectedProcedure.query(({ ctx }) => listStudentFeedback(ctx.user.id)),
+  /** Öğrencinin dershane programı (sınıflarının dersleri). */
+  myTimetable: protectedProcedure.query(({ ctx }) => listStudentTimetable(ctx.user.id)),
   /** Üyenin bağlı olduğu kurumun KVKK metinleri ve kendi onayladığı sürüm ("Kurumum"). */
   myKvkk: protectedProcedure.input(z11.object({ orgId: id3 })).query(async ({ ctx, input }) => {
     const membership = (await listMyMemberships(ctx.user.id)).find((row) => row.orgId === input.orgId);

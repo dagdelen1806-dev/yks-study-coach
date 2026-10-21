@@ -202,15 +202,15 @@ describe("kurum kuralları", () => {
     expect(canInviteRole("admin", "admin")).toBe(false);
   });
 
-  it("ayarlar: kurum bilgisini yalnızca yönetici, sınıfı koordinatör+ tanımlar; danışman aynı kurumun personeli olmalı", async () => {
+  it("ayarlar: kurum bilgisini yalnızca yönetici, sınıfı koordinatör+ tanımlar; sorumlu öğretmen aynı kurumun personeli olmalı", async () => {
     vi.clearAllMocks();
     await expect(as(11).org.settings.update({ orgId: 1, name: "Değişti", kind: "okul" })).rejects.toThrow();
     await expect(as(30).org.settings.update({ orgId: 1, name: "Değişti", kind: "okul" })).rejects.toThrow();
     await expect(as(10).org.settings.update({ orgId: 1, name: "A Kurs Merkezi", kind: "dershane", contactEmail: "" })).resolves.toEqual({ ok: true });
     expect(updateOrganization).toHaveBeenCalledWith(1, expect.objectContaining({ name: "A Kurs Merkezi", contactEmail: null, city: null }));
     await expect(as(11).org.classes.create({ orgId: 1, name: "12-A" })).rejects.toThrow();
-    await expect(as(10).org.classes.create({ orgId: 1, name: "12-A", advisorUserId: 30 })).rejects.toThrow(/Danışman/);
-    await expect(as(10).org.classes.create({ orgId: 1, name: "12-A", advisorUserId: 20 })).rejects.toThrow(/Danışman/);
+    await expect(as(10).org.classes.create({ orgId: 1, name: "12-A", advisorUserId: 30 })).rejects.toThrow(/Sorumlu öğretmen/);
+    await expect(as(10).org.classes.create({ orgId: 1, name: "12-A", advisorUserId: 20 })).rejects.toThrow(/Sorumlu öğretmen/);
     await expect(as(10).org.classes.create({ orgId: 1, name: "12-A", gradeLevel: "12", track: "SAY", advisorUserId: 11 })).resolves.toEqual({ id: 1 });
     await expect(as(11).org.members.setSubject({ orgId: 1, userId: 11, subject: "Fizik" })).rejects.toThrow();
     expect(store.audit.map((row) => row.action)).toEqual(expect.arrayContaining(["org.update", "class.create"]));

@@ -6,6 +6,7 @@ export const ORG_PATHS = {
   dashboard: "/kurum",
   students: "/kurum/ogrenciler",
   classes: "/kurum/siniflar",
+  timetable: "/kurum/ders-programi",
   teachers: "/kurum/ogretmenler",
   invitations: "/kurum/davetler",
   audit: "/kurum/kayitlar",

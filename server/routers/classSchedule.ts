@@ -2,7 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { llmUnavailableMessage } from "../_core/llm";
 import { metredFeatureProcedure, protectedProcedure, router } from "../_core/trpc";
-import { ScheduleError, getClassSchedule, saveClassSchedule } from "../schedule/classScheduleDb";
+import { ScheduleError, getClassSchedule, getCourseBlocks, saveClassSchedule } from "../schedule/classScheduleDb";
 import { readScheduleFromImage } from "../schedule/scheduleImport";
 import { MAX_SCHEDULE_BLOCKS, MAX_SCHOOL_PERIODS, SCHEDULE_SOURCES, SCHEDULE_SUBJECTS } from "../../shared/classSchedule";
 import { getStudentProfile } from "../db";
@@ -11,7 +11,11 @@ const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Saat SS:dd biçimind
 
 /** Ders programım: öğrencinin okul/dershane haftalık programı. Her uç ctx.user.id ile kapsamlı. */
 export const classScheduleRouter = router({
-  get: protectedProcedure.query(({ ctx }) => getClassSchedule(ctx.user.id)),
+  // `courseBlocks`: kurumun (dershane) sınıf programı; salt okunur, kaydedilen programa girmez.
+  get: protectedProcedure.query(async ({ ctx }) => {
+    const [schedule, courseBlocks] = await Promise.all([getClassSchedule(ctx.user.id), getCourseBlocks(ctx.user.id)]);
+    return { ...schedule, courseBlocks };
+  }),
   save: protectedProcedure
     .input(z.object({
       periods: z.array(z.object({ start: time, end: time })).max(MAX_SCHOOL_PERIODS),

@@ -13,14 +13,16 @@ import { randomBytes, scryptSync } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { getDb } from "../server/db";
 import { parseIdentifier } from "../server/_core/loginIdentifier";
-import { classStudents, counselingNotes, featureUsageLogs, organizationCreditUsage, organizationAuditLogs, organizationClasses, organizationInvitations, organizationMembers, organizations, parentLinks, payments, studentExamTracks, studentProfiles, subscriptions, teacherAssignments, topicStudyLogs, userMockExams, users } from "../drizzle/schema";
+import { classStudents, classTimetableSlots, counselingNotes, featureUsageLogs, organizationCreditUsage, organizationAuditLogs, organizationClasses, organizationInvitations, organizationMembers, organizations, parentLinks, payments, studentExamTracks, studentProfiles, subscriptions, teacherAssignments, topicStudyLogs, userMockExams, users } from "../drizzle/schema";
 
 const SLUG = "test-dershanesi";
 const PASSWORD = "test1234";
 const staff = [
-  { email: "kurum.admin@test.local", name: "Selin Yönetici", role: "admin" as const },
-  { email: "ogretmen1@test.local", name: "Murat Hoca", role: "teacher" as const },
-  { email: "ogretmen2@test.local", name: "Ayşe Hoca", role: "teacher" as const },
+  { email: "kurum.admin@test.local", name: "Selin Yönetici", role: "admin" as const, subject: null },
+  { email: "ogretmen1@test.local", name: "Murat Hoca", role: "teacher" as const, subject: "Matematik" },
+  { email: "ogretmen2@test.local", name: "Ayşe Hoca", role: "teacher" as const, subject: "Türkçe" },
+  // Hiç öğrenci atanmamış; 12-A'nın sorumlu öğretmeni olduğu için o sınıfı görür.
+  { email: "ogretmen3@test.local", name: "Kenan Hoca", role: "teacher" as const, subject: "Fizik" },
 ];
 const students = [
   { email: "ogrenci1@test.local", name: "Ece", avatar: "girl" },
@@ -60,7 +62,7 @@ async function main() {
   if (old) {
     const classIds = (await db.select({ id: organizationClasses.id }).from(organizationClasses).where(eq(organizationClasses.orgId, old.id))).map((row) => row.id);
     if (classIds.length) await db.delete(classStudents).where(inArray(classStudents.classId, classIds));
-    for (const table of [organizationClasses, teacherAssignments, counselingNotes, organizationInvitations, organizationAuditLogs, organizationMembers, organizationCreditUsage]) await db.delete(table).where(eq(table.orgId, old.id));
+    for (const table of [classTimetableSlots, organizationClasses, teacherAssignments, counselingNotes, organizationInvitations, organizationAuditLogs, organizationMembers, organizationCreditUsage]) await db.delete(table).where(eq(table.orgId, old.id));
     await db.delete(organizations).where(eq(organizations.id, old.id));
   }
 
@@ -71,7 +73,7 @@ async function main() {
   for (const person of staff) {
     const userId = await ensureUser(person.email, person.name);
     staffIds[person.email] = userId;
-    await db.insert(organizationMembers).values({ orgId, userId, role: person.role, status: "active" });
+    await db.insert(organizationMembers).values({ orgId, userId, role: person.role, status: "active", subject: person.subject });
   }
 
   const studentIds: number[] = [];
@@ -95,6 +97,18 @@ async function main() {
 
   const murat = staffIds["ogretmen1@test.local"];
   const ayse = staffIds["ogretmen2@test.local"];
+  const kenan = staffIds["ogretmen3@test.local"];
+  await db.update(organizationClasses).set({ advisorUserId: kenan }).where(eq(organizationClasses.id, sayClass));
+  await db.update(organizationClasses).set({ advisorUserId: ayse }).where(eq(organizationClasses.id, eaClass));
+  // Ders programı: hafta içi akşam ve cumartesi; öğretmen iki sınıfa aynı saatte girmez.
+  const lesson = (classId: number, dayOfWeek: number, startTime: string, endTime: string, subject: string, teacherUserId: number, room: string) => ({ orgId, classId, dayOfWeek, startTime, endTime, subject, teacherUserId, room });
+  await db.insert(classTimetableSlots).values([
+    lesson(sayClass, 2, "16:30", "17:10", "Matematik", murat, "A-101"), lesson(sayClass, 2, "17:20", "18:00", "Fizik", kenan, "A-101"),
+    lesson(sayClass, 4, "16:30", "17:10", "Fizik", kenan, "A-101"), lesson(sayClass, 4, "17:20", "18:00", "Türkçe", ayse, "A-101"),
+    lesson(sayClass, 6, "09:00", "09:40", "Matematik", murat, "A-101"), lesson(sayClass, 6, "09:50", "10:30", "Geometri", murat, "A-101"),
+    lesson(eaClass, 2, "16:30", "17:10", "Türkçe", ayse, "B-203"), lesson(eaClass, 2, "17:20", "18:00", "Matematik", murat, "B-203"),
+    lesson(eaClass, 4, "16:30", "17:10", "Matematik", murat, "B-203"), lesson(eaClass, 6, "09:00", "09:40", "Türkçe", ayse, "B-203"),
+  ]);
   await db.insert(teacherAssignments).values([...studentIds.slice(0, 3).map((id) => ({ orgId, teacherUserId: murat, studentUserId: id, active: 1 })), ...studentIds.slice(3).map((id) => ({ orgId, teacherUserId: ayse, studentUserId: id, active: 1 }))]);
 
   await db.insert(counselingNotes).values([
@@ -130,7 +144,7 @@ async function main() {
 
   console.log(`\nKurum hazır (id ${orgId}). Şifre: ${PASSWORD}`);
   console.log(`  LGS öğrencisi: ${LGS_STUDENT.email} · Veli: ${PARENT.email} · KPSS + MEB-AGS adayı: ${AGS_CANDIDATE.email}`);
-  console.log(`  Yönetici: ${staff[0].email}\n  Öğretmenler: ${staff[1].email} (12-A), ${staff[2].email} (12-B)\n  Öğrenciler: ${students.map((student) => student.email).join(", ")}`);
+  console.log(`  Yönetici: ${staff[0].email}\n  Öğretmenler: ${staff[1].email} (Matematik), ${staff[2].email} (Türkçe, 12-B sorumlusu), ${staff[3].email} (Fizik, 12-A sorumlusu)\n  Öğrenciler: ${students.map((student) => student.email).join(", ")}`);
   process.exit(0);
 }
 

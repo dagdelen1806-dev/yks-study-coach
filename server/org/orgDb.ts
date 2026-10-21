@@ -1,6 +1,7 @@
 import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import {
   classStudents,
+  classTimetableSlots,
   counselingNotes,
   organizationAuditLogs,
   organizationClasses,
@@ -17,6 +18,7 @@ import {
   userMockExams,
   users,
 } from "../../drizzle/schema";
+import type { TimetableSlot } from "../../shared/orgTimetable";
 import { membershipState, type InvitableRole, type MembershipState, type OrgKind, type OrgPlan, type OrgRole, type StudentSignals } from "../../shared/org";
 import { getDb } from "../db";
 
@@ -60,12 +62,24 @@ export async function listMyMemberships(userId: number): Promise<Array<Membershi
   return rows.map((row) => ({ ...toMembership(row), kvkkVersion: row.kvkkVersion, consentAt: row.consentAt }));
 }
 
-export async function hasActiveAssignment(orgId: number, teacherUserId: number, studentUserId: number): Promise<boolean> {
+/**
+ * Öğretmenin gördüğü öğrenciler: kendisine atananlar ve sorumlu öğretmeni olduğu sınıfların
+ * öğrencileri (sınıftan çıkan öğrenci listeden de düşer).
+ */
+export async function teacherStudentIds(orgId: number, teacherUserId: number): Promise<number[]> {
   const db = await requireDb();
-  const [row] = await db.select({ id: teacherAssignments.id }).from(teacherAssignments)
-    .where(and(eq(teacherAssignments.orgId, orgId), eq(teacherAssignments.teacherUserId, teacherUserId), eq(teacherAssignments.studentUserId, studentUserId), eq(teacherAssignments.active, 1)))
-    .limit(1);
-  return Boolean(row);
+  const [assigned, advised] = await Promise.all([
+    db.select({ studentUserId: teacherAssignments.studentUserId }).from(teacherAssignments)
+      .where(and(eq(teacherAssignments.orgId, orgId), eq(teacherAssignments.teacherUserId, teacherUserId), eq(teacherAssignments.active, 1))),
+    db.select({ studentUserId: classStudents.studentUserId }).from(classStudents)
+      .innerJoin(organizationClasses, eq(organizationClasses.id, classStudents.classId))
+      .where(and(eq(organizationClasses.orgId, orgId), eq(organizationClasses.advisorUserId, teacherUserId))),
+  ]);
+  return Array.from(new Set([...assigned, ...advised].map((row) => row.studentUserId)));
+}
+
+export async function hasActiveAssignment(orgId: number, teacherUserId: number, studentUserId: number): Promise<boolean> {
+  return (await teacherStudentIds(orgId, teacherUserId)).includes(studentUserId);
 }
 
 export async function isActiveStudent(orgId: number, studentUserId: number): Promise<boolean> {
@@ -78,16 +92,15 @@ export async function isActiveStudent(orgId: number, studentUserId: number): Pro
 
 export type OrgMemberRow = { userId: number; name: string; email: string | null; role: OrgRole; subject: string | null; joinedAt: Date; consentAt: Date | null; lastSignedIn: Date | null };
 
-/** Kurumun aktif üyeleri; `teacherUserId` verilirse yalnızca o öğretmene atanmış öğrenciler. */
+/** Kurumun aktif üyeleri; `teacherUserId` verilirse yalnızca o öğretmenin gördüğü öğrenciler (atama + sorumlu olduğu sınıf). */
 export async function listMembers(orgId: number, options: { role?: OrgRole; teacherUserId?: number } = {}): Promise<OrgMemberRow[]> {
   const db = await requireDb();
   const conditions = [eq(organizationMembers.orgId, orgId), eq(organizationMembers.status, "active")];
   if (options.role) conditions.push(eq(organizationMembers.role, options.role));
   if (options.teacherUserId) {
-    const assigned = await db.select({ studentUserId: teacherAssignments.studentUserId }).from(teacherAssignments)
-      .where(and(eq(teacherAssignments.orgId, orgId), eq(teacherAssignments.teacherUserId, options.teacherUserId), eq(teacherAssignments.active, 1)));
-    if (!assigned.length) return [];
-    conditions.push(inArray(organizationMembers.userId, assigned.map((row) => row.studentUserId)));
+    const visible = await teacherStudentIds(orgId, options.teacherUserId);
+    if (!visible.length) return [];
+    conditions.push(inArray(organizationMembers.userId, visible));
   }
   const rows = await db
     .select({ userId: organizationMembers.userId, preferredName: studentProfiles.preferredName, name: users.name, email: users.email, role: organizationMembers.role, subject: organizationMembers.subject, joinedAt: organizationMembers.joinedAt, consentAt: organizationMembers.consentAt, lastSignedIn: users.lastSignedIn })
@@ -125,6 +138,8 @@ export async function endMembership(orgId: number, userId: number, status: "left
   await db.update(teacherAssignments).set({ active: 0 }).where(and(eq(teacherAssignments.orgId, orgId), sql`(${teacherAssignments.studentUserId} = ${userId} OR ${teacherAssignments.teacherUserId} = ${userId})`));
   const classes = await db.select({ id: organizationClasses.id }).from(organizationClasses).where(eq(organizationClasses.orgId, orgId));
   if (classes.length) await db.delete(classStudents).where(and(eq(classStudents.studentUserId, userId), inArray(classStudents.classId, classes.map((row) => row.id))));
+  await db.update(organizationClasses).set({ advisorUserId: null }).where(and(eq(organizationClasses.orgId, orgId), eq(organizationClasses.advisorUserId, userId)));
+  await db.update(classTimetableSlots).set({ teacherUserId: null }).where(and(eq(classTimetableSlots.orgId, orgId), eq(classTimetableSlots.teacherUserId, userId)));
 }
 
 // --- Davet ------------------------------------------------------------------
@@ -196,6 +211,7 @@ export async function deleteClass(orgId: number, classId: number): Promise<boole
   const [row] = await db.select({ id: organizationClasses.id }).from(organizationClasses).where(and(eq(organizationClasses.orgId, orgId), eq(organizationClasses.id, classId))).limit(1);
   if (!row) return false;
   await db.delete(classStudents).where(eq(classStudents.classId, classId));
+  await db.delete(classTimetableSlots).where(and(eq(classTimetableSlots.orgId, orgId), eq(classTimetableSlots.classId, classId)));
   await db.delete(organizationClasses).where(eq(organizationClasses.id, classId));
   return true;
 }
@@ -225,6 +241,46 @@ export async function setTeacherStudents(orgId: number, teacherUserId: number, s
     await db.insert(teacherAssignments).values({ orgId, teacherUserId, studentUserId, active: 1 }).onConflictDoUpdate({ target: [teacherAssignments.orgId, teacherAssignments.teacherUserId, teacherAssignments.studentUserId], set: { active: 1 } });
   }
   return valid;
+}
+
+// --- Ders programı -----------------------------------------------------------
+
+const slotColumns = { id: classTimetableSlots.id, classId: classTimetableSlots.classId, dayOfWeek: classTimetableSlots.dayOfWeek, startTime: classTimetableSlots.startTime, endTime: classTimetableSlots.endTime, subject: classTimetableSlots.subject, teacherUserId: classTimetableSlots.teacherUserId, room: classTimetableSlots.room };
+
+/** Kurumun tüm sınıflarının dersleri (çakışma denetimi, öğretmen programı). */
+export async function listOrgTimetable(orgId: number) {
+  const db = await requireDb();
+  return db.select(slotColumns).from(classTimetableSlots).where(eq(classTimetableSlots.orgId, orgId)).orderBy(classTimetableSlots.dayOfWeek, classTimetableSlots.startTime);
+}
+
+/** Sınıfın programını tümüyle değiştirir (denetim çağıran tarafta). */
+export async function replaceClassTimetable(orgId: number, classId: number, slots: TimetableSlot[]): Promise<boolean> {
+  const db = await requireDb();
+  const [row] = await db.select({ id: organizationClasses.id }).from(organizationClasses).where(and(eq(organizationClasses.orgId, orgId), eq(organizationClasses.id, classId))).limit(1);
+  if (!row) return false;
+  await db.transaction(async (tx) => {
+    await tx.delete(classTimetableSlots).where(and(eq(classTimetableSlots.orgId, orgId), eq(classTimetableSlots.classId, classId)));
+    if (slots.length) await tx.insert(classTimetableSlots).values(slots.map((slot) => ({ ...slot, orgId, classId })));
+  });
+  return true;
+}
+
+/**
+ * Öğrencinin dershane programı: aktif üyesi olduğu kurumlarda bulunduğu sınıfların dersleri,
+ * öğretmen adıyla. Öğrenci uygulaması (Ders programım) ve AI haftalık plan bunu okur.
+ */
+export async function listStudentTimetable(studentUserId: number) {
+  const db = await requireDb();
+  return db
+    .select({ orgName: organizations.name, className: organizationClasses.name, dayOfWeek: classTimetableSlots.dayOfWeek, startTime: classTimetableSlots.startTime, endTime: classTimetableSlots.endTime, subject: classTimetableSlots.subject, room: classTimetableSlots.room, teacherName: users.name })
+    .from(classStudents)
+    .innerJoin(organizationClasses, eq(organizationClasses.id, classStudents.classId))
+    .innerJoin(organizationMembers, and(eq(organizationMembers.orgId, organizationClasses.orgId), eq(organizationMembers.userId, classStudents.studentUserId), eq(organizationMembers.role, "student"), eq(organizationMembers.status, "active")))
+    .innerJoin(organizations, eq(organizations.id, organizationClasses.orgId))
+    .innerJoin(classTimetableSlots, eq(classTimetableSlots.classId, organizationClasses.id))
+    .leftJoin(users, eq(users.id, classTimetableSlots.teacherUserId))
+    .where(eq(classStudents.studentUserId, studentUserId))
+    .orderBy(classTimetableSlots.dayOfWeek, classTimetableSlots.startTime);
 }
 
 // --- Görüşme notları ve denetim kaydı ---------------------------------------

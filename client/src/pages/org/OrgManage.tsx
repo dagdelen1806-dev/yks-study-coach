@@ -69,7 +69,12 @@ export function OrgTeachers({ scope }: { scope: OrgScope }) {
   const utils = trpc.useUtils();
   const members = trpc.org.members.list.useQuery({ orgId: scope.orgId }, { retry: false });
   const assignments = trpc.org.assignments.list.useQuery({ orgId: scope.orgId }, { retry: false });
+  const timetable = trpc.org.timetable.get.useQuery({ orgId: scope.orgId }, { retry: false });
   const [editing, setEditing] = useState<{ userId: number; name: string } | null>(null);
+  const [branch, setBranch] = useState("");
+  const branches = Array.from(new Set((members.data ?? []).map((member) => member.subject).filter((subject): subject is string => Boolean(subject)))).sort((a, b) => a.localeCompare(b, "tr"));
+  const advising = (userId: number) => (timetable.data?.classes ?? []).filter((item) => item.advisorUserId === userId).map((item) => item.name);
+  const lessons = (userId: number) => (timetable.data?.slots ?? []).filter((slot) => slot.teacherUserId === userId).length;
   const refresh = () => { utils.org.assignments.list.invalidate(); utils.org.members.list.invalidate(); utils.org.students.invalidate(); };
   const setTeacherStudents = trpc.org.assignments.setTeacherStudents.useMutation({ onSuccess: (result) => { setEditing(null); refresh(); toast.success(`${result.assigned} öğrenci atandı.`); }, onError: (error) => toast.error(error.message) });
   const setRole = trpc.org.members.setRole.useMutation({ onSuccess: () => { refresh(); toast.success("Rol güncellendi."); }, onError: (error) => toast.error(error.message) });
@@ -79,15 +84,23 @@ export function OrgTeachers({ scope }: { scope: OrgScope }) {
 
   return (
     <div className="space-y-5">
-      <PageHeader eyebrow={scope.orgName} title="Öğretmenler ve personel" description="Öğretmenlere öğrenci ata: öğretmen yalnızca kendisine atanmış öğrencilerin verisini görür. Yeni personel için Davetler sayfasından kod oluştur." />
+      <PageHeader eyebrow={scope.orgName} title="Öğretmenler ve personel" description="Öğretmen, kendisine atanan öğrencilerin ve sorumlu olduğu sınıfın öğrencilerinin verisini görür. Yeni öğretmeni branşıyla Ayarlar → Öğretmenler'den davet et; branşı oradan değiştirilir." />
+      {branches.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Branşa göre">
+          <button onClick={() => setBranch("")} className={`rounded-full px-3 py-1 text-[12.5px] font-semibold ${branch ? "bg-paper text-ink-3" : "bg-brand text-white"}`}>Tümü</button>
+          {branches.map((item) => <button key={item} onClick={() => setBranch(item)} className={`rounded-full px-3 py-1 text-[12.5px] font-semibold ${branch === item ? "bg-brand text-white" : "bg-paper text-ink-3"}`}>{item} ({(members.data ?? []).filter((member) => member.subject === item).length})</button>)}
+        </div>
+      )}
       {!members.data ? <EmptyNote>Yükleniyor…</EmptyNote> : (
         <section className="soft-card overflow-hidden">
           <ul className="divide-y divide-rule">
-            {members.data.map((member) => {
+            {members.data.filter((member) => !branch || member.subject === branch).map((member) => {
               const count = (assignments.data ?? []).filter((row) => row.teacherUserId === member.userId).length;
+              const advisedClasses = advising(member.userId);
+              const lessonCount = lessons(member.userId);
               return (
                 <li key={member.userId} className="flex flex-col gap-3 px-5 py-3 sm:flex-row sm:items-center">
-                  <span className="flex min-w-0 flex-1 items-center gap-3"><Initials name={member.name} /><span className="min-w-0"><span className="block truncate text-[13.5px] font-semibold text-ink">{member.name}</span><span className="block text-[12px] text-ink-3">{ROLE_LABELS[member.role]}{member.subject ? ` · ${member.subject}` : ""}{member.role === "teacher" ? ` · ${count} öğrenci` : ""} · son giriş {relativeTime(member.lastSignedIn)}</span></span></span>
+                  <span className="flex min-w-0 flex-1 items-center gap-3"><Initials name={member.name} /><span className="min-w-0"><span className="block truncate text-[13.5px] font-semibold text-ink">{member.name}</span><span className="block text-[12px] text-ink-3">{ROLE_LABELS[member.role]}{member.subject ? ` · ${member.subject}` : ""}{member.role === "teacher" ? ` · ${count} öğrenci` : ""}{advisedClasses.length ? ` · Sorumlu: ${advisedClasses.join(", ")}` : ""}{lessonCount ? ` · haftada ${lessonCount} ders` : ""} · son giriş {relativeTime(member.lastSignedIn)}</span></span></span>
                   <span className="flex flex-wrap items-center gap-2">
                     {member.role === "teacher" && <button onClick={() => setEditing({ userId: member.userId, name: member.name })} className={secondaryButton}><Users size={15} /> Öğrenci ata</button>}
                     {isAdmin && staffRoles.includes(member.role) && <select value={member.role} onChange={(event) => setRole.mutate({ orgId: scope.orgId, userId: member.userId, role: event.target.value as OrgRole })} className="form-input h-10 w-auto text-[13px]" aria-label={`${member.name} rolü`}>{staffRoles.map((role) => <option key={role} value={role}>{ROLE_LABELS[role]}</option>)}</select>}

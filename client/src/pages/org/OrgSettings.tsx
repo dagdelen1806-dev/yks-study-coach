@@ -1,6 +1,6 @@
 import { trpc } from "@/lib/trpc";
 import { EmptyNote, PageHeader, Panel, Segmented, primaryButton, secondaryButton } from "@/components/app/kit";
-import { CLASS_GRADES, CLASS_TRACKS, CLASS_TRACK_LABELS, ORG_CREDIT_COSTS, ORG_CREDIT_FEATURE_LABELS, ORG_KINDS, ORG_KIND_LABELS, ORG_PLANS, ORG_PLAN_DEFAULT_CREDITS, ORG_PLAN_DESCRIPTIONS, ORG_PLAN_LABELS, ORG_PLAN_RANK, ROLE_LABELS, canRequestPlan, type MembershipState, type OrgPlan, ROLE_PERMISSIONS, TEACHER_SUBJECTS, hasRole, isStaffRole, type OrgKind } from "@shared/org";
+import { CLASS_GRADES, CLASS_TRACKS, CLASS_TRACK_LABELS, ORG_CREDIT_COSTS, ORG_CREDIT_FEATURE_LABELS, ORG_KINDS, ORG_KIND_LABELS, ORG_PLANS, ORG_PLAN_DEFAULT_CREDITS, ORG_PLAN_DESCRIPTIONS, ORG_PLAN_LABELS, ORG_PLAN_RANK, ROLE_LABELS, canRequestPlan, type MembershipState, type OrgPlan, ROLE_PERMISSIONS, TEACHER_SUBJECT_GROUPS, TEACHER_SUBJECTS, hasRole, isStaffRole, type OrgKind } from "@shared/org";
 import { DEFAULT_KVKK_CONSENT, DEFAULT_KVKK_NOTICE, KVKK_PLACEHOLDERS } from "@shared/kvkk";
 import type { FeatureKey } from "@shared/entitlements";
 import { Building2, Check, Copy, FileText, Pencil, Plus, Rocket, RotateCcw, School, ShieldCheck, Sparkles, Trash2, UserPlus, Users, Wallet, X } from "lucide-react";
@@ -238,8 +238,8 @@ function SubjectSelect({ value, onChange, disabled, label }: { value: string; on
   return (
     <select value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} className="form-input" aria-label={label}>
       <option value="">Branş seç</option>
-      {TEACHER_SUBJECTS.map((subject) => <option key={subject} value={subject}>{subject}</option>)}
-      {value && !(TEACHER_SUBJECTS as readonly string[]).includes(value) && <option value={value}>{value}</option>}
+      {TEACHER_SUBJECT_GROUPS.map((group) => <optgroup key={group.label} label={group.label}>{group.subjects.map((subject) => <option key={subject} value={subject}>{subject}</option>)}</optgroup>)}
+      {value && !TEACHER_SUBJECTS.includes(value) && <option value={value}>{value}</option>}
     </select>
   );
 }
@@ -319,12 +319,12 @@ function ClassSettings({ scope }: { scope: OrgScope }) {
 
   return (
     <div className="space-y-5">
-      <Panel icon={<School size={18} />} title={editingId ? "Sınıfı düzenle" : "Yeni sınıf tanımla"} subtitle="Seviye ve alan, panelde sınıfları karşılaştırmayı kolaylaştırır; danışman öğretmen sınıfın rehberidir.">
+      <Panel icon={<School size={18} />} title={editingId ? "Sınıfı düzenle" : "Yeni sınıf tanımla"} subtitle="Seviye ve alan, panelde sınıfları karşılaştırmayı kolaylaştırır; sorumlu öğretmen sınıfın tüm öğrencilerini panelde görür.">
         <div className="grid gap-3 sm:grid-cols-4">
           <label className="block"><span className="form-label">Sınıf adı</span><input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} maxLength={80} placeholder="Ör. 12-A" className="form-input" /></label>
           <label className="block"><span className="form-label">Seviye</span><select value={form.gradeLevel} onChange={(event) => setForm({ ...form, gradeLevel: event.target.value })} className="form-input"><option value="">Seç</option>{CLASS_GRADES.map((grade) => <option key={grade} value={grade}>{grade === "Mezun" ? "Mezun" : `${grade}. sınıf`}</option>)}</select></label>
           <label className="block"><span className="form-label">Alan</span><select value={form.track} onChange={(event) => setForm({ ...form, track: event.target.value })} className="form-input"><option value="">Seç</option>{CLASS_TRACKS.map((track) => <option key={track} value={track}>{CLASS_TRACK_LABELS[track]}</option>)}</select></label>
-          <label className="block"><span className="form-label">Danışman öğretmen</span><select value={form.advisorUserId} onChange={(event) => setForm({ ...form, advisorUserId: event.target.value })} className="form-input"><option value="">Yok</option>{staff.map((member) => <option key={member.userId} value={member.userId}>{member.name}{member.subject ? ` · ${member.subject}` : ""}</option>)}</select></label>
+          <label className="block"><span className="form-label">Sorumlu öğretmen</span><select value={form.advisorUserId} onChange={(event) => setForm({ ...form, advisorUserId: event.target.value })} className="form-input"><option value="">Yok</option>{staff.map((member) => <option key={member.userId} value={member.userId}>{member.name}{member.subject ? ` · ${member.subject}` : ""}</option>)}</select></label>
         </div>
         <div className="mt-4 flex gap-2">
           <button onClick={submit} disabled={pending || !form.name.trim()} className={primaryButton}>{editingId ? <Check size={16} /> : <Plus size={16} />} {pending ? "Kaydediliyor…" : editingId ? "Kaydet" : "Sınıf ekle"}</button>
@@ -334,7 +334,7 @@ function ClassSettings({ scope }: { scope: OrgScope }) {
       <section className="soft-card overflow-x-auto">
         {!classes.data ? <div className="p-5"><EmptyNote>Yükleniyor…</EmptyNote></div> : classes.data.length === 0 ? <div className="p-5"><EmptyNote>Henüz sınıf tanımlanmadı.</EmptyNote></div> : (
           <table className="w-full min-w-[620px] text-left text-[13px]">
-            <thead className="border-b border-rule text-[11.5px] font-semibold text-ink-3"><tr><th className="px-5 py-3">Sınıf</th><th className="px-3 py-3">Seviye</th><th className="px-3 py-3">Alan</th><th className="px-3 py-3">Danışman</th><th className="px-3 py-3">Öğrenci</th><th className="px-5 py-3 text-right">İşlem</th></tr></thead>
+            <thead className="border-b border-rule text-[11.5px] font-semibold text-ink-3"><tr><th className="px-5 py-3">Sınıf</th><th className="px-3 py-3">Seviye</th><th className="px-3 py-3">Alan</th><th className="px-3 py-3">Sorumlu öğretmen</th><th className="px-3 py-3">Öğrenci</th><th className="px-5 py-3 text-right">İşlem</th></tr></thead>
             <tbody>
               {classes.data.map((item) => (
                 <tr key={item.id} className={`border-b border-rule last:border-0 ${editingId === item.id ? "bg-brand-soft/40" : ""}`}>

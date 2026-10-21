@@ -23,7 +23,15 @@ export const CLASS_GRADES = ["7", "8", "9", "10", "11", "12", "Mezun", "Önlisan
 const YKS_CLASS_TRACKS = ["SAY", "EA", "SÖZ", "DİL", "TYT"] as const;
 export const CLASS_TRACKS = [...YKS_CLASS_TRACKS, ...EXAM_TRACKS.filter((track) => track !== "YKS")] as const;
 export const CLASS_TRACK_LABELS: Record<string, string> = { SAY: "Sayısal", EA: "Eşit Ağırlık", "SÖZ": "Sözel", "DİL": "Dil", TYT: "TYT (ortak)", ...EXAM_TRACK_LABELS };
-export const TEACHER_SUBJECTS = ["Türkçe", "Edebiyat", "Matematik", "Geometri", "Fizik", "Kimya", "Biyoloji", "Tarih", "Coğrafya", "Felsefe", "Din Kültürü", "İngilizce", "Rehberlik"] as const;
+/** Öğretmen branşları, sınav grubuna göre (dershane LGS, YKS, KPSS, MEB-AGS ve A grubu dersleri verebilir). */
+export const TEACHER_SUBJECT_GROUPS: Array<{ label: string; subjects: readonly string[] }> = [
+  { label: "YKS ve ortak dersler", subjects: ["Türkçe", "Edebiyat", "Matematik", "Geometri", "Fizik", "Kimya", "Biyoloji", "Tarih", "Coğrafya", "Felsefe", "Din Kültürü", "İngilizce"] },
+  { label: "LGS", subjects: ["Fen Bilimleri", "İnkılap Tarihi"] },
+  { label: "KPSS ve MEB-AGS", subjects: ["Vatandaşlık", "Güncel Bilgiler", "Eğitim Bilimleri", "Mevzuat"] },
+  { label: "KPSS A grubu", subjects: ["Hukuk", "İktisat", "Maliye", "Muhasebe", "İşletme", "Çalışma Ekonomisi", "İstatistik", "Kamu Yönetimi", "Uluslararası İlişkiler"] },
+  { label: "Diğer", subjects: ["Rehberlik"] },
+];
+export const TEACHER_SUBJECTS = TEACHER_SUBJECT_GROUPS.flatMap((group) => group.subjects);
 /** Ayarlar → Roller: her rolün panelde neyi görüp yapabildiği (bilgilendirme; yetki kararı sunucuda). */
 export const ROLE_PERMISSIONS: Array<{ role: Exclude<OrgRole, "student">; can: string[] }> = [
   { role: "owner", can: ["Kurum yöneticisinin her şeyi", "Kurumdan çıkarılamaz"] },

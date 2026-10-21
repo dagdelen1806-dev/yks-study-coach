@@ -2,6 +2,7 @@ import { asc, eq } from "drizzle-orm";
 import { classScheduleBlocks, studentProfiles } from "../../drizzle/schema";
 import { DEFAULT_SCHOOL_PERIODS, describeWeekForPlan, isValidTime, validateSchedule, type ClassBlock, type ClassPeriod, type ClassSchedule } from "../../shared/classSchedule";
 import { getDb } from "../db";
+import { listStudentTimetable } from "../org/orgDb";
 
 // Ders programım veri katmanı. Her sorgu userId ile kapsamlıdır.
 
@@ -39,7 +40,17 @@ export async function getPlanScheduleContext(userId: number, startDate: Date): P
   if (!db) return null;
   const [profile] = await db.select({ start: studentProfiles.preferredStudyStartTime }).from(studentProfiles).where(eq(studentProfiles.userId, userId)).limit(1);
   const { blocks } = await getClassSchedule(userId);
-  return describeWeekForPlan(blocks, startDate, profile?.start && isValidTime(profile.start) ? profile.start : "16:00");
+  // Kurumun (dershane) sınıf programındaki dersler de dolu saattir; öğrenci kendi programına girmese bile.
+  return describeWeekForPlan([...blocks, ...(await getCourseBlocks(userId))], startDate, profile?.start && isValidTime(profile.start) ? profile.start : "16:00");
+}
+
+/**
+ * Öğrencinin kurumunun (dershane) sınıf programındaki dersleri, salt okunur bloklar olarak. Öğrenci
+ * bunları düzenlemez; takvim, görev çakışması ve AI planı kendi programıyla birlikte kullanır.
+ */
+export async function getCourseBlocks(userId: number): Promise<Array<ClassBlock & { orgName: string; teacherName: string | null; room: string | null }>> {
+  const rows = await listStudentTimetable(userId).catch(() => []);
+  return rows.map((slot) => ({ source: "course", dayOfWeek: slot.dayOfWeek, startTime: slot.startTime, endTime: slot.endTime, subject: slot.subject, label: `${slot.className} · ${slot.subject}`, orgName: slot.orgName, teacherName: slot.teacherName, room: slot.room }));
 }
 
 /** Tüm programı tek seferde değiştirir (tek haftalık program küçük; parça parça güncellemeye gerek yok). */

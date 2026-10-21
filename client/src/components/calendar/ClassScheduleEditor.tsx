@@ -60,7 +60,7 @@ export default function ClassScheduleEditor({ onClose }: { onClose: () => void }
   const utils = trpc.useUtils();
   const schedule = trpc.classSchedule.get.useQuery(undefined, { retry: false });
   const save = trpc.classSchedule.save.useMutation({
-    onSuccess: (value) => { utils.classSchedule.get.setData(undefined, value); toast.success("Ders programın kaydedildi; takvim ve planın boş zamanına göre ayarlanacak."); onClose(); },
+    onSuccess: (value) => { utils.classSchedule.get.setData(undefined, (old) => ({ ...value, courseBlocks: old?.courseBlocks ?? [] })); toast.success("Ders programın kaydedildi; takvim ve planın boş zamanına göre ayarlanacak."); onClose(); },
     onError: (error) => toast.error(error.message || "Program kaydedilemedi, tekrar dener misin?"),
   });
   const [periods, setPeriods] = useState<ClassPeriod[]>(DEFAULT_SCHOOL_PERIODS);
@@ -165,6 +165,17 @@ export default function ClassScheduleEditor({ onClose }: { onClose: () => void }
 
       {schedule.isLoading ? <div className="mt-6 flex items-center gap-2 text-[13px] text-ink-3"><Loader2 size={15} className="animate-spin" /> Programın yükleniyor…</div> : (
         <>
+          {(schedule.data?.courseBlocks.length ?? 0) > 0 && (
+            <div className="mt-5 rounded-xl border border-rule bg-paper/60 p-3">
+              <div className="text-[12px] font-semibold text-ink-2">Dershane programın ({schedule.data!.courseBlocks[0].orgName})</div>
+              <p className="mt-0.5 text-[11.5px] leading-4 text-ink-4">Kurumun girdi; takvim ve plan bu saatleri de dolu sayar. Değişiklik için kurumuna haber ver.</p>
+              <ul className="mt-2 grid gap-1 text-[12px] text-ink-2 sm:grid-cols-2">
+                {schedule.data!.courseBlocks.map((block, index) => (
+                  <li key={index}>{DAY_LABELS[block.dayOfWeek - 1]} {block.startTime}–{block.endTime} · <span className="font-semibold">{block.label}</span>{block.teacherName ? ` · ${block.teacherName}` : ""}{block.room ? ` · ${block.room}` : ""}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="mt-5 flex flex-col gap-3 rounded-xl border border-dashed border-brand/30 bg-brand-soft/40 p-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-[12px] leading-5 text-ink-3">
               <div className="font-semibold text-ink-2">📷 Okulun program çizelgesi elinde mi?</div>

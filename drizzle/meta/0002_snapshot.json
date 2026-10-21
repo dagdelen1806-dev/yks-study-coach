@@ -1,5 +1,5 @@
 {
-  "id": "faa39010-6291-4005-8368-09e8b304f3cd",
+  "id": "137857c7-6d23-43fc-805f-ef9701e1d6f1",
   "prevId": "8ee081d0-efaf-4807-a4df-ca2fb1e9a55e",
   "version": "7",
   "dialect": "postgresql",
@@ -1105,6 +1105,134 @@
             }
           ],
           "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.class_timetable_slots": {
+      "name": "class_timetable_slots",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "byDefault",
+            "name": "class_timetable_slots_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "2147483647",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "orgId": {
+          "name": "orgId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "classId": {
+          "name": "classId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dayOfWeek": {
+          "name": "dayOfWeek",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "startTime": {
+          "name": "startTime",
+          "type": "varchar(5)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "endTime": {
+          "name": "endTime",
+          "type": "varchar(5)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subject": {
+          "name": "subject",
+          "type": "varchar(60)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "teacherUserId": {
+          "name": "teacherUserId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "room": {
+          "name": "room",
+          "type": "varchar(40)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "class_timetable_slots_org_class_idx": {
+          "name": "class_timetable_slots_org_class_idx",
+          "columns": [
+            {
+              "expression": "orgId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "classId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "class_timetable_slots_org_teacher_idx": {
+          "name": "class_timetable_slots_org_teacher_idx",
+          "columns": [
+            {
+              "expression": "orgId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "teacherUserId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}

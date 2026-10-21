@@ -289,6 +289,38 @@ test("kurum panelinden çıkış da ilk sayfaya döner", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Hesap oluştur", exact: true })).toBeVisible();
 });
 
+test("kurum ders programı: öğretmen iki sınıfa aynı saatte verilemez, uygun saatte ders kaydedilir", async ({ page }) => {
+  await signIn(page, ORG_ADMIN);
+  await page.goto("/kurum/ders-programi");
+  await expect(page.getByRole("heading", { name: "Ders programı" })).toBeVisible();
+  await page.getByLabel("Sınıf", { exact: true }).selectOption({ label: "12-B Eşit Ağırlık" });
+  await expect(page.locator("main table")).toContainText("B-203");
+  // Ayşe Hoca perşembe 17:20'de 12-A'da Türkçe dersinde.
+  await page.getByLabel("Gün").selectOption({ label: "Perşembe" });
+  await page.getByLabel("Başlangıç").fill("17:20");
+  await page.getByLabel("Bitiş").fill("18:00");
+  await page.getByLabel("Ders", { exact: true }).selectOption("Türkçe");
+  await page.getByLabel("Öğretmen", { exact: true }).selectOption({ label: "Ayşe Hoca · Türkçe" });
+  await page.getByRole("button", { name: "Tabloya ekle" }).click();
+  await expect(page.getByText("Çakışan dersler var")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Programı kaydet" })).toBeDisabled();
+  // Çakışan derse tıklayıp çarşambaya alınca kaydedilir.
+  await page.locator("main table button", { hasText: "Çakışma" }).click();
+  await page.getByLabel("Gün").selectOption({ label: "Çarşamba" });
+  await page.getByRole("button", { name: "Güncelle" }).click();
+  await expect(page.getByText("Çakışan dersler var")).toHaveCount(0);
+  await page.getByRole("button", { name: "Programı kaydet" }).click();
+  await expect(page.getByText("12-B Eşit Ağırlık programı kaydedildi.")).toBeVisible();
+});
+
+test("sınıfın sorumlu öğretmeni atama olmadan sınıfının öğrencilerini görür", async ({ page }) => {
+  await signIn(page, "ogretmen3@test.local");
+  await page.goto("/kurum/ogrenciler");
+  await expect(page.getByText("Zeynep").first()).toBeVisible();
+  await expect(page.getByText("Ece").first()).toBeVisible();
+  await expect(page.locator("main")).not.toContainText("Arda");
+});
+
 test("kurum yöneticisi Kurum Paneli'nde öğrencilerini görür", async ({ page }) => {
   await signIn(page, ORG_ADMIN);
   await page.goto("/kurum");

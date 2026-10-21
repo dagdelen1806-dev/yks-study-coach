@@ -31,7 +31,7 @@ export function GettingStarted({ exams, onSection, onStartSession }: { exams: Mo
 
   const totals = review.data?.totals;
   const steps: Step[] = [
-    { key: "schedule", title: "Okul ve dershane saatlerini gir", why: "Plan yalnızca gerçekten boş olduğun saatlere yerleşir.", done: (schedule.data?.blocks.length ?? 0) > 0, action: "Takvim'e git", onClick: () => onSection("calendar") },
+    { key: "schedule", title: "Okul ve dershane saatlerini gir", why: "Plan yalnızca gerçekten boş olduğun saatlere yerleşir.", done: (schedule.data?.blocks.length ?? 0) + (schedule.data?.courseBlocks.length ?? 0) > 0, action: "Takvim'e git", onClick: () => onSection("calendar") },
     { key: "exam", title: "Son denemeni ekle", why: "Zayıf konuların denemelerden çıkar; koç buna göre önerir.", done: exams.length > 0, action: "Deneme ekle", onClick: () => onSection("exams") },
     { key: "plan", title: "AI ile haftalık planını oluştur", why: "Haftalık süren günlere küçük oturumlar olarak dağıtılır.", done: (calendar.data?.plans.length ?? 0) > 0, action: "AI Planım", onClick: () => onSection("plan") },
     { key: "focus", title: "İlk odak oturumunu tamamla", why: "Süre, soru ve doğruluk konu günlüğüne kendiliğinden işlenir.", done: (calendar.data?.logs.length ?? 0) > 0, action: "Oturum başlat", onClick: onStartSession },

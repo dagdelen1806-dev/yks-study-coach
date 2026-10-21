@@ -19,8 +19,8 @@
     {
       "idx": 2,
       "version": "7",
-      "when": 1792592101604,
-      "tag": "0002_exam_tracks_and_subscriptions",
+      "when": 1792614260151,
+      "tag": "0002_exam_tracks_subscriptions_timetable",
       "breakpoints": true
     }
   ]
