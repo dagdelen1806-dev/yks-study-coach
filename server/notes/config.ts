@@ -24,7 +24,7 @@ export const notesConfig = {
     /** "whisper": sağlayıcının /audio/transcriptions uç noktası. İstemci, sunucu kullanılamazsa tarayıcının kendi dikte özelliğine düşebilir. */
     provider: "whisper" as "whisper" | "none",
     language: "tr",
-    prompt: "Türkçe bir YKS öğrencisinin ders notu. Noktalama işaretlerini doğru kullan.",
+    prompt: "Türkçe bir öğrencinin ders notu. Noktalama işaretlerini doğru kullan.",
     maxAudioSeconds: 600,
   },
   ai: {

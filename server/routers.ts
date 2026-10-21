@@ -11,7 +11,7 @@ import { protectedProcedure, metredFeatureProcedure } from "./_core/trpc";
 import { LlmUnavailableError, invokeLLM, invokeLLMWithTier, llmUnavailableMessage } from "./_core/llm";
 import { validateDataUrl } from "./_core/fileValidation";
 import { z } from "zod";
-import { addBookStudyLog, addBookToInventory, addSourceSwitch, addTopicStudyLog, addUserMockExams, addUserResourceBooks, completeStudySession, getBookInventory, getBookStudyLogs, getBookTopicMappings, getCoachAlerts, getPlanAdherenceInputs, getSourceSwitches, getStudyCalendar, getUserMockExams, getUserResourceBooks, logCompletedRoutineSession, markCoachAlertRead, removeBookFromInventory, savePlanAdherence, saveStudyPlan, upsertBookTopicMapping } from "./db";
+import { addBookStudyLog, addBookToInventory, addSourceSwitch, addTopicStudyLog, addUserMockExams, addUserResourceBooks, completeStudySession, getBookInventory, getStudentProfile,getBookStudyLogs, getBookTopicMappings, getCoachAlerts, getPlanAdherenceInputs, getSourceSwitches, getStudyCalendar, getUserMockExams, getUserResourceBooks, logCompletedRoutineSession, markCoachAlertRead, removeBookFromInventory, savePlanAdherence, saveStudyPlan, upsertBookTopicMapping } from "./db";
 import { calculatePlanAdherence } from "../shared/planAdherence";
 import { topicsRouter } from "./routers/topics";
 import { bookContentRouter } from "./routers/bookContent";
@@ -32,7 +32,7 @@ import { subscriptionRouter } from "./routers/subscription";
 import { paymentRouter } from "./routers/payment";
 import { adminRouter } from "./routers/admin";
 import { testimonialsRouter } from "./routers/testimonials";
-import { EXAM_KINDS } from "@shared/exams";
+import { EXAM_KINDS, examPromptContext, type ExamKind } from "@shared/exams";
 
 const planInput = z.object({
   topics: z.array(z.object({
@@ -97,7 +97,7 @@ const bookPhotoSchema = {
     title: { type: "string" },
     publisher: { type: "string" },
     subject: { type: "string" },
-    exam: { type: "string", enum: ["TYT", "AYT", "GENEL"] },
+    exam: { type: "string", enum: ["TYT", "AYT", "LGS", "GENEL"] },
     authors: { type: "array", items: { type: "string" } },
     isbn: { type: "string" },
     edition: { type: "string" },
@@ -119,7 +119,7 @@ type BookPhotoResult = {
   title: string;
   publisher: string;
   subject: string;
-  exam: "TYT" | "AYT" | "GENEL";
+  exam: ExamKind | "GENEL";
   authors: string[];
   isbn: string;
   edition: string;
@@ -262,7 +262,7 @@ export const appRouter = router({
         // Kapak okuması kütüphanedeki kitabın kimliğini belirler: en güçlü model (kotası doluysa varsayılan model).
         const response = await invokeLLMWithTier({
           messages: [
-            { role: "system", content: "Sen bir kitap kapağı tanıma asistanısın. Türkçe bir YKS kaynak kitabının kapak fotoğrafını okuyup kitap adını, yayınevini, dersini (Türkçe, Matematik, Fizik, Kimya, Biyoloji, Tarih, Coğrafya, Felsefe, Din Kültürü, Genel) ve sınav kapsamını (TYT/AYT/GENEL) tahmin et. Kapakta yazıyorsa yazar adlarını (authors), ISBN numarasını (isbn, yalnızca kapakta/arkada gerçekten görünüyorsa) ve baskı bilgisini (edition, ör. 'Güncellenmiş Yeni Baskı', '2025-2026') da çıkar. Görselde net okuyamadığın bir alanı boş string / boş dizi bırak, uydurma. fieldConfidence her alan için 0-1 arası okuma güvenin; alan boşsa 0. Kitap adı kapakta birden çok satıra/puntoya bölünmüş olabilir (ör. büyük 'Paragraf' + altında 'SORU BANKASI'): bunları tek başlıkta, kelimelerin ilk harfi büyük birleştir ('Paragraf Soru Bankası'); 'Video çözümlü', 'Yeni nesil', '20 deneme ilaveli' gibi slogan/özellik satırlarını başlığa katma. Ders kapakta açıkça yazmıyorsa kitap adından çıkar (Paragraf, Dil Bilgisi, Sözcükte Anlam → Türkçe; Problemler, Temel Matematik → Matematik); o durumda subject güvenini en fazla 0.7 ver. 'TYT-AYT' ya da 'YKS' yazıyorsa ve tek bir sınava ait değilse exam 'GENEL' olsun. Fotoğraf yan (90°) ya da ters çekilmiş, kapağın bir kısmı kadraj dışında kalmış olabilir: yazıyı döndürerek oku ve görünen başlığı yine çıkar; kapağın kısmen görünmesi onu 'other' yapmaz. Yayınevi çoğu zaman yalnızca logo olarak (ör. köşedeki 'ÜçDörtBeş') görünür; logodaki adı yayınevi olarak yaz. Büyük dekoratif yazılar ve rakamlar da başlığın parçasıdır ('0'DAN BAŞLA' + 'START' + 'Matematik' → '0'dan Başla Start Matematik'); yazar/hoca adı ('Şenol Hoca') authors alanına gider. imageKind: görsel bir kitap KAPAĞIYSA 'cover'; kitabın içindekiler / konu listesi / kitap bitirme planı sayfasıysa 'table_of_contents'; başka bir şeyse 'other'. `confident` alanını yalnızca kapaktaki yazıları gerçekten net okuyabildiysen true yap." },
+            { role: "system", content: "Sen bir kitap kapağı tanıma asistanısın. Türkçe bir sınav hazırlık (YKS ya da LGS) kaynak kitabının kapak fotoğrafını okuyup kitap adını, yayınevini, dersini (Türkçe, Matematik, Fizik, Kimya, Biyoloji, Tarih, Coğrafya, Felsefe, Din Kültürü, Fen Bilimleri, İnkılap Tarihi, İngilizce, Genel) ve sınav kapsamını (TYT/AYT/LGS/GENEL) tahmin et. Kapakta 'LGS', '8. Sınıf' ya da 'Liselere Geçiş' yazıyorsa exam 'LGS' olsun. Kapakta yazıyorsa yazar adlarını (authors), ISBN numarasını (isbn, yalnızca kapakta/arkada gerçekten görünüyorsa) ve baskı bilgisini (edition, ör. 'Güncellenmiş Yeni Baskı', '2025-2026') da çıkar. Görselde net okuyamadığın bir alanı boş string / boş dizi bırak, uydurma. fieldConfidence her alan için 0-1 arası okuma güvenin; alan boşsa 0. Kitap adı kapakta birden çok satıra/puntoya bölünmüş olabilir (ör. büyük 'Paragraf' + altında 'SORU BANKASI'): bunları tek başlıkta, kelimelerin ilk harfi büyük birleştir ('Paragraf Soru Bankası'); 'Video çözümlü', 'Yeni nesil', '20 deneme ilaveli' gibi slogan/özellik satırlarını başlığa katma. Ders kapakta açıkça yazmıyorsa kitap adından çıkar (Paragraf, Dil Bilgisi, Sözcükte Anlam → Türkçe; Problemler, Temel Matematik → Matematik); o durumda subject güvenini en fazla 0.7 ver. 'TYT-AYT' ya da 'YKS' yazıyorsa ve tek bir sınava ait değilse exam 'GENEL' olsun. Fotoğraf yan (90°) ya da ters çekilmiş, kapağın bir kısmı kadraj dışında kalmış olabilir: yazıyı döndürerek oku ve görünen başlığı yine çıkar; kapağın kısmen görünmesi onu 'other' yapmaz. Yayınevi çoğu zaman yalnızca logo olarak (ör. köşedeki 'ÜçDörtBeş') görünür; logodaki adı yayınevi olarak yaz. Büyük dekoratif yazılar ve rakamlar da başlığın parçasıdır ('0'DAN BAŞLA' + 'START' + 'Matematik' → '0'dan Başla Start Matematik'); yazar/hoca adı ('Şenol Hoca') authors alanına gider. imageKind: görsel bir kitap KAPAĞIYSA 'cover'; kitabın içindekiler / konu listesi / kitap bitirme planı sayfasıysa 'table_of_contents'; başka bir şeyse 'other'. `confident` alanını yalnızca kapaktaki yazıları gerçekten net okuyabildiysen true yap." },
             { role: "user", content: [{ type: "text" as const, text: "Bu kitap kapağını oku." }, { type: "image_url" as const, image_url: { url: input.dataUrl, detail: "high" as const } }] },
           ],
           response_format: { type: "json_schema", json_schema: { name: "yks_book_cover", strict: true, schema: bookPhotoSchema } },
@@ -328,7 +328,13 @@ export const appRouter = router({
       const weakTopics = input.topics.filter((topic) => topic.status === "Zayıf");
       const recentExams = input.exams.slice(0, 3);
       const profile = input.studentProfile;
-      const targetContext = profile && (profile.targetScoreType || profile.targetUniversity || profile.targetDepartment || profile.targetRanking || profile.examYear)
+      // Sınav (YKS/LGS) istemciye değil sunucudaki profile dayanır.
+      const serverProfile = ctx.user ? await getStudentProfile(ctx.user.id) : null;
+      const track = serverProfile?.examTrack ?? "YKS";
+      const lgsTargetContext = track === "LGS" && serverProfile && (serverProfile.targetHighSchool || serverProfile.targetLgsScore || serverProfile.examYear)
+        ? `\n\nÖğrencinin hedefi (onboarding'den — kesin bir puan/okul garantisi verme, yalnızca bu hedefe uygun tempo ve odak öner): LGS ${serverProfile.examYear ?? "yılı belirtilmemiş"}, hedef lise ${serverProfile.targetHighSchool || "belirtilmemiş"}, hedef puan ${serverProfile.targetLgsScore || "belirtilmemiş"} / 500.`
+        : "";
+      const targetContext = track === "LGS" ? lgsTargetContext : profile && (profile.targetScoreType || profile.targetUniversity || profile.targetDepartment || profile.targetRanking || profile.examYear)
         ? `\n\nÖğrencinin hedefi (onboarding'den — planın önceliklerini buna göre kur, ama kesin bir sıralama/puan garantisi verme, sadece bu hedefe uygun bir tempo ve odak öner): hedef sınav yılı ${profile.examYear ?? "belirtilmemiş"}, hedef puan türü ${profile.targetScoreType ?? "belirtilmemiş"}, hedef üniversite ${profile.targetUniversity || "belirtilmemiş"}, hedef bölüm ${profile.targetDepartment || "belirtilmemiş"}, tahmini hedef sıralama ${profile.targetRanking || "belirtilmemiş"}.`
         : "";
       const coachingContext = profile && (profile.dailyStudyDuration || profile.preferredStudyMethods?.length || profile.studyObstacles || profile.coachingStyle || profile.mainGoal)
@@ -345,14 +351,14 @@ export const appRouter = router({
       const planDays = Array.from({ length: 7 }, (_, offset) => { const date = new Date(planStart.getTime() + offset * 86400000); return `${DAY_LABELS[weekdayOf(date) - 1]} ${date.toISOString().slice(0, 10)}`; });
       const scheduleSignal = ctx.user ? await getPlanScheduleContext(ctx.user.id, planStart).catch(() => null) : null;
       const scheduleContext = scheduleSignal
-        ? `\n\nÖğrencinin okul/dershane programına göre bu haftanın boş zamanı (oturumları yalnızca bu aralıklara ve her günün boş dakikasını aşmayacak şekilde planla; 23:30'dan sonra oturum koyma; o gün okulda işlenen YKS derslerine akşam kısa bir pekiştirme oturumu eklemek iyi olur):\n${scheduleSignal}`
+        ? `\n\nÖğrencinin okul/dershane programına göre bu haftanın boş zamanı (oturumları yalnızca bu aralıklara ve her günün boş dakikasını aşmayacak şekilde planla; 23:30'dan sonra oturum koyma; o gün okulda işlenen ${track} derslerine akşam kısa bir pekiştirme oturumu eklemek iyi olur):\n${scheduleSignal}`
         : "";
-      const prompt = `Bir YKS öğrencisi için 7 günlük uygulanabilir çalışma programı oluştur. Plan bugünden başlar; days dizisi sırasıyla şu 7 gün olsun ve her günün day alanına gün adını, date alanına YYYY-MM-DD tarihini yaz: ${planDays.join(", ")}. Hedef: ${input.goal}. Haftalık toplam süre: ${input.availableMinutes} dakika. Öncelik, zayıf konular ve son deneme performansı olsun. Zayıf konuları tamamen yok sayma; orta konulara pekiştirme, iyi konulara koruma oturumu ekle. Her gün toplam 60-150 dakika ve 2-4 oturum planla. Türkçe yanıt üret. Kişisel raftaki kitapları mümkün olduğunca ilgili zayıf konu oturumlarına bağla. Bir kitabın mappings alanında ilgili konu varsa targetPages alanına gerçek sayfa aralığını ve targetTests alanına gerçek test aralığını yaz; eşleştirme yoksa uydurma aralık verme, boş metin ("") bırak. Soru oturumlarında gerçekçi günlük soru hedefi yaz.\n\nZayıf/orta/iyi konu verisi:\n${JSON.stringify(input.topics)}\n\nÖncelikli zayıf konular:\n${JSON.stringify(weakTopics)}\n\nSon denemeler:\n${JSON.stringify(recentExams)}\n\nKişisel raf ve çözüm durumu:\n${JSON.stringify(input.books)}${targetContext}${coachingContext}${notebookContext}${scheduleContext}`;
+      const prompt = `${track === "LGS" ? "LGS'ye hazırlanan bir ortaokul öğrencisi" : "Bir YKS öğrencisi"} için 7 günlük uygulanabilir çalışma programı oluştur. Plan bugünden başlar; days dizisi sırasıyla şu 7 gün olsun ve her günün day alanına gün adını, date alanına YYYY-MM-DD tarihini yaz: ${planDays.join(", ")}. Hedef: ${input.goal}. Haftalık toplam süre: ${input.availableMinutes} dakika. Öncelik, zayıf konular ve son deneme performansı olsun. Zayıf konuları tamamen yok sayma; orta konulara pekiştirme, iyi konulara koruma oturumu ekle. ${track === "LGS" ? "Her gün toplam 45-120 dakika ve 2-4 kısa oturum planla (okul ve ödevlerle birlikte yorucu olmasın)." : "Her gün toplam 60-150 dakika ve 2-4 oturum planla."} Türkçe yanıt üret. Kişisel raftaki kitapları mümkün olduğunca ilgili zayıf konu oturumlarına bağla. Bir kitabın mappings alanında ilgili konu varsa targetPages alanına gerçek sayfa aralığını ve targetTests alanına gerçek test aralığını yaz; eşleştirme yoksa uydurma aralık verme, boş metin ("") bırak. Soru oturumlarında gerçekçi günlük soru hedefi yaz.\n\nZayıf/orta/iyi konu verisi:\n${JSON.stringify(input.topics)}\n\nÖncelikli zayıf konular:\n${JSON.stringify(weakTopics)}\n\nSon denemeler:\n${JSON.stringify(recentExams)}\n\nKişisel raf ve çözüm durumu:\n${JSON.stringify(input.books)}${targetContext}${coachingContext}${notebookContext}${scheduleContext}`;
       try {
         const response = await invokeLLM({
           reasoningEffort: "low",
           messages: [
-            { role: "system", content: "Sen deneyimli, ölçülü ve motive edici bir YKS çalışma koçusun. Sadece verilen verilere dayan; gerçekçi olmayan hedefler verme. Yanıtın JSON şemasına tam uysun." },
+            { role: "system", content: `Sen deneyimli, ölçülü ve motive edici bir ${track} çalışma koçusun. ${examPromptContext(track)} Sadece verilen verilere dayan; gerçekçi olmayan hedefler verme. Yanıtın JSON şemasına tam uysun.` },
             { role: "user", content: prompt },
           ],
           response_format: {
@@ -405,7 +411,11 @@ export const appRouter = router({
     // free/premium kullanım kotasına tabi; ayrıca gönderilen dosya artık
     // gerçekten sunucu tarafında doğrulanıyor (magic bytes + gerçek boyut —
     // önceden yalnızca client'taki 8MB kontrolüne güveniliyordu).
-    extract: metredFeatureProcedure("OCR_EXAM_IMPORT").input(documentExtractionInput).mutation(async ({ input }) => {
+    extract: metredFeatureProcedure("OCR_EXAM_IMPORT").input(documentExtractionInput).mutation(async ({ ctx, input }) => {
+      const track = ctx.user ? (await getStudentProfile(ctx.user.id)).examTrack : "YKS";
+      const examHint = track === "LGS"
+        ? "Bu bir LGS denemesi (exam = 'LGS'): dersler Türkçe, İnkılap Tarihi, Din Kültürü, İngilizce, Matematik, Fen Bilimleri adlarıyla yazılsın; neti doğru - yanlış/3 olarak hesapla."
+        : "Neti doğru - yanlış/4 olarak hesapla.";
       const fileCheck = validateDataUrl(input.dataUrl, input.mimeType);
       if (!fileCheck.valid) throw new Error(fileCheck.reason);
       const isImage = input.mimeType.startsWith("image/");
@@ -415,7 +425,7 @@ export const appRouter = router({
       try {
         const response = await invokeLLM({
           messages: [
-            { role: "system", content: "Sen YKS deneme sonuç belgesi okuyucususun. Türkçe yanıt ver ve yalnızca belgede görülen verileri çıkar. Belge örnekteki gibi konu adı, soru sayısı, doğru, yanlış ve yüzde sütunları içerir. Her konu satırını ayrı kaydet. Neti doğru - yanlış/4 olarak hesapla; bilinmeyen tarih için boş string, bilinmeyen süre için 0 kullan. Ders toplam netlerini subjects içinde, belge açıkça süre vermiyorsa timeSpent içinde 0 döndür. JSON şemasına tam uy." },
+            { role: "system", content: `Sen ${track} deneme sonuç belgesi okuyucususun. Türkçe yanıt ver ve yalnızca belgede görülen verileri çıkar. Belge örnekteki gibi konu adı, soru sayısı, doğru, yanlış ve yüzde sütunları içerir. Her konu satırını ayrı kaydet. ${examHint} Bilinmeyen tarih için boş string, bilinmeyen süre için 0 kullan. Ders toplam netlerini subjects içinde, belge açıkça süre vermiyorsa timeSpent içinde 0 döndür. JSON şemasına tam uy.` },
             { role: "user", content },
           ],
           response_format: { type: "json_schema", json_schema: { name: "yks_exam_document", strict: true, schema: documentExtractionSchema } },

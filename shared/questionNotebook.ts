@@ -221,11 +221,11 @@ export function parseAiSolution(raw: unknown): AiSolution | null {
 export const OPTION_LETTERS = ["A", "B", "C", "D", "E"] as const;
 export type OptionLetter = (typeof OPTION_LETTERS)[number];
 
-/** 🔁 Benzer soru: aynı kazanımı ölçen, YKS biçiminde 5 şıklı yeni bir alıştırma sorusu. */
+/** 🔁 Benzer soru: aynı kazanımı ölçen yeni bir alıştırma sorusu; YKS biçiminde 5, LGS biçiminde 4 şıklı. */
 export type SimilarQuestion = { question: string; options: string[]; answer: OptionLetter; steps: Array<{ work: string; why: string }>; hint: string };
 
 /** AI yanıtını SimilarQuestion'a çevirir; soru metni, 5 dolu şık ya da geçerli doğru şık yoksa null. */
-export function parseSimilarQuestion(raw: unknown): SimilarQuestion | null {
+export function parseSimilarQuestion(raw: unknown, optionCount: 4 | 5 = 5): SimilarQuestion | null {
   let value = raw;
   if (typeof value === "string") {
     try { value = JSON.parse(value); } catch { return null; }
@@ -234,9 +234,9 @@ export function parseSimilarQuestion(raw: unknown): SimilarQuestion | null {
   const input = value as Record<string, unknown>;
   const question = clip(input.question, 3000);
   // Model şıkları "A) 12" biçiminde yazabilir: harf öneki temizlenir.
-  const options = (Array.isArray(input.options) ? input.options : []).slice(0, 5).map((option) => clip(option, 400).replace(/^[A-Ea-e][).:-]\s*/, ""));
+  const options = (Array.isArray(input.options) ? input.options : []).slice(0, optionCount).map((option) => clip(option, 400).replace(/^[A-Ea-e][).:-]\s*/, ""));
   const answer = clip(input.answer, 5).toUpperCase().charAt(0) as OptionLetter;
-  if (!question || options.length !== 5 || options.some((option) => !option) || !OPTION_LETTERS.includes(answer)) return null;
+  if (!question || options.length !== optionCount || options.some((option) => !option) || !OPTION_LETTERS.slice(0, optionCount).includes(answer)) return null;
   const steps = (Array.isArray(input.steps) ? input.steps : [])
     .map((step) => (step && typeof step === "object" ? { work: clip((step as Record<string, unknown>).work, 600), why: clip((step as Record<string, unknown>).why, 600) } : null))
     .filter((step): step is { work: string; why: string } => Boolean(step && (step.work || step.why)))

@@ -1,24 +1,30 @@
 import { invokeLLM } from "../_core/llm";
-import { parseSimilarQuestion, type AiSolution, type SimilarQuestion } from "../../shared/questionNotebook";
+import { OPTION_LETTERS, parseSimilarQuestion, type AiSolution, type SimilarQuestion } from "../../shared/questionNotebook";
+import { examPromptContext, examStudentPhrase, optionCountOf } from "../../shared/exams";
 import { subjectGuidance, type SolveInput } from "./questionSolver";
 
 /**
  * 🔁 Benzer soru: kartdaki soruyla AYNI kazanımı/yöntemi ölçen ama sayıları ve bağlamı farklı,
- * YKS biçiminde 5 şıklı yeni bir alıştırma sorusu üretir. Öğrenci yöntemi gerçekten öğrendi mi,
+ * öğrencinin sınavının biçiminde (YKS 5, LGS 4 şıklı) yeni bir alıştırma sorusu üretir. Öğrenci yöntemi gerçekten öğrendi mi,
  * kopyalamadan dener. Kayıtlı AI çözümü varsa yöntem oradan alınır. Yalnızca öğrenci isteyince çağrılır.
  */
 export async function generateSimilarQuestion(input: SolveInput & { solution: AiSolution | null }, invoke: typeof invokeLLM = invokeLLM, options: { model?: string } = {}): Promise<SimilarQuestion> {
   const questionText = input.ocrText?.trim();
   if (!input.imageDataUrl && !questionText) throw new Error("Benzer soru için kartta soru fotoğrafı olmalı.");
+  const track = input.track ?? "YKS";
+  const optionCount = optionCountOf(track);
+  const letters = OPTION_LETTERS.slice(0, optionCount);
+  const style = track === "LGS" ? "LGS (MEB) üslubunda, beceri temelli" : "YKS (ÖSYM) üslubunda";
   const system = [
-    "Bir YKS öğrencisinin çözemediği soruya BENZER yeni bir alıştırma sorusu yazıyorsun (Türkçe).",
+    `${examStudentPhrase(track)} çözemediği soruya BENZER yeni bir alıştırma sorusu yazıyorsun (Türkçe).`,
+    examPromptContext(track),
     `Ders: ${input.subject ?? "belirtilmemiş"}${input.topic ? ` · Konu: ${input.topic}` : ""}.`,
     "Kurallar:",
     "- Aynı kazanımı ve aynı çözüm yöntemini ölçsün; sayılar, isimler ve bağlam FARKLI olsun. Orijinal soruyu kopyalama.",
-    "- Zorluk orijinale yakın olsun; YKS (ÖSYM) üslubunda, tek doğru cevaplı, 5 şıklı (A–E).",
+    `- Zorluk orijinale yakın olsun; ${style}, tek doğru cevaplı, ${optionCount} şıklı (${letters[0]}–${letters[optionCount - 1]}).`,
     "- question: soru metni (matematiği düz yazıyla, ör. x^2, √, π). Şekil gerekiyorsa şekli kelimelerle eksiksiz tarif et.",
-    "- options: tam 5 şık, harfsiz (yalnızca şık içeriği). Çeldiriciler tipik öğrenci hatalarından gelsin.",
-    "- answer: doğru şıkkın harfi (A, B, C, D ya da E). Cevabı yazmadan önce soruyu kendin çözüp doğrula.",
+    `- options: tam ${optionCount} şık, harfsiz (yalnızca şık içeriği). Çeldiriciler tipik öğrenci hatalarından gelsin.`,
+    `- answer: doğru şıkkın harfi (${letters.join(", ")}). Cevabı yazmadan önce soruyu kendin çözüp doğrula.`,
     `- steps: 2–6 adım çözüm; work = işlem, why = neden. ${subjectGuidance(input.subject)}`,
     "- hint: cevabı ele vermeyen tek cümle ipucu.",
   ].join("\n");
@@ -43,7 +49,7 @@ export async function generateSimilarQuestion(input: SolveInput & { solution: Ai
           properties: {
             question: { type: "string" },
             options: { type: "array", items: { type: "string" } },
-            answer: { type: "string", enum: ["A", "B", "C", "D", "E"] },
+            answer: { type: "string", enum: letters },
             steps: { type: "array", items: { type: "object", properties: { work: { type: "string" }, why: { type: "string" } }, required: ["work", "why"], additionalProperties: false } },
             hint: { type: "string" },
           },
@@ -56,7 +62,7 @@ export async function generateSimilarQuestion(input: SolveInput & { solution: Ai
   const raw = response.choices[0]?.message?.content;
   const jsonText = typeof raw === "string" ? raw : raw?.map((part) => (part.type === "text" ? part.text : "")).join("");
   if (!jsonText) throw new Error("AI yanıtı boş döndü.");
-  const similar = parseSimilarQuestion(jsonText.replace(/```json|```/g, "").trim());
+  const similar = parseSimilarQuestion(jsonText.replace(/```json|```/g, "").trim(), optionCount);
   if (!similar) throw new Error("Benzer soru okunamadı.");
   return similar;
 }

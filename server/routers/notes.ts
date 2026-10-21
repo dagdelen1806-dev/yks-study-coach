@@ -6,6 +6,7 @@ import { extractPlainTextFromImage } from "../bookContent/ocrProvider";
 import { AttachmentError, decodeAttachment, getAttachmentStorage } from "../notes/attachmentStorage";
 import { notesConfig } from "../notes/config";
 import { runNoteAi } from "../notes/noteAi";
+import { getStudentProfile } from "../db";
 import { NoteError, createTaskFromNote, deleteNote, getNote, getNoteCalendar, listNotes, listTags, saveNote, updateNoteFlags } from "../notes/notesDb";
 import { SpeechToTextError, getSpeechProvider } from "../notes/speechProvider";
 import { PlanTaskError } from "../studyPlan/planTasks";
@@ -161,7 +162,7 @@ export const notesRouter = router({
       const note = await getNote(userId, input.id);
       if (!note) throw new NoteError("Not bulunamadı.");
       try {
-        const items = await runNoteAi(input.action, note.plainText);
+        const items = await runNoteAi(input.action, note.plainText, undefined, (await getStudentProfile(userId)).examTrack);
         return { items, nodes: aiResultToNodes(input.action, items) };
       } catch (error) {
         console.warn("[Notes] AI failed:", error instanceof Error ? error.message : error);

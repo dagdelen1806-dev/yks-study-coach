@@ -101,6 +101,11 @@ export function estimateLgsScore(nets: Record<string, number>): number {
   return Math.round((100 + (400 * weighted) / max) * 100) / 100;
 }
 
+/** İstemlerde öğrenciyi anan ifade: "Bir YKS öğrencisinin…" / "LGS'ye hazırlanan bir ortaokul öğrencisinin…". */
+export const examStudentPhrase = (track: ExamTrack): string => (track === "LGS" ? "LGS'ye hazırlanan bir ortaokul öğrencisinin" : "Bir YKS öğrencisinin");
+/** Track'in şık sayısı (YKS 5, LGS 4). */
+export const optionCountOf = (track: ExamTrack): 4 | 5 => EXAM_KIND_DEFS[defaultKindOf(track)].optionCount;
+
 /** AI istemlerine eklenen sınav bağlamı (sınav adı, dersler, şık sayısı, yaş grubu tonu). */
 export function examPromptContext(track: ExamTrack): string {
   if (track === "LGS") {

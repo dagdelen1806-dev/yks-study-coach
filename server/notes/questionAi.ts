@@ -1,4 +1,5 @@
 import { invokeLLM } from "../_core/llm";
+import { examStudentPhrase, type ExamTrack } from "../../shared/exams";
 import { DIFFICULTY_KEYS, ERROR_TYPES, ERROR_TYPE_KEYS, type Difficulty, type ErrorType } from "../../shared/questionNotebook";
 
 export type TopicCandidate = { id: number; subject: string; unit: string; topic: string };
@@ -12,14 +13,14 @@ export type QuestionSuggestion = { ocrText: string; topicId: number | null; subj
  * açıkça istediğinde çağrılır.
  */
 export async function suggestQuestionDetails(
-  input: { imageDataUrl: string | null; stuckPoint: string | null; topics: TopicCandidate[] },
+  input: { imageDataUrl: string | null; stuckPoint: string | null; topics: TopicCandidate[]; track?: ExamTrack },
   invoke: typeof invokeLLM = invokeLLM
 ): Promise<QuestionSuggestion> {
   if (!input.imageDataUrl && !input.stuckPoint?.trim()) throw new Error("Önerilecek bir şey yok: fotoğraf ya da açıklama ekle.");
   const topicList = input.topics.map((topic) => `${topic.id}|${topic.subject}|${topic.unit}|${topic.topic}`).join("\n");
   const errorList = ERROR_TYPE_KEYS.map((key) => `${key} = ${ERROR_TYPES[key].label}`).join("; ");
   const system = [
-    "Bir YKS öğrencisinin çözemediği soruyu sınıflandıran yardımcısın. Türkçe çalış.",
+    `${examStudentPhrase(input.track ?? "YKS")} çözemediği soruyu sınıflandıran yardımcısın. Türkçe çalış.`,
     "1) Görselde soru varsa metnini olduğu gibi çıkar (matematiği düz yazıyla, ör. x^2). Görsel yoksa ocrText boş string.",
     "2) Sorunun konusunu YALNIZCA aşağıdaki listeden seç ve topicId olarak o satırın numarasını yaz. Emin değilsen topicId = 0.",
     `3) Zorluk: ${DIFFICULTY_KEYS.join(", ")} (emin değilsen medium).`,

@@ -1,8 +1,10 @@
 import { invokeLLM, LlmUnavailableError, modelForTier } from "../_core/llm";
 import { parseAiSolution, type AiSolution } from "../../shared/questionNotebook";
 import { nextTier, type ModelTier } from "../../shared/solveRouting";
+import { examPromptContext, examStudentPhrase, type ExamTrack } from "../../shared/exams";
 
-export type SolveInput = { imageDataUrl: string | null; ocrText: string | null; stuckPoint: string | null; subject: string | null; topic: string | null };
+/** track: öğrencinin sınavı (yoksa YKS) — istemdeki sınav, şık sayısı ve ton buna göre. */
+export type SolveInput = { imageDataUrl: string | null; ocrText: string | null; stuckPoint: string | null; subject: string | null; topic: string | null; track?: ExamTrack };
 
 /** Derse göre çözüm yaklaşımı: sayısal derslerde sağlama, sözel derslerde gerekçe ve çeldiriciler. */
 export function subjectGuidance(subject: string | null): string {
@@ -26,7 +28,8 @@ export async function solveQuestion(input: SolveInput, invoke: typeof invokeLLM 
   const questionText = input.ocrText?.trim();
   if (!input.imageDataUrl && !questionText) throw new Error("Çözülecek soru yok: kartta soru fotoğrafı olmalı.");
   const system = [
-    "Bir YKS öğrencisinin çözemediği soruyu sabırlı bir öğretmen gibi ADIM ADIM Türkçe çözüyorsun. Amaç cevabı değil yöntemi öğretmek.",
+    `${examStudentPhrase(input.track ?? "YKS")} çözemediği soruyu sabırlı bir öğretmen gibi ADIM ADIM Türkçe çözüyorsun. Amaç cevabı değil yöntemi öğretmek.`,
+    examPromptContext(input.track ?? "YKS"),
     `Ders: ${input.subject ?? "belirtilmemiş"}${input.topic ? ` · Konu: ${input.topic}` : ""}. ${subjectGuidance(input.subject)}`,
     "Kurallar:",
     "- method: bu soru tipinde kullanılacak yöntemi tek cümleyle söyle.",

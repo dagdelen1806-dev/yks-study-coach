@@ -24,7 +24,7 @@ export async function suggestTopicsWithAi(titles: AmbiguousTitle[], candidates: 
   try {
     const response = await invoke({
       messages: [
-        { role: "system", content: "Bir YKS kitabının içindekiler başlıklarını, verilen müfredat konu listesindeki EN UYGUN konuyla eşleştiriyorsun. Yalnızca listedeki id'lerden birini seç; hiçbiri gerçekten uymuyorsa candidateTopicId null ver. Yeni konu önerme. confidence 0-1 arası, emin değilsen düşük ver. reason tek kısa Türkçe cümle." },
+        { role: "system", content: "Bir sınav hazırlık (YKS ya da LGS) kitabının içindekiler başlıklarını, verilen müfredat konu listesindeki EN UYGUN konuyla eşleştiriyorsun. Yalnızca listedeki id'lerden birini seç; hiçbiri gerçekten uymuyorsa candidateTopicId null ver. Yeni konu önerme. confidence 0-1 arası, emin değilsen düşük ver. reason tek kısa Türkçe cümle." },
         { role: "user", content: JSON.stringify({ topics: pool.map((topic) => ({ id: topic.id, subject: topic.subject, unit: topic.unit, topic: topic.topic })), titles: titles.map((title) => ({ key: title.key, title: title.text, unit: title.unitTitle })) }) },
       ],
       response_format: {

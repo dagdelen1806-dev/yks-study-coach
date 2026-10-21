@@ -29,7 +29,7 @@ const tocItemSchema = {
 } as const;
 
 const SYSTEM_PROMPT = [
-  "Sen bir Türkçe YKS kaynak kitabının İÇİNDEKİLER (konu listesi) sayfasını satır satır okuyan bir OCR asistanısın.",
+  "Sen bir Türkçe sınav hazırlık (YKS ya da LGS) kaynak kitabının İÇİNDEKİLER (konu listesi) sayfasını satır satır okuyan bir OCR asistanısın.",
   "Görseldeki her satırı yukarıdan aşağıya, sayfadaki sırasıyla döndür. Yorum yapma, özetleme, eksik satırı tahminle doldurma.",
   "type: numaralı ünite başlığı (ör. '1. ÜNİTE') için 'unit' (unitNumber dolu); ünite adı ayrı satırdaysa veya numarasız grup başlığıysa (ör. 'SİMÜLASYON DENEMELERİ') 'section'; sayfa numarası olan her satır için 'entry'.",
   "entry satırlarında: label = satır başındaki etiket ('Test 1', 'ÖSYM Tipi', 'Sarmal Test – 2', 'Simülasyon 3', 'ÖSYM Tipi - Eğitim Kontrol Testi - 1'); title = etiketten sonraki konu adı (yoksa boş string); pageText = satırın sağındaki sayfa numarasını GÖRDÜĞÜN GİBİ yaz (ör. '12'; '1' ile 'I' ayırt edilemiyorsa gördüğünü yaz, düzeltme yapma), yoksa null.",

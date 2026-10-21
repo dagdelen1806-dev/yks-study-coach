@@ -1,13 +1,14 @@
 import { invokeLLM } from "../_core/llm";
 import type { NoteAiAction, NoteAiItem } from "../../shared/noteContent";
 import { notesConfig } from "./config";
+import { examPromptContext, examStudentPhrase, type ExamTrack } from "../../shared/exams";
 
 const INSTRUCTIONS: Record<NoteAiAction, string> = {
   summarize: "Notu 3-6 maddelik kısa bir özete çevir.",
   keypoints: "Nottaki sınav için önemli bilgileri madde madde çıkar (en fazla 8).",
-  questions: "Nottaki bilgiyi yoklayan 3-6 kısa YKS tarzı soru yaz (cevapsız, yalnız soru).",
+  questions: "Nottaki bilgiyi yoklayan 3-6 kısa, öğrencinin sınavı tarzında soru yaz (cevapsız, yalnız soru).",
   flashcards: "Nottan 3-8 flashcard üret: front = kısa soru, back = kısa net cevap.",
-  simplify: "Notu bir lise öğrencisinin hemen anlayacağı sade cümlelerle, madde madde yeniden anlat.",
+  simplify: "Notu öğrencinin hemen anlayacağı sade cümlelerle, madde madde yeniden anlat.",
   review: "Nottan öğrencinin tekrar etmesi gereken kavram/konuları madde madde çıkar (en fazla 6).",
 };
 
@@ -16,12 +17,12 @@ const INSTRUCTIONS: Record<NoteAiAction, string> = {
  * sağlayıcıya yalnızca o notun düz metni (üst sınırlı) gider. Sonuç notun
  * üzerine yazılmaz — çağıran onu ayrı bir blok olarak ekler.
  */
-export async function runNoteAi(action: NoteAiAction, plainText: string, invoke: typeof invokeLLM = invokeLLM): Promise<NoteAiItem[]> {
+export async function runNoteAi(action: NoteAiAction, plainText: string, invoke: typeof invokeLLM = invokeLLM, track: ExamTrack = "YKS"): Promise<NoteAiItem[]> {
   const input = plainText.trim().slice(0, notesConfig.ai.maxInputChars);
   if (!input) throw new Error("Bu notta işlenecek yazı yok.");
   const response = await invoke({
     messages: [
-      { role: "system", content: `Sen bir YKS öğrencisinin kendi ders notunu işleyen yardımcı bir asistansın. Yalnızca nottaki bilgiye dayan, not dışı bilgi uydurma; Türkçe yaz. ${INSTRUCTIONS[action]} Her maddeyi 'front' alanına yaz; yalnızca flashcard'larda 'back' doldur, diğerlerinde boş string bırak.` },
+      { role: "system", content: `Sen ${examStudentPhrase(track).replace(/^Bir /, "bir ")} kendi ders notunu işleyen yardımcı bir asistansın. ${examPromptContext(track)} Yalnızca nottaki bilgiye dayan, not dışı bilgi uydurma; Türkçe yaz. ${INSTRUCTIONS[action]} Her maddeyi 'front' alanına yaz; yalnızca flashcard'larda 'back' doldur, diğerlerinde boş string bırak.` },
       { role: "user", content: input },
     ],
     response_format: {
