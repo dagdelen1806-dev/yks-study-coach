@@ -4,12 +4,12 @@ import { tierHighlights } from "@/components/subscription/PlanComparison";
 import { PAID_TIERS, TIER_LABELS, type PlanTier } from "@shared/entitlements";
 import { appData, footerDisclaimer } from "@shared/yksData";
 import { SAMPLE_TESTIMONIALS } from "@shared/testimonials";
-import { BarChart3, Building2, CalendarClock, Check, ChevronDown, Map, NotebookPen, PlayCircle, Sparkles, Star, Target, Timer, Users } from "lucide-react";
+import { BarChart3, Building2, CalendarClock, Check, ChevronDown, GraduationCap, Map, NotebookPen, PlayCircle, Sparkles, Star, Target, Timer, Users } from "lucide-react";
 
 const formatPrice = (minorUnits: number) => `${(minorUnits / 100).toLocaleString("tr-TR", { maximumFractionDigits: 0 })} ₺`;
 
 const FEATURES = [
-  { icon: Map, title: "Konu Haritası", text: "ÖSYM kapsamındaki tüm TYT ve AYT konularını gerçek soru verine göre izle: hangisi tamam, hangisi tekrar istiyor, hangisinde henüz veri yok." },
+  { icon: Map, title: "Konu Haritası", text: "TYT ve AYT (ÖSYM) ya da LGS (MEB 8. sınıf) konularını gerçek soru verine göre izle: hangisi tamam, hangisi tekrar istiyor, hangisinde henüz veri yok." },
   { icon: BarChart3, title: "Deneme analizi", text: "Netlerini elle gir ya da sonuç belgesinin fotoğrafını yükle; ders ve konu bazında trendini, zayıf konularını tek bakışta gör." },
   { icon: Sparkles, title: "Yapay zekâ ile haftalık plan", text: "Zayıf konuların, deneme trendin ve okul saatlerine göre sana özel, gerçekçi bir haftalık çalışma planı." },
   { icon: Timer, title: "Takvim ve odak modu", text: "Günlük oturumlarını takvimden başlat; zamanlayıcı, beyaz/pembe/kahverengi gürültü ve oturum hatırlatma bildirimleriyle odaklan." },
@@ -18,7 +18,7 @@ const FEATURES = [
 ];
 
 const STEPS = [
-  { title: "Hesabını aç", text: "Sınıfını, hedef sınav yılını ve hedef bölümünü birkaç dakikalık kısa bir ankette paylaş." },
+  { title: "Hesabını aç", text: "YKS mi LGS mi, sınıfını, hedef sınav yılını ve hedefini birkaç dakikalık kısa bir ankette paylaş." },
   { title: "Denemeni ekle", text: "Son deneme sonucunu gir; Pusula zayıf konularını çıkarıp koç önerisini hazırlar." },
   { title: "Planını uygula", text: "Haftalık planındaki oturumları odak modunda tamamla; her oturum konu haritanı günceller." },
 ];
@@ -26,12 +26,13 @@ const STEPS = [
 const FAQ = [
   { q: "Pusula ücretsiz mi?", a: "Hesap açmak ve temel takip (konu haritası, denemeler, takvim, odak zamanlayıcı) ücretsiz. Yapay zekâ araçları ücretsiz pakette de var ama aylık kotası düşük. Gelişmiş deneme analizleri, plan uyumu, kaynak önerileri ve raporlar ücretli paketlerde açılır; her ücretli pakette 10 gün ücretsiz deneme var." },
   { q: "Paketler arasındaki fark ne?", a: "Temel, Premium ve Pro'da tüm özellikler açık; paketler yalnızca yapay zekâ kotalarında ayrılır: haftalık plan, deneme belgesini okuma, kitap ekleme, sesli not ve not asistanı gibi araçları ayda kaç kez kullanabileceğin." },
-  { q: "Yıllık plan nasıl işliyor?", a: "Yıllık plan, başlangıç anketinde seçtiğin sınav yılının YKS'si bitene kadar sürer. Fiyatı, sınava kalan ayların aylık toplamından %20 daha azdır; yani ne zaman alırsan al yalnızca kalan dönem için ödersin." },
+  { q: "LGS öğrencileri de kullanabilir mi?", a: "Evet. Kayıt olurken LGS'yi seçersen konu haritan MEB 8. sınıf programına (Türkçe, Matematik, Fen Bilimleri, İnkılap Tarihi, Din Kültürü, İngilizce) göre kurulur; denemelerde 3 yanlış 1 doğruyu götürür, yapay zekâ 4 şıklı LGS tarzında soru üretir ve dilini ortaokul öğrencisine göre ayarlar. Paketler ve fiyatlar YKS ile aynıdır." },
+  { q: "Yıllık plan nasıl işliyor?", a: "Yıllık plan, başlangıç anketinde seçtiğin sınavın (YKS ya da LGS) o yılki tarihine kadar sürer. Fiyatı, sınava kalan ayların aylık toplamından %20 daha azdır; yani ne zaman alırsan al yalnızca kalan dönem için ödersin." },
   { q: "Aboneliğimi iptal edebilir miyim?", a: "Evet, istediğin an Premium sayfasından iptal edebilirsin. Ödediğin dönem bitene kadar paketini kullanmaya devam edersin, sonra ücretsiz pakete geçersin; verilerin silinmez." },
   { q: "Kayıt olunca hesabım hemen açılıyor mu?", a: "E-postayla kayıt olursan önce adresine gelen bağlantıyla e-postanı doğrularsın. Ardından hesabın bir yönetici tarafından onaylanır ve panele erişebilirsin." },
   { q: "Verilerimi kimler görebilir?", a: "Varsayılan olarak yalnızca sen. Dershanen ya da okulun sana davet kodu verir ve sen onay verirsen; deneme sonuçların, konu durumun, takvimdeki planın ve hedef bilgin kurumunla paylaşılır. Notların, soru defterin, fotoğrafların, sesli notların ve iletişim bilgilerin hiçbir zaman paylaşılmaz; kurumdan istediğin an ayrılabilirsin." },
   { q: "Telefonda kullanabilir miyim?", a: "Evet. Pusula tarayıcıda çalışır ve telefonunun ana ekranına uygulama olarak eklenebilir. İstersen yaklaşan çalışma oturumların için hatırlatma bildirimi de alırsın." },
-  { q: "Puan ya da sıralama tahmini veriyor mu?", a: "Hayır. Pusula bir çalışma takip ve planlama aracıdır; resmi puan veya sıralama tahmini sunmaz. Konu kapsamı ÖSYM ve MEB programlarına dayanır." },
+  { q: "Puan ya da sıralama tahmini veriyor mu?", a: "YKS için hayır; Pusula bir çalışma takip ve planlama aracıdır, puan veya sıralama tahmini sunmaz. LGS'de son denemendeki netlerden ağırlıklı (Türkçe, Matematik ve Fen 4 kat) hesaplanan kaba bir tahmini puan gösterir; MEB'in standart puanı değildir. Konu kapsamı ÖSYM ve MEB programlarına dayanır." },
   { q: "Dershane ya da okul olarak nasıl kullanırız?", a: "Kurum Paneli ile öğretmenleriniz, onay veren öğrencilerin denemelerini, konu durumlarını ve planlarını izler. Personel, platformdan aldığı davet koduyla Kurum Paneli'ne katılır; öğrencilerinizi de kurumunuzun davet kodlarıyla eklersiniz." },
 ];
 
@@ -52,6 +53,8 @@ export default function Landing() {
   const testimonialList = showingSamples ? SAMPLE_TESTIMONIALS : published.data ?? [];
   const register = () => startLogin("register");
   const login = () => startLogin("login");
+  // /lgs adresi aynı tanıtım sayfasını LGS öğrencisine göre açar (paylaşılabilir bağlantı).
+  const lgsPage = typeof window !== "undefined" && window.location.pathname === "/lgs";
 
   return (
     <div className="min-h-screen bg-paper text-ink">
@@ -63,6 +66,7 @@ export default function Landing() {
           </a>
           <nav className="flex items-center gap-1 text-[14px] font-semibold sm:gap-2">
             <a href="#ozellikler" className="hidden rounded-lg px-3 py-2 text-ink-3 hover:text-ink md:block">Özellikler</a>
+            <a href="#lgs" className="hidden rounded-lg px-3 py-2 text-ink-3 hover:text-ink md:block">LGS</a>
             <a href="#fiyatlar" className="hidden rounded-lg px-3 py-2 text-ink-3 hover:text-ink md:block">Fiyatlar</a>
             <a href="#kurumlar" className="hidden rounded-lg px-3 py-2 text-ink-3 hover:text-ink md:block">Kurumlar</a>
             <a href="#sss" className="hidden rounded-lg px-3 py-2 text-ink-3 hover:text-ink lg:block">SSS</a>
@@ -75,8 +79,8 @@ export default function Landing() {
       <main>
         <section className="mx-auto grid max-w-6xl items-center gap-10 px-4 py-14 sm:px-6 lg:grid-cols-[1.15fr_0.85fr] lg:py-20">
           <div>
-            <p className="hero-pill w-fit bg-brand/10 text-brand">Kişisel YKS koçun</p>
-            <h1 className="mt-4 text-[36px] font-semibold leading-[1.1] font-display sm:text-[48px]">{appData.tagline}</h1>
+            <p className="hero-pill w-fit bg-brand/10 text-brand">{lgsPage ? "Kişisel LGS koçun" : "Kişisel YKS ve LGS koçun"}</p>
+            <h1 className="mt-4 text-[36px] font-semibold leading-[1.1] font-display sm:text-[48px]">{lgsPage ? "LGS'ye planlı, sakin ve kendinden emin hazırlan." : appData.tagline}</h1>
             <p className="mt-5 max-w-xl text-[16px] leading-7 text-ink-3">Denemelerin, konu haritan, çalışma takvimin ve sana özel haftalık planın tek yerde. Pusula nerede net kaybettiğini gösterir, bugün neye çalışman gerektiğini söyler ve ilerlemeni her oturumda günceller.</p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <button onClick={register} className="h-12 rounded-xl bg-brand px-6 text-[15px] font-semibold text-white hover:bg-brand-strong">Ücretsiz hesap oluştur</button>
@@ -104,6 +108,24 @@ export default function Landing() {
                 <p className="mt-2 text-[14px] leading-6 text-ink-3">{text}</p>
               </div>
             ))}
+          </div>
+        </section>
+
+        <section id="lgs" className="mx-auto max-w-6xl scroll-mt-20 px-4 py-14 sm:px-6">
+          <div className="soft-card grid items-center gap-8 p-7 sm:p-10 lg:grid-cols-[1.2fr_0.8fr]">
+            <div>
+              <p className="hero-pill w-fit bg-brand/10 text-brand"><GraduationCap size={13} className="mr-1 inline" /> 7. ve 8. sınıflar için</p>
+              <h2 className="mt-4 text-[26px] font-semibold font-display sm:text-[30px]">LGS'ye hazırlanıyor musun?</h2>
+              <p className="mt-3 text-[15px] leading-7 text-ink-3">Kayıt olurken LGS'yi seç; Pusula her şeyi 8. sınıf programına göre kurar. Okul ve ödevlerle birlikte yorulmadan ilerleyebileceğin kısa, düzenli oturumlar önerir.</p>
+              <ul className="mt-5 grid gap-2 text-[14px] text-ink-2 sm:grid-cols-2">
+                {["6 dersin MEB konu haritası", "3 yanlış 1 doğru net hesabı", "Denemeden tahmini LGS puanı", "4 şıklı LGS tarzı benzer sorular", "Sözel ve sayısal oturum takibi", "Ders programına göre haftalık plan"].map((item) => <li key={item} className="flex items-start gap-2"><Check size={15} className="mt-0.5 shrink-0 text-brand" />{item}</li>)}
+              </ul>
+            </div>
+            <div className="flex flex-col gap-3 rounded-2xl bg-paper p-6 text-center">
+              <Target className="mx-auto text-brand" size={30} />
+              <p className="text-[14px] leading-6 text-ink-3">Paketler ve fiyatlar YKS ile aynı. Yıllık plan LGS gününe kadar sürer.</p>
+              <button onClick={register} className="h-11 rounded-xl bg-brand text-[14px] font-semibold text-white hover:bg-brand-strong">LGS için ücretsiz başla</button>
+            </div>
           </div>
         </section>
 
