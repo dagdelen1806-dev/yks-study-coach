@@ -1,6 +1,6 @@
 import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
-import { drizzle, type MySql2Database } from "drizzle-orm/mysql2";
-import mysql from "mysql2/promise";
+import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 import { bookInventory, bookStudyLogs, bookTopicMappings, coachAlerts, InsertUser, planAdherenceReports, sourceSwitches, studentProfiles, studyPlanSessions, studyPlans, topicProgress, topicStudyLogs, userMockExams, userResourceBooks, users, yksTopics } from "../drizzle/schema";
 import type { AvatarStyle, CoachingStyle, GradeLevel, TargetScoreType } from "../shared/onboarding";
 import { calculatePlanAdherence, dedupeAlerts, type AdherenceSession } from "../shared/planAdherence";
@@ -12,30 +12,31 @@ import { topicSeeds, type ExamType, type TopicStatus } from "../shared/yksData";
 import { toLocalDateKey } from "../shared/dates";
 import { NOTEBOOK_REVIEW_TASK_KIND } from "../shared/questionNotebook";
 
-let _db: MySql2Database | null = null;
+export type Db = PostgresJsDatabase;
+let _db: Db | null = null;
 
 /**
- * Railway MySQL'e herkese açık proxy üzerinden bağlanılıyor ve Vercel fonksiyon örnekleri
- * istekler arasında canlı kalıyor. Varsayılan havuz boştaki bağlantıları süresiz tutar;
- * proxy bunları sessizce kapatınca bir sonraki sorgu "Got timeout reading communication
- * packets" / ETIMEDOUT ile düşer. Bu yüzden: keep-alive açık, boştaki bağlantı proxy'den
- * önce (30 sn) kapatılır, sunucusuz ortama uygun küçük havuz, bağlantı kurmaya daha uzun süre.
+ * Supabase PostgreSQL'e "transaction" kipindeki havuzlayıcı (Supavisor, port 6543) üzerinden
+ * bağlanılır; Vercel fonksiyon örnekleri istekler arasında canlı kalır. Bu kipte hazırlanmış
+ * sorgu (prepared statement) desteklenmez → prepare: false. Sunucusuz ortama uygun küçük
+ * havuz; boştaki bağlantı 20 sn sonra kapatılır, bağlantı kurmaya 20 sn tanınır.
  */
 export const DB_POOL_OPTIONS = {
-  connectionLimit: 5,
-  maxIdle: 2,
-  idleTimeout: 30_000,
-  enableKeepAlive: true,
-  keepAliveInitialDelay: 10_000,
-  connectTimeout: 20_000,
-  waitForConnections: true,
+  max: 5,
+  idle_timeout: 20,
+  connect_timeout: 20,
+  prepare: false,
 } as const;
+
+export function createDb(url: string): Db {
+  return drizzle({ client: postgres(url, DB_POOL_OPTIONS) });
+}
 
 // Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      _db = drizzle({ client: mysql.createPool({ uri: process.env.DATABASE_URL, ...DB_POOL_OPTIONS }) });
+      _db = createDb(process.env.DATABASE_URL);
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;
@@ -98,7 +99,8 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       updateSet.lastSignedIn = new Date();
     }
 
-    await db.insert(users).values(values).onDuplicateKeyUpdate({
+    await db.insert(users).values(values).onConflictDoUpdate({
+      target: users.openId,
       set: updateSet,
     });
   } catch (error) {
@@ -343,8 +345,8 @@ export async function addBookToInventory(userId: number, bookId: string) {
   if (!db) return undefined;
   const existing = await db.select().from(bookInventory).where(and(eq(bookInventory.userId, userId), eq(bookInventory.bookId, bookId), isNull(bookInventory.removedAt))).limit(1);
   if (existing[0]) return existing[0];
-  const result = await db.insert(bookInventory).values({ userId, bookId });
-  return { id: Number(result[0].insertId), userId, bookId, addedAt: new Date(), removedAt: null };
+  const result = await db.insert(bookInventory).values({ userId, bookId }).returning({ id: bookInventory.id });
+  return { id: Number(result[0].id), userId, bookId, addedAt: new Date(), removedAt: null };
 }
 
 export async function removeBookFromInventory(userId: number, bookId: string) {
@@ -362,8 +364,8 @@ export async function getBookStudyLogs(userId: number) {
 export async function addBookStudyLog(userId: number, input: Omit<typeof bookStudyLogs.$inferInsert, "id" | "userId" | "createdAt">) {
   const db = await getDb();
   if (!db) return undefined;
-  const result = await db.insert(bookStudyLogs).values({ ...input, userId });
-  return { id: Number(result[0].insertId), ...input, userId, createdAt: new Date() };
+  const result = await db.insert(bookStudyLogs).values({ ...input, userId }).returning({ id: bookStudyLogs.id });
+  return { id: Number(result[0].id), ...input, userId, createdAt: new Date() };
 }
 
 export async function getBookTopicMappings(userId: number) {
@@ -380,8 +382,8 @@ export async function upsertBookTopicMapping(userId: number, input: Omit<typeof 
     await db.update(bookTopicMappings).set({ ...input, updatedAt: new Date() }).where(eq(bookTopicMappings.id, existing[0].id));
     return { ...existing[0], ...input, updatedAt: new Date() };
   }
-  const result = await db.insert(bookTopicMappings).values({ ...input, userId });
-  return { id: Number(result[0].insertId), ...input, userId, updatedAt: new Date() };
+  const result = await db.insert(bookTopicMappings).values({ ...input, userId }).returning({ id: bookTopicMappings.id });
+  return { id: Number(result[0].id), ...input, userId, updatedAt: new Date() };
 }
 
 export async function getSourceSwitches(userId: number) {
@@ -393,8 +395,8 @@ export async function getSourceSwitches(userId: number) {
 export async function addSourceSwitch(userId: number, input: Omit<typeof sourceSwitches.$inferInsert, "id" | "userId">) {
   const db = await getDb();
   if (!db) return undefined;
-  const result = await db.insert(sourceSwitches).values({ ...input, userId });
-  return { id: Number(result[0].insertId), ...input, userId };
+  const result = await db.insert(sourceSwitches).values({ ...input, userId }).returning({ id: sourceSwitches.id });
+  return { id: Number(result[0].id), ...input, userId };
 }
 
 type UserMockExamInput = {
@@ -516,8 +518,8 @@ export async function saveStudyPlan(userId: number, input: { title: string; week
     const previous = await db.select({ id: studyPlans.id }).from(studyPlans).where(and(eq(studyPlans.userId, userId), eq(studyPlans.title, input.title)));
     if (previous.length) await db.delete(studyPlanSessions).where(and(eq(studyPlanSessions.userId, userId), eq(studyPlanSessions.status, "planned"), inArray(studyPlanSessions.planId, previous.map((plan) => plan.id))));
   }
-  const planResult = await db.insert(studyPlans).values({ userId, title: input.title, weekStart: input.weekStart, weekEnd: input.weekEnd, summary: input.summary, source: input.source ?? "ai" });
-  const planId = Number(planResult[0].insertId);
+  const planResult = await db.insert(studyPlans).values({ userId, title: input.title, weekStart: input.weekStart, weekEnd: input.weekEnd, summary: input.summary, source: input.source ?? "ai" }).returning({ id: studyPlans.id });
+  const planId = Number(planResult[0].id);
   if (input.sessions.length) await db.insert(studyPlanSessions).values(input.sessions.map((session) => ({ ...session, userId, planId, targetPages: session.targetPages ?? null, targetTests: session.targetTests ?? null })));
   return getStudyCalendar(userId);
 }
@@ -593,8 +595,8 @@ export async function logCompletedRoutineSession(userId: number, input: { title:
   const sessionDate = new Date();
   const dayStart = new Date(sessionDate); dayStart.setHours(0, 0, 0, 0);
   const dayEnd = new Date(dayStart); dayEnd.setDate(dayEnd.getDate() + 1);
-  const planResult = await db.insert(studyPlans).values({ userId, title: input.title, weekStart: dayStart, weekEnd: dayEnd, summary: input.title, source: "manual" });
-  const planId = Number(planResult[0].insertId);
+  const planResult = await db.insert(studyPlans).values({ userId, title: input.title, weekStart: dayStart, weekEnd: dayEnd, summary: input.title, source: "manual" }).returning({ id: studyPlans.id });
+  const planId = Number(planResult[0].id);
   const completedAt = new Date();
   const sessionValues = {
     userId, planId, sessionDate, title: input.title, subject: input.subject, topic: input.topic, kind: input.kind,
@@ -602,8 +604,8 @@ export async function logCompletedRoutineSession(userId: number, input: { title:
     actualMinutes: input.actualMinutes, actualQuestions: 0, correct: 0, wrong: 0, blank: 0,
     actualPages: input.actualPages ?? null, note: input.note ?? null,
   };
-  const sessionResult = await db.insert(studyPlanSessions).values(sessionValues);
-  const sessionId = Number(sessionResult[0].insertId);
+  const sessionResult = await db.insert(studyPlanSessions).values(sessionValues).returning({ id: studyPlanSessions.id });
+  const sessionId = Number(sessionResult[0].id);
   await db.insert(topicStudyLogs).values({ userId, sessionId, subject: input.subject, topic: input.topic, studyDate: completedAt, minutes: input.actualMinutes, questions: 0, correct: 0, wrong: 0, blank: 0, note: input.note ?? null });
   return getStudyCalendar(userId);
 }
@@ -611,14 +613,14 @@ export async function logCompletedRoutineSession(userId: number, input: { title:
 export async function addTopicStudyLog(userId: number, input: Omit<typeof topicStudyLogs.$inferInsert, "id" | "userId" | "createdAt">) {
   const db = await getDb();
   if (!db) return undefined;
-  const result = await db.insert(topicStudyLogs).values({ ...input, userId });
+  const result = await db.insert(topicStudyLogs).values({ ...input, userId }).returning({ id: topicStudyLogs.id });
   // Pusula Odak'ta öğrencinin serbestçe seçtiği (takvim oturumuna bağlı
   // olmayan) bir konu için de aynı şekilde konu durumunu günceller.
   const questionCount = input.questions ?? 0;
   if (questionCount > 0) {
     await upsertTopicProgress(userId, { exam: FALLBACK_EXAM, subject: input.subject, topic: input.topic, accuracy: ((input.correct ?? 0) / questionCount) * 100, questionCount, studyDate: input.studyDate });
   }
-  return { id: Number(result[0].insertId), ...input, userId, createdAt: new Date() };
+  return { id: Number(result[0].id), ...input, userId, createdAt: new Date() };
 }
 
 export async function getPlanAdherenceInputs(userId: number, periodStart: Date, periodEnd: Date) {
@@ -636,8 +638,8 @@ export async function savePlanAdherence(userId: number, periodStart: Date, perio
   if (!db) return undefined;
   const { sessions, averageAccuracy } = await getPlanAdherenceInputs(userId, periodStart, periodEnd);
   const result = calculatePlanAdherence(sessions, averageAccuracy);
-  const inserted = await db.insert(planAdherenceReports).values({ userId, periodType: "week", periodStart, periodEnd, overallScore: result.overallScore, sessionScore: result.sessionScore, timeScore: result.timeScore, questionScore: result.questionScore, punctualityScore: result.punctualityScore, plannedSessions: result.plannedSessions, completedSessions: result.completedSessions, plannedMinutes: result.plannedMinutes, actualMinutes: result.actualMinutes, targetQuestions: result.targetQuestions, actualQuestions: result.actualQuestions, rescheduledSessions: result.rescheduledSessions, summary: result.summary, decision: result.decision, snapshotJson: JSON.stringify({ averageAccuracy, alerts: result.alerts }) });
-  const reportId = Number(inserted[0].insertId);
+  const inserted = await db.insert(planAdherenceReports).values({ userId, periodType: "week", periodStart, periodEnd, overallScore: result.overallScore, sessionScore: result.sessionScore, timeScore: result.timeScore, questionScore: result.questionScore, punctualityScore: result.punctualityScore, plannedSessions: result.plannedSessions, completedSessions: result.completedSessions, plannedMinutes: result.plannedMinutes, actualMinutes: result.actualMinutes, targetQuestions: result.targetQuestions, actualQuestions: result.actualQuestions, rescheduledSessions: result.rescheduledSessions, summary: result.summary, decision: result.decision, snapshotJson: JSON.stringify({ averageAccuracy, alerts: result.alerts }) }).returning({ id: planAdherenceReports.id });
+  const reportId = Number(inserted[0].id);
   const existingAlerts = await db.select({ ruleKey: coachAlerts.ruleKey }).from(coachAlerts).where(eq(coachAlerts.userId, userId));
   const newAlerts = dedupeAlerts(result.alerts, existingAlerts.map((alert) => alert.ruleKey));
   if (newAlerts.length) await db.insert(coachAlerts).values(newAlerts.map((alert) => ({ userId, reportId, level: alert.level, ruleKey: alert.ruleKey, title: alert.title, message: alert.message, actionLabel: alert.actionLabel, actionJson: JSON.stringify({ decision: result.decision }) })));
@@ -671,7 +673,7 @@ export async function ensureTopicCatalogSeeded() {
   if (!db) return;
   const existing = await db.select({ id: yksTopics.id }).from(yksTopics).limit(1);
   if (existing.length === 0 && topicSeeds.length > 0) {
-    await db.insert(yksTopics).values(topicSeeds.map((seed) => ({ slug: seed.id, exam: seed.exam, subject: seed.subject, topic: seed.topic, unit: seed.unit }))).onDuplicateKeyUpdate({ set: { subject: sql`subject` } });
+    await db.insert(yksTopics).values(topicSeeds.map((seed) => ({ slug: seed.id, exam: seed.exam, subject: seed.subject, topic: seed.topic, unit: seed.unit }))).onConflictDoNothing({ target: yksTopics.slug });
   }
   await ensureCurriculumSeeded(db);
   topicCatalogSeeded = true;
@@ -690,7 +692,7 @@ async function ensureCurriculumSeeded(db: NonNullable<Awaited<ReturnType<typeof 
   await db
     .insert(yksTopics)
     .values(missing.map((def) => ({ slug: def.slug, exam: def.exam, subject: def.subject, topic: def.topic, unit: def.unit })))
-    .onDuplicateKeyUpdate({ set: { slug: sql`slug` } });
+    .onConflictDoNothing({ target: yksTopics.slug });
 }
 
 async function findOrCreateTopic(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, exam: ExamType, subject: string, topic: string) {
@@ -698,9 +700,9 @@ async function findOrCreateTopic(db: NonNullable<Awaited<ReturnType<typeof getDb
   const existing = await db.select().from(yksTopics).where(and(eq(yksTopics.subject, subject), eq(yksTopics.topic, topic))).orderBy(sql`${yksTopics.exam} = ${exam} DESC`, yksTopics.id).limit(1);
   if (existing[0]) return existing[0];
   const slug = `${exam}-${slugify(subject)}-${slugify(topic)}` || `topic-${Date.now()}`;
-  const result = await db.insert(yksTopics).values({ slug, exam, subject, topic, unit: subject }).onDuplicateKeyUpdate({ set: { subject } });
+  const result = await db.insert(yksTopics).values({ slug, exam, subject, topic, unit: subject }).onConflictDoUpdate({ target: yksTopics.slug, set: { subject } }).returning({ id: yksTopics.id });
   const inserted = await db.select().from(yksTopics).where(eq(yksTopics.slug, slug)).limit(1);
-  return inserted[0] ?? { id: Number(result[0].insertId), slug, exam, subject, topic, unit: subject, sourceUrl: null, createdAt: new Date() };
+  return inserted[0] ?? { id: Number(result[0].id), slug, exam, subject, topic, unit: subject, sourceUrl: null, createdAt: new Date() };
 }
 
 export async function getTopicCatalog() {

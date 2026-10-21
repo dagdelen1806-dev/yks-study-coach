@@ -1,25 +1,9 @@
 import { and, eq, inArray } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
 import { bookCurriculumTopics, bookOffers, catalogBooks, externalBookSources, publishers, resourceCatalogSyncLogs, yksTopics } from "../../drizzle/schema";
-import { ENV } from "../_core/env";
+// Ortak bağlantı (server/db.ts): DATABASE_URL yoksa null döner, yerel araçlar / kuru çalıştırmalar yine çalışır.
+import { getDb } from "../db";
 import type { CurriculumTopicCandidate } from "./curriculumMapper";
 import type { CatalogBookRow, CatalogDbPort, DifficultyPatch, PublisherRow, UpsertCatalogBookInput } from "./pipeline/types";
-
-let _db: ReturnType<typeof drizzle> | null = null;
-
-// Same lazy-connect pattern as `server/db.ts` so local tooling / dry runs
-// keep working without a DATABASE_URL.
-async function getDb() {
-  if (!_db && ENV.databaseUrl) {
-    try {
-      _db = drizzle(ENV.databaseUrl);
-    } catch (error) {
-      console.warn("[ResourceCatalog] Failed to connect:", error);
-      _db = null;
-    }
-  }
-  return _db;
-}
 
 const toCatalogBookRow = (row: typeof catalogBooks.$inferSelect): CatalogBookRow => ({
   id: row.id,
@@ -56,8 +40,8 @@ export const catalogDb: CatalogDbPort = {
   async createPublisher(input) {
     const db = await getDb();
     if (!db) throw new Error("Database not available");
-    const result = await db.insert(publishers).values(input);
-    const id = Number(result[0].insertId);
+    const result = await db.insert(publishers).values(input).returning({ id: publishers.id });
+    const id = Number(result[0].id);
     return { id, ...input } satisfies PublisherRow;
   },
 
@@ -90,8 +74,8 @@ export const catalogDb: CatalogDbPort = {
       await db.update(externalBookSources).set(values).where(eq(externalBookSources.id, existing[0].id));
       return { id: existing[0].id, source: row.source, sourceProductId: row.sourceProductId, matchedBookId: existing[0].matchedBookId, syncStatus: existing[0].syncStatus };
     }
-    const result = await db.insert(externalBookSources).values(values);
-    const id = Number(result[0].insertId);
+    const result = await db.insert(externalBookSources).values(values).returning({ id: externalBookSources.id });
+    const id = Number(result[0].id);
     return { id, source: row.source, sourceProductId: row.sourceProductId, matchedBookId: null, syncStatus: "pending" };
   },
 
@@ -140,8 +124,8 @@ export const catalogDb: CatalogDbPort = {
       examScope: input.examScope,
       subject: input.subject,
       metadata: input.metadata ? JSON.stringify(input.metadata) : null,
-    });
-    const id = Number(result[0].insertId);
+    }).returning({ id: catalogBooks.id });
+    const id = Number(result[0].id);
     const row = await this.getCatalogBookById(id);
     if (!row) throw new Error("Failed to read back created catalog book");
     return row;
@@ -219,8 +203,8 @@ export const catalogDb: CatalogDbPort = {
   async createSyncLog(input) {
     const db = await getDb();
     if (!db) return { id: -1 };
-    const result = await db.insert(resourceCatalogSyncLogs).values({ source: input.source, startedAt: input.startedAt, dryRun: input.dryRun ? 1 : 0, triggeredBy: input.triggeredBy });
-    return { id: Number(result[0].insertId) };
+    const result = await db.insert(resourceCatalogSyncLogs).values({ source: input.source, startedAt: input.startedAt, dryRun: input.dryRun ? 1 : 0, triggeredBy: input.triggeredBy }).returning({ id: resourceCatalogSyncLogs.id });
+    return { id: Number(result[0].id) };
   },
 
   async finishSyncLog(id, patch) {

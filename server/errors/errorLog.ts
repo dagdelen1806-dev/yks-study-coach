@@ -25,7 +25,7 @@ export async function recordAppError(input: { source: ErrorSource; message: stri
       .insert(appErrors)
       .values({ fingerprint, source: input.source, ...latest, firstSeenAt: now, lastSeenAt: now })
       // Tekrar: sayaç artar, son görülen bilgiler güncellenir, çözülmüşse yeniden açılır.
-      .onDuplicateKeyUpdate({ set: { ...latest, count: sql`${appErrors.count} + 1`, lastSeenAt: now, resolvedAt: null } });
+      .onConflictDoUpdate({ target: appErrors.fingerprint, set: { ...latest, count: sql`${appErrors.count} + 1`, lastSeenAt: now, resolvedAt: null } });
   } catch (error) {
     console.error("[ErrorLog] could not record:", error instanceof Error ? error.message : error);
   }

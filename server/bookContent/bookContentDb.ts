@@ -187,7 +187,7 @@ export async function getAutoSchedule(userId: number): Promise<boolean> {
 export async function setAutoSchedule(userId: number, enabled: boolean): Promise<boolean> {
   const db = await requireDb();
   // Profil satırı henüz yoksa (onboarding öncesi) yalnızca bu tercihle açılır; diğer alanlar varsayılanda kalır.
-  await db.insert(studentProfiles).values({ userId, autoScheduleBookTasks: enabled ? 1 : 0 }).onDuplicateKeyUpdate({ set: { autoScheduleBookTasks: enabled ? 1 : 0 } });
+  await db.insert(studentProfiles).values({ userId, autoScheduleBookTasks: enabled ? 1 : 0 }).onConflictDoUpdate({ target: studentProfiles.userId, set: { autoScheduleBookTasks: enabled ? 1 : 0 } });
   return enabled;
 }
 

@@ -109,9 +109,9 @@ import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { eq as eq3 } from "drizzle-orm";
 
 // drizzle/schema.ts
-import { customType, decimal, index, int, mediumtext, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
-var users = mysqlTable("users", {
-  id: int("id").autoincrement().primaryKey(),
+import { customType, decimal, index, integer, pgTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/pg-core";
+var users = pgTable("users", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   openId: varchar("openId", { length: 64 }).notNull().unique(),
   name: text("name"),
   email: varchar("email", { length: 320 }),
@@ -123,9 +123,9 @@ var users = mysqlTable("users", {
   // `loginMethod = "dev_email"` hesaplar için zorunlu; NULL = doğrulanmadı.
   // `emailVerificationSentAt` tekrar gönderme bekleme süresini sunucusuz
   // ortamda da (her instance ayrı bellek) güvenilir kılmak için DB'de tutulur.
-  emailVerifiedAt: timestamp("emailVerifiedAt"),
-  emailVerificationSentAt: timestamp("emailVerificationSentAt"),
-  role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
+  emailVerifiedAt: timestamp("emailVerifiedAt", { withTimezone: true }),
+  emailVerificationSentAt: timestamp("emailVerificationSentAt", { withTimezone: true }),
+  role: text("role", { enum: ["user", "admin"] }).default("user").notNull(),
   // Manuel üyelik onayı (PHASE 2 spec §admin-approval). Sütun varsayılanı
   // "approved" — bu, migration uygulandığında MEVCUT tüm hesapların
   // (bu oturumda test edilen gerçek hesap dahil) kilitlenmemesi içindir.
@@ -133,188 +133,188 @@ var users = mysqlTable("users", {
   // bunu bilerek "pending" olarak GEÇERSİZ KILAR — yani sütun varsayılanı
   // yalnızca "geçmiş" kayıtlar için güvenli bir taban, uygulama mantığı her
   // zaman kazanır.
-  approvalStatus: mysqlEnum("approvalStatus", ["pending", "approved", "rejected"]).default("approved").notNull(),
-  approvedAt: timestamp("approvedAt"),
-  approvedBy: int("approvedBy"),
-  rejectedAt: timestamp("rejectedAt"),
+  approvalStatus: text("approvalStatus", { enum: ["pending", "approved", "rejected"] }).default("approved").notNull(),
+  approvedAt: timestamp("approvedAt", { withTimezone: true }),
+  approvedBy: integer("approvedBy"),
+  rejectedAt: timestamp("rejectedAt", { withTimezone: true }),
   rejectionReason: varchar("rejectionReason", { length: 300 }),
   // Hesap yaşam döngüsü — subscription iptaliyle KARIŞTIRILMAMALI (spec §23).
-  accountStatus: mysqlEnum("accountStatus", ["active", "suspended", "deleted"]).default("active").notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull()
+  accountStatus: text("accountStatus", { enum: ["active", "suspended", "deleted"] }).default("active").notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull(),
+  lastSignedIn: timestamp("lastSignedIn", { withTimezone: true }).defaultNow().notNull()
 });
-var yksTopics = mysqlTable("yks_topics", {
-  id: int("id").autoincrement().primaryKey(),
+var yksTopics = pgTable("yks_topics", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   slug: varchar("slug", { length: 120 }).notNull().unique(),
-  exam: mysqlEnum("exam", ["TYT", "AYT"]).notNull(),
+  exam: text("exam", { enum: ["TYT", "AYT"] }).notNull(),
   subject: varchar("subject", { length: 80 }).notNull(),
   topic: varchar("topic", { length: 180 }).notNull(),
   unit: varchar("unit", { length: 120 }).notNull(),
   sourceUrl: varchar("sourceUrl", { length: 500 }),
-  createdAt: timestamp("createdAt").defaultNow().notNull()
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
 });
-var topicProgress = mysqlTable("topic_progress", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
-  topicId: int("topicId").notNull(),
-  progress: int("progress").default(0).notNull(),
-  status: mysqlEnum("status", ["weak", "medium", "good"]).default("medium").notNull(),
-  lastReviewedAt: timestamp("lastReviewedAt"),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull()
+var topicProgress = pgTable("topic_progress", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
+  topicId: integer("topicId").notNull(),
+  progress: integer("progress").default(0).notNull(),
+  status: text("status", { enum: ["weak", "medium", "good"] }).default("medium").notNull(),
+  lastReviewedAt: timestamp("lastReviewedAt", { withTimezone: true }),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull()
 });
-var mockExams = mysqlTable("mock_exams", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
+var mockExams = pgTable("mock_exams", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
   title: varchar("title", { length: 180 }).notNull(),
-  exam: mysqlEnum("exam", ["TYT", "AYT"]).default("TYT").notNull(),
-  examDate: timestamp("examDate").notNull(),
-  turkceNet: int("turkceNet").default(0).notNull(),
-  matematikNet: int("matematikNet").default(0).notNull(),
-  fenNet: int("fenNet").default(0).notNull(),
-  sosyalNet: int("sosyalNet").default(0).notNull(),
+  exam: text("exam", { enum: ["TYT", "AYT"] }).default("TYT").notNull(),
+  examDate: timestamp("examDate", { withTimezone: true }).notNull(),
+  turkceNet: integer("turkceNet").default(0).notNull(),
+  matematikNet: integer("matematikNet").default(0).notNull(),
+  fenNet: integer("fenNet").default(0).notNull(),
+  sosyalNet: integer("sosyalNet").default(0).notNull(),
   notes: text("notes"),
-  createdAt: timestamp("createdAt").defaultNow().notNull()
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
 });
-var userMockExams = mysqlTable("user_mock_exams", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
+var userMockExams = pgTable("user_mock_exams", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
   title: varchar("title", { length: 180 }).notNull(),
-  exam: mysqlEnum("exam", ["TYT", "AYT"]).notNull(),
-  examDate: timestamp("examDate").notNull(),
+  exam: text("exam", { enum: ["TYT", "AYT"] }).notNull(),
+  examDate: timestamp("examDate", { withTimezone: true }).notNull(),
   net: decimal("net", { precision: 6, scale: 2 }).notNull(),
   delta: decimal("delta", { precision: 6, scale: 2 }).default("0").notNull(),
   subjectsJson: text("subjectsJson").notNull(),
   timeSpentJson: text("timeSpentJson").notNull(),
   topicNetsJson: text("topicNetsJson").notNull(),
   topicDetailsJson: text("topicDetailsJson").notNull(),
-  importedFrom: mysqlEnum("importedFrom", ["manual", "ocr", "pdf", "csv", "xlsx"]).default("manual").notNull(),
+  importedFrom: text("importedFrom", { enum: ["manual", "ocr", "pdf", "csv", "xlsx"] }).default("manual").notNull(),
   notes: text("notes"),
-  createdAt: timestamp("createdAt").defaultNow().notNull()
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
 });
-var studySessions = mysqlTable("study_sessions", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
-  topicId: int("topicId"),
-  mode: mysqlEnum("mode", ["review", "practice", "analysis"]).notNull(),
-  minutes: int("minutes").default(0).notNull(),
-  completedAt: timestamp("completedAt").defaultNow().notNull()
+var studySessions = pgTable("study_sessions", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
+  topicId: integer("topicId"),
+  mode: text("mode", { enum: ["review", "practice", "analysis"] }).notNull(),
+  minutes: integer("minutes").default(0).notNull(),
+  completedAt: timestamp("completedAt", { withTimezone: true }).defaultNow().notNull()
 });
-var resources = mysqlTable("resources", {
-  id: int("id").autoincrement().primaryKey(),
+var resources = pgTable("resources", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   title: varchar("title", { length: 180 }).notNull(),
   publisher: varchar("publisher", { length: 120 }).notNull(),
   subject: varchar("subject", { length: 80 }).notNull(),
-  level: mysqlEnum("level", ["beginner", "medium", "advanced"]).notNull(),
+  level: text("level", { enum: ["beginner", "medium", "advanced"] }).notNull(),
   reason: text("reason").notNull(),
   sourceUrl: varchar("sourceUrl", { length: 500 })
 });
-var userResourceBooks = mysqlTable("user_resource_books", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
+var userResourceBooks = pgTable("user_resource_books", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
   bookId: varchar("bookId", { length: 120 }).notNull(),
   title: varchar("title", { length: 180 }).notNull(),
   publisher: varchar("publisher", { length: 120 }).notNull(),
   subject: varchar("subject", { length: 80 }).notNull(),
-  exam: mysqlEnum("exam", ["TYT", "AYT"]).notNull(),
-  level: mysqlEnum("level", ["Kolay", "Orta", "Zor"]).notNull(),
+  exam: text("exam", { enum: ["TYT", "AYT"] }).notNull(),
+  level: text("level", { enum: ["Kolay", "Orta", "Zor"] }).notNull(),
   format: varchar("format", { length: 120 }).notNull(),
   reason: text("reason").notNull(),
   sourceUrl: varchar("sourceUrl", { length: 500 }),
-  pageCount: int("pageCount"),
+  pageCount: integer("pageCount"),
   tone: varchar("tone", { length: 20 }).default("blue").notNull(),
   // Kapak OCR'ından (öğrenci onayladıktan sonra). ISBN varsa mükerrer kitap
   // tespitinde en güçlü kimliktir; yoksa yayınevi + normalize ad + yazar.
   authors: varchar("authors", { length: 300 }),
   isbn: varchar("isbn", { length: 32 }),
-  createdAt: timestamp("createdAt").defaultNow().notNull()
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
 });
-var bookInventory = mysqlTable("book_inventory", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
+var bookInventory = pgTable("book_inventory", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
   bookId: varchar("bookId", { length: 120 }).notNull(),
-  addedAt: timestamp("addedAt").defaultNow().notNull(),
-  removedAt: timestamp("removedAt")
+  addedAt: timestamp("addedAt", { withTimezone: true }).defaultNow().notNull(),
+  removedAt: timestamp("removedAt", { withTimezone: true })
 });
-var bookStudyLogs = mysqlTable("book_study_logs", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
+var bookStudyLogs = pgTable("book_study_logs", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
   bookId: varchar("bookId", { length: 120 }).notNull(),
   topic: varchar("topic", { length: 180 }),
-  sessionDate: timestamp("sessionDate").notNull(),
-  minutes: int("minutes").default(0).notNull(),
-  questions: int("questions").default(0).notNull(),
-  correct: int("correct").default(0).notNull(),
-  wrong: int("wrong").default(0).notNull(),
-  blank: int("blank").default(0).notNull(),
-  pageStart: int("pageStart"),
-  pageEnd: int("pageEnd"),
-  testStart: int("testStart"),
-  testEnd: int("testEnd"),
-  createdAt: timestamp("createdAt").defaultNow().notNull()
+  sessionDate: timestamp("sessionDate", { withTimezone: true }).notNull(),
+  minutes: integer("minutes").default(0).notNull(),
+  questions: integer("questions").default(0).notNull(),
+  correct: integer("correct").default(0).notNull(),
+  wrong: integer("wrong").default(0).notNull(),
+  blank: integer("blank").default(0).notNull(),
+  pageStart: integer("pageStart"),
+  pageEnd: integer("pageEnd"),
+  testStart: integer("testStart"),
+  testEnd: integer("testEnd"),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
 });
-var bookTopicMappings = mysqlTable("book_topic_mappings", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
+var bookTopicMappings = pgTable("book_topic_mappings", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
   bookId: varchar("bookId", { length: 120 }).notNull(),
   topic: varchar("topic", { length: 180 }).notNull(),
   subject: varchar("subject", { length: 80 }).notNull(),
-  pageStart: int("pageStart"),
-  pageEnd: int("pageEnd"),
-  testStart: int("testStart"),
-  testEnd: int("testEnd"),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull()
+  pageStart: integer("pageStart"),
+  pageEnd: integer("pageEnd"),
+  testStart: integer("testStart"),
+  testEnd: integer("testEnd"),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull()
 });
-var userBookContents = mysqlTable("user_book_contents", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
+var userBookContents = pgTable("user_book_contents", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
   bookId: varchar("bookId", { length: 120 }).notNull(),
-  sortOrder: int("sortOrder").notNull(),
-  unitNumber: int("unitNumber"),
+  sortOrder: integer("sortOrder").notNull(),
+  unitNumber: integer("unitNumber"),
   unitTitle: varchar("unitTitle", { length: 300 }).notNull(),
-  contentType: mysqlEnum("contentType", ["topic_test", "osym_type", "review", "simulation", "topic"]).notNull(),
+  contentType: text("contentType", { enum: ["topic_test", "osym_type", "review", "simulation", "topic"] }).notNull(),
   label: varchar("label", { length: 120 }).notNull(),
-  testNumber: int("testNumber"),
+  testNumber: integer("testNumber"),
   title: varchar("title", { length: 300 }).notNull(),
-  pageStart: int("pageStart"),
-  pageEnd: int("pageEnd"),
-  topicId: int("topicId"),
-  mappingStatus: mysqlEnum("mappingStatus", ["confirmed", "unmatched", "not_applicable"]).notNull(),
-  mappingMethod: mysqlEnum("mappingMethod", ["exact_topic", "exact_alias", "contains_topic", "contains_alias", "fuzzy", "ai", "manual", "none"]).default("none").notNull(),
+  pageStart: integer("pageStart"),
+  pageEnd: integer("pageEnd"),
+  topicId: integer("topicId"),
+  mappingStatus: text("mappingStatus", { enum: ["confirmed", "unmatched", "not_applicable"] }).notNull(),
+  mappingMethod: text("mappingMethod", { enum: ["exact_topic", "exact_alias", "contains_topic", "contains_alias", "fuzzy", "ai", "manual", "none"] }).default("none").notNull(),
   mappingConfidence: decimal("mappingConfidence", { precision: 4, scale: 3 }).default("0").notNull(),
-  source: mysqlEnum("source", ["ocr", "manual"]).default("ocr").notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull()
+  source: text("source", { enum: ["ocr", "manual"] }).default("ocr").notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
 }, (table) => ({
   userBookIdx: index("user_book_contents_user_book_idx").on(table.userId, table.bookId),
   userTopicIdx: index("user_book_contents_user_topic_idx").on(table.userId, table.topicId)
 }));
-var mediumBlob = customType({ dataType: () => "mediumblob" });
-var notes = mysqlTable("notes", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
+var mediumBlob = customType({ dataType: () => "bytea" });
+var notes = pgTable("notes", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
   // Çevrimdışı/yeniden gönderilen kayıtta aynı notun ikinci kez oluşmaması için istemcinin ürettiği kimlik.
   clientId: varchar("clientId", { length: 40 }).notNull(),
   title: varchar("title", { length: 200 }).notNull(),
-  content: mediumtext("content").notNull(),
-  plainText: mediumtext("plainText").notNull(),
+  content: text("content").notNull(),
+  plainText: text("plainText").notNull(),
   // Liste önizlemesi: {"images":2,"voice":1,"voiceSeconds":32,"formulas":1,"drawings":0,...}
   stats: varchar("stats", { length: 500 }).notNull(),
-  noteDate: timestamp("noteDate").notNull(),
-  status: mysqlEnum("status", ["active", "archived"]).default("active").notNull(),
-  visibility: mysqlEnum("visibility", ["private"]).default("private").notNull(),
-  isFavorite: int("isFavorite").default(0).notNull(),
-  isPinned: int("isPinned").default(0).notNull(),
-  reviewAt: timestamp("reviewAt"),
+  noteDate: timestamp("noteDate", { withTimezone: true }).notNull(),
+  status: text("status", { enum: ["active", "archived"] }).default("active").notNull(),
+  visibility: text("visibility", { enum: ["private"] }).default("private").notNull(),
+  isFavorite: integer("isFavorite").default(0).notNull(),
+  isPinned: integer("isPinned").default(0).notNull(),
+  reviewAt: timestamp("reviewAt", { withTimezone: true }),
   templateKey: varchar("templateKey", { length: 40 }),
   subject: varchar("subject", { length: 80 }),
-  topicId: int("topicId"),
+  topicId: integer("topicId"),
   bookId: varchar("bookId", { length: 120 }),
-  bookContentId: int("bookContentId"),
-  studySessionId: int("studySessionId"),
-  mockExamId: int("mockExamId"),
-  version: int("version").default(1).notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull()
+  bookContentId: integer("bookContentId"),
+  studySessionId: integer("studySessionId"),
+  mockExamId: integer("mockExamId"),
+  version: integer("version").default(1).notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull()
 }, (table) => ({
   userClientUnique: uniqueIndex("notes_user_client_unique").on(table.userId, table.clientId),
   userDateIdx: index("notes_user_date_idx").on(table.userId, table.noteDate),
@@ -323,216 +323,383 @@ var notes = mysqlTable("notes", {
   userSessionIdx: index("notes_user_session_idx").on(table.userId, table.studySessionId),
   userReviewIdx: index("notes_user_review_idx").on(table.userId, table.reviewAt)
 }));
-var noteTags = mysqlTable("note_tags", {
-  id: int("id").autoincrement().primaryKey(),
-  noteId: int("noteId").notNull(),
-  userId: int("userId").notNull(),
+var noteTags = pgTable("note_tags", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  noteId: integer("noteId").notNull(),
+  userId: integer("userId").notNull(),
   tag: varchar("tag", { length: 40 }).notNull()
 }, (table) => ({
   noteTagUnique: uniqueIndex("note_tags_note_tag_unique").on(table.noteId, table.tag),
   userTagIdx: index("note_tags_user_tag_idx").on(table.userId, table.tag)
 }));
-var noteAttachments = mysqlTable("note_attachments", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
-  noteId: int("noteId"),
-  kind: mysqlEnum("kind", ["image", "audio"]).notNull(),
+var noteAttachments = pgTable("note_attachments", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
+  noteId: integer("noteId"),
+  kind: text("kind", { enum: ["image", "audio"] }).notNull(),
   mimeType: varchar("mimeType", { length: 60 }).notNull(),
-  byteSize: int("byteSize").notNull(),
+  byteSize: integer("byteSize").notNull(),
   data: mediumBlob("data").notNull(),
-  durationSec: int("durationSec"),
+  durationSec: integer("durationSec"),
   ocrText: text("ocrText"),
-  createdAt: timestamp("createdAt").defaultNow().notNull()
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
 }, (table) => ({
   userNoteIdx: index("note_attachments_user_note_idx").on(table.userId, table.noteId)
 }));
-var notebookQuestions = mysqlTable("notebook_questions", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
-  noteId: int("noteId").notNull(),
+var notebookQuestions = pgTable("notebook_questions", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
+  noteId: integer("noteId").notNull(),
   subject: varchar("subject", { length: 80 }),
-  topicId: int("topicId"),
-  questionImageId: int("questionImageId"),
-  solutionImageId: int("solutionImageId"),
-  voiceAttachmentId: int("voiceAttachmentId"),
-  voiceDuration: int("voiceDuration"),
+  topicId: integer("topicId"),
+  questionImageId: integer("questionImageId"),
+  solutionImageId: integer("solutionImageId"),
+  voiceAttachmentId: integer("voiceAttachmentId"),
+  voiceDuration: integer("voiceDuration"),
   stuckPoint: text("stuckPoint"),
   solutionText: text("solutionText"),
   // Hata türü: AI önerirse "ai", öğrenci seçer ya da onaylarsa "student".
   errorType: varchar("errorType", { length: 30 }),
-  errorTypeSource: mysqlEnum("errorTypeSource", ["student", "ai"]),
-  difficulty: mysqlEnum("difficulty", ["easy", "medium", "hard"]),
+  errorTypeSource: text("errorTypeSource", { enum: ["student", "ai"] }),
+  difficulty: text("difficulty", { enum: ["easy", "medium", "hard"] }),
   // AI'ın önerdiği konu (öğrenci düzelttiyse topicId'den farklı kalır: öneri isabeti ölçülebilsin).
-  aiTopicId: int("aiTopicId"),
+  aiTopicId: integer("aiTopicId"),
   // ✨ Adım adım çöz: AI çözümü (JSON, AiSolution). Kartta saklanır; tekrar açmak yeniden ücret ödetmez.
   aiSolution: text("aiSolution"),
-  aiSolutionAt: timestamp("aiSolutionAt"),
+  aiSolutionAt: timestamp("aiSolutionAt", { withTimezone: true }),
   // Çözümü hangi kademe/model yazdı ("strong:gemini-…", üst kademeye çıkıldıysa sonu "↑"): maliyet ve isabet takibi.
   aiSolutionModel: varchar("aiSolutionModel", { length: 100 }),
-  status: mysqlEnum("status", ["unsolved", "learning", "mastered"]).default("unsolved").notNull(),
-  reviewStage: int("reviewStage").default(0).notNull(),
-  nextReviewAt: timestamp("nextReviewAt"),
-  attemptCount: int("attemptCount").default(0).notNull(),
-  lastResult: mysqlEnum("lastResult", ["solved", "partial", "failed"]),
-  lastAttemptAt: timestamp("lastAttemptAt"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull()
+  status: text("status", { enum: ["unsolved", "learning", "mastered"] }).default("unsolved").notNull(),
+  reviewStage: integer("reviewStage").default(0).notNull(),
+  nextReviewAt: timestamp("nextReviewAt", { withTimezone: true }),
+  attemptCount: integer("attemptCount").default(0).notNull(),
+  lastResult: text("lastResult", { enum: ["solved", "partial", "failed"] }),
+  lastAttemptAt: timestamp("lastAttemptAt", { withTimezone: true }),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull()
 }, (table) => ({
   noteUnique: uniqueIndex("notebook_questions_note_unique").on(table.noteId),
   userReviewIdx: index("notebook_questions_user_review_idx").on(table.userId, table.nextReviewAt),
   userTopicIdx: index("notebook_questions_user_topic_idx").on(table.userId, table.topicId)
 }));
-var questionAttempts = mysqlTable("question_attempts", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
-  questionId: int("questionId").notNull(),
-  result: mysqlEnum("result", ["solved", "partial", "failed"]).notNull(),
-  sawSolution: int("sawSolution").default(0).notNull(),
+var questionAttempts = pgTable("question_attempts", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
+  questionId: integer("questionId").notNull(),
+  result: text("result", { enum: ["solved", "partial", "failed"] }).notNull(),
+  sawSolution: integer("sawSolution").default(0).notNull(),
   // Kademeli ipucu: 0 yok, 1 ipucu, 2 ilk adım, 3 tam çözüm (HINT_LEVELS).
-  hintLevel: int("hintLevel").default(0).notNull(),
-  seconds: int("seconds"),
-  stageBefore: int("stageBefore").notNull(),
-  attemptedAt: timestamp("attemptedAt").defaultNow().notNull()
+  hintLevel: integer("hintLevel").default(0).notNull(),
+  seconds: integer("seconds"),
+  stageBefore: integer("stageBefore").notNull(),
+  attemptedAt: timestamp("attemptedAt", { withTimezone: true }).defaultNow().notNull()
 }, (table) => ({
   userQuestionIdx: index("question_attempts_user_question_idx").on(table.userId, table.questionId)
 }));
-var ocrPageCache = mysqlTable("ocr_page_cache", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
+var ocrPageCache = pgTable("ocr_page_cache", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
   imageHash: varchar("imageHash", { length: 64 }).notNull(),
   pipelineVersion: varchar("pipelineVersion", { length: 16 }).notNull(),
-  resultJson: mediumtext("resultJson").notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull()
+  resultJson: text("resultJson").notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
 }, (table) => ({
   userHashUnique: uniqueIndex("ocr_page_cache_user_hash_unique").on(table.userId, table.imageHash, table.pipelineVersion)
 }));
-var sourceSwitches = mysqlTable("source_switches", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
+var sourceSwitches = pgTable("source_switches", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
   fromBookId: varchar("fromBookId", { length: 120 }),
   toBookId: varchar("toBookId", { length: 120 }).notNull(),
   reason: varchar("reason", { length: 300 }).notNull(),
-  switchedAt: timestamp("switchedAt").defaultNow().notNull()
+  switchedAt: timestamp("switchedAt", { withTimezone: true }).defaultNow().notNull()
 });
-var studyPlans = mysqlTable("study_plans", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
+var studyPlans = pgTable("study_plans", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
   title: varchar("title", { length: 180 }).notNull(),
-  weekStart: timestamp("weekStart").notNull(),
-  weekEnd: timestamp("weekEnd").notNull(),
+  weekStart: timestamp("weekStart", { withTimezone: true }).notNull(),
+  weekEnd: timestamp("weekEnd", { withTimezone: true }).notNull(),
   summary: text("summary").notNull(),
-  source: mysqlEnum("source", ["ai", "manual"]).default("ai").notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull()
+  source: text("source", { enum: ["ai", "manual"] }).default("ai").notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
 });
-var studyPlanSessions = mysqlTable("study_plan_sessions", {
-  id: int("id").autoincrement().primaryKey(),
-  planId: int("planId").notNull(),
-  userId: int("userId").notNull(),
-  sessionDate: timestamp("sessionDate").notNull(),
+var studyPlanSessions = pgTable("study_plan_sessions", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  planId: integer("planId").notNull(),
+  userId: integer("userId").notNull(),
+  sessionDate: timestamp("sessionDate", { withTimezone: true }).notNull(),
   title: varchar("title", { length: 180 }).notNull(),
   subject: varchar("subject", { length: 80 }).notNull(),
   topic: varchar("topic", { length: 180 }).notNull(),
   kind: varchar("kind", { length: 40 }).notNull(),
-  plannedMinutes: int("plannedMinutes").default(0).notNull(),
-  targetQuestions: int("targetQuestions"),
+  plannedMinutes: integer("plannedMinutes").default(0).notNull(),
+  targetQuestions: integer("targetQuestions"),
   targetPages: varchar("targetPages", { length: 80 }),
   targetTests: varchar("targetTests", { length: 80 }),
   // Kitaptan üretilmiş görevde öğrencinin kitabı (bkz. userBookContents).
   // Tamamlanınca performans ayrıca bookStudyLogs'a da yazılır: kitap çözümü
   // ile konu/soru takibi ayrı veri olarak kalır ama bu alanla ilişkilenir.
   sourceBookId: varchar("sourceBookId", { length: 120 }),
-  status: mysqlEnum("status", ["planned", "completed", "skipped"]).default("planned").notNull(),
-  rescheduledFrom: timestamp("rescheduledFrom"),
-  rescheduledAt: timestamp("rescheduledAt"),
-  rescheduleCount: int("rescheduleCount").default(0).notNull(),
-  completedAt: timestamp("completedAt"),
-  actualMinutes: int("actualMinutes"),
-  actualQuestions: int("actualQuestions"),
-  correct: int("correct"),
-  wrong: int("wrong"),
-  blank: int("blank"),
-  actualPages: int("actualPages"),
+  status: text("status", { enum: ["planned", "completed", "skipped"] }).default("planned").notNull(),
+  rescheduledFrom: timestamp("rescheduledFrom", { withTimezone: true }),
+  rescheduledAt: timestamp("rescheduledAt", { withTimezone: true }),
+  rescheduleCount: integer("rescheduleCount").default(0).notNull(),
+  // Kurum öğretmeninin atadığı görev (bkz. organization_*); öğrencinin kendi görevlerinde boş.
+  assignedByUserId: integer("assignedByUserId"),
+  assignedOrgId: integer("assignedOrgId"),
+  completedAt: timestamp("completedAt", { withTimezone: true }),
+  actualMinutes: integer("actualMinutes"),
+  actualQuestions: integer("actualQuestions"),
+  correct: integer("correct"),
+  wrong: integer("wrong"),
+  blank: integer("blank"),
+  actualPages: integer("actualPages"),
   note: text("note"),
-  createdAt: timestamp("createdAt").defaultNow().notNull()
+  // Oturum hatırlatma bildirimi gönderildiyse (server/push/sessionReminders.ts): aynı oturuma ikinci bildirim gitmez.
+  reminderSentAt: timestamp("reminderSentAt", { withTimezone: true }),
+  // Bu oturumdan açılan odak süre dolmadan bırakıldıysa (topics.markForReview): takvimde
+  // "Yarım kaldı" görünür; oturum planlı kalır, yeniden başlatılıp tamamlanabilir.
+  abandonedAt: timestamp("abandonedAt", { withTimezone: true }),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
 });
-var classScheduleBlocks = mysqlTable("class_schedule_blocks", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
-  source: mysqlEnum("source", ["school", "course", "tutor", "other"]).default("school").notNull(),
-  dayOfWeek: int("dayOfWeek").notNull(),
+var pushSubscriptions = pgTable("push_subscriptions", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
+  endpoint: varchar("endpoint", { length: 600 }).notNull(),
+  p256dh: varchar("p256dh", { length: 200 }).notNull(),
+  auth: varchar("auth", { length: 100 }).notNull(),
+  userAgent: varchar("userAgent", { length: 300 }),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+  lastSentAt: timestamp("lastSentAt", { withTimezone: true })
+}, (table) => ({
+  endpointIdx: uniqueIndex("push_subscriptions_endpoint_idx").on(table.endpoint),
+  userIdx: index("push_subscriptions_user_idx").on(table.userId)
+}));
+var classScheduleBlocks = pgTable("class_schedule_blocks", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
+  source: text("source", { enum: ["school", "course", "tutor", "other"] }).default("school").notNull(),
+  dayOfWeek: integer("dayOfWeek").notNull(),
   startTime: varchar("startTime", { length: 5 }).notNull(),
   endTime: varchar("endTime", { length: 5 }).notNull(),
   subject: varchar("subject", { length: 80 }),
   label: varchar("label", { length: 80 }).notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull()
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
 }, (table) => ({
   userDayIdx: index("class_schedule_blocks_user_day_idx").on(table.userId, table.dayOfWeek)
 }));
-var readingBooks = mysqlTable("reading_books", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
+var organizations = pgTable("organizations", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  name: varchar("name", { length: 160 }).notNull(),
+  slug: varchar("slug", { length: 80 }).notNull().unique(),
+  status: text("status", { enum: ["active", "suspended"] }).default("active").notNull(),
+  // Kurum bilgileri (Ayarlar → Kurum bilgileri; kurum yöneticisi düzenler).
+  kind: text("kind", { enum: ["dershane", "okul", "etut", "kocluk", "diger"] }).default("dershane").notNull(),
+  city: varchar("city", { length: 80 }),
+  district: varchar("district", { length: 80 }),
+  address: varchar("address", { length: 300 }),
+  phone: varchar("phone", { length: 40 }),
+  contactEmail: varchar("contactEmail", { length: 160 }),
+  // Üyelik (platform yöneticisi tanımlar): paket, süre ve aylık AI kredi havuzu.
+  plan: text("plan", { enum: ["trial", "standard", "pro"] }).default("trial").notNull(),
+  membershipStartsAt: timestamp("membershipStartsAt", { withTimezone: true }),
+  membershipEndsAt: timestamp("membershipEndsAt", { withTimezone: true }),
+  aiCreditsMonthly: integer("aiCreditsMonthly").default(0).notNull(),
+  // Kurum yöneticisinin öğrenci başına aylık üst sınırı (boş = sınırsız).
+  perStudentCreditCap: integer("perStudentCreditCap"),
+  // KVKK: boşsa platform şablonu kullanılır; her düzenlemede sürüm artar.
+  kvkkNotice: text("kvkkNotice"),
+  kvkkConsent: text("kvkkConsent"),
+  kvkkVersion: integer("kvkkVersion").default(1).notNull(),
+  kvkkUpdatedAt: timestamp("kvkkUpdatedAt", { withTimezone: true }),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
+});
+var organizationUpgradeRequests = pgTable("organization_upgrade_requests", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  orgId: integer("orgId").notNull(),
+  requestedBy: integer("requestedBy").notNull(),
+  currentPlan: text("currentPlan", { enum: ["trial", "standard", "pro"] }).notNull(),
+  requestedPlan: text("requestedPlan", { enum: ["trial", "standard", "pro"] }).notNull(),
+  note: varchar("note", { length: 300 }),
+  status: text("status", { enum: ["pending", "approved", "rejected", "canceled"] }).default("pending").notNull(),
+  resolvedBy: integer("resolvedBy"),
+  resolvedAt: timestamp("resolvedAt", { withTimezone: true }),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
+}, (table) => ({
+  orgStatusIdx: index("organization_upgrade_requests_org_status_idx").on(table.orgId, table.status)
+}));
+var organizationCreditUsage = pgTable("organization_credit_usage", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  orgId: integer("orgId").notNull(),
+  userId: integer("userId").notNull(),
+  featureKey: varchar("featureKey", { length: 60 }).notNull(),
+  credits: integer("credits").notNull(),
+  usedAt: timestamp("usedAt", { withTimezone: true }).defaultNow().notNull()
+}, (table) => ({
+  orgUsedIdx: index("organization_credit_usage_org_used_idx").on(table.orgId, table.usedAt),
+  orgUserUsedIdx: index("organization_credit_usage_org_user_used_idx").on(table.orgId, table.userId, table.usedAt)
+}));
+var organizationMembers = pgTable("organization_members", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  orgId: integer("orgId").notNull(),
+  userId: integer("userId").notNull(),
+  role: text("role", { enum: ["owner", "admin", "coordinator", "teacher", "student"] }).notNull(),
+  status: text("status", { enum: ["active", "left", "removed"] }).default("active").notNull(),
+  // Öğrencinin "kurumun verilerimi görmesine izin veriyorum" onayı (personelde boş).
+  consentAt: timestamp("consentAt", { withTimezone: true }),
+  joinedAt: timestamp("joinedAt", { withTimezone: true }).defaultNow().notNull(),
+  leftAt: timestamp("leftAt", { withTimezone: true }),
+  invitedBy: integer("invitedBy"),
+  // Personelin branşı (ör. Matematik); öğrencide boş.
+  subject: varchar("subject", { length: 60 }),
+  // Öğrencinin onayladığı KVKK metin sürümü (organizations.kvkkVersion).
+  kvkkVersion: integer("kvkkVersion"),
+  // Personelin pazar akşamı aldığı sınıf özeti (server/digest/teacherDigest.ts): üyelik başına,
+  // varsayılan AÇIK. Son gönderim, cron tekrar çalışırsa aynı haftaya ikinci mail gitmesin diye.
+  weeklyDigestOptOut: integer("weeklyDigestOptOut").default(0).notNull(),
+  weeklyDigestLastSentAt: timestamp("weeklyDigestLastSentAt", { withTimezone: true })
+}, (table) => ({
+  orgUserUnique: uniqueIndex("organization_members_org_user_unique").on(table.orgId, table.userId),
+  userStatusIdx: index("organization_members_user_status_idx").on(table.userId, table.status)
+}));
+var organizationInvitations = pgTable("organization_invitations", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  orgId: integer("orgId").notNull(),
+  role: text("role", { enum: ["admin", "coordinator", "teacher", "student"] }).notNull(),
+  // Kodun kendisi saklanmaz; yalnızca sha256 özeti (kod oluşturulurken bir kez gösterilir).
+  codeHash: varchar("codeHash", { length: 64 }).notNull().unique(),
+  note: varchar("note", { length: 160 }),
+  // Öğretmen tanımlarken girilen branş; kabulde üyeliğe yazılır.
+  subject: varchar("subject", { length: 60 }),
+  expiresAt: timestamp("expiresAt", { withTimezone: true }).notNull(),
+  maxUses: integer("maxUses").default(1).notNull(),
+  usedCount: integer("usedCount").default(0).notNull(),
+  createdBy: integer("createdBy").notNull(),
+  revokedAt: timestamp("revokedAt", { withTimezone: true }),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
+}, (table) => ({
+  orgIdx: index("organization_invitations_org_idx").on(table.orgId)
+}));
+var organizationClasses = pgTable("organization_classes", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  orgId: integer("orgId").notNull(),
+  name: varchar("name", { length: 80 }).notNull(),
+  gradeLevel: varchar("gradeLevel", { length: 20 }),
+  // Alan (SAY/EA/SÖZ/DİL/TYT) ve danışman (rehber) öğretmen.
+  track: varchar("track", { length: 20 }),
+  advisorUserId: integer("advisorUserId"),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
+}, (table) => ({
+  orgIdx: index("organization_classes_org_idx").on(table.orgId)
+}));
+var classStudents = pgTable("class_students", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  classId: integer("classId").notNull(),
+  studentUserId: integer("studentUserId").notNull()
+}, (table) => ({
+  classStudentUnique: uniqueIndex("class_students_class_student_unique").on(table.classId, table.studentUserId)
+}));
+var teacherAssignments = pgTable("teacher_assignments", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  orgId: integer("orgId").notNull(),
+  teacherUserId: integer("teacherUserId").notNull(),
+  studentUserId: integer("studentUserId").notNull(),
+  active: integer("active").default(1).notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
+}, (table) => ({
+  pairUnique: uniqueIndex("teacher_assignments_pair_unique").on(table.orgId, table.teacherUserId, table.studentUserId)
+}));
+var counselingNotes = pgTable("counseling_notes", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  orgId: integer("orgId").notNull(),
+  studentUserId: integer("studentUserId").notNull(),
+  authorUserId: integer("authorUserId").notNull(),
+  body: text("body").notNull(),
+  // staff: yalnızca kurum personeli görür; student: öğrenciye geri bildirim olarak gösterilir.
+  visibility: text("visibility", { enum: ["staff", "student"] }).default("staff").notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull()
+}, (table) => ({
+  orgStudentIdx: index("counseling_notes_org_student_idx").on(table.orgId, table.studentUserId)
+}));
+var organizationAuditLogs = pgTable("organization_audit_logs", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  orgId: integer("orgId").notNull(),
+  actorUserId: integer("actorUserId").notNull(),
+  action: varchar("action", { length: 60 }).notNull(),
+  targetType: varchar("targetType", { length: 40 }),
+  targetId: integer("targetId"),
+  metadataJson: text("metadataJson"),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
+}, (table) => ({
+  orgCreatedIdx: index("organization_audit_logs_org_created_idx").on(table.orgId, table.createdAt)
+}));
+var readingBooks = pgTable("reading_books", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
   title: varchar("title", { length: 180 }).notNull(),
   author: varchar("author", { length: 120 }),
-  totalPages: int("totalPages"),
-  pagesRead: int("pagesRead").default(0).notNull(),
-  status: mysqlEnum("status", ["reading", "finished"]).default("reading").notNull(),
-  finishedAt: timestamp("finishedAt"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull()
+  totalPages: integer("totalPages"),
+  pagesRead: integer("pagesRead").default(0).notNull(),
+  status: text("status", { enum: ["reading", "finished"] }).default("reading").notNull(),
+  finishedAt: timestamp("finishedAt", { withTimezone: true }),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull()
 }, (table) => ({
   userIdx: index("reading_books_user_idx").on(table.userId)
 }));
-var topicStudyLogs = mysqlTable("topic_study_logs", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
-  sessionId: int("sessionId"),
+var topicStudyLogs = pgTable("topic_study_logs", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
+  sessionId: integer("sessionId"),
   subject: varchar("subject", { length: 80 }).notNull(),
   topic: varchar("topic", { length: 180 }).notNull(),
-  studyDate: timestamp("studyDate").notNull(),
-  minutes: int("minutes").default(0).notNull(),
-  questions: int("questions").default(0).notNull(),
-  correct: int("correct").default(0).notNull(),
-  wrong: int("wrong").default(0).notNull(),
-  blank: int("blank").default(0).notNull(),
+  studyDate: timestamp("studyDate", { withTimezone: true }).notNull(),
+  minutes: integer("minutes").default(0).notNull(),
+  questions: integer("questions").default(0).notNull(),
+  correct: integer("correct").default(0).notNull(),
+  wrong: integer("wrong").default(0).notNull(),
+  blank: integer("blank").default(0).notNull(),
   note: text("note"),
-  createdAt: timestamp("createdAt").defaultNow().notNull()
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
 });
-var planAdherenceReports = mysqlTable("plan_adherence_reports", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
-  periodType: mysqlEnum("periodType", ["day", "week", "month"]).notNull(),
-  periodStart: timestamp("periodStart").notNull(),
-  periodEnd: timestamp("periodEnd").notNull(),
-  overallScore: int("overallScore").default(0).notNull(),
-  sessionScore: int("sessionScore").default(0).notNull(),
-  timeScore: int("timeScore").default(0).notNull(),
-  questionScore: int("questionScore").default(0).notNull(),
-  punctualityScore: int("punctualityScore").default(0).notNull(),
-  plannedSessions: int("plannedSessions").default(0).notNull(),
-  completedSessions: int("completedSessions").default(0).notNull(),
-  plannedMinutes: int("plannedMinutes").default(0).notNull(),
-  actualMinutes: int("actualMinutes").default(0).notNull(),
-  targetQuestions: int("targetQuestions").default(0).notNull(),
-  actualQuestions: int("actualQuestions").default(0).notNull(),
-  rescheduledSessions: int("rescheduledSessions").default(0).notNull(),
+var planAdherenceReports = pgTable("plan_adherence_reports", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
+  periodType: text("periodType", { enum: ["day", "week", "month"] }).notNull(),
+  periodStart: timestamp("periodStart", { withTimezone: true }).notNull(),
+  periodEnd: timestamp("periodEnd", { withTimezone: true }).notNull(),
+  overallScore: integer("overallScore").default(0).notNull(),
+  sessionScore: integer("sessionScore").default(0).notNull(),
+  timeScore: integer("timeScore").default(0).notNull(),
+  questionScore: integer("questionScore").default(0).notNull(),
+  punctualityScore: integer("punctualityScore").default(0).notNull(),
+  plannedSessions: integer("plannedSessions").default(0).notNull(),
+  completedSessions: integer("completedSessions").default(0).notNull(),
+  plannedMinutes: integer("plannedMinutes").default(0).notNull(),
+  actualMinutes: integer("actualMinutes").default(0).notNull(),
+  targetQuestions: integer("targetQuestions").default(0).notNull(),
+  actualQuestions: integer("actualQuestions").default(0).notNull(),
+  rescheduledSessions: integer("rescheduledSessions").default(0).notNull(),
   summary: text("summary").notNull(),
   decision: varchar("decision", { length: 80 }).notNull(),
   snapshotJson: text("snapshotJson").notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull()
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
 });
-var studentProfiles = mysqlTable("student_profiles", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull().unique(),
-  onboardingCompleted: int("onboardingCompleted").default(0).notNull(),
+var studentProfiles = pgTable("student_profiles", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull().unique(),
+  onboardingCompleted: integer("onboardingCompleted").default(0).notNull(),
   // 0 = kullanıcı tanımlama, 1..4 = koçluk bilgisi adımları (bkz. shared/onboarding.ts STEP_ORDER).
-  onboardingStep: int("onboardingStep").default(0).notNull(),
+  onboardingStep: integer("onboardingStep").default(0).notNull(),
   // 1) Kullanıcı tanımlama
   preferredName: varchar("preferredName", { length: 120 }),
   // Arayüz avatarı (öğrencinin seçimi; boşsa nötr tasarım). Bkz. shared/onboarding.ts AVATAR_STYLES.
-  avatarStyle: mysqlEnum("avatarStyle", ["girl", "boy"]),
-  gradeLevel: mysqlEnum("gradeLevel", ["9", "10", "11", "12", "mezun"]),
-  examYear: int("examYear"),
-  targetScoreType: mysqlEnum("targetScoreType", ["SAY", "EA", "SOZ", "DIL", "TYT", "belirsiz"]),
+  avatarStyle: text("avatarStyle", { enum: ["girl", "boy"] }),
+  gradeLevel: text("gradeLevel", { enum: ["9", "10", "11", "12", "mezun"] }),
+  examYear: integer("examYear"),
+  targetScoreType: text("targetScoreType", { enum: ["SAY", "EA", "SOZ", "DIL", "TYT", "belirsiz"] }),
   // 2) Akademik durum — free text: "yaklaşık net aralığı" veya "Bilmiyorum" gibi
   // metinsel değerlere izin vermek için sayısal değil varchar.
   currentTytNet: varchar("currentTytNet", { length: 40 }),
@@ -540,7 +707,7 @@ var studentProfiles = mysqlTable("student_profiles", {
   mockExamFrequency: varchar("mockExamFrequency", { length: 60 }),
   strongSubjectsJson: text("strongSubjectsJson"),
   weakSubjectsJson: text("weakSubjectsJson"),
-  hasPriorStudyPlan: int("hasPriorStudyPlan"),
+  hasPriorStudyPlan: integer("hasPriorStudyPlan"),
   // 3) Hedefler
   targetUniversity: varchar("targetUniversity", { length: 180 }),
   targetDepartment: varchar("targetDepartment", { length: 180 }),
@@ -549,7 +716,7 @@ var studentProfiles = mysqlTable("student_profiles", {
   shortTermGoal: text("shortTermGoal"),
   longTermGoal: text("longTermGoal"),
   // 4) Çalışma düzeni
-  dailyStudyDuration: int("dailyStudyDuration"),
+  dailyStudyDuration: integer("dailyStudyDuration"),
   // "HH:mm" — öğrencinin genelde ders çalışmaya başladığı saat; Pusula Odak
   // günlük planının gerçek saat dilimlerini (16:00–16:40, 16:50–17:30...)
   // buradan türetir (bkz. shared/focusPlan.ts generateDailyFocusPlan).
@@ -563,16 +730,20 @@ var studentProfiles = mysqlTable("student_profiles", {
   // 5) Koçluk tercihleri
   coachingExpectationsJson: text("coachingExpectationsJson"),
   notificationPreference: varchar("notificationPreference", { length: 60 }),
-  coachingStyle: mysqlEnum("coachingStyle", ["destekleyici", "disiplinli", "kisa_net", "detayli", "dengeli"]),
+  coachingStyle: text("coachingStyle", { enum: ["destekleyici", "disiplinli", "kisa_net", "detayli", "dengeli"] }),
   additionalNotes: text("additionalNotes"),
   // "Zayıf konular için kitapları otomatik planla" — varsayılan KAPALI: kitap
   // görevleri yalnızca önerilir, öğrenci açıkça seçmeden plana girmez.
-  autoScheduleBookTasks: int("autoScheduleBookTasks").default(0).notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull()
+  autoScheduleBookTasks: integer("autoScheduleBookTasks").default(0).notNull(),
+  // Pazar akşamı giden haftalık ilerleme özeti: varsayılan AÇIK, maildeki bağlantı
+  // ya da profil menüsü kapatır. Son gönderim, cron tekrar çalışırsa aynı haftaya ikinci mail gitmesin diye.
+  weeklyDigestOptOut: integer("weeklyDigestOptOut").default(0).notNull(),
+  weeklyDigestLastSentAt: timestamp("weeklyDigestLastSentAt", { withTimezone: true }),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull()
 });
-var publishers = mysqlTable("publishers", {
-  id: int("id").autoincrement().primaryKey(),
+var publishers = pgTable("publishers", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   name: varchar("name", { length: 180 }).notNull(),
   slug: varchar("slug", { length: 200 }).notNull().unique(),
   // Deterministic normalization key (lowercase, Turkish-folded, punctuation
@@ -580,22 +751,22 @@ var publishers = mysqlTable("publishers", {
   normalizedName: varchar("normalizedName", { length: 200 }).notNull(),
   logoUrl: varchar("logoUrl", { length: 500 }),
   websiteUrl: varchar("websiteUrl", { length: 500 }),
-  isActive: int("isActive").default(1).notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull()
+  isActive: integer("isActive").default(1).notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull()
 }, (table) => ({
   normalizedNameIdx: index("publishers_normalized_name_idx").on(table.normalizedName)
 }));
-var catalogBooks = mysqlTable("catalog_books", {
-  id: int("id").autoincrement().primaryKey(),
-  publisherId: int("publisherId"),
+var catalogBooks = pgTable("catalog_books", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  publisherId: integer("publisherId"),
   name: varchar("name", { length: 300 }).notNull(),
   slug: varchar("slug", { length: 320 }).notNull().unique(),
   isbn: varchar("isbn", { length: 32 }),
-  editionYear: int("editionYear"),
+  editionYear: integer("editionYear"),
   description: text("description"),
   imageUrl: varchar("imageUrl", { length: 500 }),
-  bookType: mysqlEnum("bookType", [
+  bookType: text("bookType", { enum: [
     "question_bank",
     "topic_explanation",
     "topic_explanation_question_bank",
@@ -606,24 +777,24 @@ var catalogBooks = mysqlTable("catalog_books", {
     "test_book",
     "reference",
     "other"
-  ]).default("other").notNull(),
-  examScope: mysqlEnum("examScope", ["TYT", "AYT", "TYT_AYT", "YKS", "GENEL"]).default("GENEL").notNull(),
+  ] }).default("other").notNull(),
+  examScope: text("examScope", { enum: ["TYT", "AYT", "TYT_AYT", "YKS", "GENEL"] }).default("GENEL").notNull(),
   // Free-text subject label kept consistent with `yks_topics.subject` /
   // `resources.subject` conventions (e.g. "Matematik", "Türkçe") — no parallel
   // subject table is introduced. Null means multi-subject/general product.
   subject: varchar("subject", { length: 80 }),
-  difficultyScore: int("difficultyScore").default(50).notNull(),
-  difficultyLabel: mysqlEnum("difficultyLabel", ["easy", "medium", "hard"]).default("medium").notNull(),
+  difficultyScore: integer("difficultyScore").default(50).notNull(),
+  difficultyLabel: text("difficultyLabel", { enum: ["easy", "medium", "hard"] }).default("medium").notNull(),
   difficultyConfidence: decimal("difficultyConfidence", { precision: 4, scale: 3 }).default("0").notNull(),
-  classificationMethod: mysqlEnum("classificationMethod", ["rule", "ai", "hybrid", "manual"]).default("rule").notNull(),
-  manualOverride: int("manualOverride").default(0).notNull(),
-  needsReview: int("needsReview").default(0).notNull(),
-  classifiedAt: timestamp("classifiedAt"),
-  active: int("active").default(1).notNull(),
+  classificationMethod: text("classificationMethod", { enum: ["rule", "ai", "hybrid", "manual"] }).default("rule").notNull(),
+  manualOverride: integer("manualOverride").default(0).notNull(),
+  needsReview: integer("needsReview").default(0).notNull(),
+  classifiedAt: timestamp("classifiedAt", { withTimezone: true }),
+  active: integer("active").default(1).notNull(),
   // Free-form JSON bag for source-specific extras that don't warrant their own column.
   metadata: text("metadata"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull()
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull()
 }, (table) => ({
   publisherIdx: index("catalog_books_publisher_idx").on(table.publisherId),
   isbnIdx: index("catalog_books_isbn_idx").on(table.isbn),
@@ -635,8 +806,8 @@ var catalogBooks = mysqlTable("catalog_books", {
   needsReviewIdx: index("catalog_books_needs_review_idx").on(table.needsReview),
   createdAtIdx: index("catalog_books_created_at_idx").on(table.createdAt)
 }));
-var externalBookSources = mysqlTable("external_book_sources", {
-  id: int("id").autoincrement().primaryKey(),
+var externalBookSources = pgTable("external_book_sources", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   source: varchar("source", { length: 60 }).notNull(),
   sourceProductId: varchar("sourceProductId", { length: 160 }).notNull(),
   sourceUrl: varchar("sourceUrl", { length: 500 }),
@@ -649,190 +820,224 @@ var externalBookSources = mysqlTable("external_book_sources", {
   rawCategory: varchar("rawCategory", { length: 200 }),
   rawIsbn: varchar("rawIsbn", { length: 32 }),
   rawMetadata: text("rawMetadata"),
-  firstSeenAt: timestamp("firstSeenAt").defaultNow().notNull(),
-  lastSeenAt: timestamp("lastSeenAt").defaultNow().onUpdateNow().notNull(),
-  lastSyncedAt: timestamp("lastSyncedAt"),
-  syncStatus: mysqlEnum("syncStatus", ["pending", "processed", "needs_review", "failed"]).default("pending").notNull(),
-  matchedBookId: int("matchedBookId"),
+  firstSeenAt: timestamp("firstSeenAt", { withTimezone: true }).defaultNow().notNull(),
+  lastSeenAt: timestamp("lastSeenAt", { withTimezone: true }).defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull(),
+  lastSyncedAt: timestamp("lastSyncedAt", { withTimezone: true }),
+  syncStatus: text("syncStatus", { enum: ["pending", "processed", "needs_review", "failed"] }).default("pending").notNull(),
+  matchedBookId: integer("matchedBookId"),
   errorMessage: text("errorMessage"),
-  createdAt: timestamp("createdAt").defaultNow().notNull()
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
 }, (table) => ({
   sourceProductUnique: uniqueIndex("external_book_sources_source_product_unique").on(table.source, table.sourceProductId),
   syncStatusIdx: index("external_book_sources_sync_status_idx").on(table.syncStatus),
   matchedBookIdx: index("external_book_sources_matched_book_idx").on(table.matchedBookId),
   rawIsbnIdx: index("external_book_sources_raw_isbn_idx").on(table.rawIsbn)
 }));
-var bookOffers = mysqlTable("book_offers", {
-  id: int("id").autoincrement().primaryKey(),
-  bookId: int("bookId").notNull(),
+var bookOffers = pgTable("book_offers", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  bookId: integer("bookId").notNull(),
   source: varchar("source", { length: 60 }).notNull(),
   price: decimal("price", { precision: 10, scale: 2 }),
   currency: varchar("currency", { length: 8 }).default("TRY").notNull(),
-  stockStatus: mysqlEnum("stockStatus", ["in_stock", "out_of_stock", "unknown"]).default("unknown").notNull(),
+  stockStatus: text("stockStatus", { enum: ["in_stock", "out_of_stock", "unknown"] }).default("unknown").notNull(),
   productUrl: varchar("productUrl", { length: 500 }),
   affiliateUrl: varchar("affiliateUrl", { length: 500 }),
-  affiliateEnabled: int("affiliateEnabled").default(0).notNull(),
-  lastSyncedAt: timestamp("lastSyncedAt").defaultNow().onUpdateNow().notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull()
+  affiliateEnabled: integer("affiliateEnabled").default(0).notNull(),
+  lastSyncedAt: timestamp("lastSyncedAt", { withTimezone: true }).defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
 }, (table) => ({
   bookSourceUnique: uniqueIndex("book_offers_book_source_unique").on(table.bookId, table.source),
   bookIdx: index("book_offers_book_idx").on(table.bookId)
 }));
-var bookCurriculumTopics = mysqlTable("book_curriculum_topics", {
-  id: int("id").autoincrement().primaryKey(),
-  bookId: int("bookId").notNull(),
-  topicId: int("topicId").notNull(),
-  mappingMethod: mysqlEnum("mappingMethod", ["rule", "ai", "manual"]).default("rule").notNull(),
+var bookCurriculumTopics = pgTable("book_curriculum_topics", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  bookId: integer("bookId").notNull(),
+  topicId: integer("topicId").notNull(),
+  mappingMethod: text("mappingMethod", { enum: ["rule", "ai", "manual"] }).default("rule").notNull(),
   confidence: decimal("confidence", { precision: 4, scale: 3 }).default("0").notNull(),
-  isVerified: int("isVerified").default(0).notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull()
+  isVerified: integer("isVerified").default(0).notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull()
 }, (table) => ({
   bookTopicUnique: uniqueIndex("book_curriculum_topics_book_topic_unique").on(table.bookId, table.topicId),
   topicIdx: index("book_curriculum_topics_topic_idx").on(table.topicId)
 }));
-var resourceCatalogSyncLogs = mysqlTable("resource_catalog_sync_logs", {
-  id: int("id").autoincrement().primaryKey(),
+var resourceCatalogSyncLogs = pgTable("resource_catalog_sync_logs", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   source: varchar("source", { length: 60 }).notNull(),
-  startedAt: timestamp("startedAt").notNull(),
-  finishedAt: timestamp("finishedAt"),
-  dryRun: int("dryRun").default(0).notNull(),
-  fetched: int("fetched").default(0).notNull(),
-  created: int("created").default(0).notNull(),
-  updated: int("updated").default(0).notNull(),
-  skipped: int("skipped").default(0).notNull(),
-  failed: int("failed").default(0).notNull(),
-  needsReview: int("needsReview").default(0).notNull(),
+  startedAt: timestamp("startedAt", { withTimezone: true }).notNull(),
+  finishedAt: timestamp("finishedAt", { withTimezone: true }),
+  dryRun: integer("dryRun").default(0).notNull(),
+  fetched: integer("fetched").default(0).notNull(),
+  created: integer("created").default(0).notNull(),
+  updated: integer("updated").default(0).notNull(),
+  skipped: integer("skipped").default(0).notNull(),
+  failed: integer("failed").default(0).notNull(),
+  needsReview: integer("needsReview").default(0).notNull(),
   statsJson: text("statsJson"),
   errorLog: text("errorLog"),
-  triggeredBy: int("triggeredBy"),
-  createdAt: timestamp("createdAt").defaultNow().notNull()
+  triggeredBy: integer("triggeredBy"),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
 }, (table) => ({
   sourceIdx: index("resource_catalog_sync_logs_source_idx").on(table.source),
   startedAtIdx: index("resource_catalog_sync_logs_started_at_idx").on(table.startedAt)
 }));
-var coachAlerts = mysqlTable("coach_alerts", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
-  reportId: int("reportId"),
-  level: mysqlEnum("level", ["info", "success", "warning", "action"]).notNull(),
+var coachAlerts = pgTable("coach_alerts", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
+  reportId: integer("reportId"),
+  level: text("level", { enum: ["info", "success", "warning", "action"] }).notNull(),
   ruleKey: varchar("ruleKey", { length: 80 }).notNull(),
   title: varchar("title", { length: 180 }).notNull(),
   message: text("message").notNull(),
   actionLabel: varchar("actionLabel", { length: 120 }),
   actionJson: text("actionJson"),
-  isRead: int("isRead").default(0).notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull()
+  isRead: integer("isRead").default(0).notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
 });
-var subscriptionPlans = mysqlTable("subscription_plans", {
-  id: int("id").autoincrement().primaryKey(),
+var subscriptionPlans = pgTable("subscription_plans", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   code: varchar("code", { length: 40 }).notNull().unique(),
   name: varchar("name", { length: 120 }).notNull(),
   description: text("description"),
-  tier: mysqlEnum("tier", ["free", "premium", "premium_plus"]).default("free").notNull(),
-  billingPeriod: mysqlEnum("billingPeriod", ["none", "monthly", "yearly"]).default("none").notNull(),
+  // basic = Temel, premium = Premium, premium_plus = Pro (bkz. shared/entitlements.ts).
+  tier: text("tier", { enum: ["free", "basic", "premium", "premium_plus"] }).default("free").notNull(),
+  billingPeriod: text("billingPeriod", { enum: ["none", "monthly", "yearly"] }).default("none").notNull(),
   // Kuruş cinsinden (minor unit) — ondalık/float fiyat yuvarlama hatalarından kaçınmak için.
-  price: int("price").default(0).notNull(),
+  price: integer("price").default(0).notNull(),
   currency: varchar("currency", { length: 8 }).default("TRY").notNull(),
-  trialDays: int("trialDays").default(0).notNull(),
+  trialDays: integer("trialDays").default(0).notNull(),
   storeProductId: varchar("storeProductId", { length: 180 }),
   provider: varchar("provider", { length: 40 }),
-  isActive: int("isActive").default(1).notNull(),
+  isActive: integer("isActive").default(1).notNull(),
   metadata: text("metadata"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull()
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull()
 });
-var subscriptions = mysqlTable("subscriptions", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull().unique(),
-  planId: int("planId").notNull(),
-  status: mysqlEnum("status", ["trialing", "active", "past_due", "grace_period", "canceled", "expired", "paused", "incomplete"]).default("active").notNull(),
-  trialStartedAt: timestamp("trialStartedAt"),
-  trialEndsAt: timestamp("trialEndsAt"),
-  currentPeriodStart: timestamp("currentPeriodStart"),
-  currentPeriodEnd: timestamp("currentPeriodEnd"),
-  canceledAt: timestamp("canceledAt"),
-  cancelAtPeriodEnd: int("cancelAtPeriodEnd").default(0).notNull(),
-  gracePeriodEndsAt: timestamp("gracePeriodEndsAt"),
+var subscriptions = pgTable("subscriptions", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull().unique(),
+  planId: integer("planId").notNull(),
+  status: text("status", { enum: ["trialing", "active", "past_due", "grace_period", "canceled", "expired", "paused", "incomplete"] }).default("active").notNull(),
+  trialStartedAt: timestamp("trialStartedAt", { withTimezone: true }),
+  trialEndsAt: timestamp("trialEndsAt", { withTimezone: true }),
+  currentPeriodStart: timestamp("currentPeriodStart", { withTimezone: true }),
+  currentPeriodEnd: timestamp("currentPeriodEnd", { withTimezone: true }),
+  canceledAt: timestamp("canceledAt", { withTimezone: true }),
+  cancelAtPeriodEnd: integer("cancelAtPeriodEnd").default(0).notNull(),
+  gracePeriodEndsAt: timestamp("gracePeriodEndsAt", { withTimezone: true }),
   provider: varchar("provider", { length: 40 }),
   providerSubscriptionId: varchar("providerSubscriptionId", { length: 180 }),
   providerCustomerId: varchar("providerCustomerId", { length: 180 }),
-  latestPaymentId: int("latestPaymentId"),
+  latestPaymentId: integer("latestPaymentId"),
   // Admin'in elle verdiği erişim (spec §24: "manual entitlement ile provider
   // subscription birbirinden ayrı tutulmalı") — provider alanları boş kalır,
   // yalnızca bu bayrak + subscription_audit_logs kaydı ile iz sürülür.
-  isManualOverride: int("isManualOverride").default(0).notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull()
+  isManualOverride: integer("isManualOverride").default(0).notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull()
 }, (table) => ({
   statusIdx: index("subscriptions_status_idx").on(table.status),
   periodEndIdx: index("subscriptions_current_period_end_idx").on(table.currentPeriodEnd),
   providerSubIdx: index("subscriptions_provider_subscription_idx").on(table.providerSubscriptionId)
 }));
-var payments = mysqlTable("payments", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
-  subscriptionId: int("subscriptionId"),
+var payments = pgTable("payments", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
+  subscriptionId: integer("subscriptionId"),
   provider: varchar("provider", { length: 40 }).notNull(),
   providerPaymentId: varchar("providerPaymentId", { length: 180 }),
   providerTransactionId: varchar("providerTransactionId", { length: 180 }),
-  amount: int("amount").notNull(),
+  amount: integer("amount").notNull(),
   currency: varchar("currency", { length: 8 }).default("TRY").notNull(),
-  status: mysqlEnum("status", ["pending", "authorized", "paid", "failed", "refunded", "partially_refunded", "canceled"]).default("pending").notNull(),
+  status: text("status", { enum: ["pending", "authorized", "paid", "failed", "refunded", "partially_refunded", "canceled"] }).default("pending").notNull(),
   paymentType: varchar("paymentType", { length: 40 }),
-  paidAt: timestamp("paidAt"),
-  failedAt: timestamp("failedAt"),
-  refundedAt: timestamp("refundedAt"),
+  paidAt: timestamp("paidAt", { withTimezone: true }),
+  failedAt: timestamp("failedAt", { withTimezone: true }),
+  refundedAt: timestamp("refundedAt", { withTimezone: true }),
   metadata: text("metadata"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull()
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull()
 }, (table) => ({
   userIdx: index("payments_user_idx").on(table.userId),
   subscriptionIdx: index("payments_subscription_idx").on(table.subscriptionId),
   statusIdx: index("payments_status_idx").on(table.status)
 }));
-var paymentEvents = mysqlTable("payment_events", {
-  id: int("id").autoincrement().primaryKey(),
+var paymentEvents = pgTable("payment_events", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   provider: varchar("provider", { length: 40 }).notNull(),
   eventId: varchar("eventId", { length: 180 }).notNull(),
   eventType: varchar("eventType", { length: 80 }).notNull(),
   // Redaction uygulanmış payload (bkz. server/services/payments/webhookRedaction.ts) — ham kart/secret verisi asla yazılmaz.
   payload: text("payload").notNull(),
   signature: varchar("signature", { length: 500 }),
-  processedAt: timestamp("processedAt"),
-  status: mysqlEnum("status", ["received", "processed", "failed", "ignored"]).default("received").notNull(),
+  processedAt: timestamp("processedAt", { withTimezone: true }),
+  status: text("status", { enum: ["received", "processed", "failed", "ignored"] }).default("received").notNull(),
   errorMessage: text("errorMessage"),
-  createdAt: timestamp("createdAt").defaultNow().notNull()
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
 }, (table) => ({
   providerEventUnique: uniqueIndex("payment_events_provider_event_unique").on(table.provider, table.eventId)
 }));
-var subscriptionAuditLogs = mysqlTable("subscription_audit_logs", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
-  adminId: int("adminId"),
+var subscriptionAuditLogs = pgTable("subscription_audit_logs", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
+  adminId: integer("adminId"),
   action: varchar("action", { length: 80 }).notNull(),
   oldState: text("oldState"),
   newState: text("newState"),
   reason: text("reason"),
   metadata: text("metadata"),
-  createdAt: timestamp("createdAt").defaultNow().notNull()
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
 }, (table) => ({
   userIdx: index("subscription_audit_logs_user_idx").on(table.userId),
   createdAtIdx: index("subscription_audit_logs_created_at_idx").on(table.createdAt)
 }));
-var featureUsageLogs = mysqlTable("feature_usage_logs", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
+var featureUsageLogs = pgTable("feature_usage_logs", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
   featureKey: varchar("featureKey", { length: 60 }).notNull(),
-  usedAt: timestamp("usedAt").defaultNow().notNull()
+  usedAt: timestamp("usedAt", { withTimezone: true }).defaultNow().notNull()
 }, (table) => ({
   userFeatureIdx: index("feature_usage_logs_user_feature_idx").on(table.userId, table.featureKey, table.usedAt)
+}));
+var testimonials = pgTable("testimonials", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
+  displayName: varchar("displayName", { length: 60 }).notNull(),
+  detail: varchar("detail", { length: 80 }),
+  rating: integer("rating").notNull(),
+  body: varchar("body", { length: 600 }).notNull(),
+  status: text("status", { enum: ["pending", "approved", "rejected"] }).default("pending").notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().notNull(),
+  reviewedAt: timestamp("reviewedAt", { withTimezone: true }),
+  reviewedBy: integer("reviewedBy")
+}, (table) => ({
+  userIdx: uniqueIndex("testimonials_user_idx").on(table.userId),
+  statusIdx: index("testimonials_status_idx").on(table.status, table.updatedAt)
+}));
+var appErrors = pgTable("app_errors", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  fingerprint: varchar("fingerprint", { length: 64 }).notNull(),
+  source: text("source", { enum: ["client", "server"] }).notNull(),
+  message: varchar("message", { length: 500 }).notNull(),
+  stack: text("stack"),
+  path: varchar("path", { length: 300 }),
+  lastUserId: integer("lastUserId"),
+  userAgent: varchar("userAgent", { length: 300 }),
+  count: integer("count").default(1).notNull(),
+  firstSeenAt: timestamp("firstSeenAt", { withTimezone: true }).defaultNow().notNull(),
+  lastSeenAt: timestamp("lastSeenAt", { withTimezone: true }).defaultNow().notNull(),
+  resolvedAt: timestamp("resolvedAt", { withTimezone: true })
+}, (table) => ({
+  fingerprintIdx: uniqueIndex("app_errors_fingerprint_idx").on(table.fingerprint),
+  lastSeenIdx: index("app_errors_last_seen_idx").on(table.lastSeenAt)
 }));
 
 // server/db.ts
 import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
-import mysql from "mysql2/promise";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 
 // shared/planAdherence.ts
 var cap = (value) => Math.max(0, Math.min(100, Math.round(value)));
@@ -1199,13 +1404,13 @@ var AYT = {
 var slugPart = (value) => value.replace(/İ/g, "i").replace(/I/g, "\u0131").toLowerCase().replace(/[çğıöşüâîû]/g, (char) => ({ \u00E7: "c", \u011F: "g", \u0131: "i", \u00F6: "o", \u015F: "s", \u00FC: "u", \u00E2: "a", \u00EE: "i", \u00FB: "u" })[char] ?? char).replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 function flatten(exam, tree) {
   return Object.entries(tree).flatMap(
-    ([subject, units]) => Object.entries(units).flatMap(
+    ([subject2, units]) => Object.entries(units).flatMap(
       ([unit, entries]) => entries.map((entry) => {
         const def = typeof entry === "string" ? { topic: entry } : entry;
         return {
-          slug: def.legacySlug ?? `cur-${exam.toLowerCase()}-${slugPart(subject)}-${slugPart(def.topic)}`.slice(0, 120),
+          slug: def.legacySlug ?? `cur-${exam.toLowerCase()}-${slugPart(subject2)}-${slugPart(def.topic)}`.slice(0, 120),
           exam,
-          subject,
+          subject: subject2,
           unit,
           topic: def.topic,
           aliases: def.aliases ?? []
@@ -1224,6 +1429,9 @@ function deriveTopicStatus(accuracy, questionCount) {
   const clamped = Math.max(0, Math.min(100, accuracy));
   const status = clamped < TOPIC_STATUS_THRESHOLDS.weak ? "Zay\u0131f" : clamped < TOPIC_STATUS_THRESHOLDS.good ? "Orta" : "\u0130yi";
   return { status, insufficientData: questionCount < MIN_RELIABLE_QUESTION_COUNT };
+}
+function statusAfterAbandonedSession(current) {
+  return current === null || current === "\u0130yi" ? "Orta" : current;
 }
 
 // shared/palette.ts
@@ -1291,47 +1499,6 @@ var topicSeeds = [
   { id: "ayt-fizik-elektrik", exam: "AYT", subject: "Fizik", topic: "Elektrik ve manyetizma", unit: "Elektrik", progress: 58, status: "Orta", accent: "lilac" },
   { id: "ayt-biyo-sistem", exam: "AYT", subject: "Biyoloji", topic: "Sistemler", unit: "\u0130nsan fizyolojisi", progress: 67, status: "Orta", accent: "mint" }
 ];
-var initialExams = [
-  {
-    id: "mock-3",
-    title: "T\xFCrkiye Geneli TYT \xB7 03",
-    date: "2026-09-14",
-    net: 68.25,
-    delta: 4.5,
-    tag: "Y\xFCkseli\u015F",
-    subjects: { T\u00FCrk\u00E7e: 28.5, Matematik: 18.75, Fen: 12.5, Sosyal: 8.5 },
-    timeSpent: { T\u00FCrk\u00E7e: 48, Matematik: 74, Fen: 31, Sosyal: 27 },
-    topicNets: { "Paragrafta anlam": 10, Problemler: 6, "Maddenin halleri": 2.5, "Milli M\xFCcadele": 4.5, Fonksiyonlar: 6.5 }
-  },
-  {
-    id: "mock-2",
-    title: "Kurum \u0130\xE7i TYT \xB7 02",
-    date: "2026-09-07",
-    net: 63.75,
-    delta: 2.25,
-    tag: "Y\xFCkseli\u015F",
-    subjects: { T\u00FCrk\u00E7e: 27, Matematik: 16.5, Fen: 11.75, Sosyal: 8.5 },
-    timeSpent: { T\u00FCrk\u00E7e: 51, Matematik: 69, Fen: 34, Sosyal: 26 },
-    topicNets: { "Paragrafta anlam": 8, Problemler: 5.25, "Maddenin halleri": 3.25, "Milli M\xFCcadele": 4, Fonksiyonlar: 5.5 }
-  },
-  {
-    id: "mock-1",
-    title: "Ba\u015Flang\u0131\xE7 Denemesi",
-    date: "2026-08-31",
-    net: 61.5,
-    delta: 0,
-    tag: "Ba\u015Flang\u0131\xE7",
-    subjects: { T\u00FCrk\u00E7e: 26, Matematik: 15.25, Fen: 11.25, Sosyal: 9 },
-    timeSpent: { T\u00FCrk\u00E7e: 56, Matematik: 63, Fen: 36, Sosyal: 25 },
-    topicNets: { "Paragrafta anlam": 7.5, Problemler: 4, "Maddenin halleri": 3.5, "Milli M\xFCcadele": 4.5, Fonksiyonlar: 5 }
-  }
-];
-var subjectBreakdown = [
-  { label: "T\xFCrk\xE7e", value: 28.5, total: 40, color: subjectPalette.T\u00FCrk\u00E7e },
-  { label: "Matematik", value: 18.75, total: 40, color: subjectPalette.Matematik },
-  { label: "Fen", value: 12.5, total: 20, color: subjectPalette.Fen },
-  { label: "Sosyal", value: 8.5, total: 20, color: subjectPalette.Sosyal }
-];
 var statusMeta = {
   Zay\u0131f: { color: palette.danger, bg: palette.dangerSoft, description: "\xD6ncelikli tekrar" },
   Orta: { color: palette.warn, bg: palette.warnSoft, description: "Bir tur daha" },
@@ -1345,15 +1512,16 @@ var topicCounts = {
 };
 var focusTopics = topicSeeds.filter((topic) => topic.status === "Zay\u0131f");
 var averageProgress = Math.round(topicSeeds.reduce((sum, topic) => sum + topic.progress, 0) / topicSeeds.length);
-var currentNet = initialExams[0].net;
 var targetNet = 85;
-var weeklyStudyMinutes = 485;
-var weeklyGoalMinutes = 600;
+var formatMinutes = (minutes) => {
+  const total = Math.max(0, Math.round(minutes));
+  const hours = Math.floor(total / 60);
+  const rest = total % 60;
+  if (!hours) return `${rest} dk`;
+  return rest ? `${hours} sa ${rest} dk` : `${hours} sa`;
+};
 var localStorageKeys = { exams: "pusula-yks-exams", topics: "pusula-yks-topics", studyHistory: "pusula-yks-study-history", bookInventory: "pusula-yks-book-inventory", bookLogs: "pusula-yks-book-logs", sourceSwitches: "pusula-yks-source-switches", customBooks: "pusula-yks-custom-books", calendarSessions: "pusula-yks-calendar-sessions", onboardingDraft: "pusula-yks-onboarding-draft" };
 var perAccountCacheKeys = [localStorageKeys.exams, localStorageKeys.topics, localStorageKeys.studyHistory, localStorageKeys.bookInventory, localStorageKeys.bookLogs, localStorageKeys.sourceSwitches, localStorageKeys.customBooks, localStorageKeys.calendarSessions, localStorageKeys.onboardingDraft];
-var progressGoalPercent = Math.round(currentNet / targetNet * 100);
-var weeklyGoalPercent = Math.round(weeklyStudyMinutes / weeklyGoalMinutes * 100);
-var currentGoalText = `${currentNet} netten ${targetNet} nete`;
 var statusLegend = [
   { label: "Zay\u0131f", copy: "\xD6ncelikli tekrar", color: palette.danger },
   { label: "Orta", copy: "Peki\u015Ftir", color: palette.warn },
@@ -1402,9 +1570,9 @@ function buildErrorMap(rows) {
   const topics = /* @__PURE__ */ new Map();
   const errorTypes = /* @__PURE__ */ new Map();
   for (const row of rows) {
-    const subject = row.subject ?? "Genel";
-    const key = row.topicId !== null ? `t${row.topicId}` : `s${subject}`;
-    const entry = topics.get(key) ?? { subject, topic: row.topicId !== null ? row.topic : null, topicId: row.topicId, count: 0, open: 0, errors: /* @__PURE__ */ new Map() };
+    const subject2 = row.subject ?? "Genel";
+    const key = row.topicId !== null ? `t${row.topicId}` : `s${subject2}`;
+    const entry = topics.get(key) ?? { subject: subject2, topic: row.topicId !== null ? row.topic : null, topicId: row.topicId, count: 0, open: 0, errors: /* @__PURE__ */ new Map() };
     entry.count += 1;
     if (row.status !== "mastered") entry.open += 1;
     if (isErrorType(row.errorType)) {
@@ -1438,8 +1606,8 @@ function buildQuestionDoc(input) {
   content.push(paragraph(input.solutionText));
   return { type: "doc", content };
 }
-function questionTitle(subject, topic, createdAt) {
-  if (subject || topic) return `\u2753 ${[subject, topic].filter(Boolean).join(" \xB7 ")}`.slice(0, 200);
+function questionTitle(subject2, topic, createdAt) {
+  if (subject2 || topic) return `\u2753 ${[subject2, topic].filter(Boolean).join(" \xB7 ")}`.slice(0, 200);
   return `\u2753 Soru \xB7 ${createdAt.toLocaleDateString("tr-TR", { day: "numeric", month: "long" })}`;
 }
 var clip = (value, max) => typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -1481,18 +1649,18 @@ function parseSimilarQuestion(raw) {
 // server/db.ts
 var _db = null;
 var DB_POOL_OPTIONS = {
-  connectionLimit: 5,
-  maxIdle: 2,
-  idleTimeout: 3e4,
-  enableKeepAlive: true,
-  keepAliveInitialDelay: 1e4,
-  connectTimeout: 2e4,
-  waitForConnections: true
+  max: 5,
+  idle_timeout: 20,
+  connect_timeout: 20,
+  prepare: false
 };
+function createDb(url) {
+  return drizzle({ client: postgres(url, DB_POOL_OPTIONS) });
+}
 async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      _db = drizzle({ client: mysql.createPool({ uri: process.env.DATABASE_URL, ...DB_POOL_OPTIONS }) });
+      _db = createDb(process.env.DATABASE_URL);
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;
@@ -1538,7 +1706,8 @@ async function upsertUser(user) {
     if (Object.keys(updateSet).length === 0) {
       updateSet.lastSignedIn = /* @__PURE__ */ new Date();
     }
-    await db.insert(users).values(values).onDuplicateKeyUpdate({
+    await db.insert(users).values(values).onConflictDoUpdate({
+      target: users.openId,
       set: updateSet
     });
   } catch (error) {
@@ -1691,8 +1860,8 @@ async function addBookToInventory(userId, bookId) {
   if (!db) return void 0;
   const existing = await db.select().from(bookInventory).where(and(eq(bookInventory.userId, userId), eq(bookInventory.bookId, bookId), isNull(bookInventory.removedAt))).limit(1);
   if (existing[0]) return existing[0];
-  const result = await db.insert(bookInventory).values({ userId, bookId });
-  return { id: Number(result[0].insertId), userId, bookId, addedAt: /* @__PURE__ */ new Date(), removedAt: null };
+  const result = await db.insert(bookInventory).values({ userId, bookId }).returning({ id: bookInventory.id });
+  return { id: Number(result[0].id), userId, bookId, addedAt: /* @__PURE__ */ new Date(), removedAt: null };
 }
 async function removeBookFromInventory(userId, bookId) {
   const db = await getDb();
@@ -1707,8 +1876,8 @@ async function getBookStudyLogs(userId) {
 async function addBookStudyLog(userId, input) {
   const db = await getDb();
   if (!db) return void 0;
-  const result = await db.insert(bookStudyLogs).values({ ...input, userId });
-  return { id: Number(result[0].insertId), ...input, userId, createdAt: /* @__PURE__ */ new Date() };
+  const result = await db.insert(bookStudyLogs).values({ ...input, userId }).returning({ id: bookStudyLogs.id });
+  return { id: Number(result[0].id), ...input, userId, createdAt: /* @__PURE__ */ new Date() };
 }
 async function getBookTopicMappings(userId) {
   const db = await getDb();
@@ -1723,8 +1892,8 @@ async function upsertBookTopicMapping(userId, input) {
     await db.update(bookTopicMappings).set({ ...input, updatedAt: /* @__PURE__ */ new Date() }).where(eq(bookTopicMappings.id, existing[0].id));
     return { ...existing[0], ...input, updatedAt: /* @__PURE__ */ new Date() };
   }
-  const result = await db.insert(bookTopicMappings).values({ ...input, userId });
-  return { id: Number(result[0].insertId), ...input, userId, updatedAt: /* @__PURE__ */ new Date() };
+  const result = await db.insert(bookTopicMappings).values({ ...input, userId }).returning({ id: bookTopicMappings.id });
+  return { id: Number(result[0].id), ...input, userId, updatedAt: /* @__PURE__ */ new Date() };
 }
 async function getSourceSwitches(userId) {
   const db = await getDb();
@@ -1734,8 +1903,8 @@ async function getSourceSwitches(userId) {
 async function addSourceSwitch(userId, input) {
   const db = await getDb();
   if (!db) return void 0;
-  const result = await db.insert(sourceSwitches).values({ ...input, userId });
-  return { id: Number(result[0].insertId), ...input, userId };
+  const result = await db.insert(sourceSwitches).values({ ...input, userId }).returning({ id: sourceSwitches.id });
+  return { id: Number(result[0].id), ...input, userId };
 }
 var parseJson = (value, fallback) => {
   try {
@@ -1804,7 +1973,7 @@ async function getStudyCalendar(userId) {
   const overdue = await db.select({ id: studyPlanSessions.id, sessionDate: studyPlanSessions.sessionDate }).from(studyPlanSessions).where(and(eq(studyPlanSessions.userId, userId), eq(studyPlanSessions.status, "planned"), lt(studyPlanSessions.sessionDate, today)));
   const reschedules = rescheduleOverdueSessions(overdue, today, tomorrow, /* @__PURE__ */ new Date());
   for (const instruction of reschedules) {
-    await db.update(studyPlanSessions).set({ sessionDate: instruction.sessionDate, rescheduledFrom: instruction.rescheduledFrom, rescheduledAt: instruction.rescheduledAt, rescheduleCount: sql`${studyPlanSessions.rescheduleCount} + 1` }).where(eq(studyPlanSessions.id, instruction.id));
+    await db.update(studyPlanSessions).set({ sessionDate: instruction.sessionDate, rescheduledFrom: instruction.rescheduledFrom, rescheduledAt: instruction.rescheduledAt, abandonedAt: null, rescheduleCount: sql`${studyPlanSessions.rescheduleCount} + 1` }).where(eq(studyPlanSessions.id, instruction.id));
   }
   const [plans, sessions, logs] = await Promise.all([
     db.select().from(studyPlans).where(eq(studyPlans.userId, userId)).orderBy(desc(studyPlans.weekStart)),
@@ -1820,8 +1989,8 @@ async function saveStudyPlan(userId, input) {
     const previous = await db.select({ id: studyPlans.id }).from(studyPlans).where(and(eq(studyPlans.userId, userId), eq(studyPlans.title, input.title)));
     if (previous.length) await db.delete(studyPlanSessions).where(and(eq(studyPlanSessions.userId, userId), eq(studyPlanSessions.status, "planned"), inArray(studyPlanSessions.planId, previous.map((plan) => plan.id))));
   }
-  const planResult = await db.insert(studyPlans).values({ userId, title: input.title, weekStart: input.weekStart, weekEnd: input.weekEnd, summary: input.summary, source: input.source ?? "ai" });
-  const planId = Number(planResult[0].insertId);
+  const planResult = await db.insert(studyPlans).values({ userId, title: input.title, weekStart: input.weekStart, weekEnd: input.weekEnd, summary: input.summary, source: input.source ?? "ai" }).returning({ id: studyPlans.id });
+  const planId = Number(planResult[0].id);
   if (input.sessions.length) await db.insert(studyPlanSessions).values(input.sessions.map((session) => ({ ...session, userId, planId, targetPages: session.targetPages ?? null, targetTests: session.targetTests ?? null })));
   return getStudyCalendar(userId);
 }
@@ -1871,8 +2040,8 @@ async function logCompletedRoutineSession(userId, input) {
   dayStart.setHours(0, 0, 0, 0);
   const dayEnd = new Date(dayStart);
   dayEnd.setDate(dayEnd.getDate() + 1);
-  const planResult = await db.insert(studyPlans).values({ userId, title: input.title, weekStart: dayStart, weekEnd: dayEnd, summary: input.title, source: "manual" });
-  const planId = Number(planResult[0].insertId);
+  const planResult = await db.insert(studyPlans).values({ userId, title: input.title, weekStart: dayStart, weekEnd: dayEnd, summary: input.title, source: "manual" }).returning({ id: studyPlans.id });
+  const planId = Number(planResult[0].id);
   const completedAt = /* @__PURE__ */ new Date();
   const sessionValues = {
     userId,
@@ -1893,20 +2062,20 @@ async function logCompletedRoutineSession(userId, input) {
     actualPages: input.actualPages ?? null,
     note: input.note ?? null
   };
-  const sessionResult = await db.insert(studyPlanSessions).values(sessionValues);
-  const sessionId = Number(sessionResult[0].insertId);
+  const sessionResult = await db.insert(studyPlanSessions).values(sessionValues).returning({ id: studyPlanSessions.id });
+  const sessionId = Number(sessionResult[0].id);
   await db.insert(topicStudyLogs).values({ userId, sessionId, subject: input.subject, topic: input.topic, studyDate: completedAt, minutes: input.actualMinutes, questions: 0, correct: 0, wrong: 0, blank: 0, note: input.note ?? null });
   return getStudyCalendar(userId);
 }
 async function addTopicStudyLog(userId, input) {
   const db = await getDb();
   if (!db) return void 0;
-  const result = await db.insert(topicStudyLogs).values({ ...input, userId });
+  const result = await db.insert(topicStudyLogs).values({ ...input, userId }).returning({ id: topicStudyLogs.id });
   const questionCount = input.questions ?? 0;
   if (questionCount > 0) {
     await upsertTopicProgress(userId, { exam: FALLBACK_EXAM, subject: input.subject, topic: input.topic, accuracy: (input.correct ?? 0) / questionCount * 100, questionCount, studyDate: input.studyDate });
   }
-  return { id: Number(result[0].insertId), ...input, userId, createdAt: /* @__PURE__ */ new Date() };
+  return { id: Number(result[0].id), ...input, userId, createdAt: /* @__PURE__ */ new Date() };
 }
 async function getPlanAdherenceInputs(userId, periodStart, periodEnd) {
   const db = await getDb();
@@ -1922,8 +2091,8 @@ async function savePlanAdherence(userId, periodStart, periodEnd) {
   if (!db) return void 0;
   const { sessions, averageAccuracy } = await getPlanAdherenceInputs(userId, periodStart, periodEnd);
   const result = calculatePlanAdherence(sessions, averageAccuracy);
-  const inserted = await db.insert(planAdherenceReports).values({ userId, periodType: "week", periodStart, periodEnd, overallScore: result.overallScore, sessionScore: result.sessionScore, timeScore: result.timeScore, questionScore: result.questionScore, punctualityScore: result.punctualityScore, plannedSessions: result.plannedSessions, completedSessions: result.completedSessions, plannedMinutes: result.plannedMinutes, actualMinutes: result.actualMinutes, targetQuestions: result.targetQuestions, actualQuestions: result.actualQuestions, rescheduledSessions: result.rescheduledSessions, summary: result.summary, decision: result.decision, snapshotJson: JSON.stringify({ averageAccuracy, alerts: result.alerts }) });
-  const reportId = Number(inserted[0].insertId);
+  const inserted = await db.insert(planAdherenceReports).values({ userId, periodType: "week", periodStart, periodEnd, overallScore: result.overallScore, sessionScore: result.sessionScore, timeScore: result.timeScore, questionScore: result.questionScore, punctualityScore: result.punctualityScore, plannedSessions: result.plannedSessions, completedSessions: result.completedSessions, plannedMinutes: result.plannedMinutes, actualMinutes: result.actualMinutes, targetQuestions: result.targetQuestions, actualQuestions: result.actualQuestions, rescheduledSessions: result.rescheduledSessions, summary: result.summary, decision: result.decision, snapshotJson: JSON.stringify({ averageAccuracy, alerts: result.alerts }) }).returning({ id: planAdherenceReports.id });
+  const reportId = Number(inserted[0].id);
   const existingAlerts = await db.select({ ruleKey: coachAlerts.ruleKey }).from(coachAlerts).where(eq(coachAlerts.userId, userId));
   const newAlerts = dedupeAlerts(result.alerts, existingAlerts.map((alert) => alert.ruleKey));
   if (newAlerts.length) await db.insert(coachAlerts).values(newAlerts.map((alert) => ({ userId, reportId, level: alert.level, ruleKey: alert.ruleKey, title: alert.title, message: alert.message, actionLabel: alert.actionLabel, actionJson: JSON.stringify({ decision: result.decision }) })));
@@ -1949,7 +2118,7 @@ async function ensureTopicCatalogSeeded() {
   if (!db) return;
   const existing = await db.select({ id: yksTopics.id }).from(yksTopics).limit(1);
   if (existing.length === 0 && topicSeeds.length > 0) {
-    await db.insert(yksTopics).values(topicSeeds.map((seed) => ({ slug: seed.id, exam: seed.exam, subject: seed.subject, topic: seed.topic, unit: seed.unit }))).onDuplicateKeyUpdate({ set: { subject: sql`subject` } });
+    await db.insert(yksTopics).values(topicSeeds.map((seed) => ({ slug: seed.id, exam: seed.exam, subject: seed.subject, topic: seed.topic, unit: seed.unit }))).onConflictDoNothing({ target: yksTopics.slug });
   }
   await ensureCurriculumSeeded(db);
   topicCatalogSeeded = true;
@@ -1958,15 +2127,15 @@ async function ensureCurriculumSeeded(db) {
   const present = new Set((await db.select({ slug: yksTopics.slug }).from(yksTopics)).map((row) => row.slug));
   const missing = CURRICULUM.filter((def) => !present.has(def.slug));
   if (missing.length === 0) return;
-  await db.insert(yksTopics).values(missing.map((def) => ({ slug: def.slug, exam: def.exam, subject: def.subject, topic: def.topic, unit: def.unit }))).onDuplicateKeyUpdate({ set: { slug: sql`slug` } });
+  await db.insert(yksTopics).values(missing.map((def) => ({ slug: def.slug, exam: def.exam, subject: def.subject, topic: def.topic, unit: def.unit }))).onConflictDoNothing({ target: yksTopics.slug });
 }
-async function findOrCreateTopic(db, exam, subject, topic) {
-  const existing = await db.select().from(yksTopics).where(and(eq(yksTopics.subject, subject), eq(yksTopics.topic, topic))).orderBy(sql`${yksTopics.exam} = ${exam} DESC`, yksTopics.id).limit(1);
+async function findOrCreateTopic(db, exam, subject2, topic) {
+  const existing = await db.select().from(yksTopics).where(and(eq(yksTopics.subject, subject2), eq(yksTopics.topic, topic))).orderBy(sql`${yksTopics.exam} = ${exam} DESC`, yksTopics.id).limit(1);
   if (existing[0]) return existing[0];
-  const slug = `${exam}-${slugify(subject)}-${slugify(topic)}` || `topic-${Date.now()}`;
-  const result = await db.insert(yksTopics).values({ slug, exam, subject, topic, unit: subject }).onDuplicateKeyUpdate({ set: { subject } });
+  const slug = `${exam}-${slugify(subject2)}-${slugify(topic)}` || `topic-${Date.now()}`;
+  const result = await db.insert(yksTopics).values({ slug, exam, subject: subject2, topic, unit: subject2 }).onConflictDoUpdate({ target: yksTopics.slug, set: { subject: subject2 } }).returning({ id: yksTopics.id });
   const inserted = await db.select().from(yksTopics).where(eq(yksTopics.slug, slug)).limit(1);
-  return inserted[0] ?? { id: Number(result[0].insertId), slug, exam, subject, topic, unit: subject, sourceUrl: null, createdAt: /* @__PURE__ */ new Date() };
+  return inserted[0] ?? { id: Number(result[0].id), slug, exam, subject: subject2, topic, unit: subject2, sourceUrl: null, createdAt: /* @__PURE__ */ new Date() };
 }
 async function getTopicCatalog() {
   await ensureTopicCatalogSeeded();
@@ -2001,6 +2170,18 @@ async function upsertTopicProgress(userId, input) {
   }
   return { slug: topicRow.slug, exam: topicRow.exam, subject: topicRow.subject, topic: topicRow.topic, unit: topicRow.unit, progress: Math.round(input.accuracy), status, insufficientData, lastReviewedAt: input.studyDate };
 }
+async function markTopicForReview(userId, input) {
+  await ensureTopicCatalogSeeded();
+  const db = await getDb();
+  if (!db) return void 0;
+  if (input.sessionId) await db.update(studyPlanSessions).set({ abandonedAt: /* @__PURE__ */ new Date() }).where(and(eq(studyPlanSessions.id, input.sessionId), eq(studyPlanSessions.userId, userId), eq(studyPlanSessions.status, "planned")));
+  const topicRow = await findOrCreateTopic(db, input.exam, input.subject, input.topic);
+  const [existing] = await db.select().from(topicProgress).where(and(eq(topicProgress.userId, userId), eq(topicProgress.topicId, topicRow.id))).limit(1);
+  const status = statusAfterAbandonedSession(existing ? statusFromDb[existing.status] : null);
+  if (!existing) await db.insert(topicProgress).values({ userId, topicId: topicRow.id, progress: 0, status: statusToDb[status] });
+  else if (statusToDb[status] !== existing.status) await db.update(topicProgress).set({ status: statusToDb[status], updatedAt: /* @__PURE__ */ new Date() }).where(eq(topicProgress.id, existing.id));
+  return { slug: topicRow.slug, status };
+}
 
 // server/_core/cookies.ts
 function isSecureRequest(req) {
@@ -2030,7 +2211,7 @@ import { SignJWT as SignJWT2, errors as joseErrors, jwtVerify as jwtVerify2 } fr
 var escapeHtml = (value) => value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 function buildVerifyEmail({ to, name, verifyUrl, expiresInMinutes }) {
   const greeting = name ? `Merhaba ${name},` : "Merhaba,";
-  const subject = "Pusula YKS hesab\u0131n\u0131 do\u011Frula";
+  const subject2 = "Pusula YKS hesab\u0131n\u0131 do\u011Frula";
   const text3 = [
     greeting,
     "",
@@ -2050,7 +2231,7 @@ function buildVerifyEmail({ to, name, verifyUrl, expiresInMinutes }) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(subject)}</title>
+<title>${escapeHtml(subject2)}</title>
 </head>
 <body style="margin:0;padding:0;background:#f7f5ef;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1f2333;">
 <span style="display:none;max-height:0;overflow:hidden;opacity:0;">Hesab\u0131n\u0131 kullanmaya ba\u015Flamak i\xE7in e-posta adresini do\u011Frula.</span>
@@ -2082,7 +2263,7 @@ function buildVerifyEmail({ to, name, verifyUrl, expiresInMinutes }) {
 </table>
 </body>
 </html>`;
-  return { to, subject, html, text: text3 };
+  return { to, subject: subject2, html, text: text3 };
 }
 
 // server/_core/env.ts
@@ -2614,17 +2795,17 @@ var databaseAttachmentStorage = {
     if (used + input.data.byteLength > notesConfig.attachments.perUserQuotaBytes) {
       throw new AttachmentError("Defterindeki ek alan\u0131 doldu. Eski notlardaki baz\u0131 foto\u011Fraf/ses kay\u0131tlar\u0131n\u0131 silip tekrar dener misin?");
     }
-    const result = await db.insert(noteAttachments).values({ userId, kind: input.kind, mimeType: input.mimeType, byteSize: input.data.byteLength, data: input.data, durationSec: input.durationSec ?? null });
-    return { id: Number(result[0].insertId) };
+    const result = await db.insert(noteAttachments).values({ userId, kind: input.kind, mimeType: input.mimeType, byteSize: input.data.byteLength, data: input.data, durationSec: input.durationSec ?? null }).returning({ id: noteAttachments.id });
+    return { id: Number(result[0].id) };
   },
-  async get(userId, id3) {
+  async get(userId, id4) {
     const db = await requireDb();
-    const [row] = await db.select({ mimeType: noteAttachments.mimeType, data: noteAttachments.data, kind: noteAttachments.kind, noteId: noteAttachments.noteId }).from(noteAttachments).where(and2(eq4(noteAttachments.id, id3), eq4(noteAttachments.userId, userId))).limit(1);
+    const [row] = await db.select({ mimeType: noteAttachments.mimeType, data: noteAttachments.data, kind: noteAttachments.kind, noteId: noteAttachments.noteId }).from(noteAttachments).where(and2(eq4(noteAttachments.id, id4), eq4(noteAttachments.userId, userId))).limit(1);
     return row ?? null;
   },
-  async setOcrText(userId, id3, text3) {
+  async setOcrText(userId, id4, text3) {
     const db = await requireDb();
-    await db.update(noteAttachments).set({ ocrText: text3 }).where(and2(eq4(noteAttachments.id, id3), eq4(noteAttachments.userId, userId)));
+    await db.update(noteAttachments).set({ ocrText: text3 }).where(and2(eq4(noteAttachments.id, id4), eq4(noteAttachments.userId, userId)));
   },
   async syncNoteLinks(userId, noteId, referencedIds) {
     const db = await requireDb();
@@ -2652,8 +2833,8 @@ var getAttachmentStorage = () => databaseAttachmentStorage;
 // server/notes/attachmentRoutes.ts
 function registerNoteAttachmentRoutes(app2) {
   app2.get("/api/notes/attachments/:id", async (req, res) => {
-    const id3 = Number(req.params.id);
-    if (!Number.isInteger(id3) || id3 <= 0) {
+    const id4 = Number(req.params.id);
+    if (!Number.isInteger(id4) || id4 <= 0) {
       res.status(400).end();
       return;
     }
@@ -2665,7 +2846,7 @@ function registerNoteAttachmentRoutes(app2) {
       return;
     }
     try {
-      const attachment = await getAttachmentStorage().get(userId, id3);
+      const attachment = await getAttachmentStorage().get(userId, id4);
       if (!attachment) {
         res.status(404).end();
         return;
@@ -2679,6 +2860,1919 @@ function registerNoteAttachmentRoutes(app2) {
     } catch (error) {
       console.error("[Notes] attachment read failed:", error instanceof Error ? error.message : error);
       res.status(500).end();
+    }
+  });
+}
+
+// server/digest/weeklyDigest.ts
+import { and as and8, asc as asc2, desc as desc6, eq as eq10, gte as gte6, isNotNull as isNotNull4, isNull as isNull7, lt as lt7, or as or3 } from "drizzle-orm";
+
+// shared/weeklyDigest.ts
+var DAY_MS2 = 24 * 60 * 60 * 1e3;
+var ISTANBUL_OFFSET_MS = 3 * 60 * 60 * 1e3;
+var dayKey = (date) => Math.floor((date.getTime() + ISTANBUL_OFFSET_MS) / DAY_MS2);
+function weeklyDigestWindow(now) {
+  const startOfToday3 = dayKey(now) * DAY_MS2 - ISTANBUL_OFFSET_MS;
+  return { start: new Date(startOfToday3 - 6 * DAY_MS2), end: now };
+}
+var inWindow = (date, start, end) => date >= start && date < end;
+function buildWeeklyDigest(input) {
+  const sessions = input.sessions.filter((session) => inWindow(session.sessionDate, input.start, input.end) && session.status !== "skipped");
+  const logs = input.logs.filter((log) => inWindow(log.studyDate, input.start, input.end));
+  const plannedSessions = sessions.length;
+  const completedSessions = sessions.filter((session) => session.status === "completed").length;
+  const completionRate = plannedSessions ? Math.round(completedSessions / plannedSessions * 100) : null;
+  const minutes = logs.reduce((sum, log) => sum + log.minutes, 0);
+  const questions = logs.reduce((sum, log) => sum + log.questions, 0);
+  const correct = logs.reduce((sum, log) => sum + log.correct, 0);
+  const accuracy = questions ? Math.round(correct / questions * 100) : null;
+  const activeDays = new Set(logs.filter((log) => log.minutes > 0).map((log) => dayKey(log.studyDate))).size;
+  const bySubject = /* @__PURE__ */ new Map();
+  for (const log of logs) bySubject.set(log.subject, (bySubject.get(log.subject) ?? 0) + log.minutes);
+  const top = Array.from(bySubject).sort((a, b) => b[1] - a[1])[0];
+  const topSubject = top && top[1] > 0 ? { subject: top[0], minutes: top[1] } : null;
+  const weakTopics = input.weakTopics.slice(0, 3);
+  const idle = minutes === 0 && completedSessions === 0;
+  const headline = idle ? "Bu hafta Pusula'da kay\u0131tl\u0131 bir \xE7al\u0131\u015Fman yok." : completionRate !== null && completionRate >= 80 ? `Harika bir hafta: plan\u0131n\u0131n %${completionRate}'ini tamamlad\u0131n.` : `Bu hafta ${activeDays} g\xFCn \xE7al\u0131\u015Ft\u0131n, toplam ${formatMinutes(minutes)}.`;
+  const suggestion = idle ? "K\xFC\xE7\xFCk ba\u015Fla: AI Plan\u0131m'dan haftal\u0131k plan\u0131n\u0131 olu\u015Ftur ve her g\xFCn tek bir k\u0131sa odak oturumu tamamla." : plannedSessions >= 3 && completionRate !== null && completionRate < 50 && activeDays <= 3 ? `Plan\u0131n bu hafta a\u011F\u0131r gelmi\u015F olabilir. Takvim'deki "Plan\u0131 hafiflet" ile oturumlar\u0131 k\u0131salt; d\xFCzenli k\xFC\xE7\xFCk ad\u0131mlar daha \xE7ok kazand\u0131r\u0131r.` : weakTopics[0] ? `${weakTopics[0].topic} (${weakTopics[0].subject}) i\xE7in en az iki k\u0131sa oturum ay\u0131r.` : input.dueReviews > 0 ? `Tekrar listende ${input.dueReviews} soru bekliyor; haftaya onlarla ba\u015Fla.` : "Ayn\u0131 ritmi koru ve haftada bir deneme \xE7\xF6z\xFCp sonucunu ekle.";
+  return { plannedSessions, completedSessions, completionRate, minutes, questions, accuracy, activeDays, topSubject, weakTopics, dueReviews: input.dueReviews, headline, suggestion };
+}
+
+// server/_core/emails/weeklyDigestEmail.ts
+var escapeHtml2 = (value) => value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+var rangeLabel = (start, end) => {
+  const last = new Date(end.getTime() - 1);
+  const fmt = (date, withMonth) => date.toLocaleDateString("tr-TR", withMonth ? { day: "numeric", month: "long", timeZone: "Europe/Istanbul" } : { day: "numeric", timeZone: "Europe/Istanbul" });
+  const sameMonth = start.toLocaleDateString("tr-TR", { month: "long", timeZone: "Europe/Istanbul" }) === last.toLocaleDateString("tr-TR", { month: "long", timeZone: "Europe/Istanbul" });
+  return `${fmt(start, !sameMonth)} \u2013 ${fmt(last, true)}`;
+};
+function buildWeeklyDigestEmail({ to, name, digest, start, end, appUrl, unsubscribeUrl }) {
+  const greeting = name ? `Merhaba ${name},` : "Merhaba,";
+  const range = rangeLabel(start, end);
+  const subject2 = `Haftal\u0131k \xF6zetin \xB7 ${range}`;
+  const stats = [
+    ["Tamamlanan oturum", digest.plannedSessions ? `${digest.completedSessions} / ${digest.plannedSessions}` : String(digest.completedSessions)],
+    ["\xC7al\u0131\u015Fma s\xFCresi", formatMinutes(digest.minutes)],
+    ["\xC7\xF6z\xFClen soru", digest.accuracy !== null ? `${digest.questions} \xB7 %${digest.accuracy} do\u011Fru` : String(digest.questions)],
+    ["\xC7al\u0131\u015Ft\u0131\u011F\u0131n g\xFCn", `${digest.activeDays} / 7`]
+  ];
+  const text3 = [
+    greeting,
+    "",
+    `${range} haftan: ${digest.headline}`,
+    "",
+    ...stats.map(([label, value]) => `\u2022 ${label}: ${value}`),
+    ...digest.topSubject ? [`\u2022 En \xE7ok \xE7al\u0131\u015Ft\u0131\u011F\u0131n ders: ${digest.topSubject.subject} (${formatMinutes(digest.topSubject.minutes)})`] : [],
+    ...digest.weakTopics.length ? ["", "G\xFC\xE7lendirmen gereken konular:", ...digest.weakTopics.map((topic) => `\u2022 ${topic.topic} (${topic.subject}) \xB7 %${topic.progress}`)] : [],
+    ...digest.dueReviews > 0 ? ["", `Tekrar listende ${digest.dueReviews} soru seni bekliyor.`] : [],
+    "",
+    `Gelecek hafta i\xE7in \xF6nerim: ${digest.suggestion}`,
+    "",
+    `Pusula'y\u0131 a\xE7: ${appUrl}`,
+    "",
+    `Bu \xF6zeti her pazar al\u0131yorsun. Almak istemiyorsan: ${unsubscribeUrl}`,
+    "\u2014 Pusula YKS \xB7 Ki\u015Fisel \xE7al\u0131\u015Fma ko\xE7u"
+  ].join("\n");
+  const statCell = ([label, value]) => `<td width="50%" valign="top" style="background:#f3f6f5;border-radius:12px;padding:12px 14px;"><div style="font-size:12px;color:#5d6670;">${escapeHtml2(label)}</div><div style="margin-top:4px;font-size:18px;font-weight:700;color:#18202a;">${escapeHtml2(value)}</div></td>`;
+  const weakRows = digest.weakTopics.map((topic) => `<tr><td style="padding:8px 0;border-top:1px solid #e6ebe9;font-size:14px;color:#18202a;">${escapeHtml2(topic.topic)} <span style="color:#5d6670;">\xB7 ${escapeHtml2(topic.subject)}</span></td><td align="right" style="padding:8px 0;border-top:1px solid #e6ebe9;font-size:13px;font-weight:700;color:#b42318;">%${topic.progress}</td></tr>`).join("");
+  const safeApp = escapeHtml2(appUrl);
+  const safeUnsub = escapeHtml2(unsubscribeUrl);
+  const html = `<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml2(subject2)}</title>
+</head>
+<body style="margin:0;padding:0;background:#f3f6f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#18202a;">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0;">${escapeHtml2(digest.headline)}</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f6f5;">
+  <tr><td align="center" style="padding:32px 16px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;">
+      <tr><td style="padding:0 4px 20px 4px;">
+        <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+          <td style="width:36px;height:36px;border-radius:10px;background:#17625f;color:#ffffff;font-size:17px;font-weight:700;text-align:center;vertical-align:middle;">P</td>
+          <td style="padding-left:10px;font-size:15px;font-weight:700;color:#18202a;">Pusula YKS</td>
+        </tr></table>
+      </td></tr>
+      <tr><td style="background:#ffffff;border-radius:20px;padding:28px 22px;border:1px solid #e6ebe9;">
+        <div style="font-size:13px;font-weight:600;color:#17625f;">Haftal\u0131k \xF6zet \xB7 ${escapeHtml2(range)}</div>
+        <h1 style="margin:6px 0 10px 0;font-size:21px;line-height:1.3;font-weight:700;color:#18202a;">${escapeHtml2(digest.headline)}</h1>
+        <p style="margin:0 0 14px 0;font-size:14px;line-height:1.6;color:#3f4852;">${escapeHtml2(greeting)} ge\xE7en yedi g\xFCn\xFCn k\u0131sa \xF6zeti a\u015Fa\u011F\u0131da.</p>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="8" style="margin:0 -8px;width:calc(100% + 16px);">
+          <tr>${statCell(stats[0])}${statCell(stats[1])}</tr>
+          <tr>${statCell(stats[2])}${statCell(stats[3])}</tr>
+        </table>
+        ${digest.topSubject ? `<p style="margin:14px 0 0 0;font-size:13px;line-height:1.6;color:#5d6670;">En \xE7ok \xE7al\u0131\u015Ft\u0131\u011F\u0131n ders: <strong style="color:#18202a;">${escapeHtml2(digest.topSubject.subject)}</strong> (${escapeHtml2(formatMinutes(digest.topSubject.minutes))})</p>` : ""}
+        ${weakRows ? `<div style="margin:22px 0 4px 0;font-size:14px;font-weight:700;color:#18202a;">G\xFC\xE7lendirmen gereken konular</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0">${weakRows}</table>` : ""}
+        ${digest.dueReviews > 0 ? `<p style="margin:14px 0 0 0;font-size:13px;line-height:1.6;color:#5d6670;">Tekrar listende <strong style="color:#18202a;">${digest.dueReviews} soru</strong> seni bekliyor.</p>` : ""}
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:22px;"><tr>
+          <td style="background:#fdf3d9;border-radius:12px;padding:14px 16px;font-size:14px;line-height:1.6;color:#18202a;"><strong>Gelecek hafta i\xE7in \xF6nerim:</strong> ${escapeHtml2(digest.suggestion)}</td>
+        </tr></table>
+        <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin-top:22px;"><tr><td align="center">
+          <a href="${safeApp}" style="display:inline-block;background:#17625f;color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;padding:14px 28px;border-radius:12px;">Pusula'y\u0131 a\xE7</a>
+        </td></tr></table>
+      </td></tr>
+      <tr><td align="center" style="padding:20px 8px 0 8px;font-size:11px;line-height:1.6;color:#7c858e;">Pusula YKS \xB7 Ki\u015Fisel \xE7al\u0131\u015Fma ko\xE7u<br>Bu \xF6zeti her pazar al\u0131yorsun. <a href="${safeUnsub}" style="color:#7c858e;">Almak istemiyorum</a></td></tr>
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>`;
+  return { to, subject: subject2, html, text: text3 };
+}
+
+// server/notes/questionsDb.ts
+import { and as and5, asc, desc as desc3, eq as eq7, gte as gte4, isNotNull as isNotNull2, isNull as isNull4, lt as lt4, lte as lte3, ne as ne2, sql as sql4 } from "drizzle-orm";
+
+// server/studyPlan/planTasks.ts
+import { and as and3, eq as eq5, gte as gte2, lte } from "drizzle-orm";
+
+// server/bookContent/config.ts
+var bookContentConfig = {
+  mapping: {
+    /** Bu güvenin üstü: eşleşme otomatik önerilir (öğrenci yine görür, değiştirebilir). */
+    autoSuggestMin: 0.9,
+    /** Bu aralık: öğrencinin açıkça onaylaması istenir. Altı: manuel eşleştirme gerekli. */
+    confirmMin: 0.7,
+    /** Eşleşme adımlarının verdiği güven (tam eşleşme > alias > kapsama > benzerlik). */
+    scores: { exactTopic: 1, exactAlias: 0.95, containsTopic: 0.88, containsAlias: 0.85, fuzzyMax: 0.8 },
+    /** Kelime kökü yaklaşımı: Türkçe ekleri tolere etmek için kelimenin ilk N harfi karşılaştırılır. */
+    stemLength: 5,
+    maxAlternatives: 3
+  },
+  aiMapping: {
+    /** Deterministik eşleştirme belirsiz kaldığında (onay/manuel) AI'ya aday listesinden seçtirilsin mi. */
+    enabled: true,
+    /** AI'ya gösterilecek en fazla aday konu (ilgili dersin konuları). */
+    maxCandidates: 60,
+    /** AI önerisinin güveni bu değeri AŞAMAZ: otomatik öneri eşiğinin altında kalır, öğrenci her zaman onaylar. */
+    maxConfidence: 0.85,
+    /** Bu güvenin altındaki AI önerisi hiç gösterilmez (manuel eşleştirme kalır). */
+    minConfidence: 0.6
+  },
+  ocr: {
+    /** Tek istekte gönderilebilecek en büyük görsel (Vercel istek gövdesi sınırı ~4.5 MB). */
+    maxImageBytes: 3.5 * 1024 * 1024,
+    /** Bir kitap için en fazla içindekiler sayfası. */
+    maxTocPages: 8,
+    /** İsteğin tamamı için süre bütçesi (Vercel fonksiyonu 300 sn; güçlü model yavaştır, yanıt + eşleştirme payı bırakılır). */
+    requestBudgetMs: 15e4,
+    /** Aynı anda okunan sayfa sayısı bunu aşarsa sayfa başına geçiş sayısı kısılır (hız sınırı + süre). */
+    manyPagesThreshold: 3,
+    maxPassesWhenManyPages: 2
+  },
+  confidence: {
+    /** Nihai güven = ağırlıklı ortalama (görüntü, okuma, yapı, eşleştirme). */
+    weights: { image: 0.15, ocr: 0.35, structure: 0.25, mapping: 0.25 },
+    /** Bunun altındaki satır / sayfa "kontrol et" olarak işaretlenir. */
+    needsReviewBelow: 0.7
+  },
+  allocation: {
+    /** Zayıflık (0-1) → önerilen çalışma süresi (dk). Aralık alt sınırı dahil; ilk eşleşen kullanılır. */
+    weaknessMinutes: [
+      { min: 0.85, minutes: 60 },
+      { min: 0.7, minutes: 45 },
+      { min: 0.5, minutes: 30 },
+      { min: 0.3, minutes: 20 }
+    ],
+    /** Bu doğruluğun (%) altındaki "Orta" konular için de TEKRAR önerisi yapılır (Zayıf eşiği shared/topicStatus.ts'te). */
+    reviewMaxAccuracy: 70,
+    /** Bir kitap testinin ortalama çözüm süresi (dk) — öneride kaç test verileceğini belirler. */
+    minutesPerTest: 15,
+    /** Bir günde kitap görevlerine ayrılabilecek en fazla süre (dk). */
+    maxDailyBookMinutes: 90,
+    /** Öğrencinin tercihi yoksa varsayılan: kitap görevleri otomatik planlanmaz, yalnızca önerilir. */
+    autoScheduleDefault: false
+  }
+};
+
+// server/bookContent/bookStudyAllocation.ts
+var weaknessFromAccuracy = (accuracy) => Math.round((1 - Math.max(0, Math.min(100, accuracy)) / 100) * 100) / 100;
+function minutesForWeakness(weakness, bands = bookContentConfig.allocation.weaknessMinutes) {
+  const band = [...bands].sort((a, b) => b.min - a.min).find((item) => weakness >= item.min);
+  return band ? band.minutes : null;
+}
+var overlaps = (row, ranges) => row.pageStart !== null && ranges.some((range) => row.pageStart >= range.pageStart && row.pageStart <= range.pageEnd);
+var PRACTICE_TYPES = /* @__PURE__ */ new Set(["topic_test", "topic", "osym_type"]);
+function buildBookRecommendations(input) {
+  const { minutesPerTest, weaknessMinutes } = bookContentConfig.allocation;
+  const recommendations = [];
+  for (const weak of input.weakTopics) {
+    const weakness = weaknessFromAccuracy(weak.accuracy);
+    const minutes = minutesForWeakness(weakness, weaknessMinutes);
+    if (minutes === null) continue;
+    const byBook = /* @__PURE__ */ new Map();
+    for (const row of input.contents) {
+      if (row.topicId !== weak.topicId || !PRACTICE_TYPES.has(row.contentType)) continue;
+      byBook.set(row.bookId, [...byBook.get(row.bookId) ?? [], row]);
+    }
+    const purpose = weak.accuracy < TOPIC_STATUS_THRESHOLDS.weak ? "practice" : "review";
+    for (const [bookId, rows] of Array.from(byBook)) {
+      const skip = [...input.donePages[bookId] ?? [], ...input.scheduledPages[bookId] ?? []];
+      const open = rows.sort((a, b) => a.sortOrder - b.sortOrder).filter((row) => !overlaps(row, skip));
+      if (open.length === 0) continue;
+      if (purpose === "review") open.sort((a, b) => Number(b.contentType === "osym_type") - Number(a.contentType === "osym_type") || a.sortOrder - b.sortOrder);
+      const first = open[0];
+      const count4 = Math.max(1, Math.floor(minutes / minutesPerTest));
+      const picked = open.filter((row) => row.unitNumber === first.unitNumber && row.unitTitle === first.unitTitle).slice(0, count4);
+      const numbers = picked.map((row) => row.testNumber).filter((value) => value !== null);
+      const allTopicTests = picked.every((row) => row.contentType === "topic_test");
+      recommendations.push({
+        purpose,
+        topicId: weak.topicId,
+        topic: weak.topic,
+        subject: weak.subject,
+        exam: weak.exam,
+        weakness,
+        minutes,
+        bookId,
+        unitNumber: first.unitNumber,
+        unitTitle: first.unitTitle,
+        contentIds: picked.map((row) => row.id),
+        labels: picked.map((row) => row.label),
+        testRange: allTopicTests && numbers.length ? numbers.length === 1 ? String(numbers[0]) : `${Math.min(...numbers)}-${Math.max(...numbers)}` : null,
+        pageStart: picked[0].pageStart,
+        pageEnd: picked[picked.length - 1].pageEnd ?? picked[picked.length - 1].pageStart,
+        match: Math.min(...picked.map((row) => row.mappingConfidence)) >= bookContentConfig.mapping.autoSuggestMin ? "HIGH" : "MEDIUM",
+        remainingTests: open.length
+      });
+    }
+  }
+  return recommendations.sort((a, b) => b.weakness - a.weakness || a.bookId.localeCompare(b.bookId));
+}
+function computeBookCompletion(input) {
+  const ranges = input.logs.filter((log) => log.pageStart !== null).map((log) => ({ pageStart: log.pageStart, pageEnd: Math.max(log.pageStart, log.pageEnd ?? log.pageStart) }));
+  const questions = input.logs.reduce((sum, log) => sum + log.questions, 0);
+  const correct = input.logs.reduce((sum, log) => sum + log.correct, 0);
+  const accuracy = questions > 0 ? Math.round(correct / questions * 100) : null;
+  const isDone = (row) => row.pageStart !== null && ranges.some((range) => row.pageStart >= range.pageStart && row.pageStart <= range.pageEnd);
+  if (input.contents.length > 0) {
+    const units = [];
+    for (const row of input.contents) {
+      let unit = units[units.length - 1];
+      if (!unit || unit.unitNumber !== row.unitNumber || unit.unitTitle !== row.unitTitle) {
+        unit = { unitNumber: row.unitNumber, unitTitle: row.unitTitle, done: 0, total: 0 };
+        units.push(unit);
+      }
+      unit.total += 1;
+      if (isDone(row)) unit.done += 1;
+    }
+    const total = input.contents.length;
+    const done = units.reduce((sum, unit) => sum + unit.done, 0);
+    return { percent: Math.round(done / total * 100), basis: "contents", done, total, accuracy, questions, units };
+  }
+  if (input.pageCount && input.pageCount > 0) {
+    const covered = /* @__PURE__ */ new Set();
+    for (const range of ranges) for (let page2 = range.pageStart; page2 <= Math.min(range.pageEnd, input.pageCount); page2++) covered.add(page2);
+    return { percent: Math.min(100, Math.round(covered.size / input.pageCount * 100)), basis: "pages", done: covered.size, total: input.pageCount, accuracy, questions, units: [] };
+  }
+  return { percent: null, basis: "none", done: 0, total: 0, accuracy, questions, units: [] };
+}
+function pickStudyDay(input) {
+  const { maxDailyBookMinutes } = bookContentConfig.allocation;
+  const start = /* @__PURE__ */ new Date(`${input.today}T00:00:00Z`);
+  for (let offset = 0; offset < (input.horizonDays ?? 7); offset++) {
+    const date = new Date(start.getTime() + offset * 864e5).toISOString().slice(0, 10);
+    const dayLoad = input.load.filter((item) => item.date === date);
+    const total = dayLoad.reduce((sum, item) => sum + item.minutes, 0);
+    const bookTotal = dayLoad.filter((item) => item.isBook).reduce((sum, item) => sum + item.minutes, 0);
+    if (total + input.minutes <= input.dailyCapacity && bookTotal + input.minutes <= maxDailyBookMinutes) return date;
+  }
+  return null;
+}
+
+// server/studyPlan/planTasks.ts
+var PlanTaskError = class extends Error {
+};
+var isoDate = (date) => date.toISOString().slice(0, 10);
+async function pickDayForTask(userId, minutes, when) {
+  const db = await getDb();
+  if (!db) throw new PlanTaskError("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
+  const today = /* @__PURE__ */ new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  if (when === "today") return isoDate(today);
+  const horizonEnd = new Date(today.getTime() + 7 * 864e5);
+  const [profile] = await db.select({ daily: studentProfiles.dailyStudyDuration }).from(studentProfiles).where(eq5(studentProfiles.userId, userId)).limit(1);
+  const sessions = await db.select({ sessionDate: studyPlanSessions.sessionDate, minutes: studyPlanSessions.plannedMinutes, sourceBookId: studyPlanSessions.sourceBookId }).from(studyPlanSessions).where(and3(eq5(studyPlanSessions.userId, userId), eq5(studyPlanSessions.status, "planned"), gte2(studyPlanSessions.sessionDate, today), lte(studyPlanSessions.sessionDate, horizonEnd)));
+  const picked = pickStudyDay({ today: isoDate(today), minutes, dailyCapacity: profile?.daily ?? 120, load: sessions.map((session) => ({ date: isoDate(new Date(session.sessionDate)), minutes: session.minutes, isBook: Boolean(session.sourceBookId) })) });
+  if (!picked) throw new PlanTaskError('\xD6n\xFCm\xFCzdeki 7 g\xFCnde bu g\xF6rev i\xE7in yer yok \u2014 plan\u0131n dolu. "Bug\xFCn \xE7al\u0131\u015F" ile yine de ekleyebilirsin.');
+  return picked;
+}
+async function insertPlanTask(userId, input) {
+  const db = await getDb();
+  if (!db) throw new PlanTaskError("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
+  const noon = /* @__PURE__ */ new Date(`${input.date}T12:00:00Z`);
+  const sessionDate = input.date === isoDate(/* @__PURE__ */ new Date()) ? new Date(Math.max(noon.getTime(), Date.now() + 5 * 6e4)) : noon;
+  const [plan] = await db.select({ id: studyPlans.id }).from(studyPlans).where(and3(eq5(studyPlans.userId, userId), lte(studyPlans.weekStart, sessionDate), gte2(studyPlans.weekEnd, sessionDate))).orderBy(studyPlans.createdAt).limit(1);
+  let planId = plan?.id;
+  if (!planId) {
+    const weekStart = /* @__PURE__ */ new Date(`${input.date}T00:00:00Z`);
+    const weekEnd = new Date(weekStart.getTime() + 6 * 864e5 + 86399e3);
+    const result2 = await db.insert(studyPlans).values({ userId, title: input.planTitle, weekStart, weekEnd, summary: input.planSummary, source: "manual" }).returning({ id: studyPlans.id });
+    planId = Number(result2[0].id);
+  }
+  const result = await db.insert(studyPlanSessions).values({
+    planId,
+    userId,
+    sessionDate,
+    title: input.title.slice(0, 180),
+    subject: input.subject,
+    // Tam konu adı: tamamlanınca completeStudySession → upsertTopicProgress aynı
+    // konu satırını günceller; zayıflık mevcut sistem tarafından yeniden hesaplanır.
+    topic: input.topic,
+    kind: input.kind,
+    plannedMinutes: input.minutes,
+    targetPages: input.targetPages ?? null,
+    targetTests: input.targetTests ?? null,
+    sourceBookId: input.sourceBookId ?? null
+  }).returning({ id: studyPlanSessions.id });
+  return { sessionId: Number(result[0].id), date: input.date };
+}
+
+// server/notes/notesDb.ts
+import { and as and4, desc as desc2, eq as eq6, gte as gte3, inArray as inArray3, isNotNull, isNull as isNull3, ilike, lt as lt3, lte as lte2, ne, or, sql as sql3 } from "drizzle-orm";
+
+// shared/noteContent.ts
+var BLOCK_TYPES = /* @__PURE__ */ new Set(["paragraph", "heading", "listItem", "taskItem", "blockquote", "formula", "noteImage", "voiceClip", "drawing", "horizontalRule"]);
+function extractPlainText(doc) {
+  const parts = [];
+  const walk = (node) => {
+    if (node.type === "text" && typeof node.text === "string") parts.push(node.text);
+    else if (node.type === "hardBreak") parts.push("\n");
+    else if (node.type === "formula" && typeof node.attrs?.latex === "string") parts.push(` ${node.attrs.latex} `);
+    else if (node.type === "noteImage" && typeof node.attrs?.ocrText === "string") parts.push(node.attrs.ocrText);
+    for (const child of node.content ?? []) walk(child);
+    if (BLOCK_TYPES.has(node.type)) parts.push("\n");
+  };
+  walk(doc);
+  return parts.join("").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+function computeNoteStats(doc) {
+  const stats = { images: 0, voice: 0, voiceSeconds: 0, formulas: 0, drawings: 0, checklist: 0, checklistDone: 0, firstFormula: null };
+  const walk = (node) => {
+    if (node.type === "noteImage") stats.images += 1;
+    if (node.type === "voiceClip") {
+      stats.voice += 1;
+      stats.voiceSeconds += Number(node.attrs?.duration) || 0;
+    }
+    if (node.type === "formula") {
+      stats.formulas += 1;
+      if (!stats.firstFormula && typeof node.attrs?.latex === "string") stats.firstFormula = node.attrs.latex.slice(0, 60);
+    }
+    if (node.type === "drawing") stats.drawings += 1;
+    if (node.type === "taskItem") {
+      stats.checklist += 1;
+      if (node.attrs?.checked) stats.checklistDone += 1;
+    }
+    for (const child of node.content ?? []) walk(child);
+  };
+  walk(doc);
+  return stats;
+}
+function deriveNoteTitle(title, plainText, noteDate) {
+  const clean2 = title.trim();
+  if (clean2) return clean2.slice(0, 200);
+  const firstLine = plainText.split("\n").map((line) => line.trim()).find(Boolean);
+  if (firstLine) return firstLine.length > 60 ? `${firstLine.slice(0, 57)}\u2026` : firstLine;
+  return `Not \xB7 ${noteDate.toLocaleDateString("tr-TR", { day: "numeric", month: "long" })}`;
+}
+function normalizeTag(value) {
+  const tag = value.trim().replace(/^#+/, "").replace(/İ/g, "i").replace(/I/g, "\u0131").toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9çğıöşü_-]/g, "").slice(0, 40);
+  return tag.length >= 2 ? tag : null;
+}
+function isValidNoteDoc(value, limits = { maxNodes: 2e4, maxDepth: 30 }) {
+  if (!value || typeof value !== "object" || value.type !== "doc" || !Array.isArray(value.content)) return false;
+  let count4 = 0;
+  const check2 = (node, depth) => {
+    if (!node || typeof node !== "object" || typeof node.type !== "string") return false;
+    if (++count4 > limits.maxNodes || depth > limits.maxDepth) return false;
+    const children = node.content;
+    if (children !== void 0 && !Array.isArray(children)) return false;
+    return (children ?? []).every((child) => check2(child, depth + 1));
+  };
+  return check2(value, 0);
+}
+var NOTE_AI_ACTIONS = {
+  summarize: { label: "\xD6zet", menu: "\xD6zetle" },
+  keypoints: { label: "\xD6nemli noktalar", menu: "\xD6nemli noktalar\u0131 \xE7\u0131kar" },
+  questions: { label: "Sorular", menu: "Soru olu\u015Ftur" },
+  flashcards: { label: "Flashcard", menu: "Flashcard olu\u015Ftur" },
+  simplify: { label: "Basitle\u015Ftirilmi\u015F", menu: "Basitle\u015Ftir" },
+  review: { label: "Tekrar etmem gerekenler", menu: "Tekrar etmem gerekenleri bul" }
+};
+function aiResultToNodes(action, items) {
+  const text3 = (value) => value.trim() ? [{ type: "text", text: value.trim() }] : [];
+  const listType = action === "questions" ? "orderedList" : "bulletList";
+  const list = {
+    type: listType,
+    content: items.map((item) => ({
+      type: "listItem",
+      content: action === "flashcards" && item.back ? [{ type: "paragraph", content: [{ type: "text", text: "S: ", marks: [{ type: "bold" }] }, ...text3(item.front)] }, { type: "paragraph", content: [{ type: "text", text: "C: ", marks: [{ type: "bold" }] }, ...text3(item.back)] }] : [{ type: "paragraph", content: text3(item.front) }]
+    }))
+  };
+  return [{ type: "blockquote", content: [{ type: "paragraph", content: [{ type: "text", text: `\u2728 AI \xB7 ${NOTE_AI_ACTIONS[action].label}`, marks: [{ type: "bold" }] }] }, list] }];
+}
+
+// server/notes/notesDb.ts
+var NoteError = class extends Error {
+};
+async function requireDb2() {
+  const db = await getDb();
+  if (!db) throw new NoteError("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
+  return db;
+}
+function referencedAttachmentIds(doc) {
+  const ids = /* @__PURE__ */ new Set();
+  const walk = (node) => {
+    if ((node.type === "noteImage" || node.type === "voiceClip") && Number.isInteger(node.attrs?.attachmentId)) ids.add(Number(node.attrs.attachmentId));
+    for (const child of node.content ?? []) walk(child);
+  };
+  walk(doc);
+  return Array.from(ids);
+}
+async function resolveLinks(db, userId, links) {
+  let subject2 = links.subject?.trim() || null;
+  const topicId = links.topicId ?? null;
+  if (topicId !== null) {
+    const [topic] = await db.select({ subject: yksTopics.subject }).from(yksTopics).where(eq6(yksTopics.id, topicId)).limit(1);
+    if (!topic) throw new NoteError("Se\xE7ilen konu bulunamad\u0131.");
+    subject2 = subject2 ?? topic.subject;
+  }
+  const bookId = links.bookId?.trim() || null;
+  if (bookId) {
+    const [owned] = await db.select({ id: bookInventory.id }).from(bookInventory).where(and4(eq6(bookInventory.userId, userId), eq6(bookInventory.bookId, bookId))).limit(1);
+    if (!owned) throw new NoteError("Bu kitap k\xFCt\xFCphanende bulunmuyor.");
+  }
+  const bookContentId = links.bookContentId ?? null;
+  if (bookContentId !== null) {
+    const [content] = await db.select({ bookId: userBookContents.bookId }).from(userBookContents).where(and4(eq6(userBookContents.id, bookContentId), eq6(userBookContents.userId, userId))).limit(1);
+    if (!content || bookId && content.bookId !== bookId) throw new NoteError("Se\xE7ilen kitap b\xF6l\xFCm\xFC ge\xE7ersiz.");
+  }
+  const studySessionId = links.studySessionId ?? null;
+  if (studySessionId !== null) {
+    const [session] = await db.select({ id: studyPlanSessions.id }).from(studyPlanSessions).where(and4(eq6(studyPlanSessions.id, studySessionId), eq6(studyPlanSessions.userId, userId))).limit(1);
+    if (!session) throw new NoteError("\xC7al\u0131\u015Fma oturumu bulunamad\u0131.");
+  }
+  const mockExamId = links.mockExamId ?? null;
+  if (mockExamId !== null) {
+    const [exam] = await db.select({ id: userMockExams.id }).from(userMockExams).where(and4(eq6(userMockExams.id, mockExamId), eq6(userMockExams.userId, userId))).limit(1);
+    if (!exam) throw new NoteError("Deneme bulunamad\u0131.");
+  }
+  return { subject: subject2?.slice(0, 80) ?? null, topicId, bookId, bookContentId, studySessionId, mockExamId };
+}
+async function saveNote(userId, input) {
+  const db = await requireDb2();
+  if (!isValidNoteDoc(input.content)) throw new NoteError("Not i\xE7eri\u011Fi okunamad\u0131.");
+  const contentJson = JSON.stringify(input.content);
+  if (Buffer.byteLength(contentJson) > notesConfig.content.maxContentBytes) throw new NoteError("Not \xE7ok b\xFCy\xFCk. Baz\u0131 \xE7izim ya da g\xF6rselleri ayr\u0131 bir nota ta\u015F\u0131r m\u0131s\u0131n?");
+  const plainText = extractPlainText(input.content);
+  const stats = computeNoteStats(input.content);
+  const links = await resolveLinks(db, userId, input);
+  const title = deriveNoteTitle(input.title, plainText, input.noteDate);
+  const tags = Array.from(new Set(input.tags.map(normalizeTag).filter((tag) => Boolean(tag)))).slice(0, notesConfig.content.maxTagsPerNote);
+  const values = {
+    title,
+    content: contentJson,
+    plainText,
+    stats: JSON.stringify(stats),
+    noteDate: input.noteDate,
+    subject: links.subject,
+    topicId: links.topicId,
+    bookId: links.bookId,
+    bookContentId: links.bookContentId,
+    studySessionId: links.studySessionId,
+    mockExamId: links.mockExamId,
+    reviewAt: input.reviewAt ?? null,
+    templateKey: input.templateKey ?? null,
+    ...input.isFavorite !== void 0 ? { isFavorite: input.isFavorite ? 1 : 0 } : {},
+    ...input.isPinned !== void 0 ? { isPinned: input.isPinned ? 1 : 0 } : {}
+  };
+  await db.insert(notes).values({ userId, clientId: input.clientId, ...values, isFavorite: input.isFavorite ? 1 : 0, isPinned: input.isPinned ? 1 : 0 }).onConflictDoUpdate({ target: [notes.userId, notes.clientId], set: { ...values, version: sql3`${notes.version} + 1` } });
+  const [saved] = await db.select({ id: notes.id, version: notes.version, updatedAt: notes.updatedAt, title: notes.title }).from(notes).where(and4(eq6(notes.userId, userId), eq6(notes.clientId, input.clientId))).limit(1);
+  if (!saved) throw new NoteError("Not kaydedilemedi.");
+  await db.delete(noteTags).where(and4(eq6(noteTags.userId, userId), eq6(noteTags.noteId, saved.id)));
+  if (tags.length) await db.insert(noteTags).values(tags.map((tag) => ({ noteId: saved.id, userId, tag })));
+  await getAttachmentStorage().syncNoteLinks(userId, saved.id, referencedAttachmentIds(input.content));
+  return { id: saved.id, clientId: input.clientId, version: saved.version, title: saved.title, updatedAt: saved.updatedAt };
+}
+async function describeLinks(db, userId, rows) {
+  const topicIds = Array.from(new Set(rows.map((row) => row.topicId).filter((id4) => id4 !== null)));
+  const bookIds = Array.from(new Set(rows.map((row) => row.bookId).filter((id4) => Boolean(id4))));
+  const numeric = bookIds.filter((id4) => /^\d+$/.test(id4)).map(Number);
+  const [topics, custom, catalog] = await Promise.all([
+    topicIds.length ? db.select({ id: yksTopics.id, topic: yksTopics.topic, unit: yksTopics.unit }).from(yksTopics).where(inArray3(yksTopics.id, topicIds)) : Promise.resolve([]),
+    bookIds.length ? db.select({ bookId: userResourceBooks.bookId, title: userResourceBooks.title }).from(userResourceBooks).where(and4(eq6(userResourceBooks.userId, userId), inArray3(userResourceBooks.bookId, bookIds))) : Promise.resolve([]),
+    numeric.length ? db.select({ id: catalogBooks.id, name: catalogBooks.name }).from(catalogBooks).where(inArray3(catalogBooks.id, numeric)) : Promise.resolve([])
+  ]);
+  const topicById = new Map(topics.map((row) => [row.id, row]));
+  const bookTitle = new Map([...custom.map((row) => [row.bookId, row.title]), ...catalog.map((row) => [String(row.id), row.name])]);
+  return { topicById, bookTitle };
+}
+var parseStats = (value) => {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return computeNoteStats({ type: "doc", content: [] });
+  }
+};
+async function getNote(userId, id4) {
+  const db = await requireDb2();
+  const [row] = await db.select().from(notes).where(and4(eq6(notes.id, id4), eq6(notes.userId, userId))).limit(1);
+  if (!row) return null;
+  const [tags, links] = await Promise.all([
+    db.select({ tag: noteTags.tag }).from(noteTags).where(and4(eq6(noteTags.userId, userId), eq6(noteTags.noteId, id4))),
+    describeLinks(db, userId, [row])
+  ]);
+  return {
+    ...row,
+    content: JSON.parse(row.content),
+    stats: parseStats(row.stats),
+    isFavorite: row.isFavorite === 1,
+    isPinned: row.isPinned === 1,
+    tags: tags.map((item) => item.tag),
+    topic: row.topicId !== null ? links.topicById.get(row.topicId) ?? null : null,
+    bookTitle: row.bookId ? links.bookTitle.get(row.bookId) ?? null : null
+  };
+}
+var escapeLike = (value) => value.replace(/[\\%_]/g, (char) => `\\${char}`);
+async function keywordCondition(db, userId, q) {
+  const term = `%${escapeLike(q.trim().slice(0, 100))}%`;
+  const [topics, books] = await Promise.all([
+    db.select({ id: yksTopics.id }).from(yksTopics).where(ilike(yksTopics.topic, term)).limit(50),
+    db.select({ bookId: userResourceBooks.bookId }).from(userResourceBooks).where(and4(eq6(userResourceBooks.userId, userId), ilike(userResourceBooks.title, term))).limit(50)
+  ]);
+  const conditions = [
+    ilike(notes.title, term),
+    ilike(notes.plainText, term),
+    ilike(notes.subject, term),
+    sql3`EXISTS (SELECT 1 FROM ${noteTags} WHERE ${noteTags.noteId} = ${notes.id} AND ${noteTags.tag} ILIKE ${term})`
+  ];
+  if (topics.length) conditions.push(inArray3(notes.topicId, topics.map((row) => row.id)));
+  if (books.length) conditions.push(inArray3(notes.bookId, books.map((row) => row.bookId)));
+  return or(...conditions);
+}
+async function listNotes(userId, filters) {
+  const db = await requireDb2();
+  const limit = Math.min(Math.max(filters.limit ?? notesConfig.list.pageSize, 1), 100);
+  const conditions = [eq6(notes.userId, userId), eq6(notes.status, "active")];
+  if (filters.from) conditions.push(gte3(notes.noteDate, filters.from));
+  if (filters.to) conditions.push(lte2(notes.noteDate, filters.to));
+  if (filters.subject) conditions.push(eq6(notes.subject, filters.subject));
+  if (filters.noSubject) conditions.push(isNull3(notes.subject));
+  if (filters.topicId) conditions.push(eq6(notes.topicId, filters.topicId));
+  if (filters.bookId) conditions.push(eq6(notes.bookId, filters.bookId));
+  if (filters.studySessionId) conditions.push(eq6(notes.studySessionId, filters.studySessionId));
+  if (filters.favorite) conditions.push(eq6(notes.isFavorite, 1));
+  if (filters.pinned) conditions.push(eq6(notes.isPinned, 1));
+  if (filters.reviewDue) conditions.push(and4(isNotNull(notes.reviewAt), lte2(notes.reviewAt, endOfToday())));
+  if (filters.questions === "exclude") conditions.push(or(isNull3(notes.templateKey), ne(notes.templateKey, QUESTION_TEMPLATE_KEY)));
+  if (filters.questions === "only") conditions.push(eq6(notes.templateKey, QUESTION_TEMPLATE_KEY));
+  if (filters.tag) {
+    const tag = normalizeTag(filters.tag);
+    if (tag) conditions.push(sql3`EXISTS (SELECT 1 FROM ${noteTags} WHERE ${noteTags.noteId} = ${notes.id} AND ${noteTags.tag} = ${tag})`);
+  }
+  if (filters.kind) {
+    const statKey = { voice: "voice", image: "images", formula: "formulas", drawing: "drawings" };
+    if (filters.kind === "text") conditions.push(sql3`CHAR_LENGTH(${notes.plainText}) > 0`);
+    else conditions.push(sql3`COALESCE((${notes.stats}::jsonb ->> ${statKey[filters.kind]})::int, 0) > 0`);
+  }
+  if (filters.q?.trim()) conditions.push(await keywordCondition(db, userId, filters.q));
+  if (filters.cursor) {
+    const [time2, id4] = filters.cursor.split("_").map(Number);
+    if (Number.isFinite(time2) && Number.isFinite(id4)) conditions.push(or(lt3(notes.noteDate, new Date(time2)), and4(eq6(notes.noteDate, new Date(time2)), lt3(notes.id, id4))));
+  }
+  const rows = await db.select({
+    id: notes.id,
+    clientId: notes.clientId,
+    title: notes.title,
+    plainText: notes.plainText,
+    stats: notes.stats,
+    noteDate: notes.noteDate,
+    subject: notes.subject,
+    topicId: notes.topicId,
+    bookId: notes.bookId,
+    studySessionId: notes.studySessionId,
+    isFavorite: notes.isFavorite,
+    isPinned: notes.isPinned,
+    reviewAt: notes.reviewAt,
+    templateKey: notes.templateKey,
+    updatedAt: notes.updatedAt,
+    // Soru kartıysa ders defteri akışında kart olarak çizilebilsin diye özet bilgisi.
+    question: { id: notebookQuestions.id, status: notebookQuestions.status, nextReviewAt: notebookQuestions.nextReviewAt, errorType: notebookQuestions.errorType, questionImageId: notebookQuestions.questionImageId, stuckPoint: notebookQuestions.stuckPoint }
+  }).from(notes).leftJoin(notebookQuestions, and4(eq6(notebookQuestions.noteId, notes.id), eq6(notebookQuestions.userId, userId))).where(and4(...conditions)).orderBy(desc2(notes.noteDate), desc2(notes.id)).limit(limit + 1);
+  const page2 = rows.slice(0, limit);
+  const ids = page2.map((row) => row.id);
+  const [tags, links] = await Promise.all([
+    ids.length ? db.select({ noteId: noteTags.noteId, tag: noteTags.tag }).from(noteTags).where(and4(eq6(noteTags.userId, userId), inArray3(noteTags.noteId, ids))) : Promise.resolve([]),
+    describeLinks(db, userId, page2)
+  ]);
+  const last = page2[page2.length - 1];
+  return {
+    items: page2.map(({ plainText, stats, ...row }) => ({
+      ...row,
+      snippet: plainText.replace(/\s+/g, " ").slice(0, notesConfig.list.snippetLength),
+      stats: parseStats(stats),
+      isFavorite: row.isFavorite === 1,
+      isPinned: row.isPinned === 1,
+      tags: tags.filter((item) => item.noteId === row.id).map((item) => item.tag),
+      topic: row.topicId !== null ? links.topicById.get(row.topicId)?.topic ?? null : null,
+      bookTitle: row.bookId ? links.bookTitle.get(row.bookId) ?? null : null,
+      question: row.question?.id ? { ...row.question, errorType: row.question.errorType } : null
+    })),
+    nextCursor: rows.length > limit && last ? `${new Date(last.noteDate).getTime()}_${last.id}` : null
+  };
+}
+var endOfToday = () => {
+  const date = /* @__PURE__ */ new Date();
+  date.setHours(23, 59, 59, 999);
+  return date;
+};
+async function updateNoteFlags(userId, id4, flags) {
+  const db = await requireDb2();
+  const set = {
+    ...flags.isFavorite !== void 0 ? { isFavorite: flags.isFavorite ? 1 : 0 } : {},
+    ...flags.isPinned !== void 0 ? { isPinned: flags.isPinned ? 1 : 0 } : {},
+    ...flags.reviewAt !== void 0 ? { reviewAt: flags.reviewAt } : {},
+    ...flags.archived !== void 0 ? { status: flags.archived ? "archived" : "active" } : {}
+  };
+  const [row] = await db.select({ id: notes.id }).from(notes).where(and4(eq6(notes.id, id4), eq6(notes.userId, userId))).limit(1);
+  if (!row) throw new NoteError("Not bulunamad\u0131.");
+  if (Object.keys(set).length === 0) return;
+  await db.update(notes).set(set).where(and4(eq6(notes.id, id4), eq6(notes.userId, userId)));
+}
+async function deleteNote(userId, id4) {
+  const db = await requireDb2();
+  const [row] = await db.select({ id: notes.id }).from(notes).where(and4(eq6(notes.id, id4), eq6(notes.userId, userId))).limit(1);
+  if (!row) throw new NoteError("Not bulunamad\u0131.");
+  await getAttachmentStorage().deleteForNote(userId, id4);
+  const [question] = await db.select({ id: notebookQuestions.id }).from(notebookQuestions).where(and4(eq6(notebookQuestions.userId, userId), eq6(notebookQuestions.noteId, id4))).limit(1);
+  if (question) {
+    await db.delete(questionAttempts).where(and4(eq6(questionAttempts.userId, userId), eq6(questionAttempts.questionId, question.id)));
+    await db.delete(notebookQuestions).where(eq6(notebookQuestions.id, question.id));
+  }
+  await db.delete(noteTags).where(and4(eq6(noteTags.userId, userId), eq6(noteTags.noteId, id4)));
+  await db.delete(notes).where(and4(eq6(notes.id, id4), eq6(notes.userId, userId)));
+}
+async function getNoteCalendar(userId, from, to) {
+  const db = await requireDb2();
+  const [written, reviews] = await Promise.all([
+    db.select({ noteDate: notes.noteDate }).from(notes).where(and4(eq6(notes.userId, userId), eq6(notes.status, "active"), gte3(notes.noteDate, from), lte2(notes.noteDate, to))),
+    db.select({ reviewAt: notes.reviewAt }).from(notes).where(and4(eq6(notes.userId, userId), eq6(notes.status, "active"), gte3(notes.reviewAt, from), lte2(notes.reviewAt, to)))
+  ]);
+  return { notes: written.map((row) => row.noteDate), reviews: reviews.map((row) => row.reviewAt).filter((value) => value !== null) };
+}
+async function listTags(userId) {
+  const db = await requireDb2();
+  const rows = await db.select({ tag: noteTags.tag, count: sql3`COUNT(*)::int` }).from(noteTags).where(eq6(noteTags.userId, userId)).groupBy(noteTags.tag).orderBy(desc2(sql3`COUNT(*)`)).limit(50);
+  return rows.map((row) => ({ tag: row.tag, count: Number(row.count) }));
+}
+async function getNoteStatsForAdmin(userId) {
+  const db = await requireDb2();
+  const rows = await db.select({ stats: notes.stats, updatedAt: notes.updatedAt }).from(notes).where(eq6(notes.userId, userId));
+  const parsed = rows.map((row) => parseStats(row.stats));
+  return {
+    notes: rows.length,
+    voiceNotes: parsed.filter((stats) => stats.voice > 0).length,
+    imageNotes: parsed.filter((stats) => stats.images > 0).length,
+    lastActivity: rows.reduce((latest, row) => !latest || row.updatedAt > latest ? row.updatedAt : latest, null)
+  };
+}
+async function createTaskFromNote(userId, noteId, input) {
+  const db = await requireDb2();
+  const [note] = await db.select({ id: notes.id, title: notes.title, topicId: notes.topicId }).from(notes).where(and4(eq6(notes.id, noteId), eq6(notes.userId, userId))).limit(1);
+  if (!note) throw new NoteError("Not bulunamad\u0131.");
+  const topicId = input.topicId ?? note.topicId;
+  if (!topicId) throw new NoteError("G\xF6rev olu\u015Fturmak i\xE7in \xF6nce notu bir konuya ba\u011Fla.");
+  const [topic] = await db.select({ topic: yksTopics.topic, subject: yksTopics.subject }).from(yksTopics).where(eq6(yksTopics.id, topicId)).limit(1);
+  if (!topic) throw new NoteError("Se\xE7ilen konu bulunamad\u0131.");
+  const minutes = Math.min(Math.max(input.minutes ?? notesConfig.task.defaultMinutes, 10), 240);
+  const date = await pickDayForTask(userId, minutes, input.when);
+  const title = `${topic.subject} \xB7 ${topic.topic} (nottan: ${note.title})`;
+  await insertPlanTask(userId, { date, title, subject: topic.subject, topic: topic.topic, kind: "Tekrar", minutes, planTitle: "Defter g\xF6revleri", planSummary: "Ak\u0131ll\u0131 Defter'deki notlardan olu\u015Fturulan \xE7al\u0131\u015Fma g\xF6revleri." });
+  return { date, title: title.slice(0, 180), minutes };
+}
+
+// server/notes/questionsDb.ts
+async function requireDb3() {
+  const db = await getDb();
+  if (!db) throw new NoteError("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
+  return db;
+}
+var startOfToday = () => {
+  const date = /* @__PURE__ */ new Date();
+  date.setHours(0, 0, 0, 0);
+  return date;
+};
+var endOfToday2 = () => {
+  const date = /* @__PURE__ */ new Date();
+  date.setHours(23, 59, 59, 999);
+  return date;
+};
+var clean = (value, max) => value?.trim() ? value.trim().slice(0, max) : null;
+async function assertAttachment(userId, id4, kind) {
+  if (!id4) return;
+  const attachment = await getAttachmentStorage().get(userId, id4);
+  if (!attachment || attachment.kind !== kind) throw new NoteError(kind === "image" ? "Foto\u011Fraf bulunamad\u0131." : "Ses kayd\u0131 bulunamad\u0131.");
+}
+async function resolveTopic(db, topicId) {
+  if (!topicId) return null;
+  const [topic] = await db.select({ id: yksTopics.id, subject: yksTopics.subject, topic: yksTopics.topic }).from(yksTopics).where(eq7(yksTopics.id, topicId)).limit(1);
+  if (!topic) throw new NoteError("Se\xE7ilen konu bulunamad\u0131.");
+  return topic;
+}
+function ocrTextOf(content, attachmentId) {
+  if (!attachmentId) return null;
+  try {
+    const doc = JSON.parse(content);
+    const image = doc.content.find((node) => node.type === "noteImage" && Number(node.attrs?.attachmentId) === attachmentId);
+    return typeof image?.attrs?.ocrText === "string" ? image.attrs.ocrText : null;
+  } catch {
+    return null;
+  }
+}
+async function createQuestion(userId, input) {
+  const db = await requireDb3();
+  const [existing] = await db.select({ id: notebookQuestions.id }).from(notebookQuestions).innerJoin(notes, eq7(notes.id, notebookQuestions.noteId)).where(and5(eq7(notebookQuestions.userId, userId), eq7(notes.userId, userId), eq7(notes.clientId, input.clientId))).limit(1);
+  if (existing) return await getQuestion(userId, existing.id);
+  const stuckPoint = clean(input.stuckPoint, 4e3);
+  if (!input.questionImageId && !stuckPoint) throw new NoteError("Sorunun foto\u011Fraf\u0131n\u0131 ekle ya da nerede tak\u0131ld\u0131\u011F\u0131n\u0131 yaz.");
+  await assertAttachment(userId, input.questionImageId, "image");
+  await assertAttachment(userId, input.solutionImageId, "image");
+  await assertAttachment(userId, input.voiceAttachmentId, "audio");
+  const topic = await resolveTopic(db, input.topicId);
+  const subject2 = clean(input.subject, 80) ?? topic?.subject ?? null;
+  const now = /* @__PURE__ */ new Date();
+  const fields2 = {
+    subject: subject2,
+    topicId: topic?.id ?? null,
+    questionImageId: input.questionImageId ?? null,
+    solutionImageId: input.solutionImageId ?? null,
+    voiceAttachmentId: input.voiceAttachmentId ?? null,
+    voiceDuration: input.voiceAttachmentId ? Math.round(input.voiceDuration ?? 0) : null,
+    stuckPoint,
+    solutionText: clean(input.solutionText, 4e3),
+    errorType: input.errorType ?? null,
+    errorTypeSource: input.errorType ? input.errorTypeSource ?? "student" : null,
+    difficulty: input.difficulty ?? null
+  };
+  const saved = await saveNote(userId, {
+    clientId: input.clientId,
+    title: questionTitle(subject2, topic?.topic ?? null, now),
+    content: buildQuestionDoc({ ...fields2, questionOcrText: clean(input.questionOcrText, 5e3) }),
+    noteDate: now,
+    tags: ["soru"],
+    templateKey: QUESTION_TEMPLATE_KEY,
+    subject: subject2,
+    topicId: topic?.id ?? null,
+    bookId: input.bookId ?? null,
+    studySessionId: input.studySessionId ?? null
+  });
+  await db.insert(notebookQuestions).values({ userId, noteId: saved.id, ...fields2, aiTopicId: input.aiTopicId ?? null, nextReviewAt: firstReviewAt(now) }).onConflictDoUpdate({ target: notebookQuestions.noteId, set: fields2 });
+  const [row] = await db.select({ id: notebookQuestions.id }).from(notebookQuestions).where(and5(eq7(notebookQuestions.userId, userId), eq7(notebookQuestions.noteId, saved.id))).limit(1);
+  if (!row) throw new NoteError("Soru kaydedilemedi.");
+  return await getQuestion(userId, row.id);
+}
+async function updateQuestion(userId, id4, patch) {
+  const db = await requireDb3();
+  const [row] = await db.select().from(notebookQuestions).where(and5(eq7(notebookQuestions.id, id4), eq7(notebookQuestions.userId, userId))).limit(1);
+  if (!row) throw new NoteError("Soru bulunamad\u0131.");
+  const [note] = await db.select({ clientId: notes.clientId, content: notes.content, noteDate: notes.noteDate, bookId: notes.bookId, studySessionId: notes.studySessionId, isFavorite: notes.isFavorite, isPinned: notes.isPinned }).from(notes).where(and5(eq7(notes.id, row.noteId), eq7(notes.userId, userId))).limit(1);
+  if (!note) throw new NoteError("Soru bulunamad\u0131.");
+  if (patch.solutionImageId !== void 0) await assertAttachment(userId, patch.solutionImageId, "image");
+  const topicChanged = patch.topicId !== void 0;
+  const topic = await resolveTopic(db, topicChanged ? patch.topicId : row.topicId);
+  const subject2 = patch.subject !== void 0 ? clean(patch.subject, 80) ?? topic?.subject ?? null : topicChanged && topic ? topic.subject : row.subject;
+  const errorType = patch.errorType !== void 0 ? patch.errorType : row.errorType;
+  const next = {
+    subject: subject2,
+    topicId: topic?.id ?? null,
+    stuckPoint: patch.stuckPoint !== void 0 ? clean(patch.stuckPoint, 4e3) : row.stuckPoint,
+    solutionText: patch.solutionText !== void 0 ? clean(patch.solutionText, 4e3) : row.solutionText,
+    solutionImageId: patch.solutionImageId !== void 0 ? patch.solutionImageId : row.solutionImageId,
+    errorType,
+    errorTypeSource: errorType ? patch.errorType !== void 0 ? patch.errorTypeSource ?? "student" : row.errorTypeSource : null,
+    difficulty: patch.difficulty !== void 0 ? patch.difficulty : row.difficulty
+  };
+  if (!row.questionImageId && !next.stuckPoint) throw new NoteError("Foto\u011Frafs\u0131z bir soruda tak\u0131ld\u0131\u011F\u0131n yer bo\u015F b\u0131rak\u0131lamaz.");
+  await saveNote(userId, {
+    clientId: note.clientId,
+    title: questionTitle(next.subject, topic?.topic ?? null, row.createdAt),
+    content: buildQuestionDoc({ ...row, ...next, questionOcrText: ocrTextOf(note.content, row.questionImageId) }),
+    noteDate: note.noteDate,
+    tags: ["soru"],
+    templateKey: QUESTION_TEMPLATE_KEY,
+    subject: next.subject,
+    topicId: next.topicId,
+    bookId: note.bookId,
+    studySessionId: note.studySessionId,
+    isFavorite: note.isFavorite === 1,
+    isPinned: note.isPinned === 1
+  });
+  await db.update(notebookQuestions).set(next).where(eq7(notebookQuestions.id, id4));
+  return await getQuestion(userId, id4);
+}
+var questionColumns = {
+  id: notebookQuestions.id,
+  noteId: notebookQuestions.noteId,
+  subject: notebookQuestions.subject,
+  topicId: notebookQuestions.topicId,
+  topic: yksTopics.topic,
+  questionImageId: notebookQuestions.questionImageId,
+  solutionImageId: notebookQuestions.solutionImageId,
+  voiceAttachmentId: notebookQuestions.voiceAttachmentId,
+  voiceDuration: notebookQuestions.voiceDuration,
+  stuckPoint: notebookQuestions.stuckPoint,
+  solutionText: notebookQuestions.solutionText,
+  errorType: notebookQuestions.errorType,
+  errorTypeSource: notebookQuestions.errorTypeSource,
+  difficulty: notebookQuestions.difficulty,
+  status: notebookQuestions.status,
+  reviewStage: notebookQuestions.reviewStage,
+  nextReviewAt: notebookQuestions.nextReviewAt,
+  attemptCount: notebookQuestions.attemptCount,
+  lastResult: notebookQuestions.lastResult,
+  lastAttemptAt: notebookQuestions.lastAttemptAt,
+  aiSolution: notebookQuestions.aiSolution,
+  aiSolutionAt: notebookQuestions.aiSolutionAt,
+  aiSolutionModel: notebookQuestions.aiSolutionModel,
+  createdAt: notebookQuestions.createdAt
+};
+var shape = (row) => ({ ...row, errorType: row.errorType, aiSolution: row.aiSolution ? parseAiSolution(row.aiSolution) : null });
+async function getQuestion(userId, id4) {
+  const db = await requireDb3();
+  const [row] = await db.select(questionColumns).from(notebookQuestions).leftJoin(yksTopics, eq7(yksTopics.id, notebookQuestions.topicId)).where(and5(eq7(notebookQuestions.id, id4), eq7(notebookQuestions.userId, userId))).limit(1);
+  if (!row) return null;
+  const attempts = await db.select({ result: questionAttempts.result, sawSolution: questionAttempts.sawSolution, hintLevel: questionAttempts.hintLevel, attemptedAt: questionAttempts.attemptedAt }).from(questionAttempts).where(and5(eq7(questionAttempts.userId, userId), eq7(questionAttempts.questionId, id4))).orderBy(desc3(questionAttempts.attemptedAt), desc3(questionAttempts.id)).limit(20);
+  return { ...shape(row), attempts: attempts.map((attempt) => ({ ...attempt, sawSolution: attempt.sawSolution === 1 })) };
+}
+async function getSolveContext(userId, id4) {
+  const db = await requireDb3();
+  const [row] = await db.select({ questionImageId: notebookQuestions.questionImageId, stuckPoint: notebookQuestions.stuckPoint, subject: notebookQuestions.subject, topic: yksTopics.topic, exam: yksTopics.exam, content: notes.content, aiSolution: notebookQuestions.aiSolution, aiSolutionModel: notebookQuestions.aiSolutionModel, difficulty: notebookQuestions.difficulty, lastResult: notebookQuestions.lastResult }).from(notebookQuestions).innerJoin(notes, eq7(notes.id, notebookQuestions.noteId)).leftJoin(yksTopics, eq7(yksTopics.id, notebookQuestions.topicId)).where(and5(eq7(notebookQuestions.id, id4), eq7(notebookQuestions.userId, userId))).limit(1);
+  if (!row) throw new NoteError("Soru bulunamad\u0131.");
+  return { questionImageId: row.questionImageId, ocrText: ocrTextOf(row.content, row.questionImageId), stuckPoint: row.stuckPoint, subject: row.subject, topic: row.topic, aiSolution: parseAiSolution(row.aiSolution), aiSolutionModel: row.aiSolutionModel, exam: row.exam, difficulty: row.difficulty, lastResult: row.lastResult };
+}
+async function saveAiSolution(userId, id4, solution, aiSolutionModel = null) {
+  const db = await requireDb3();
+  const aiSolutionAt = /* @__PURE__ */ new Date();
+  await db.update(notebookQuestions).set({ aiSolution: JSON.stringify(solution), aiSolutionAt, aiSolutionModel }).where(and5(eq7(notebookQuestions.id, id4), eq7(notebookQuestions.userId, userId)));
+  return { aiSolution: solution, aiSolutionAt, aiSolutionModel };
+}
+async function getQuestionIdByNote(userId, noteId) {
+  const db = await requireDb3();
+  const [row] = await db.select({ id: notebookQuestions.id }).from(notebookQuestions).where(and5(eq7(notebookQuestions.userId, userId), eq7(notebookQuestions.noteId, noteId))).limit(1);
+  return row?.id ?? null;
+}
+async function listQuestions(userId, filters) {
+  const db = await requireDb3();
+  const limit = Math.min(Math.max(filters.limit ?? 30, 1), 100);
+  const conditions = [eq7(notebookQuestions.userId, userId)];
+  if (filters.status === "open" || filters.due) conditions.push(ne2(notebookQuestions.status, "mastered"));
+  if (filters.status === "mastered") conditions.push(eq7(notebookQuestions.status, "mastered"));
+  if (filters.due) conditions.push(and5(isNotNull2(notebookQuestions.nextReviewAt), lte3(notebookQuestions.nextReviewAt, endOfToday2())));
+  conditions.push(...questionSubject(filters.subject));
+  if (filters.topicId) conditions.push(eq7(notebookQuestions.topicId, filters.topicId));
+  if (!filters.due && filters.cursor) conditions.push(lt4(notebookQuestions.id, filters.cursor));
+  const rows = await db.select(questionColumns).from(notebookQuestions).leftJoin(yksTopics, eq7(yksTopics.id, notebookQuestions.topicId)).where(and5(...conditions)).orderBy(...filters.due ? [asc(notebookQuestions.nextReviewAt), asc(notebookQuestions.id)] : [desc3(notebookQuestions.id)]).limit(limit + 1);
+  const page2 = rows.slice(0, limit).map(shape);
+  return { items: page2, nextCursor: !filters.due && rows.length > limit ? page2[page2.length - 1]?.id ?? null : null };
+}
+async function deleteQuestion(userId, id4) {
+  const db = await requireDb3();
+  const [row] = await db.select({ noteId: notebookQuestions.noteId }).from(notebookQuestions).where(and5(eq7(notebookQuestions.id, id4), eq7(notebookQuestions.userId, userId))).limit(1);
+  if (!row) throw new NoteError("Soru bulunamad\u0131.");
+  await deleteNote(userId, row.noteId);
+}
+async function recordAttempt(userId, id4, input) {
+  const db = await requireDb3();
+  const [row] = await db.select({ reviewStage: notebookQuestions.reviewStage }).from(notebookQuestions).where(and5(eq7(notebookQuestions.id, id4), eq7(notebookQuestions.userId, userId))).limit(1);
+  if (!row) throw new NoteError("Soru bulunamad\u0131.");
+  const now = /* @__PURE__ */ new Date();
+  const hintLevel = Math.min(Math.max(Math.round(input.hintLevel ?? 0), 0), HINT_LEVELS.solution);
+  const next = scheduleAfterAttempt(row, input.result, input.sawSolution, now, hintLevel);
+  await db.insert(questionAttempts).values({ userId, questionId: id4, result: input.result, sawSolution: input.sawSolution ? 1 : 0, hintLevel, seconds: input.seconds ? Math.min(Math.round(input.seconds), 7200) : null, stageBefore: row.reviewStage, attemptedAt: now });
+  await db.update(notebookQuestions).set({ ...next, attemptCount: sql4`${notebookQuestions.attemptCount} + 1`, lastResult: input.result, lastAttemptAt: now }).where(eq7(notebookQuestions.id, id4));
+  return next;
+}
+var questionSubject = (subject2) => subject2 === void 0 ? [] : [subject2 === null ? isNull4(notebookQuestions.subject) : eq7(notebookQuestions.subject, subject2)];
+async function getErrorMap(userId, days, subject2) {
+  const db = await requireDb3();
+  const conditions = [eq7(notebookQuestions.userId, userId), ...questionSubject(subject2)];
+  if (days) conditions.push(gte4(notebookQuestions.createdAt, new Date(Date.now() - days * 864e5)));
+  const rows = await db.select({ subject: notebookQuestions.subject, topicId: notebookQuestions.topicId, topic: yksTopics.topic, errorType: notebookQuestions.errorType, status: notebookQuestions.status }).from(notebookQuestions).leftJoin(yksTopics, eq7(yksTopics.id, notebookQuestions.topicId)).where(and5(...conditions));
+  return buildErrorMap(rows.map((row) => ({ ...row, status: row.status })));
+}
+async function getNotebookPlanSignal(userId) {
+  return describeErrorMapForPlan(await getErrorMap(userId, 60));
+}
+async function todaysReviewTask(db, userId) {
+  const [task] = await db.select({ id: studyPlanSessions.id, status: studyPlanSessions.status, plannedMinutes: studyPlanSessions.plannedMinutes, title: studyPlanSessions.title }).from(studyPlanSessions).where(and5(eq7(studyPlanSessions.userId, userId), eq7(studyPlanSessions.kind, NOTEBOOK_REVIEW_TASK_KIND), gte4(studyPlanSessions.sessionDate, startOfToday()), lte3(studyPlanSessions.sessionDate, endOfToday2()))).orderBy(desc3(studyPlanSessions.id)).limit(1);
+  return task ?? null;
+}
+var dueCondition = () => and5(ne2(notebookQuestions.status, "mastered"), isNotNull2(notebookQuestions.nextReviewAt), lte3(notebookQuestions.nextReviewAt, endOfToday2()));
+async function countDue(db, userId, subject2) {
+  const [row] = await db.select({ count: sql4`COUNT(*)::int` }).from(notebookQuestions).where(and5(eq7(notebookQuestions.userId, userId), dueCondition(), ...questionSubject(subject2)));
+  return Number(row?.count ?? 0);
+}
+async function getReviewSummary(userId, subject2) {
+  const db = await requireDb3();
+  const [due, task, totals] = await Promise.all([
+    countDue(db, userId, subject2),
+    todaysReviewTask(db, userId),
+    db.select({ status: notebookQuestions.status, count: sql4`COUNT(*)::int` }).from(notebookQuestions).where(and5(eq7(notebookQuestions.userId, userId), ...questionSubject(subject2))).groupBy(notebookQuestions.status)
+  ]);
+  const byStatus = Object.fromEntries(totals.map((row) => [row.status, Number(row.count)]));
+  const reviewCount = Math.min(due, MAX_QUESTIONS_PER_REVIEW);
+  return {
+    due,
+    reviewCount,
+    minutes: reviewTaskMinutes(reviewCount),
+    task,
+    totals: { unsolved: byStatus.unsolved ?? 0, learning: byStatus.learning ?? 0, mastered: byStatus.mastered ?? 0 }
+  };
+}
+async function addReviewTask(userId) {
+  const db = await requireDb3();
+  const existing = await todaysReviewTask(db, userId);
+  if (existing) return { created: false, task: existing };
+  const due = Math.min(await countDue(db, userId), MAX_QUESTIONS_PER_REVIEW);
+  if (due === 0) throw new NoteError("Bug\xFCn tekrar bekleyen soru yok.");
+  const minutes = reviewTaskMinutes(due);
+  const date = await pickDayForTask(userId, minutes, "today");
+  await insertPlanTask(userId, { date, title: `\u{1F4D3} Defterim \xB7 ${due} soru tekrar\u0131`, subject: "Defterim", topic: "Soru tekrar\u0131", kind: NOTEBOOK_REVIEW_TASK_KIND, minutes, planTitle: "Defter g\xF6revleri", planSummary: "Ak\u0131ll\u0131 Defter'deki notlardan ve sorulardan olu\u015Fturulan \xE7al\u0131\u015Fma g\xF6revleri." });
+  return { created: true, task: await todaysReviewTask(db, userId) };
+}
+async function finishReviewSession(userId, input) {
+  const db = await requireDb3();
+  const task = await todaysReviewTask(db, userId);
+  if (!task || task.status !== "planned") return { taskCompleted: false };
+  const total = input.solved + input.partial + input.failed;
+  await db.update(studyPlanSessions).set({ status: "completed", completedAt: /* @__PURE__ */ new Date(), actualMinutes: Math.max(1, Math.round(input.minutes)), actualQuestions: total, correct: input.solved, wrong: input.failed, blank: input.partial }).where(and5(eq7(studyPlanSessions.id, task.id), eq7(studyPlanSessions.userId, userId)));
+  return { taskCompleted: true };
+}
+async function getSubjectSummary(userId) {
+  const db = await requireDb3();
+  const isQuestion = sql4`(${notes.templateKey} IS NOT DISTINCT FROM ${sql4.raw(`'${QUESTION_TEMPLATE_KEY}'`)})::int`;
+  const [noteRows, dueRows] = await Promise.all([
+    db.select({ subject: notes.subject, isQuestion, count: sql4`COUNT(*)::int` }).from(notes).where(and5(eq7(notes.userId, userId), eq7(notes.status, "active"))).groupBy(notes.subject, isQuestion),
+    db.select({ subject: notebookQuestions.subject, count: sql4`COUNT(*)::int` }).from(notebookQuestions).where(and5(eq7(notebookQuestions.userId, userId), dueCondition())).groupBy(notebookQuestions.subject)
+  ]);
+  const bySubject = /* @__PURE__ */ new Map();
+  const entry = (subject2) => {
+    const key = subject2?.trim() || null;
+    const found = bySubject.get(key) ?? { subject: key, notes: 0, questions: 0, due: 0 };
+    bySubject.set(key, found);
+    return found;
+  };
+  for (const row of noteRows) {
+    const item = entry(row.subject);
+    if (Number(row.isQuestion) === 1) item.questions += Number(row.count);
+    else item.notes += Number(row.count);
+  }
+  for (const row of dueRows) entry(row.subject).due += Number(row.count);
+  return Array.from(bySubject.values());
+}
+async function moveNoteToSubject(userId, noteId, subject2) {
+  const db = await requireDb3();
+  const target = clean(subject2, 80);
+  const [note] = await db.select({ id: notes.id, topicId: notes.topicId, templateKey: notes.templateKey }).from(notes).where(and5(eq7(notes.id, noteId), eq7(notes.userId, userId))).limit(1);
+  if (!note) throw new NoteError("Not bulunamad\u0131.");
+  const topic = note.topicId ? await resolveTopic(db, note.topicId).catch(() => null) : null;
+  const keepTopic = Boolean(topic && target && topic.subject === target);
+  if (note.templateKey === QUESTION_TEMPLATE_KEY) {
+    const questionId = await getQuestionIdByNote(userId, noteId);
+    if (questionId) {
+      await updateQuestion(userId, questionId, { subject: target, topicId: keepTopic ? topic.id : null });
+      return { subject: target };
+    }
+  }
+  await db.update(notes).set({ subject: target, ...keepTopic ? {} : { topicId: null } }).where(and5(eq7(notes.id, noteId), eq7(notes.userId, userId)));
+  return { subject: target };
+}
+
+// server/digest/teacherDigest.ts
+import { and as and7, desc as desc5, eq as eq9, inArray as inArray5, isNotNull as isNotNull3, isNull as isNull6, lt as lt6, or as or2 } from "drizzle-orm";
+
+// shared/org.ts
+var ORG_ROLES = ["owner", "admin", "coordinator", "teacher", "student"];
+var STAFF_ROLES = ["owner", "admin", "coordinator", "teacher"];
+var INVITABLE_ROLES = ["admin", "coordinator", "teacher", "student"];
+var ROLE_RANK = { student: 0, teacher: 1, coordinator: 2, admin: 3, owner: 4 };
+var ORG_KINDS = ["dershane", "okul", "etut", "kocluk", "diger"];
+var CLASS_GRADES = ["9", "10", "11", "12", "Mezun"];
+var CLASS_TRACKS = ["SAY", "EA", "S\xD6Z", "D\u0130L", "TYT"];
+var isStaffRole = (role) => role !== "student";
+var hasRole = (role, minimum) => ROLE_RANK[role] >= ROLE_RANK[minimum];
+var seesAllStudents = (role) => hasRole(role, "coordinator");
+function canAssignRole(actor, targetCurrent, targetNext) {
+  if (!hasRole(actor, "admin")) return false;
+  if (targetNext === "owner") return false;
+  return ROLE_RANK[targetCurrent] < ROLE_RANK[actor] && ROLE_RANK[targetNext] < ROLE_RANK[actor];
+}
+function canInviteRole(actor, role) {
+  if (role === "student") return hasRole(actor, "teacher");
+  return hasRole(actor, "admin") && ROLE_RANK[role] < ROLE_RANK[actor];
+}
+var CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+function generateInviteCode(random) {
+  let code = "";
+  for (let index2 = 0; index2 < 8; index2++) code += CODE_ALPHABET[random(CODE_ALPHABET.length)];
+  return `${code.slice(0, 4)}-${code.slice(4)}`;
+}
+var normalizeInviteCode = (code) => code.toLocaleUpperCase("en-US").replace(/[^A-Z0-9]/g, "");
+function invitationProblem(invitation, now = /* @__PURE__ */ new Date()) {
+  if (invitation.revokedAt) return "Bu davet kodu iptal edilmi\u015F.";
+  if (invitation.expiresAt.getTime() <= now.getTime()) return "Bu davet kodunun s\xFCresi dolmu\u015F.";
+  if (invitation.usedCount >= invitation.maxUses) return "Bu davet kodu kullan\u0131m s\u0131n\u0131r\u0131na ula\u015Fm\u0131\u015F.";
+  return null;
+}
+var ORG_PLANS = ["trial", "standard", "pro"];
+var ORG_PLAN_LABELS = { trial: "Deneme", standard: "Standart", pro: "Pro" };
+var ORG_PLAN_DEFAULT_CREDITS = { trial: 500, standard: 5e3, pro: 2e4 };
+var ORG_PLAN_RANK = { trial: 0, standard: 1, pro: 2 };
+function canRequestPlan(current, requested) {
+  if (requested === "trial") return false;
+  return ORG_PLAN_RANK[requested] >= ORG_PLAN_RANK[current];
+}
+function renewedMembershipEnd(currentEnd, now = /* @__PURE__ */ new Date()) {
+  const base = currentEnd && currentEnd.getTime() > now.getTime() ? new Date(currentEnd) : new Date(now);
+  base.setFullYear(base.getFullYear() + 1);
+  return base;
+}
+var ORG_CREDIT_COSTS = {
+  NOTE_VOICE: 1,
+  NOTE_OCR: 2,
+  NOTE_AI: 2,
+  OCR_EXAM_IMPORT: 3,
+  OCR_BOOK_IMPORT: 3,
+  AI_STUDY_PLAN: 5
+};
+function membershipState(org, now = /* @__PURE__ */ new Date()) {
+  if (org.membershipStartsAt && new Date(org.membershipStartsAt).getTime() > now.getTime()) return "not_started";
+  if (org.membershipEndsAt) {
+    const end = new Date(org.membershipEndsAt);
+    end.setHours(23, 59, 59, 999);
+    if (end.getTime() < now.getTime()) return "expired";
+  }
+  return "active";
+}
+function creditPeriodStart(now = /* @__PURE__ */ new Date()) {
+  return new Date(now.getFullYear(), now.getMonth(), 1);
+}
+function creditDecision(input) {
+  if (input.monthly <= 0) return { ok: false, reason: "no_pool" };
+  if (input.usedByOrg + input.cost > input.monthly) return { ok: false, reason: "pool_empty" };
+  if (input.cap !== null && input.usedByStudent + input.cost > input.cap) return { ok: false, reason: "student_cap" };
+  return { ok: true };
+}
+var RISK_RULES = { inactiveDays: 7, lowAdherence: 40, netDrop: 5 };
+var RISK_LABELS = { inactive: "7 g\xFCnd\xFCr etkinlik yok", low_adherence: "Plan uyumu d\xFC\u015F\xFCk", net_drop: "Net d\xFC\u015F\xFC\u015F\xFC" };
+var DAY = 24 * 60 * 60 * 1e3;
+function latestOf(exams, kind) {
+  const sorted = exams.filter((exam) => exam.exam === kind).sort((a, b) => b.examDate.getTime() - a.examDate.getTime());
+  if (!sorted[0]) return null;
+  return { net: sorted[0].net, delta: sorted[1] ? Number((sorted[0].net - sorted[1].net).toFixed(2)) : null, date: sorted[0].examDate };
+}
+function summarizeStudent(signals, now = /* @__PURE__ */ new Date()) {
+  const lastTyt = latestOf(signals.exams, "TYT");
+  const lastAyt = latestOf(signals.exams, "AYT");
+  const weekMinutes = signals.logs.filter((log) => now.getTime() - log.studyDate.getTime() <= 7 * DAY).reduce((sum, log) => sum + log.minutes, 0);
+  const due = signals.weekSessions.filter((session) => new Date(session.sessionDate).getTime() <= now.getTime());
+  const adherence = due.length ? calculatePlanAdherence(due).overallScore : null;
+  const lastLog = signals.logs.reduce((latest, log) => !latest || log.studyDate > latest ? log.studyDate : latest, null);
+  const candidates = [lastLog, signals.lastSignedIn].filter((value) => Boolean(value));
+  const lastActivityAt = candidates.length ? new Date(Math.max(...candidates.map((value) => value.getTime()))) : null;
+  const risks = [];
+  if (!lastActivityAt || now.getTime() - lastActivityAt.getTime() > RISK_RULES.inactiveDays * DAY) risks.push("inactive");
+  if (adherence !== null && adherence < RISK_RULES.lowAdherence) risks.push("low_adherence");
+  if ([lastTyt, lastAyt].some((exam) => exam?.delta !== null && exam?.delta !== void 0 && exam.delta <= -RISK_RULES.netDrop)) risks.push("net_drop");
+  return { lastTyt, lastAyt, weekMinutes, adherence, plannedThisWeek: due.length, weakTopicCount: signals.weakTopicCount, lastActivityAt, risks };
+}
+
+// shared/teacherDigest.ts
+var MAX_FOLLOW_UPS = 10;
+function buildTeacherDigest(students) {
+  const total = students.length;
+  const activeCount = students.filter((student) => student.summary.weekMinutes > 0).length;
+  const totalMinutes = students.reduce((sum, student) => sum + student.summary.weekMinutes, 0);
+  const adherences = students.map((student) => student.summary.adherence).filter((value) => value !== null);
+  const averageAdherence = adherences.length ? Math.round(adherences.reduce((sum, value) => sum + value, 0) / adherences.length) : null;
+  const followUps = students.filter((student) => student.summary.risks.length > 0).sort((a, b) => b.summary.risks.length - a.summary.risks.length || a.summary.weekMinutes - b.summary.weekMinutes).slice(0, MAX_FOLLOW_UPS).map((student) => ({ name: student.name, reasons: student.summary.risks.map((risk) => RISK_LABELS[risk]) }));
+  const topStudents = students.filter((student) => student.summary.weekMinutes > 0).sort((a, b) => b.summary.weekMinutes - a.summary.weekMinutes).slice(0, 3).map((student) => ({ name: student.name, minutes: student.summary.weekMinutes }));
+  const followUpCount = students.filter((student) => student.summary.risks.length > 0).length;
+  const headline = total === 0 ? "Hen\xFCz takip etti\u011Fin \xF6\u011Frenci yok." : followUpCount === 0 ? `Bu hafta ${total} \xF6\u011Frencinin ${activeCount}'i \xE7al\u0131\u015Ft\u0131; takip gerektiren \xF6\u011Frenci yok.` : `Bu hafta ${total} \xF6\u011Frencinin ${activeCount}'i \xE7al\u0131\u015Ft\u0131; ${followUpCount} \xF6\u011Frenci takip bekliyor.`;
+  return { total, activeCount, totalMinutes, averageAdherence, followUps, topStudents, headline };
+}
+
+// server/_core/emails/teacherDigestEmail.ts
+var escapeHtml3 = (value) => value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+function buildTeacherDigestEmail({ to, name, orgName, digest, rangeLabel: rangeLabel2, panelUrl, unsubscribeUrl }) {
+  const greeting = name ? `Merhaba ${name},` : "Merhaba,";
+  const subject2 = `${orgName} \xB7 haftal\u0131k s\u0131n\u0131f \xF6zeti \xB7 ${rangeLabel2}`;
+  const stats = [
+    ["Bu hafta \xE7al\u0131\u015Fan", `${digest.activeCount} / ${digest.total}`],
+    ["Toplam \xE7al\u0131\u015Fma", formatMinutes(digest.totalMinutes)],
+    ["Ortalama plan uyumu", digest.averageAdherence !== null ? `%${digest.averageAdherence}` : "\u2014"],
+    ["Takip bekleyen", String(digest.followUps.length)]
+  ];
+  const text3 = [
+    greeting,
+    "",
+    `${orgName} \xB7 ${rangeLabel2}: ${digest.headline}`,
+    "",
+    ...stats.map(([label, value]) => `\u2022 ${label}: ${value}`),
+    ...digest.followUps.length ? ["", "Takip bekleyen \xF6\u011Frenciler:", ...digest.followUps.map((student) => `\u2022 ${student.name}: ${student.reasons.join(", ")}`)] : [],
+    ...digest.topStudents.length ? ["", "Haftan\u0131n en \xE7ok \xE7al\u0131\u015Fanlar\u0131:", ...digest.topStudents.map((student) => `\u2022 ${student.name} (${formatMinutes(student.minutes)})`)] : [],
+    "",
+    `Kurum Paneli: ${panelUrl}`,
+    "",
+    `Bu \xF6zeti her pazar al\u0131yorsun. Almak istemiyorsan: ${unsubscribeUrl}`,
+    "\u2014 Pusula YKS \xB7 Kurum Paneli"
+  ].join("\n");
+  const statCell = ([label, value]) => `<td width="50%" valign="top" style="background:#f3f6f5;border-radius:12px;padding:12px 14px;"><div style="font-size:12px;color:#5d6670;">${escapeHtml3(label)}</div><div style="margin-top:4px;font-size:18px;font-weight:700;color:#18202a;">${escapeHtml3(value)}</div></td>`;
+  const followRows = digest.followUps.map((student) => `<tr><td style="padding:8px 0;border-top:1px solid #e6ebe9;font-size:14px;font-weight:600;color:#18202a;">${escapeHtml3(student.name)}</td><td align="right" style="padding:8px 0;border-top:1px solid #e6ebe9;font-size:12px;color:#b42318;">${escapeHtml3(student.reasons.join(" \xB7 "))}</td></tr>`).join("");
+  const topRows = digest.topStudents.map((student) => `<tr><td style="padding:6px 0;font-size:14px;color:#18202a;">${escapeHtml3(student.name)}</td><td align="right" style="padding:6px 0;font-size:13px;font-weight:700;color:#17625f;">${escapeHtml3(formatMinutes(student.minutes))}</td></tr>`).join("");
+  const html = `<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml3(subject2)}</title>
+</head>
+<body style="margin:0;padding:0;background:#f3f6f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#18202a;">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0;">${escapeHtml3(digest.headline)}</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f6f5;">
+  <tr><td align="center" style="padding:32px 16px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;">
+      <tr><td style="padding:0 4px 20px 4px;">
+        <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+          <td style="width:36px;height:36px;border-radius:10px;background:#17625f;color:#ffffff;font-size:17px;font-weight:700;text-align:center;vertical-align:middle;">P</td>
+          <td style="padding-left:10px;font-size:15px;font-weight:700;color:#18202a;">${escapeHtml3(orgName)}</td>
+        </tr></table>
+      </td></tr>
+      <tr><td style="background:#ffffff;border-radius:20px;padding:28px 22px;border:1px solid #e6ebe9;">
+        <div style="font-size:13px;font-weight:600;color:#17625f;">Haftal\u0131k s\u0131n\u0131f \xF6zeti \xB7 ${escapeHtml3(rangeLabel2)}</div>
+        <h1 style="margin:6px 0 10px 0;font-size:21px;line-height:1.3;font-weight:700;color:#18202a;">${escapeHtml3(digest.headline)}</h1>
+        <p style="margin:0 0 14px 0;font-size:14px;line-height:1.6;color:#3f4852;">${escapeHtml3(greeting)} takip etti\u011Fin \xF6\u011Frencilerin ge\xE7en yedi g\xFCn\xFC a\u015Fa\u011F\u0131da.</p>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="8" style="margin:0 -8px;width:calc(100% + 16px);">
+          <tr>${statCell(stats[0])}${statCell(stats[1])}</tr>
+          <tr>${statCell(stats[2])}${statCell(stats[3])}</tr>
+        </table>
+        ${followRows ? `<div style="margin:22px 0 4px 0;font-size:14px;font-weight:700;color:#18202a;">Takip bekleyen \xF6\u011Frenciler</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0">${followRows}</table>` : ""}
+        ${topRows ? `<div style="margin:22px 0 4px 0;font-size:14px;font-weight:700;color:#18202a;">Haftan\u0131n en \xE7ok \xE7al\u0131\u015Fanlar\u0131</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0">${topRows}</table>` : ""}
+        <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin-top:22px;"><tr><td align="center">
+          <a href="${escapeHtml3(panelUrl)}" style="display:inline-block;background:#17625f;color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;padding:14px 28px;border-radius:12px;">Kurum Paneli'ni a\xE7</a>
+        </td></tr></table>
+      </td></tr>
+      <tr><td align="center" style="padding:20px 8px 0 8px;font-size:11px;line-height:1.6;color:#7c858e;">Pusula YKS \xB7 Kurum Paneli<br>Bu \xF6zeti her pazar al\u0131yorsun. <a href="${escapeHtml3(unsubscribeUrl)}" style="color:#7c858e;">Almak istemiyorum</a></td></tr>
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>`;
+  return { to, subject: subject2, html, text: text3 };
+}
+
+// server/org/orgDb.ts
+import { and as and6, desc as desc4, eq as eq8, gte as gte5, inArray as inArray4, isNull as isNull5, lt as lt5, sql as sql5 } from "drizzle-orm";
+var OrgError = class extends Error {
+};
+async function requireDb4() {
+  const db = await getDb();
+  if (!db) throw new OrgError("Veritaban\u0131na ula\u015F\u0131lamad\u0131.");
+  return db;
+}
+var membershipColumns = { orgId: organizationMembers.orgId, orgName: organizations.name, role: organizationMembers.role, membershipStartsAt: organizations.membershipStartsAt, membershipEndsAt: organizations.membershipEndsAt };
+var toMembership = (row) => ({ orgId: row.orgId, orgName: row.orgName, role: row.role, state: membershipState(row) });
+async function getActiveMembership(userId, orgId) {
+  const db = await requireDb4();
+  const [row] = await db.select(membershipColumns).from(organizationMembers).innerJoin(organizations, eq8(organizations.id, organizationMembers.orgId)).where(and6(eq8(organizationMembers.userId, userId), eq8(organizationMembers.orgId, orgId), eq8(organizationMembers.status, "active"), eq8(organizations.status, "active"))).limit(1);
+  return row ? toMembership(row) : null;
+}
+async function listMyMemberships(userId) {
+  const db = await requireDb4();
+  const rows = await db.select({ ...membershipColumns, kvkkVersion: organizationMembers.kvkkVersion, consentAt: organizationMembers.consentAt }).from(organizationMembers).innerJoin(organizations, eq8(organizations.id, organizationMembers.orgId)).where(and6(eq8(organizationMembers.userId, userId), eq8(organizationMembers.status, "active"), eq8(organizations.status, "active")));
+  return rows.map((row) => ({ ...toMembership(row), kvkkVersion: row.kvkkVersion, consentAt: row.consentAt }));
+}
+async function hasActiveAssignment(orgId, teacherUserId, studentUserId) {
+  const db = await requireDb4();
+  const [row] = await db.select({ id: teacherAssignments.id }).from(teacherAssignments).where(and6(eq8(teacherAssignments.orgId, orgId), eq8(teacherAssignments.teacherUserId, teacherUserId), eq8(teacherAssignments.studentUserId, studentUserId), eq8(teacherAssignments.active, 1))).limit(1);
+  return Boolean(row);
+}
+async function isActiveStudent(orgId, studentUserId) {
+  const db = await requireDb4();
+  const [row] = await db.select({ id: organizationMembers.id }).from(organizationMembers).where(and6(eq8(organizationMembers.orgId, orgId), eq8(organizationMembers.userId, studentUserId), eq8(organizationMembers.role, "student"), eq8(organizationMembers.status, "active"))).limit(1);
+  return Boolean(row);
+}
+async function listMembers(orgId, options = {}) {
+  const db = await requireDb4();
+  const conditions = [eq8(organizationMembers.orgId, orgId), eq8(organizationMembers.status, "active")];
+  if (options.role) conditions.push(eq8(organizationMembers.role, options.role));
+  if (options.teacherUserId) {
+    const assigned = await db.select({ studentUserId: teacherAssignments.studentUserId }).from(teacherAssignments).where(and6(eq8(teacherAssignments.orgId, orgId), eq8(teacherAssignments.teacherUserId, options.teacherUserId), eq8(teacherAssignments.active, 1)));
+    if (!assigned.length) return [];
+    conditions.push(inArray4(organizationMembers.userId, assigned.map((row) => row.studentUserId)));
+  }
+  const rows = await db.select({ userId: organizationMembers.userId, preferredName: studentProfiles.preferredName, name: users.name, email: users.email, role: organizationMembers.role, subject: organizationMembers.subject, joinedAt: organizationMembers.joinedAt, consentAt: organizationMembers.consentAt, lastSignedIn: users.lastSignedIn }).from(organizationMembers).innerJoin(users, eq8(users.id, organizationMembers.userId)).leftJoin(studentProfiles, eq8(studentProfiles.userId, organizationMembers.userId)).where(and6(...conditions)).orderBy(users.name);
+  return rows.map((row) => ({ userId: row.userId, name: row.preferredName || row.name || "\u0130simsiz", email: row.email, role: row.role, subject: row.subject, joinedAt: row.joinedAt, consentAt: row.consentAt, lastSignedIn: row.lastSignedIn }));
+}
+async function getMemberRole(orgId, userId) {
+  const db = await requireDb4();
+  const [row] = await db.select({ role: organizationMembers.role }).from(organizationMembers).where(and6(eq8(organizationMembers.orgId, orgId), eq8(organizationMembers.userId, userId), eq8(organizationMembers.status, "active"))).limit(1);
+  return row?.role ?? null;
+}
+async function setMemberRole(orgId, userId, role) {
+  const db = await requireDb4();
+  await db.update(organizationMembers).set({ role }).where(and6(eq8(organizationMembers.orgId, orgId), eq8(organizationMembers.userId, userId), eq8(organizationMembers.status, "active")));
+}
+async function setMemberSubject(orgId, userId, subject2) {
+  const db = await requireDb4();
+  const result = await db.update(organizationMembers).set({ subject: subject2 }).where(and6(eq8(organizationMembers.orgId, orgId), eq8(organizationMembers.userId, userId), eq8(organizationMembers.status, "active"), sql5`${organizationMembers.role} <> 'student'`)).returning();
+  return result.length > 0;
+}
+async function endMembership(orgId, userId, status) {
+  const db = await requireDb4();
+  await db.update(organizationMembers).set({ status, leftAt: /* @__PURE__ */ new Date() }).where(and6(eq8(organizationMembers.orgId, orgId), eq8(organizationMembers.userId, userId), eq8(organizationMembers.status, "active")));
+  await db.update(teacherAssignments).set({ active: 0 }).where(and6(eq8(teacherAssignments.orgId, orgId), sql5`(${teacherAssignments.studentUserId} = ${userId} OR ${teacherAssignments.teacherUserId} = ${userId})`));
+  const classes = await db.select({ id: organizationClasses.id }).from(organizationClasses).where(eq8(organizationClasses.orgId, orgId));
+  if (classes.length) await db.delete(classStudents).where(and6(eq8(classStudents.studentUserId, userId), inArray4(classStudents.classId, classes.map((row) => row.id))));
+}
+async function createInvitation(input) {
+  const db = await requireDb4();
+  const result = await db.insert(organizationInvitations).values(input).returning({ id: organizationInvitations.id });
+  return Number(result[0].id);
+}
+async function listInvitations(orgId) {
+  const db = await requireDb4();
+  return db.select({ id: organizationInvitations.id, role: organizationInvitations.role, note: organizationInvitations.note, subject: organizationInvitations.subject, expiresAt: organizationInvitations.expiresAt, maxUses: organizationInvitations.maxUses, usedCount: organizationInvitations.usedCount, revokedAt: organizationInvitations.revokedAt, createdAt: organizationInvitations.createdAt }).from(organizationInvitations).where(eq8(organizationInvitations.orgId, orgId)).orderBy(desc4(organizationInvitations.createdAt)).limit(100);
+}
+async function revokeInvitation(orgId, id4) {
+  const db = await requireDb4();
+  const result = await db.update(organizationInvitations).set({ revokedAt: /* @__PURE__ */ new Date() }).where(and6(eq8(organizationInvitations.orgId, orgId), eq8(organizationInvitations.id, id4), isNull5(organizationInvitations.revokedAt))).returning();
+  return result.length > 0;
+}
+async function findInvitationByHash(codeHash) {
+  const db = await requireDb4();
+  const [row] = await db.select({ id: organizationInvitations.id, orgId: organizationInvitations.orgId, orgName: organizations.name, orgStatus: organizations.status, role: organizationInvitations.role, expiresAt: organizationInvitations.expiresAt, maxUses: organizationInvitations.maxUses, usedCount: organizationInvitations.usedCount, revokedAt: organizationInvitations.revokedAt, createdBy: organizationInvitations.createdBy, subject: organizationInvitations.subject, membershipStartsAt: organizations.membershipStartsAt, membershipEndsAt: organizations.membershipEndsAt }).from(organizationInvitations).innerJoin(organizations, eq8(organizations.id, organizationInvitations.orgId)).where(eq8(organizationInvitations.codeHash, codeHash)).limit(1);
+  return row ?? null;
+}
+async function acceptInvitation(input) {
+  const db = await requireDb4();
+  const now = /* @__PURE__ */ new Date();
+  const consentAt = input.role === "student" ? now : null;
+  const subject2 = input.role === "student" ? null : input.subject ?? null;
+  const kvkkVersion = input.role === "student" ? input.kvkkVersion ?? null : null;
+  const [existing] = await db.select({ id: organizationMembers.id }).from(organizationMembers).where(and6(eq8(organizationMembers.orgId, input.orgId), eq8(organizationMembers.userId, input.userId))).limit(1);
+  if (existing) await db.update(organizationMembers).set({ role: input.role, status: "active", consentAt, subject: subject2, kvkkVersion, joinedAt: now, leftAt: null, invitedBy: input.invitedBy }).where(eq8(organizationMembers.id, existing.id));
+  else await db.insert(organizationMembers).values({ orgId: input.orgId, userId: input.userId, role: input.role, status: "active", consentAt, subject: subject2, kvkkVersion, joinedAt: now, invitedBy: input.invitedBy });
+  await db.update(organizationInvitations).set({ usedCount: sql5`${organizationInvitations.usedCount} + 1` }).where(eq8(organizationInvitations.id, input.invitationId));
+}
+async function listClasses(orgId) {
+  const db = await requireDb4();
+  const classes = await db.select({ id: organizationClasses.id, name: organizationClasses.name, gradeLevel: organizationClasses.gradeLevel, track: organizationClasses.track, advisorUserId: organizationClasses.advisorUserId }).from(organizationClasses).where(eq8(organizationClasses.orgId, orgId)).orderBy(organizationClasses.name);
+  const links = classes.length ? await db.select({ classId: classStudents.classId, studentUserId: classStudents.studentUserId }).from(classStudents).where(inArray4(classStudents.classId, classes.map((row) => row.id))) : [];
+  return classes.map((row) => ({ ...row, studentUserIds: links.filter((link) => link.classId === row.id).map((link) => link.studentUserId) }));
+}
+async function createClass(orgId, fields2) {
+  const db = await requireDb4();
+  const result = await db.insert(organizationClasses).values({ orgId, ...fields2 }).returning({ id: organizationClasses.id });
+  return Number(result[0].id);
+}
+async function updateClass(orgId, classId, fields2) {
+  const db = await requireDb4();
+  const result = await db.update(organizationClasses).set(fields2).where(and6(eq8(organizationClasses.orgId, orgId), eq8(organizationClasses.id, classId))).returning();
+  return result.length > 0;
+}
+async function deleteClass(orgId, classId) {
+  const db = await requireDb4();
+  const [row] = await db.select({ id: organizationClasses.id }).from(organizationClasses).where(and6(eq8(organizationClasses.orgId, orgId), eq8(organizationClasses.id, classId))).limit(1);
+  if (!row) return false;
+  await db.delete(classStudents).where(eq8(classStudents.classId, classId));
+  await db.delete(organizationClasses).where(eq8(organizationClasses.id, classId));
+  return true;
+}
+async function setClassStudents(orgId, classId, studentUserIds) {
+  const db = await requireDb4();
+  const [row] = await db.select({ id: organizationClasses.id }).from(organizationClasses).where(and6(eq8(organizationClasses.orgId, orgId), eq8(organizationClasses.id, classId))).limit(1);
+  if (!row) return false;
+  const valid = studentUserIds.length ? (await listMembers(orgId, { role: "student" })).map((member) => member.userId).filter((id4) => studentUserIds.includes(id4)) : [];
+  await db.delete(classStudents).where(eq8(classStudents.classId, classId));
+  if (valid.length) await db.insert(classStudents).values(valid.map((studentUserId) => ({ classId, studentUserId })));
+  return true;
+}
+async function listAssignments(orgId) {
+  const db = await requireDb4();
+  return db.select({ teacherUserId: teacherAssignments.teacherUserId, studentUserId: teacherAssignments.studentUserId }).from(teacherAssignments).where(and6(eq8(teacherAssignments.orgId, orgId), eq8(teacherAssignments.active, 1)));
+}
+async function setTeacherStudents(orgId, teacherUserId, studentUserIds) {
+  const db = await requireDb4();
+  const valid = studentUserIds.length ? (await listMembers(orgId, { role: "student" })).map((member) => member.userId).filter((id4) => studentUserIds.includes(id4)) : [];
+  await db.update(teacherAssignments).set({ active: 0 }).where(and6(eq8(teacherAssignments.orgId, orgId), eq8(teacherAssignments.teacherUserId, teacherUserId)));
+  for (const studentUserId of valid) {
+    await db.insert(teacherAssignments).values({ orgId, teacherUserId, studentUserId, active: 1 }).onConflictDoUpdate({ target: [teacherAssignments.orgId, teacherAssignments.teacherUserId, teacherAssignments.studentUserId], set: { active: 1 } });
+  }
+  return valid;
+}
+async function listNotes2(orgId, studentUserId) {
+  const db = await requireDb4();
+  return db.select({ id: counselingNotes.id, body: counselingNotes.body, visibility: counselingNotes.visibility, authorUserId: counselingNotes.authorUserId, authorName: users.name, createdAt: counselingNotes.createdAt }).from(counselingNotes).innerJoin(users, eq8(users.id, counselingNotes.authorUserId)).where(and6(eq8(counselingNotes.orgId, orgId), eq8(counselingNotes.studentUserId, studentUserId))).orderBy(desc4(counselingNotes.createdAt)).limit(200);
+}
+async function createNote(input) {
+  const db = await requireDb4();
+  const result = await db.insert(counselingNotes).values(input).returning({ id: counselingNotes.id });
+  return Number(result[0].id);
+}
+async function getNote2(orgId, id4) {
+  const db = await requireDb4();
+  const [row] = await db.select({ id: counselingNotes.id, studentUserId: counselingNotes.studentUserId, authorUserId: counselingNotes.authorUserId }).from(counselingNotes).where(and6(eq8(counselingNotes.orgId, orgId), eq8(counselingNotes.id, id4))).limit(1);
+  return row ?? null;
+}
+async function deleteNote2(orgId, id4) {
+  const db = await requireDb4();
+  await db.delete(counselingNotes).where(and6(eq8(counselingNotes.orgId, orgId), eq8(counselingNotes.id, id4)));
+}
+async function listStudentFeedback(studentUserId) {
+  const db = await requireDb4();
+  return db.select({ id: counselingNotes.id, body: counselingNotes.body, orgName: organizations.name, authorName: users.name, createdAt: counselingNotes.createdAt }).from(counselingNotes).innerJoin(organizationMembers, and6(eq8(organizationMembers.orgId, counselingNotes.orgId), eq8(organizationMembers.userId, studentUserId), eq8(organizationMembers.status, "active"))).innerJoin(organizations, eq8(organizations.id, counselingNotes.orgId)).innerJoin(users, eq8(users.id, counselingNotes.authorUserId)).where(and6(eq8(counselingNotes.studentUserId, studentUserId), eq8(counselingNotes.visibility, "student"))).orderBy(desc4(counselingNotes.createdAt)).limit(20);
+}
+async function writeAudit(input) {
+  const db = await requireDb4();
+  await db.insert(organizationAuditLogs).values({ orgId: input.orgId, actorUserId: input.actorUserId, action: input.action, targetType: input.targetType ?? null, targetId: input.targetId ?? null, metadataJson: input.metadata ? JSON.stringify(input.metadata) : null });
+}
+async function listAudit(orgId) {
+  const db = await requireDb4();
+  return db.select({ id: organizationAuditLogs.id, action: organizationAuditLogs.action, targetType: organizationAuditLogs.targetType, targetId: organizationAuditLogs.targetId, metadataJson: organizationAuditLogs.metadataJson, actorName: users.name, createdAt: organizationAuditLogs.createdAt }).from(organizationAuditLogs).innerJoin(users, eq8(users.id, organizationAuditLogs.actorUserId)).where(eq8(organizationAuditLogs.orgId, orgId)).orderBy(desc4(organizationAuditLogs.createdAt)).limit(200);
+}
+async function loadStudentSignals(studentUserIds, weekStart, weekEnd, logsSince) {
+  const signals = new Map(studentUserIds.map((id4) => [id4, { exams: [], logs: [], weekSessions: [], weakTopicCount: 0, lastSignedIn: null }]));
+  if (!studentUserIds.length) return signals;
+  const db = await requireDb4();
+  const [exams, logs, sessions, weak, signins] = await Promise.all([
+    db.select({ userId: userMockExams.userId, exam: userMockExams.exam, examDate: userMockExams.examDate, net: userMockExams.net }).from(userMockExams).where(inArray4(userMockExams.userId, studentUserIds)),
+    db.select({ userId: topicStudyLogs.userId, studyDate: topicStudyLogs.studyDate, minutes: topicStudyLogs.minutes }).from(topicStudyLogs).where(and6(inArray4(topicStudyLogs.userId, studentUserIds), gte5(topicStudyLogs.studyDate, logsSince))),
+    db.select({ userId: studyPlanSessions.userId, status: studyPlanSessions.status, plannedMinutes: studyPlanSessions.plannedMinutes, actualMinutes: studyPlanSessions.actualMinutes, targetQuestions: studyPlanSessions.targetQuestions, actualQuestions: studyPlanSessions.actualQuestions, sessionDate: studyPlanSessions.sessionDate, rescheduledFrom: studyPlanSessions.rescheduledFrom }).from(studyPlanSessions).where(and6(inArray4(studyPlanSessions.userId, studentUserIds), gte5(studyPlanSessions.sessionDate, weekStart), lt5(studyPlanSessions.sessionDate, weekEnd))),
+    db.select({ userId: topicProgress.userId, count: sql5`COUNT(*)::int` }).from(topicProgress).where(and6(inArray4(topicProgress.userId, studentUserIds), eq8(topicProgress.status, "weak"))).groupBy(topicProgress.userId),
+    db.select({ id: users.id, lastSignedIn: users.lastSignedIn }).from(users).where(inArray4(users.id, studentUserIds))
+  ]);
+  for (const row of exams) signals.get(row.userId)?.exams.push({ exam: row.exam, examDate: row.examDate, net: Number(row.net) });
+  for (const row of logs) signals.get(row.userId)?.logs.push({ studyDate: row.studyDate, minutes: row.minutes });
+  for (const row of sessions) signals.get(row.userId)?.weekSessions.push({ ...row, status: row.status });
+  for (const row of weak) {
+    const entry = signals.get(row.userId);
+    if (entry) entry.weakTopicCount = Number(row.count);
+  }
+  for (const row of signins) {
+    const entry = signals.get(row.id);
+    if (entry) entry.lastSignedIn = row.lastSignedIn;
+  }
+  return signals;
+}
+async function getStudentCalendarReadOnly(studentUserId, since) {
+  const db = await requireDb4();
+  const [sessions, logs] = await Promise.all([
+    db.select().from(studyPlanSessions).where(and6(eq8(studyPlanSessions.userId, studentUserId), gte5(studyPlanSessions.sessionDate, since))).orderBy(studyPlanSessions.sessionDate).limit(300),
+    db.select().from(topicStudyLogs).where(and6(eq8(topicStudyLogs.userId, studentUserId), gte5(topicStudyLogs.studyDate, since))).orderBy(desc4(topicStudyLogs.studyDate)).limit(300)
+  ]);
+  return { sessions, logs };
+}
+async function insertAssignedTask(input) {
+  const db = await requireDb4();
+  const dayStart = new Date(input.sessionDate);
+  dayStart.setHours(0, 0, 0, 0);
+  const dayEnd = new Date(dayStart);
+  dayEnd.setDate(dayEnd.getDate() + 1);
+  const plan = await db.insert(studyPlans).values({ userId: input.studentUserId, title: "\xD6\u011Fretmenin atad\u0131\u011F\u0131 g\xF6revler", weekStart: dayStart, weekEnd: dayEnd, summary: input.summary, source: "manual" }).returning({ id: studyPlans.id });
+  const session = await db.insert(studyPlanSessions).values({ userId: input.studentUserId, planId: Number(plan[0].id), sessionDate: input.sessionDate, title: input.title, subject: input.subject, topic: input.topic, kind: input.kind, plannedMinutes: input.plannedMinutes, targetQuestions: input.targetQuestions, assignedByUserId: input.teacherUserId, assignedOrgId: input.orgId }).returning({ id: studyPlanSessions.id });
+  return Number(session[0].id);
+}
+async function getOrganization(orgId) {
+  const db = await requireDb4();
+  const [row] = await db.select({
+    id: organizations.id,
+    name: organizations.name,
+    slug: organizations.slug,
+    kind: organizations.kind,
+    city: organizations.city,
+    district: organizations.district,
+    address: organizations.address,
+    phone: organizations.phone,
+    contactEmail: organizations.contactEmail,
+    createdAt: organizations.createdAt,
+    plan: organizations.plan,
+    membershipStartsAt: organizations.membershipStartsAt,
+    membershipEndsAt: organizations.membershipEndsAt,
+    aiCreditsMonthly: organizations.aiCreditsMonthly,
+    perStudentCreditCap: organizations.perStudentCreditCap,
+    kvkkNotice: organizations.kvkkNotice,
+    kvkkConsent: organizations.kvkkConsent,
+    kvkkVersion: organizations.kvkkVersion,
+    kvkkUpdatedAt: organizations.kvkkUpdatedAt
+  }).from(organizations).where(eq8(organizations.id, orgId)).limit(1);
+  return row ?? null;
+}
+async function updateOrgMembership(orgId, input) {
+  const db = await requireDb4();
+  await db.update(organizations).set(input).where(eq8(organizations.id, orgId));
+}
+async function setPerStudentCreditCap(orgId, cap3) {
+  const db = await requireDb4();
+  await db.update(organizations).set({ perStudentCreditCap: cap3 }).where(eq8(organizations.id, orgId));
+}
+async function updateKvkk(orgId, notice, consent) {
+  const db = await requireDb4();
+  await db.update(organizations).set({ kvkkNotice: notice, kvkkConsent: consent, kvkkVersion: sql5`${organizations.kvkkVersion} + 1`, kvkkUpdatedAt: /* @__PURE__ */ new Date() }).where(eq8(organizations.id, orgId));
+}
+async function listStudentKvkkVersions(orgId) {
+  const db = await requireDb4();
+  const rows = await db.select({ kvkkVersion: organizationMembers.kvkkVersion }).from(organizationMembers).where(and6(eq8(organizationMembers.orgId, orgId), eq8(organizationMembers.role, "student"), eq8(organizationMembers.status, "active")));
+  return rows.map((row) => row.kvkkVersion);
+}
+async function updateOrganization(orgId, profile) {
+  const db = await requireDb4();
+  await db.update(organizations).set(profile).where(eq8(organizations.id, orgId));
+}
+async function createOrganization(name, slug) {
+  const db = await requireDb4();
+  const result = await db.insert(organizations).values({ name, slug }).returning({ id: organizations.id });
+  return Number(result[0].id);
+}
+async function listOrganizations() {
+  const db = await requireDb4();
+  const rows = await db.select({ id: organizations.id, name: organizations.name, slug: organizations.slug, status: organizations.status, createdAt: organizations.createdAt, plan: organizations.plan, membershipStartsAt: organizations.membershipStartsAt, membershipEndsAt: organizations.membershipEndsAt, aiCreditsMonthly: organizations.aiCreditsMonthly }).from(organizations).orderBy(desc4(organizations.createdAt));
+  const counts = rows.length ? await db.select({ orgId: organizationMembers.orgId, role: organizationMembers.role, count: sql5`COUNT(*)::int` }).from(organizationMembers).where(and6(inArray4(organizationMembers.orgId, rows.map((row) => row.id)), eq8(organizationMembers.status, "active"))).groupBy(organizationMembers.orgId, organizationMembers.role) : [];
+  return rows.map((row) => ({ ...row, students: Number(counts.find((count4) => count4.orgId === row.id && count4.role === "student")?.count ?? 0), staff: counts.filter((count4) => count4.orgId === row.id && count4.role !== "student").reduce((sum, count4) => sum + Number(count4.count), 0) }));
+}
+async function setOrganizationStatus(orgId, status) {
+  const db = await requireDb4();
+  await db.update(organizations).set({ status }).where(eq8(organizations.id, orgId));
+}
+var upgradeColumns = { id: organizationUpgradeRequests.id, orgId: organizationUpgradeRequests.orgId, currentPlan: organizationUpgradeRequests.currentPlan, requestedPlan: organizationUpgradeRequests.requestedPlan, note: organizationUpgradeRequests.note, status: organizationUpgradeRequests.status, createdAt: organizationUpgradeRequests.createdAt, resolvedAt: organizationUpgradeRequests.resolvedAt, requestedBy: organizationUpgradeRequests.requestedBy };
+async function createUpgradeRequest(input) {
+  const db = await requireDb4();
+  const result = await db.insert(organizationUpgradeRequests).values(input).returning({ id: organizationUpgradeRequests.id });
+  return Number(result[0].id);
+}
+async function listOrgUpgradeRequests(orgId) {
+  const db = await requireDb4();
+  return db.select(upgradeColumns).from(organizationUpgradeRequests).where(eq8(organizationUpgradeRequests.orgId, orgId)).orderBy(desc4(organizationUpgradeRequests.createdAt)).limit(10);
+}
+async function cancelUpgradeRequest(orgId, requestId) {
+  const db = await requireDb4();
+  const result = await db.update(organizationUpgradeRequests).set({ status: "canceled", resolvedAt: /* @__PURE__ */ new Date() }).where(and6(eq8(organizationUpgradeRequests.orgId, orgId), eq8(organizationUpgradeRequests.id, requestId), eq8(organizationUpgradeRequests.status, "pending"))).returning();
+  return result.length > 0;
+}
+async function listPendingUpgradeRequests() {
+  const db = await requireDb4();
+  return db.select({ ...upgradeColumns, orgName: organizations.name, requesterName: users.name, requesterEmail: users.email, membershipEndsAt: organizations.membershipEndsAt }).from(organizationUpgradeRequests).innerJoin(organizations, eq8(organizations.id, organizationUpgradeRequests.orgId)).innerJoin(users, eq8(users.id, organizationUpgradeRequests.requestedBy)).where(eq8(organizationUpgradeRequests.status, "pending")).orderBy(organizationUpgradeRequests.createdAt);
+}
+async function getUpgradeRequest(requestId) {
+  const db = await requireDb4();
+  const [row] = await db.select(upgradeColumns).from(organizationUpgradeRequests).where(eq8(organizationUpgradeRequests.id, requestId)).limit(1);
+  return row ?? null;
+}
+async function resolveUpgradeRequest(requestId, status, resolvedBy) {
+  const db = await requireDb4();
+  const result = await db.update(organizationUpgradeRequests).set({ status, resolvedBy, resolvedAt: /* @__PURE__ */ new Date() }).where(and6(eq8(organizationUpgradeRequests.id, requestId), eq8(organizationUpgradeRequests.status, "pending"))).returning();
+  return result.length > 0;
+}
+
+// server/digest/unsubscribeToken.ts
+import { SignJWT as SignJWT3, jwtVerify as jwtVerify3 } from "jose";
+var AUDIENCE = "weekly-digest-unsubscribe";
+var secretKey3 = () => new TextEncoder().encode(ENV.cookieSecret);
+async function createUnsubscribeToken(kind, id4) {
+  return new SignJWT3({ k: kind }).setProtectedHeader({ alg: "HS256" }).setSubject(String(id4)).setAudience(AUDIENCE).setIssuedAt().sign(secretKey3());
+}
+var unsubscribeUrlFor = async (appUrl, kind, id4) => `${appUrl}/api/email/weekly-digest/unsubscribe?token=${encodeURIComponent(await createUnsubscribeToken(kind, id4))}`;
+async function readUnsubscribeToken(token) {
+  try {
+    const { payload } = await jwtVerify3(token, secretKey3(), { audience: AUDIENCE, algorithms: ["HS256"] });
+    const id4 = Number(payload.sub);
+    if (!Number.isInteger(id4) || id4 <= 0) return null;
+    return { kind: payload.k === "staff" ? "staff" : "student", id: id4 };
+  } catch {
+    return null;
+  }
+}
+
+// server/digest/teacherDigest.ts
+var DAY_MS3 = 24 * 60 * 60 * 1e3;
+var RESEND_AFTER_MS = 6 * DAY_MS3;
+var TIME_BUDGET_MS = 12e4;
+async function getStaffDigestEnabled(userId, orgId) {
+  const db = await getDb();
+  if (!db) return true;
+  const [row] = await db.select({ optOut: organizationMembers.weeklyDigestOptOut }).from(organizationMembers).where(and7(eq9(organizationMembers.userId, userId), eq9(organizationMembers.orgId, orgId))).limit(1);
+  return !row || row.optOut === 0;
+}
+async function setStaffDigestEnabled(userId, orgId, enabled) {
+  const db = await getDb();
+  if (!db) return enabled;
+  await db.update(organizationMembers).set({ weeklyDigestOptOut: enabled ? 0 : 1 }).where(and7(eq9(organizationMembers.userId, userId), eq9(organizationMembers.orgId, orgId)));
+  return enabled;
+}
+async function setStaffDigestEnabledByMemberId(memberId, enabled) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(organizationMembers).set({ weeklyDigestOptOut: enabled ? 0 : 1 }).where(eq9(organizationMembers.id, memberId));
+}
+async function runTeacherDigest(options) {
+  const result = { candidates: 0, sent: 0, skipped: 0, failed: 0, stoppedEarly: false, ...options.dryRun ? { previews: [] } : {} };
+  const db = await getDb();
+  if (!db || options.maxPerRun <= 0) return result;
+  const now = options.now ?? /* @__PURE__ */ new Date();
+  const { start } = weeklyDigestWindow(now);
+  const weekEnd = new Date(start.getTime() + 7 * DAY_MS3);
+  const startedAt = Date.now();
+  const rows = await db.select({ memberId: organizationMembers.id, userId: users.id, email: users.email, name: users.name, role: organizationMembers.role, orgId: organizations.id, orgName: organizations.name, membershipStartsAt: organizations.membershipStartsAt, membershipEndsAt: organizations.membershipEndsAt }).from(organizationMembers).innerJoin(users, eq9(users.id, organizationMembers.userId)).innerJoin(organizations, eq9(organizations.id, organizationMembers.orgId)).where(and7(
+    inArray5(organizationMembers.role, [...STAFF_ROLES]),
+    eq9(organizationMembers.status, "active"),
+    eq9(organizationMembers.weeklyDigestOptOut, 0),
+    or2(isNull6(organizationMembers.weeklyDigestLastSentAt), lt6(organizationMembers.weeklyDigestLastSentAt, new Date(now.getTime() - RESEND_AFTER_MS))),
+    eq9(organizations.status, "active"),
+    isNotNull3(users.email),
+    isNotNull3(users.emailVerifiedAt),
+    eq9(users.approvalStatus, "approved"),
+    eq9(users.accountStatus, "active")
+  )).orderBy(desc5(users.lastSignedIn)).limit(options.maxPerRun);
+  const targets = rows.filter((row) => membershipState(row, now) === "active" && (!options.onlyMemberIds || options.onlyMemberIds.includes(row.memberId)));
+  result.candidates = targets.length;
+  for (const member of targets) {
+    if (Date.now() - startedAt > TIME_BUDGET_MS) {
+      result.stoppedEarly = true;
+      break;
+    }
+    try {
+      const students = await listMembers(member.orgId, seesAllStudents(member.role) ? { role: "student" } : { role: "student", teacherUserId: member.userId });
+      if (!students.length) {
+        result.skipped++;
+        continue;
+      }
+      const signals = await loadStudentSignals(students.map((student) => student.userId), start, weekEnd, new Date(now.getTime() - 30 * DAY_MS3));
+      const digest = buildTeacherDigest(students.map((student) => ({ name: student.name, summary: summarizeStudent(signals.get(student.userId), now) })));
+      const mail = buildTeacherDigestEmail({
+        to: member.email,
+        name: member.name?.split(" ")[0] || null,
+        orgName: member.orgName,
+        digest,
+        rangeLabel: rangeLabel(start, now),
+        panelUrl: `${options.appUrl}/kurum`,
+        unsubscribeUrl: await unsubscribeUrlFor(options.appUrl, "staff", member.memberId)
+      });
+      if (options.dryRun) {
+        result.previews.push(mail);
+        continue;
+      }
+      await sendMail(mail);
+      await db.update(organizationMembers).set({ weeklyDigestLastSentAt: now }).where(eq9(organizationMembers.id, member.memberId));
+      result.sent++;
+    } catch (error) {
+      if (error instanceof MailNotConfiguredError) throw error;
+      result.failed++;
+      console.error(`[TeacherDigest] member ${member.memberId} failed:`, error instanceof Error ? error.message : error);
+    }
+  }
+  return result;
+}
+
+// server/digest/weeklyDigest.ts
+var DAY_MS4 = 24 * 60 * 60 * 1e3;
+var ACTIVE_WITHIN_MS = 30 * DAY_MS4;
+var RESEND_AFTER_MS2 = 6 * DAY_MS4;
+var DEFAULT_MAX_PER_RUN = Number(process.env.WEEKLY_DIGEST_MAX_PER_RUN) || 90;
+var TIME_BUDGET_MS2 = 24e4;
+var WEEKLY_DIGEST_MAX_PER_RUN = DEFAULT_MAX_PER_RUN;
+async function getWeeklyDigestEnabled(userId) {
+  const db = await getDb();
+  if (!db) return true;
+  const [row] = await db.select({ optOut: studentProfiles.weeklyDigestOptOut }).from(studentProfiles).where(eq10(studentProfiles.userId, userId)).limit(1);
+  return !row || row.optOut === 0;
+}
+async function setWeeklyDigestEnabled(userId, enabled) {
+  const db = await getDb();
+  if (!db) return enabled;
+  await db.update(studentProfiles).set({ weeklyDigestOptOut: enabled ? 0 : 1 }).where(eq10(studentProfiles.userId, userId));
+  return enabled;
+}
+async function collectDigest(userId, start, end) {
+  const db = await getDb();
+  const [sessions, logs, weakTopics, review] = await Promise.all([
+    db.select({ sessionDate: studyPlanSessions.sessionDate, status: studyPlanSessions.status, plannedMinutes: studyPlanSessions.plannedMinutes }).from(studyPlanSessions).where(and8(eq10(studyPlanSessions.userId, userId), gte6(studyPlanSessions.sessionDate, start), lt7(studyPlanSessions.sessionDate, end))),
+    db.select({ studyDate: topicStudyLogs.studyDate, subject: topicStudyLogs.subject, minutes: topicStudyLogs.minutes, questions: topicStudyLogs.questions, correct: topicStudyLogs.correct }).from(topicStudyLogs).where(and8(eq10(topicStudyLogs.userId, userId), gte6(topicStudyLogs.studyDate, start), lt7(topicStudyLogs.studyDate, end))),
+    db.select({ subject: yksTopics.subject, topic: yksTopics.topic, progress: topicProgress.progress }).from(topicProgress).innerJoin(yksTopics, eq10(yksTopics.id, topicProgress.topicId)).where(and8(eq10(topicProgress.userId, userId), eq10(topicProgress.status, "weak"))).orderBy(asc2(topicProgress.progress)).limit(3),
+    getReviewSummary(userId).catch(() => ({ due: 0 }))
+  ]);
+  return buildWeeklyDigest({ sessions, logs, weakTopics, dueReviews: review.due, start, end });
+}
+async function runWeeklyDigest(options) {
+  const db = await getDb();
+  if (!db) return { candidates: 0, sent: 0, failed: 0, stoppedEarly: false };
+  const now = options.now ?? /* @__PURE__ */ new Date();
+  const { start } = weeklyDigestWindow(now);
+  const startedAt = Date.now();
+  const recipients = await db.select({ id: users.id, email: users.email, name: users.name, preferredName: studentProfiles.preferredName }).from(users).innerJoin(studentProfiles, eq10(studentProfiles.userId, users.id)).where(and8(
+    isNotNull4(users.email),
+    isNotNull4(users.emailVerifiedAt),
+    eq10(users.approvalStatus, "approved"),
+    eq10(users.accountStatus, "active"),
+    gte6(users.lastSignedIn, new Date(now.getTime() - ACTIVE_WITHIN_MS)),
+    eq10(studentProfiles.onboardingCompleted, 1),
+    eq10(studentProfiles.weeklyDigestOptOut, 0),
+    or3(isNull7(studentProfiles.weeklyDigestLastSentAt), lt7(studentProfiles.weeklyDigestLastSentAt, new Date(now.getTime() - RESEND_AFTER_MS2)))
+  )).orderBy(desc6(users.lastSignedIn)).limit(options.maxPerRun ?? DEFAULT_MAX_PER_RUN);
+  const targets = options.onlyUserIds ? recipients.filter((user) => options.onlyUserIds.includes(user.id)) : recipients;
+  const result = { candidates: targets.length, sent: 0, failed: 0, stoppedEarly: false, ...options.dryRun ? { previews: [] } : {} };
+  for (const user of targets) {
+    if (Date.now() - startedAt > TIME_BUDGET_MS2) {
+      result.stoppedEarly = true;
+      break;
+    }
+    try {
+      const digest = await collectDigest(user.id, start, now);
+      const unsubscribeUrl = await unsubscribeUrlFor(options.appUrl, "student", user.id);
+      const mail = buildWeeklyDigestEmail({ to: user.email, name: user.preferredName || user.name?.split(" ")[0] || null, digest, start, end: now, appUrl: options.appUrl, unsubscribeUrl });
+      if (options.dryRun) {
+        result.previews.push(mail);
+        continue;
+      }
+      await sendMail(mail);
+      await db.update(studentProfiles).set({ weeklyDigestLastSentAt: now }).where(eq10(studentProfiles.userId, user.id));
+      result.sent++;
+    } catch (error) {
+      if (error instanceof MailNotConfiguredError) throw error;
+      result.failed++;
+      console.error(`[WeeklyDigest] user ${user.id} failed:`, error instanceof Error ? error.message : error);
+    }
+  }
+  return result;
+}
+var page = (title, body) => `<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>${title}</title></head>
+<body style="margin:0;background:#f3f6f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#18202a;">
+<div style="max-width:440px;margin:64px auto;padding:0 16px;"><div style="background:#fff;border:1px solid #e6ebe9;border-radius:20px;padding:28px 24px;text-align:center;">${body}</div></div></body></html>`;
+var button = "display:inline-block;margin-top:18px;background:#17625f;color:#fff;border:0;text-decoration:none;font-size:15px;font-weight:700;padding:12px 24px;border-radius:12px;cursor:pointer;";
+function registerWeeklyDigestRoutes(app2) {
+  app2.get("/api/cron/weekly-digest", async (req, res) => {
+    const secret = process.env.CRON_SECRET;
+    if (ENV.isProduction && !secret) {
+      res.status(503).json({ ok: false, error: "CRON_SECRET not set" });
+      return;
+    }
+    if (secret && req.headers.authorization !== `Bearer ${secret}`) {
+      res.status(401).json({ ok: false, error: "unauthorized" });
+      return;
+    }
+    try {
+      const appUrl = appBaseUrl(req);
+      const students = await runWeeklyDigest({ appUrl });
+      const staff = await runTeacherDigest({ appUrl, maxPerRun: Math.max(0, WEEKLY_DIGEST_MAX_PER_RUN - students.sent - students.failed) });
+      const result = { students, staff };
+      console.info("[WeeklyDigest]", JSON.stringify(result));
+      res.json({ ok: true, result });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: error instanceof Error ? error.message : "unknown error" });
+    }
+  });
+  app2.get("/api/email/weekly-digest/unsubscribe", async (req, res) => {
+    const token = typeof req.query.token === "string" ? req.query.token : "";
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    if (!await readUnsubscribeToken(token)) {
+      res.status(400).send(page("Ba\u011Flant\u0131 ge\xE7ersiz", `<h1 style="font-size:20px;margin:0 0 8px;">Ba\u011Flant\u0131 ge\xE7ersiz</h1><p style="font-size:14px;color:#5d6670;line-height:1.6;">Haftal\u0131k \xF6zet ayar\u0131n\u0131 uygulamada profil men\xFCs\xFCnden de\u011Fi\u015Ftirebilirsin.</p><a href="${appBaseUrl(req)}" style="${button}">Pusula'y\u0131 a\xE7</a>`));
+      return;
+    }
+    res.send(page("Haftal\u0131k \xF6zet", `<h1 style="font-size:20px;margin:0 0 8px;">Haftal\u0131k \xF6zet e-postalar\u0131</h1><p style="font-size:14px;color:#5d6670;line-height:1.6;">Her pazar gelen \xF6zeti art\u0131k almak istemiyor musun?</p><form method="post"><input type="hidden" name="token" value="${token.replace(/"/g, "&quot;")}"><button type="submit" style="${button}">Evet, almak istemiyorum</button></form>`));
+  });
+  app2.post("/api/email/weekly-digest/unsubscribe", async (req, res) => {
+    const token = typeof req.body?.token === "string" ? req.body.token : typeof req.query.token === "string" ? req.query.token : "";
+    const target = await readUnsubscribeToken(token);
+    res.setHeader("Cache-Control", "no-store");
+    if (!target) {
+      res.status(400).send(page("Ba\u011Flant\u0131 ge\xE7ersiz", `<h1 style="font-size:20px;margin:0;">Ba\u011Flant\u0131 ge\xE7ersiz</h1>`));
+      return;
+    }
+    if (target.kind === "staff") await setStaffDigestEnabledByMemberId(target.id, false);
+    else await setWeeklyDigestEnabled(target.id, false);
+    const where = target.kind === "staff" ? "Kurum Paneli'nde sol alttaki <strong>Haftal\u0131k s\u0131n\u0131f \xF6zeti</strong> se\xE7ene\u011Fiyle" : "uygulamada profil men\xFCs\xFCndeki <strong>Haftal\u0131k \xF6zet e-postas\u0131</strong> se\xE7ene\u011Fiyle";
+    res.send(page("Abonelikten \xE7\u0131kt\u0131n", `<h1 style="font-size:20px;margin:0 0 8px;">Tamam, art\u0131k g\xF6ndermeyece\u011Fiz</h1><p style="font-size:14px;color:#5d6670;line-height:1.6;">Fikrini de\u011Fi\u015Ftirirsen ${where} yeniden a\xE7abilirsin.</p><a href="${appBaseUrl(req)}${target.kind === "staff" ? "/kurum" : ""}" style="${button}">Pusula'y\u0131 a\xE7</a>`));
+  });
+}
+
+// server/errors/errorLog.ts
+import { createHash as createHash2 } from "node:crypto";
+import { and as and9, desc as desc7, eq as eq11, isNotNull as isNotNull5, isNull as isNull8, sql as sql6 } from "drizzle-orm";
+import { z } from "zod";
+
+// shared/errorLog.ts
+var MAX_MESSAGE = 500;
+var MAX_STACK = 6e3;
+var clampMessage = (message) => message.trim().slice(0, MAX_MESSAGE) || "(mesajs\u0131z hata)";
+var clampStack = (stack) => stack ? stack.slice(0, MAX_STACK) : null;
+var normalizeMessage = (message) => clampMessage(message).replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "<uuid>").replace(/\d+/g, "#");
+function firstStackFrame(stack) {
+  if (!stack) return "";
+  const line = stack.split("\n").map((item) => item.trim()).find((item) => item.startsWith("at ") || item.includes("@")) ?? "";
+  return line.replace(/https?:\/\/[^/\s)]+/g, "").replace(/\?[^\s):]*/g, "").replace(/-[A-Za-z0-9_]{8}(\.m?js)/g, "$1").replace(/:\d+(:\d+)?/g, "");
+}
+var errorFingerprintKey = (source, message, stack) => `${source}|${normalizeMessage(message)}|${firstStackFrame(stack)}`;
+var IGNORED_MESSAGES = [
+  /^ResizeObserver loop/i,
+  /^Script error\.?$/i,
+  // Ağ kopmaları kod hatası değildir (tRPC/fetch kendi hata mesajını zaten gösterir).
+  /^(TypeError: )?(Failed to fetch|Load failed|NetworkError when attempting to fetch resource\.?)$/i,
+  /^AbortError/i
+];
+function isIgnoredClientError(message, stack) {
+  if (IGNORED_MESSAGES.some((pattern) => pattern.test(message.trim()))) return true;
+  return Boolean(stack && /(chrome|moz|safari(-web)?)-extension:\/\//.test(stack));
+}
+
+// server/errors/errorLog.ts
+async function recordAppError(input) {
+  try {
+    const db = await getDb();
+    if (!db) return;
+    const message = clampMessage(input.message);
+    const stack = clampStack(input.stack);
+    const fingerprint = createHash2("sha256").update(errorFingerprintKey(input.source, message, stack)).digest("hex");
+    const now = /* @__PURE__ */ new Date();
+    const latest = { message, stack, path: input.path?.slice(0, 300) ?? null, lastUserId: input.userId ?? null, userAgent: input.userAgent?.slice(0, 300) ?? null };
+    await db.insert(appErrors).values({ fingerprint, source: input.source, ...latest, firstSeenAt: now, lastSeenAt: now }).onConflictDoUpdate({ target: appErrors.fingerprint, set: { ...latest, count: sql6`${appErrors.count} + 1`, lastSeenAt: now, resolvedAt: null } });
+  } catch (error) {
+    console.error("[ErrorLog] could not record:", error instanceof Error ? error.message : error);
+  }
+}
+async function listAppErrors(status, limit = 200) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(appErrors).where(status === "open" ? isNull8(appErrors.resolvedAt) : isNotNull5(appErrors.resolvedAt)).orderBy(desc7(appErrors.lastSeenAt)).limit(limit);
+}
+async function resolveAppError(id4) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(appErrors).set({ resolvedAt: /* @__PURE__ */ new Date() }).where(and9(eq11(appErrors.id, id4), isNull8(appErrors.resolvedAt)));
+}
+var clientReport = z.object({
+  message: z.string().min(1).max(2e3),
+  stack: z.string().max(2e4).nullish(),
+  path: z.string().max(300).nullish()
+});
+var clientIp = (req) => typeof req.headers["x-forwarded-for"] === "string" ? req.headers["x-forwarded-for"].split(",")[0].trim() : req.socket.remoteAddress ?? "unknown";
+function registerErrorLogRoutes(app2) {
+  app2.post("/api/errors", async (req, res) => {
+    try {
+      checkRateLimit(`client-error:${clientIp(req)}`, 30, 10 * 60 * 1e3);
+    } catch {
+      res.status(429).end();
+      return;
+    }
+    const parsed = clientReport.safeParse(req.body);
+    if (!parsed.success || isIgnoredClientError(parsed.data.message, parsed.data.stack)) {
+      res.status(204).end();
+      return;
+    }
+    const user = await authenticateRequest(req).catch(() => null);
+    await recordAppError({ source: "client", message: parsed.data.message, stack: parsed.data.stack, path: parsed.data.path, userId: user?.id ?? null, userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : null });
+    res.status(204).end();
+  });
+}
+function errorLogMiddleware(error, req, res, next) {
+  if (res.headersSent) {
+    next(error);
+    return;
+  }
+  const status = error?.status ?? error?.statusCode;
+  if (typeof status === "number" && status >= 400 && status < 500) {
+    res.status(status).json({ error: "Ge\xE7ersiz istek." });
+    return;
+  }
+  const err = error instanceof Error ? error : new Error(String(error));
+  console.error(`[Express] ${req.method} ${req.path}:`, err.message);
+  void recordAppError({ source: "server", message: err.message, stack: err.stack, path: `${req.method} ${req.path}` });
+  res.status(500).json({ error: "Beklenmeyen bir hata olu\u015Ftu." });
+}
+
+// server/push/sessionReminders.ts
+import { and as and11, eq as eq13, gte as gte7, isNull as isNull9, lte as lte4 } from "drizzle-orm";
+
+// shared/sessionReminder.ts
+var REMINDER_MIN_LEAD_MS = 2 * 60 * 1e3;
+var REMINDER_MAX_LEAD_MS = 20 * 60 * 1e3;
+function buildReminderMessage(session, now) {
+  const minutes = Math.max(1, Math.round((session.sessionDate.getTime() - now.getTime()) / 6e4));
+  const review = session.kind === NOTEBOOK_REVIEW_TASK_KIND;
+  return {
+    title: review ? `${minutes} dk sonra: soru defteri tekrar\u0131` : `${minutes} dk sonra: ${session.topic}`,
+    body: review ? "Tekrar listendeki sorular seni bekliyor. Haz\u0131rsan ba\u015Flayal\u0131m." : `${session.subject} \xB7 ${session.plannedMinutes} dk. Telefonunu u\xE7ak moduna al, oda\u011Fa haz\u0131rlan.`,
+    // Bildirime dokununca bu oturumun odak ekranı açılır (Home.tsx `?odak=`).
+    url: `/?odak=${session.id}`,
+    tag: `session-${session.id}`
+  };
+}
+
+// server/push/push.ts
+import { and as and10, eq as eq12, inArray as inArray6 } from "drizzle-orm";
+import webpush from "web-push";
+var publicKey = process.env.VAPID_PUBLIC_KEY ?? "";
+var privateKey = process.env.VAPID_PRIVATE_KEY ?? "";
+var subject = process.env.VAPID_SUBJECT || process.env.APP_URL || "https://yks-study-coach.vercel.app";
+var pushConfigured = () => Boolean(publicKey && privateKey);
+var pushPublicKey = () => pushConfigured() ? publicKey : null;
+var vapidSet = false;
+var ensureVapid = () => {
+  if (!vapidSet) {
+    webpush.setVapidDetails(subject, publicKey, privateKey);
+    vapidSet = true;
+  }
+};
+async function saveSubscription(userId, subscription, userAgent) {
+  const db = await getDb();
+  if (!db) return;
+  const values = { userId, endpoint: subscription.endpoint, p256dh: subscription.keys.p256dh, auth: subscription.keys.auth, userAgent: userAgent?.slice(0, 300) ?? null };
+  await db.insert(pushSubscriptions).values(values).onConflictDoUpdate({ target: pushSubscriptions.endpoint, set: { userId, p256dh: values.p256dh, auth: values.auth, userAgent: values.userAgent } });
+}
+async function removeSubscription(userId, endpoint) {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(pushSubscriptions).where(and10(eq12(pushSubscriptions.userId, userId), eq12(pushSubscriptions.endpoint, endpoint)));
+}
+async function hasSubscription(userId, endpoint) {
+  const db = await getDb();
+  if (!db) return false;
+  const rows = await db.select({ id: pushSubscriptions.id }).from(pushSubscriptions).where(and10(eq12(pushSubscriptions.userId, userId), eq12(pushSubscriptions.endpoint, endpoint))).limit(1);
+  return rows.length > 0;
+}
+async function sendToUser(userId, payload) {
+  const result = { delivered: 0, removed: 0, failed: 0 };
+  const db = await getDb();
+  if (!db || !pushConfigured()) return result;
+  ensureVapid();
+  const subscriptions2 = await db.select().from(pushSubscriptions).where(eq12(pushSubscriptions.userId, userId));
+  const gone = [];
+  const delivered = [];
+  await Promise.all(subscriptions2.map(async (row) => {
+    try {
+      await webpush.sendNotification({ endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } }, JSON.stringify(payload), { TTL: 15 * 60, urgency: "high" });
+      delivered.push(row.id);
+    } catch (error) {
+      const status = error.statusCode;
+      if (status === 404 || status === 410) gone.push(row.id);
+      else {
+        result.failed++;
+        console.error(`[Push] subscription ${row.id} failed (${status ?? "?"}):`, error instanceof Error ? error.message : error);
+      }
+    }
+  }));
+  if (gone.length) await db.delete(pushSubscriptions).where(inArray6(pushSubscriptions.id, gone));
+  if (delivered.length) await db.update(pushSubscriptions).set({ lastSentAt: /* @__PURE__ */ new Date() }).where(inArray6(pushSubscriptions.id, delivered));
+  result.delivered = delivered.length;
+  result.removed = gone.length;
+  return result;
+}
+
+// server/push/sessionReminders.ts
+async function runSessionReminders(now = /* @__PURE__ */ new Date()) {
+  const result = { due: 0, sent: 0, delivered: 0, removed: 0, failed: 0 };
+  const db = await getDb();
+  if (!db || !pushConfigured()) return result;
+  const sessions = await db.selectDistinct({ id: studyPlanSessions.id, userId: studyPlanSessions.userId, sessionDate: studyPlanSessions.sessionDate, subject: studyPlanSessions.subject, topic: studyPlanSessions.topic, kind: studyPlanSessions.kind, plannedMinutes: studyPlanSessions.plannedMinutes }).from(studyPlanSessions).innerJoin(pushSubscriptions, eq13(pushSubscriptions.userId, studyPlanSessions.userId)).where(and11(
+    eq13(studyPlanSessions.status, "planned"),
+    isNull9(studyPlanSessions.reminderSentAt),
+    gte7(studyPlanSessions.sessionDate, new Date(now.getTime() + REMINDER_MIN_LEAD_MS)),
+    lte4(studyPlanSessions.sessionDate, new Date(now.getTime() + REMINDER_MAX_LEAD_MS))
+  )).limit(500);
+  result.due = sessions.length;
+  for (const session of sessions) {
+    const [claim] = await db.update(studyPlanSessions).set({ reminderSentAt: now }).where(and11(eq13(studyPlanSessions.id, session.id), isNull9(studyPlanSessions.reminderSentAt))).returning({ id: studyPlanSessions.id });
+    if (!claim) continue;
+    const outcome = await sendToUser(session.userId, buildReminderMessage(session, now));
+    result.sent++;
+    result.delivered += outcome.delivered;
+    result.removed += outcome.removed;
+    result.failed += outcome.failed;
+  }
+  return result;
+}
+var authorized = (header) => {
+  const secrets = [process.env.CRON_SECRET, process.env.REMINDER_CRON_SECRET].filter((value) => Boolean(value));
+  return secrets.some((secret) => header === `Bearer ${secret}`);
+};
+function registerSessionReminderRoutes(app2) {
+  app2.post("/api/cron/session-reminders", async (req, res) => {
+    const anySecret = Boolean(process.env.CRON_SECRET || process.env.REMINDER_CRON_SECRET);
+    if (ENV.isProduction && !anySecret) {
+      res.status(503).json({ ok: false, error: "CRON secret not set" });
+      return;
+    }
+    if (anySecret && !authorized(req.headers.authorization)) {
+      res.status(401).json({ ok: false, error: "unauthorized" });
+      return;
+    }
+    try {
+      const result = await runSessionReminders();
+      if (result.due) console.info("[SessionReminders]", JSON.stringify(result));
+      res.json({ ok: true, configured: pushConfigured(), result });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: error instanceof Error ? error.message : "unknown error" });
     }
   });
 }
@@ -2879,23 +4973,66 @@ function statusGrantsPremiumAccess(status) {
   return PREMIUM_ACCESS_STATUSES.includes(status);
 }
 
+// shared/yksCalendar.ts
+var YKS_EXAMS = [
+  { year: 2026, firstDay: "2026-06-20", lastDay: "2026-06-21" },
+  { year: 2027, firstDay: "2027-06-19", lastDay: "2027-06-20" }
+];
+var DAY_MS5 = 24 * 60 * 60 * 1e3;
+var endOfIstanbulDay = (isoDate2) => /* @__PURE__ */ new Date(`${isoDate2}T23:59:59.999+03:00`);
+function yksEndOf(year) {
+  const known = YKS_EXAMS.find((exam) => exam.year === year);
+  if (known) return { year, endsAt: endOfIstanbulDay(known.lastDay), estimated: false };
+  const last = YKS_EXAMS[YKS_EXAMS.length - 1];
+  return { year, endsAt: endOfIstanbulDay(`${year}${last.lastDay.slice(4)}`), estimated: true };
+}
+function nextYksEnd(now, examYear) {
+  if (examYear) {
+    const chosen = yksEndOf(examYear);
+    if (chosen.endsAt.getTime() > now.getTime()) return chosen;
+  }
+  let year = Math.min(...YKS_EXAMS.map((exam) => exam.year));
+  let end = yksEndOf(year);
+  while (end.endsAt.getTime() <= now.getTime()) end = yksEndOf(++year);
+  return end;
+}
+function planPeriodEnd(billingPeriod, now, examYear) {
+  return billingPeriod === "yearly" ? nextYksEnd(now, examYear).endsAt : new Date(now.getTime() + 30 * DAY_MS5);
+}
+var YKS_TERM_DISCOUNT = 0.2;
+function yksTermPrice(input) {
+  const yks = nextYksEnd(input.now, input.examYear);
+  const months = Math.max(1, Math.ceil((yks.endsAt.getTime() - input.now.getTime()) / (30 * DAY_MS5)));
+  const monthlyTotal = input.monthlyPrice * months;
+  const discountedLira = monthlyTotal * (1 - YKS_TERM_DISCOUNT) / 100;
+  let price = (Math.round((discountedLira + 1) / 100) * 100 - 1) * 100;
+  if (price <= 0 || price >= monthlyTotal) price = Math.floor(monthlyTotal * (1 - YKS_TERM_DISCOUNT));
+  return { price, months, monthlyTotal, yks };
+}
+
 // server/subscriptions/subscriptionDb.ts
-import { and as and3, desc as desc2, eq as eq5, gte as gte2, sql as sql3 } from "drizzle-orm";
+import { and as and12, desc as desc8, eq as eq14, gte as gte8, sql as sql7 } from "drizzle-orm";
 async function listActivePlans() {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(subscriptionPlans).where(eq5(subscriptionPlans.isActive, 1));
+  return db.select().from(subscriptionPlans).where(eq14(subscriptionPlans.isActive, 1));
+}
+async function getStudentExamYear(userId) {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.select({ examYear: studentProfiles.examYear }).from(studentProfiles).where(eq14(studentProfiles.userId, userId)).limit(1);
+  return row?.examYear ?? null;
 }
 async function getPlanByCode(code) {
   const db = await getDb();
   if (!db) return void 0;
-  const rows = await db.select().from(subscriptionPlans).where(eq5(subscriptionPlans.code, code)).limit(1);
+  const rows = await db.select().from(subscriptionPlans).where(eq14(subscriptionPlans.code, code)).limit(1);
   return rows[0];
 }
-async function getPlanById(id3) {
+async function getPlanById(id4) {
   const db = await getDb();
   if (!db) return void 0;
-  const rows = await db.select().from(subscriptionPlans).where(eq5(subscriptionPlans.id, id3)).limit(1);
+  const rows = await db.select().from(subscriptionPlans).where(eq14(subscriptionPlans.id, id4)).limit(1);
   return rows[0];
 }
 async function upsertPlan(input) {
@@ -2903,7 +5040,7 @@ async function upsertPlan(input) {
   if (!db) return;
   const existing = await getPlanByCode(input.code);
   if (existing) {
-    await db.update(subscriptionPlans).set({ name: input.name, description: input.description ?? null, tier: input.tier, billingPeriod: input.billingPeriod, price: input.price, currency: input.currency ?? "TRY", trialDays: input.trialDays ?? 0, storeProductId: input.storeProductId ?? null, provider: input.provider ?? null }).where(eq5(subscriptionPlans.id, existing.id));
+    await db.update(subscriptionPlans).set({ name: input.name, description: input.description ?? null, tier: input.tier, billingPeriod: input.billingPeriod, price: input.price, currency: input.currency ?? "TRY", trialDays: input.trialDays ?? 0, storeProductId: input.storeProductId ?? null, provider: input.provider ?? null }).where(eq14(subscriptionPlans.id, existing.id));
     return;
   }
   await db.insert(subscriptionPlans).values({ code: input.code, name: input.name, description: input.description ?? null, tier: input.tier, billingPeriod: input.billingPeriod, price: input.price, currency: input.currency ?? "TRY", trialDays: input.trialDays ?? 0, storeProductId: input.storeProductId ?? null, provider: input.provider ?? null });
@@ -2911,7 +5048,7 @@ async function upsertPlan(input) {
 async function getSubscriptionByUserId(userId) {
   const db = await getDb();
   if (!db) return void 0;
-  const rows = await db.select().from(subscriptions).where(eq5(subscriptions.userId, userId)).limit(1);
+  const rows = await db.select().from(subscriptions).where(eq14(subscriptions.userId, userId)).limit(1);
   return rows[0];
 }
 async function ensureFreeSubscription(userId) {
@@ -2921,7 +5058,7 @@ async function ensureFreeSubscription(userId) {
   if (existing) return existing;
   const freePlan = await getPlanByCode("FREE");
   if (!freePlan) throw new Error("FREE plan\u0131 bulunamad\u0131 \u2014 \xF6nce seedSubscriptionPlans() \xE7al\u0131\u015Ft\u0131r\u0131lmal\u0131");
-  await db.insert(subscriptions).values({ userId, planId: freePlan.id, status: "active", provider: null }).onDuplicateKeyUpdate({ set: { updatedAt: /* @__PURE__ */ new Date() } });
+  await db.insert(subscriptions).values({ userId, planId: freePlan.id, status: "active", provider: null }).onConflictDoUpdate({ target: subscriptions.userId, set: { updatedAt: /* @__PURE__ */ new Date() } });
   const created = await getSubscriptionByUserId(userId);
   if (!created) throw new Error("Free subscription olu\u015Fturulamad\u0131");
   return created;
@@ -2942,12 +5079,12 @@ async function listAllSubscriptionsForAdmin() {
     isManualOverride: subscriptions.isManualOverride,
     provider: subscriptions.provider,
     updatedAt: subscriptions.updatedAt
-  }).from(subscriptions).innerJoin(users, eq5(users.id, subscriptions.userId)).innerJoin(subscriptionPlans, eq5(subscriptionPlans.id, subscriptions.planId)).orderBy(desc2(subscriptions.updatedAt));
+  }).from(subscriptions).innerJoin(users, eq14(users.id, subscriptions.userId)).innerJoin(subscriptionPlans, eq14(subscriptionPlans.id, subscriptions.planId)).orderBy(desc8(subscriptions.updatedAt));
 }
 async function updateSubscription(userId, patch) {
   const db = await getDb();
   if (!db) throw new Error("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok");
-  await db.update(subscriptions).set(patch).where(eq5(subscriptions.userId, userId));
+  await db.update(subscriptions).set(patch).where(eq14(subscriptions.userId, userId));
   const updated = await getSubscriptionByUserId(userId);
   if (!updated) throw new Error("Abonelik bulunamad\u0131");
   return updated;
@@ -2955,45 +5092,45 @@ async function updateSubscription(userId, patch) {
 async function createPayment(input) {
   const db = await getDb();
   if (!db) throw new Error("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok");
-  const result = await db.insert(payments).values(input);
-  return Number(result[0].insertId);
+  const result = await db.insert(payments).values(input).returning({ id: payments.id });
+  return Number(result[0].id);
 }
 async function updatePaymentStatus(paymentId, patch) {
   const db = await getDb();
   if (!db) return;
-  await db.update(payments).set(patch).where(eq5(payments.id, paymentId));
+  await db.update(payments).set(patch).where(eq14(payments.id, paymentId));
 }
 async function listPaymentsForUser(userId) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(payments).where(eq5(payments.userId, userId)).orderBy(desc2(payments.createdAt));
+  return db.select().from(payments).where(eq14(payments.userId, userId)).orderBy(desc8(payments.createdAt));
 }
 async function listAllPaymentsForAdmin(limit = 100) {
   const db = await getDb();
   if (!db) return [];
-  return db.select({ id: payments.id, userId: payments.userId, userName: users.name, userEmail: users.email, amount: payments.amount, currency: payments.currency, provider: payments.provider, status: payments.status, paymentType: payments.paymentType, providerPaymentId: payments.providerPaymentId, createdAt: payments.createdAt, paidAt: payments.paidAt }).from(payments).innerJoin(users, eq5(users.id, payments.userId)).orderBy(desc2(payments.createdAt)).limit(Math.min(500, Math.max(1, limit)));
+  return db.select({ id: payments.id, userId: payments.userId, userName: users.name, userEmail: users.email, amount: payments.amount, currency: payments.currency, provider: payments.provider, status: payments.status, paymentType: payments.paymentType, providerPaymentId: payments.providerPaymentId, createdAt: payments.createdAt, paidAt: payments.paidAt }).from(payments).innerJoin(users, eq14(users.id, payments.userId)).orderBy(desc8(payments.createdAt)).limit(Math.min(500, Math.max(1, limit)));
 }
 async function isDuplicateEvent(provider, eventId) {
   const db = await getDb();
   if (!db) return false;
-  const rows = await db.select({ id: paymentEvents.id, status: paymentEvents.status }).from(paymentEvents).where(and3(eq5(paymentEvents.provider, provider), eq5(paymentEvents.eventId, eventId))).limit(1);
+  const rows = await db.select({ id: paymentEvents.id, status: paymentEvents.status }).from(paymentEvents).where(and12(eq14(paymentEvents.provider, provider), eq14(paymentEvents.eventId, eventId))).limit(1);
   return rows.length > 0 && rows[0].status === "processed";
 }
 async function recordEventReceived(input) {
   const db = await getDb();
   if (!db) return null;
   try {
-    const result = await db.insert(paymentEvents).values(input);
-    return Number(result[0].insertId);
+    const result = await db.insert(paymentEvents).values(input).returning({ id: paymentEvents.id });
+    return Number(result[0].id);
   } catch {
-    const rows = await db.select({ id: paymentEvents.id }).from(paymentEvents).where(and3(eq5(paymentEvents.provider, input.provider), eq5(paymentEvents.eventId, input.eventId))).limit(1);
+    const rows = await db.select({ id: paymentEvents.id }).from(paymentEvents).where(and12(eq14(paymentEvents.provider, input.provider), eq14(paymentEvents.eventId, input.eventId))).limit(1);
     return rows[0]?.id ?? null;
   }
 }
-async function markEventProcessed(id3, status, errorMessage) {
+async function markEventProcessed(id4, status, errorMessage) {
   const db = await getDb();
   if (!db) return;
-  await db.update(paymentEvents).set({ status, processedAt: /* @__PURE__ */ new Date(), errorMessage: errorMessage ?? null }).where(eq5(paymentEvents.id, id3));
+  await db.update(paymentEvents).set({ status, processedAt: /* @__PURE__ */ new Date(), errorMessage: errorMessage ?? null }).where(eq14(paymentEvents.id, id4));
 }
 async function writeAuditLog(input) {
   const db = await getDb();
@@ -3011,12 +5148,12 @@ async function writeAuditLog(input) {
 async function listAuditLogsForUser(userId) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(subscriptionAuditLogs).where(eq5(subscriptionAuditLogs.userId, userId)).orderBy(desc2(subscriptionAuditLogs.createdAt));
+  return db.select().from(subscriptionAuditLogs).where(eq14(subscriptionAuditLogs.userId, userId)).orderBy(desc8(subscriptionAuditLogs.createdAt));
 }
 async function listAllAuditLogs(limit = 100) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(subscriptionAuditLogs).orderBy(desc2(subscriptionAuditLogs.createdAt)).limit(Math.min(500, Math.max(1, limit)));
+  return db.select().from(subscriptionAuditLogs).orderBy(desc8(subscriptionAuditLogs.createdAt)).limit(Math.min(500, Math.max(1, limit)));
 }
 async function recordFeatureUsage(userId, featureKey) {
   const db = await getDb();
@@ -3027,32 +5164,32 @@ async function countFeatureUsage(userId, featureKey, windowDays) {
   const db = await getDb();
   if (!db) return 0;
   const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1e3);
-  const rows = await db.select({ id: featureUsageLogs.id }).from(featureUsageLogs).where(and3(eq5(featureUsageLogs.userId, userId), eq5(featureUsageLogs.featureKey, featureKey), gte2(featureUsageLogs.usedAt, since)));
+  const rows = await db.select({ id: featureUsageLogs.id }).from(featureUsageLogs).where(and12(eq14(featureUsageLogs.userId, userId), eq14(featureUsageLogs.featureKey, featureKey), gte8(featureUsageLogs.usedAt, since)));
   return rows.length;
 }
 async function resetFeatureUsage(userId, featureKey, windowDays, adminId) {
   const db = await getDb();
   if (!db) return;
   const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1e3);
-  await db.delete(featureUsageLogs).where(and3(eq5(featureUsageLogs.userId, userId), eq5(featureUsageLogs.featureKey, featureKey), gte2(featureUsageLogs.usedAt, since)));
+  await db.delete(featureUsageLogs).where(and12(eq14(featureUsageLogs.userId, userId), eq14(featureUsageLogs.featureKey, featureKey), gte8(featureUsageLogs.usedAt, since)));
   await writeAuditLog({ userId, adminId, action: "usage_reset", newState: { featureKey, windowDays } });
 }
 async function listPendingUsers() {
   const db = await getDb();
   if (!db) return [];
-  const rows = await db.select().from(users).where(eq5(users.approvalStatus, "pending")).orderBy(desc2(users.createdAt));
+  const rows = await db.select().from(users).where(eq14(users.approvalStatus, "pending")).orderBy(desc8(users.createdAt));
   return rows.map(({ passwordHash: _passwordHash, ...safeUser }) => ({ ...safeUser, phone: phoneFromOpenId(safeUser.openId) }));
 }
 async function approveUser(userId, adminId) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ approvalStatus: "approved", approvedAt: /* @__PURE__ */ new Date(), approvedBy: adminId, rejectedAt: null, rejectionReason: null }).where(eq5(users.id, userId));
+  await db.update(users).set({ approvalStatus: "approved", approvedAt: /* @__PURE__ */ new Date(), approvedBy: adminId, rejectedAt: null, rejectionReason: null }).where(eq14(users.id, userId));
   await writeAuditLog({ userId, adminId, action: "user_approved", newState: { approvalStatus: "approved" } });
 }
 async function rejectUser(userId, adminId, reason) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ approvalStatus: "rejected", rejectedAt: /* @__PURE__ */ new Date(), rejectionReason: reason ?? null }).where(eq5(users.id, userId));
+  await db.update(users).set({ approvalStatus: "rejected", rejectedAt: /* @__PURE__ */ new Date(), rejectionReason: reason ?? null }).where(eq14(users.id, userId));
   await writeAuditLog({ userId, adminId, action: "user_rejected", newState: { approvalStatus: "rejected" }, reason });
 }
 
@@ -3114,14 +5251,19 @@ async function applyCanonicalEvent(eventType, payload) {
       throw new Error(`Bilinmeyen event tipi: ${eventType}`);
   }
 }
+async function chargeAmountFor(plan, now, examYear) {
+  if (plan.billingPeriod !== "yearly") return plan.price;
+  const monthly = await getPlanByCode(plan.code.replace(/_YEARLY$/, "_MONTHLY"));
+  return monthly ? yksTermPrice({ monthlyPrice: monthly.price, now, examYear }).price : plan.price;
+}
 async function handleCheckoutCompleted(payload) {
   if (!payload.planCode) throw new Error("payload.planCode eksik");
   const plan = await getPlanByCode(payload.planCode);
   if (!plan) throw new Error(`Plan bulunamad\u0131: ${payload.planCode}`);
   const existing = await ensureFreeSubscription(payload.userId);
   const now = /* @__PURE__ */ new Date();
-  const periodDays = payload.periodDays ?? (plan.billingPeriod === "yearly" ? 365 : 30);
-  const periodEnd = new Date(now.getTime() + periodDays * 24 * 60 * 60 * 1e3);
+  const examYear = await getStudentExamYear(payload.userId);
+  const periodEnd = payload.periodDays ? new Date(now.getTime() + payload.periodDays * 24 * 60 * 60 * 1e3) : planPeriodEnd(plan.billingPeriod, now, examYear);
   const eligibleForTrial = plan.trialDays > 0 && !existing?.trialStartedAt;
   const nextStatus = eligibleForTrial ? "trialing" : "active";
   const trialEndsAt = eligibleForTrial ? new Date(now.getTime() + plan.trialDays * 24 * 60 * 60 * 1e3) : existing?.trialEndsAt ?? null;
@@ -3131,7 +5273,7 @@ async function handleCheckoutCompleted(payload) {
     subscriptionId: existing?.id ?? null,
     provider: "web",
     providerPaymentId: payload.providerPaymentId ?? null,
-    amount: payload.amount ?? plan.price,
+    amount: payload.amount ?? await chargeAmountFor(plan, now, examYear),
     currency: payload.currency ?? plan.currency,
     status: eligibleForTrial ? "authorized" : "paid",
     paymentType: eligibleForTrial ? "trial_start" : "initial",
@@ -3159,10 +5301,10 @@ async function handleSubscriptionRenewed(payload) {
   if (!existing) throw new Error("Yenilenecek abonelik bulunamad\u0131");
   const plan = await getPlanByCode(payload.planCode ?? "");
   assertValidSubscriptionTransition(existing.status, "active");
-  const periodDays = payload.periodDays ?? (plan?.billingPeriod === "yearly" ? 365 : 30);
   const now = /* @__PURE__ */ new Date();
-  const periodEnd = new Date(now.getTime() + periodDays * 24 * 60 * 60 * 1e3);
-  const paymentId = await createPayment({ userId: payload.userId, subscriptionId: existing.id, provider: "web", providerPaymentId: payload.providerPaymentId ?? null, amount: payload.amount ?? plan?.price ?? 0, currency: payload.currency ?? plan?.currency ?? "TRY", status: "paid", paymentType: "renewal", paidAt: now });
+  const examYear = await getStudentExamYear(payload.userId);
+  const periodEnd = payload.periodDays ? new Date(now.getTime() + payload.periodDays * 24 * 60 * 60 * 1e3) : planPeriodEnd(plan?.billingPeriod ?? "monthly", now, examYear);
+  const paymentId = await createPayment({ userId: payload.userId, subscriptionId: existing.id, provider: "web", providerPaymentId: payload.providerPaymentId ?? null, amount: payload.amount ?? (plan ? await chargeAmountFor(plan, now, examYear) : 0), currency: payload.currency ?? plan?.currency ?? "TRY", status: "paid", paymentType: "renewal", paidAt: now });
   await updateSubscription(payload.userId, { status: "active", currentPeriodStart: now, currentPeriodEnd: periodEnd, latestPaymentId: paymentId });
   await writeAuditLog({ userId: payload.userId, action: "subscription_renewed", oldState: { status: existing.status }, newState: { status: "active" }, metadata: { paymentId } });
 }
@@ -3232,10 +5374,10 @@ function registerWebhookRoutes(app2) {
 }
 
 // server/routers.ts
-import { TRPCError as TRPCError10 } from "@trpc/server";
+import { TRPCError as TRPCError13 } from "@trpc/server";
 
 // server/_core/systemRouter.ts
-import { z } from "zod";
+import { z as z2 } from "zod";
 
 // server/_core/trpc.ts
 import { initTRPC, TRPCError } from "@trpc/server";
@@ -3257,31 +5399,37 @@ var FEATURE_KEYS = [
   "NOTE_OCR",
   "NOTE_AI"
 ];
+var PAID_TIERS = ["basic", "premium", "premium_plus"];
+var TIER_LABELS = { free: "\xDCcretsiz", basic: "Temel", premium: "Premium", premium_plus: "Pro" };
+var ALL_PAID_FEATURES = [...FEATURE_KEYS];
 var TIER_FEATURES = {
   free: [],
-  premium: ["AI_STUDY_PLAN", "OCR_EXAM_IMPORT", "OCR_BOOK_IMPORT", "ADVANCED_ANALYTICS", "PLAN_ADHERENCE", "RESOURCE_RECOMMENDATIONS", "ADVANCED_REPORTS", "FOCUS_AURA_PREMIUM", "MOCK_EXAM_ANALYTICS", "NOTE_VOICE", "NOTE_OCR", "NOTE_AI"],
-  premium_plus: ["AI_STUDY_PLAN", "OCR_EXAM_IMPORT", "OCR_BOOK_IMPORT", "ADVANCED_ANALYTICS", "PLAN_ADHERENCE", "RESOURCE_RECOMMENDATIONS", "ADVANCED_REPORTS", "FOCUS_AURA_PREMIUM", "MOCK_EXAM_ANALYTICS", "NOTE_VOICE", "NOTE_OCR", "NOTE_AI"]
+  basic: ALL_PAID_FEATURES,
+  premium: ALL_PAID_FEATURES,
+  premium_plus: ALL_PAID_FEATURES
 };
 function featuresForTier(tier) {
   return TIER_FEATURES[tier] ?? [];
 }
-var FEATURE_USAGE_LIMITS = {
-  AI_STUDY_PLAN: { windowDays: 30, maxUses: 60 },
-  OCR_EXAM_IMPORT: { windowDays: 30, maxUses: 40 },
-  OCR_BOOK_IMPORT: { windowDays: 30, maxUses: 40 },
-  NOTE_VOICE: { windowDays: 30, maxUses: 300 },
-  NOTE_OCR: { windowDays: 30, maxUses: 150 },
-  NOTE_AI: { windowDays: 30, maxUses: 100 }
-};
+var USAGE_WINDOW_DAYS = 30;
+var per30 = (maxUses) => ({ windowDays: USAGE_WINDOW_DAYS, maxUses });
 var FREE_TIER_LIMITS = {
-  AI_STUDY_PLAN: { windowDays: 30, maxUses: 3 },
-  OCR_EXAM_IMPORT: { windowDays: 30, maxUses: 2 },
-  OCR_BOOK_IMPORT: { windowDays: 30, maxUses: 3 },
+  AI_STUDY_PLAN: per30(3),
+  OCR_EXAM_IMPORT: per30(2),
+  OCR_BOOK_IMPORT: per30(3),
   // Defter herkesin temel aracı: ses → metin ücretsizde de makul ölçüde açık.
-  NOTE_VOICE: { windowDays: 30, maxUses: 30 },
-  NOTE_OCR: { windowDays: 30, maxUses: 10 },
-  NOTE_AI: { windowDays: 30, maxUses: 5 }
+  NOTE_VOICE: per30(30),
+  NOTE_OCR: per30(10),
+  NOTE_AI: per30(5)
 };
+var TIER_USAGE_LIMITS = {
+  basic: { AI_STUDY_PLAN: per30(8), OCR_EXAM_IMPORT: per30(8), OCR_BOOK_IMPORT: per30(8), NOTE_VOICE: per30(100), NOTE_OCR: per30(40), NOTE_AI: per30(30) },
+  premium: { AI_STUDY_PLAN: per30(60), OCR_EXAM_IMPORT: per30(40), OCR_BOOK_IMPORT: per30(40), NOTE_VOICE: per30(300), NOTE_OCR: per30(150), NOTE_AI: per30(100) },
+  premium_plus: { AI_STUDY_PLAN: per30(150), OCR_EXAM_IMPORT: per30(100), OCR_BOOK_IMPORT: per30(100), NOTE_VOICE: per30(1e3), NOTE_OCR: per30(400), NOTE_AI: per30(300) }
+};
+function usageLimitFor(tier, feature) {
+  return tier === "free" ? FREE_TIER_LIMITS[feature] : TIER_USAGE_LIMITS[tier][feature];
+}
 
 // server/subscriptions/entitlementService.ts
 async function getCurrentSubscription(userId) {
@@ -3336,15 +5484,15 @@ var UsageLimitExceededError = class extends Error {
     this.name = "UsageLimitExceededError";
   }
 };
-function limitForTier(feature, isPremium) {
-  return isPremium ? FEATURE_USAGE_LIMITS[feature] : FREE_TIER_LIMITS[feature];
+function limitForSnapshot(feature, snapshot) {
+  return usageLimitFor(snapshot.isPremium ? snapshot.tier : "free", feature);
 }
 async function assertUsageAvailable(userId, feature) {
   const snapshot = await getEntitlements(userId);
   if (!snapshot.isPremium && !FREE_TIER_LIMITS[feature]) {
     throw new PremiumRequiredError(feature);
   }
-  const limit = limitForTier(feature, snapshot.isPremium);
+  const limit = limitForSnapshot(feature, snapshot);
   if (limit) {
     const used = await countFeatureUsage(userId, feature, limit.windowDays);
     if (used >= limit.maxUses) throw new UsageLimitExceededError(feature, limit.maxUses, limit.windowDays);
@@ -3355,7 +5503,7 @@ async function getUsageSummaryForUser(userId) {
   const snapshot = await getEntitlements(userId);
   const summaries = [];
   for (const feature of FEATURE_KEYS) {
-    const limit = limitForTier(feature, snapshot.isPremium);
+    const limit = limitForSnapshot(feature, snapshot);
     if (!limit) {
       const hasAccess = snapshot.isPremium ? snapshot.entitlements.includes(feature) : Boolean(FREE_TIER_LIMITS[feature]);
       if (!hasAccess) continue;
@@ -3367,6 +5515,56 @@ async function getUsageSummaryForUser(userId) {
     summaries.push({ feature, used, limit: limit.maxUses, remaining: Math.max(0, limit.maxUses - used), windowDays: limit.windowDays, periodStart: periodStart.toISOString(), periodEnd: (/* @__PURE__ */ new Date()).toISOString() });
   }
   return summaries;
+}
+
+// server/org/orgCredits.ts
+import { and as and13, desc as desc9, eq as eq15, gte as gte9, sql as sql8 } from "drizzle-orm";
+async function sumCredits(orgId, since, userId) {
+  const db = await getDb();
+  if (!db) return 0;
+  const conditions = [eq15(organizationCreditUsage.orgId, orgId), gte9(organizationCreditUsage.usedAt, since)];
+  if (userId) conditions.push(eq15(organizationCreditUsage.userId, userId));
+  const [row] = await db.select({ total: sql8`COALESCE(SUM(${organizationCreditUsage.credits}), 0)`.mapWith(Number) }).from(organizationCreditUsage).where(and13(...conditions));
+  return Number(row?.total ?? 0);
+}
+async function findOrgCreditSource(userId, feature, now = /* @__PURE__ */ new Date()) {
+  const cost = ORG_CREDIT_COSTS[feature];
+  if (!cost) return null;
+  const db = await getDb();
+  if (!db) return null;
+  const [org] = await db.select({ orgId: organizations.id, monthly: organizations.aiCreditsMonthly, cap: organizations.perStudentCreditCap, membershipStartsAt: organizations.membershipStartsAt, membershipEndsAt: organizations.membershipEndsAt }).from(organizationMembers).innerJoin(organizations, eq15(organizations.id, organizationMembers.orgId)).where(and13(eq15(organizationMembers.userId, userId), eq15(organizationMembers.role, "student"), eq15(organizationMembers.status, "active"), eq15(organizations.status, "active"))).limit(1);
+  if (!org || org.monthly <= 0 || membershipState(org, now) !== "active") return null;
+  const since = creditPeriodStart(now);
+  const [usedByOrg, usedByStudent] = await Promise.all([sumCredits(org.orgId, since), org.cap === null ? Promise.resolve(0) : sumCredits(org.orgId, since, userId)]);
+  return creditDecision({ monthly: org.monthly, usedByOrg, cap: org.cap, usedByStudent, cost }).ok ? { orgId: org.orgId, cost } : null;
+}
+async function recordOrgCredit(source, userId, feature) {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(organizationCreditUsage).values({ orgId: source.orgId, userId, featureKey: feature, credits: source.cost });
+}
+async function orgCreditReport(orgId, now = /* @__PURE__ */ new Date()) {
+  const db = await getDb();
+  if (!db) return { periodStart: creditPeriodStart(now), used: 0, byFeature: [], byStudent: [] };
+  const since = creditPeriodStart(now);
+  const scope = and13(eq15(organizationCreditUsage.orgId, orgId), gte9(organizationCreditUsage.usedAt, since));
+  const total = sql8`SUM(${organizationCreditUsage.credits})`.mapWith(Number);
+  const count4 = sql8`COUNT(*)::int`;
+  const [byFeature, byStudent] = await Promise.all([
+    db.select({ featureKey: organizationCreditUsage.featureKey, credits: total, uses: count4 }).from(organizationCreditUsage).where(scope).groupBy(organizationCreditUsage.featureKey),
+    db.select({ userId: organizationCreditUsage.userId, name: users.name, preferredName: studentProfiles.preferredName, credits: total, uses: count4 }).from(organizationCreditUsage).innerJoin(users, eq15(users.id, organizationCreditUsage.userId)).leftJoin(studentProfiles, eq15(studentProfiles.userId, organizationCreditUsage.userId)).where(scope).groupBy(organizationCreditUsage.userId, users.name, studentProfiles.preferredName).orderBy(desc9(total)).limit(20)
+  ]);
+  return {
+    periodStart: since,
+    used: byFeature.reduce((sum, row) => sum + Number(row.credits), 0),
+    byFeature: byFeature.map((row) => ({ featureKey: row.featureKey, credits: Number(row.credits), uses: Number(row.uses) })),
+    byStudent: byStudent.map((row) => ({ userId: row.userId, name: row.preferredName || row.name || "\xD6\u011Frenci", credits: Number(row.credits), uses: Number(row.uses) }))
+  };
+}
+async function creditsUsedThisMonth(orgIds, now = /* @__PURE__ */ new Date()) {
+  const result = /* @__PURE__ */ new Map();
+  for (const orgId of orgIds) result.set(orgId, await sumCredits(orgId, creditPeriodStart(now)));
+  return result;
 }
 
 // server/_core/trpc.ts
@@ -3421,7 +5619,8 @@ function metredFeatureProcedure(feature, rateLimit = { maxRequests: 5, windowMs:
         if (error instanceof RateLimitExceededError) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: RATE_LIMITED_ERR_MSG });
         throw error;
       }
-      try {
+      const orgCredit = await findOrgCreditSource(ctx.user.id, feature).catch(() => null);
+      if (!orgCredit) try {
         await assertUsageAvailable(ctx.user.id, feature);
       } catch (error) {
         if (error instanceof PremiumRequiredError) throw new TRPCError({ code: "FORBIDDEN", message: PREMIUM_REQUIRED_ERR_MSG });
@@ -3429,7 +5628,7 @@ function metredFeatureProcedure(feature, rateLimit = { maxRequests: 5, windowMs:
         throw error;
       }
       const result = await next({ ctx });
-      if (result.ok) await recordFeatureUsage(ctx.user.id, feature);
+      if (result.ok) await (orgCredit ? recordOrgCredit(orgCredit, ctx.user.id, feature) : recordFeatureUsage(ctx.user.id, feature));
       return result;
     })
   );
@@ -3438,8 +5637,8 @@ function metredFeatureProcedure(feature, rateLimit = { maxRequests: 5, windowMs:
 // server/_core/systemRouter.ts
 var systemRouter = router({
   health: publicProcedure.input(
-    z.object({
-      timestamp: z.number().min(0, "timestamp cannot be negative")
+    z2.object({
+      timestamp: z2.number().min(0, "timestamp cannot be negative")
     })
   ).query(() => ({
     ok: true
@@ -3463,7 +5662,7 @@ var normalizeContentPart = (part) => {
   }
   throw new Error("Unsupported message content part");
 };
-var normalizeMessage = (message) => {
+var normalizeMessage2 = (message) => {
   const { role, name, tool_call_id } = message;
   if (role === "tool" || role === "function") {
     const content = ensureArray(message.content).map((part) => typeof part === "string" ? part : JSON.stringify(part)).join("\n");
@@ -3702,7 +5901,7 @@ async function invokeLLM(params) {
     max_tokens
   } = params;
   const payload = {
-    messages: messages.map(normalizeMessage)
+    messages: messages.map(normalizeMessage2)
   };
   payload.model = model || target.model;
   if (tools && tools.length > 0) {
@@ -3830,185 +6029,33 @@ function validateDataUrl(dataUrl, declaredMimeType) {
 }
 
 // server/routers.ts
-import { z as z18 } from "zod";
+import { z as z25 } from "zod";
 
 // server/routers/topics.ts
-import { z as z2 } from "zod";
+import { z as z3 } from "zod";
 var topicsRouter = router({
   catalog: publicProcedure.query(() => getTopicCatalog()),
   progress: protectedProcedure.query(({ ctx }) => getUserTopicProgress(ctx.user.id)),
   logResult: protectedProcedure.input(
-    z2.object({
-      exam: z2.enum(["TYT", "AYT"]),
-      subject: z2.string().min(1).max(80),
-      topic: z2.string().min(1).max(180),
-      accuracy: z2.number().min(0).max(100),
-      questionCount: z2.number().int().min(0).max(2e3),
-      studyDate: z2.string().min(8).max(30)
+    z3.object({
+      exam: z3.enum(["TYT", "AYT"]),
+      subject: z3.string().min(1).max(80),
+      topic: z3.string().min(1).max(180),
+      accuracy: z3.number().min(0).max(100),
+      questionCount: z3.number().int().min(0).max(2e3),
+      studyDate: z3.string().min(8).max(30)
     })
-  ).mutation(({ ctx, input }) => upsertTopicProgress(ctx.user.id, { ...input, studyDate: new Date(input.studyDate) }))
+  ).mutation(({ ctx, input }) => upsertTopicProgress(ctx.user.id, { ...input, studyDate: new Date(input.studyDate) })),
+  // Odak oturumu süresi dolmadan bırakıldı: konu tekrar gerektiren konulara eklenir.
+  markForReview: protectedProcedure.input(z3.object({ exam: z3.enum(["TYT", "AYT"]), subject: z3.string().min(1).max(80), topic: z3.string().min(1).max(180), sessionId: z3.number().int().positive().optional() })).mutation(({ ctx, input }) => markTopicForReview(ctx.user.id, input))
 });
 
 // server/routers/bookContent.ts
 import { TRPCError as TRPCError2 } from "@trpc/server";
-import { z as z3 } from "zod";
+import { z as z4 } from "zod";
 
 // server/bookContent/bookContentDb.ts
-import { and as and5, eq as eq7, inArray as inArray3, isNull as isNull3 } from "drizzle-orm";
-
-// server/bookContent/config.ts
-var bookContentConfig = {
-  mapping: {
-    /** Bu güvenin üstü: eşleşme otomatik önerilir (öğrenci yine görür, değiştirebilir). */
-    autoSuggestMin: 0.9,
-    /** Bu aralık: öğrencinin açıkça onaylaması istenir. Altı: manuel eşleştirme gerekli. */
-    confirmMin: 0.7,
-    /** Eşleşme adımlarının verdiği güven (tam eşleşme > alias > kapsama > benzerlik). */
-    scores: { exactTopic: 1, exactAlias: 0.95, containsTopic: 0.88, containsAlias: 0.85, fuzzyMax: 0.8 },
-    /** Kelime kökü yaklaşımı: Türkçe ekleri tolere etmek için kelimenin ilk N harfi karşılaştırılır. */
-    stemLength: 5,
-    maxAlternatives: 3
-  },
-  aiMapping: {
-    /** Deterministik eşleştirme belirsiz kaldığında (onay/manuel) AI'ya aday listesinden seçtirilsin mi. */
-    enabled: true,
-    /** AI'ya gösterilecek en fazla aday konu (ilgili dersin konuları). */
-    maxCandidates: 60,
-    /** AI önerisinin güveni bu değeri AŞAMAZ: otomatik öneri eşiğinin altında kalır, öğrenci her zaman onaylar. */
-    maxConfidence: 0.85,
-    /** Bu güvenin altındaki AI önerisi hiç gösterilmez (manuel eşleştirme kalır). */
-    minConfidence: 0.6
-  },
-  ocr: {
-    /** Tek istekte gönderilebilecek en büyük görsel (Vercel istek gövdesi sınırı ~4.5 MB). */
-    maxImageBytes: 3.5 * 1024 * 1024,
-    /** Bir kitap için en fazla içindekiler sayfası. */
-    maxTocPages: 8,
-    /** İsteğin tamamı için süre bütçesi (Vercel fonksiyonu 300 sn; güçlü model yavaştır, yanıt + eşleştirme payı bırakılır). */
-    requestBudgetMs: 15e4,
-    /** Aynı anda okunan sayfa sayısı bunu aşarsa sayfa başına geçiş sayısı kısılır (hız sınırı + süre). */
-    manyPagesThreshold: 3,
-    maxPassesWhenManyPages: 2
-  },
-  confidence: {
-    /** Nihai güven = ağırlıklı ortalama (görüntü, okuma, yapı, eşleştirme). */
-    weights: { image: 0.15, ocr: 0.35, structure: 0.25, mapping: 0.25 },
-    /** Bunun altındaki satır / sayfa "kontrol et" olarak işaretlenir. */
-    needsReviewBelow: 0.7
-  },
-  allocation: {
-    /** Zayıflık (0-1) → önerilen çalışma süresi (dk). Aralık alt sınırı dahil; ilk eşleşen kullanılır. */
-    weaknessMinutes: [
-      { min: 0.85, minutes: 60 },
-      { min: 0.7, minutes: 45 },
-      { min: 0.5, minutes: 30 },
-      { min: 0.3, minutes: 20 }
-    ],
-    /** Bu doğruluğun (%) altındaki "Orta" konular için de TEKRAR önerisi yapılır (Zayıf eşiği shared/topicStatus.ts'te). */
-    reviewMaxAccuracy: 70,
-    /** Bir kitap testinin ortalama çözüm süresi (dk) — öneride kaç test verileceğini belirler. */
-    minutesPerTest: 15,
-    /** Bir günde kitap görevlerine ayrılabilecek en fazla süre (dk). */
-    maxDailyBookMinutes: 90,
-    /** Öğrencinin tercihi yoksa varsayılan: kitap görevleri otomatik planlanmaz, yalnızca önerilir. */
-    autoScheduleDefault: false
-  }
-};
-
-// server/bookContent/bookStudyAllocation.ts
-var weaknessFromAccuracy = (accuracy) => Math.round((1 - Math.max(0, Math.min(100, accuracy)) / 100) * 100) / 100;
-function minutesForWeakness(weakness, bands = bookContentConfig.allocation.weaknessMinutes) {
-  const band = [...bands].sort((a, b) => b.min - a.min).find((item) => weakness >= item.min);
-  return band ? band.minutes : null;
-}
-var overlaps = (row, ranges) => row.pageStart !== null && ranges.some((range) => row.pageStart >= range.pageStart && row.pageStart <= range.pageEnd);
-var PRACTICE_TYPES = /* @__PURE__ */ new Set(["topic_test", "topic", "osym_type"]);
-function buildBookRecommendations(input) {
-  const { minutesPerTest, weaknessMinutes } = bookContentConfig.allocation;
-  const recommendations = [];
-  for (const weak of input.weakTopics) {
-    const weakness = weaknessFromAccuracy(weak.accuracy);
-    const minutes = minutesForWeakness(weakness, weaknessMinutes);
-    if (minutes === null) continue;
-    const byBook = /* @__PURE__ */ new Map();
-    for (const row of input.contents) {
-      if (row.topicId !== weak.topicId || !PRACTICE_TYPES.has(row.contentType)) continue;
-      byBook.set(row.bookId, [...byBook.get(row.bookId) ?? [], row]);
-    }
-    const purpose = weak.accuracy < TOPIC_STATUS_THRESHOLDS.weak ? "practice" : "review";
-    for (const [bookId, rows] of Array.from(byBook)) {
-      const skip = [...input.donePages[bookId] ?? [], ...input.scheduledPages[bookId] ?? []];
-      const open = rows.sort((a, b) => a.sortOrder - b.sortOrder).filter((row) => !overlaps(row, skip));
-      if (open.length === 0) continue;
-      if (purpose === "review") open.sort((a, b) => Number(b.contentType === "osym_type") - Number(a.contentType === "osym_type") || a.sortOrder - b.sortOrder);
-      const first = open[0];
-      const count4 = Math.max(1, Math.floor(minutes / minutesPerTest));
-      const picked = open.filter((row) => row.unitNumber === first.unitNumber && row.unitTitle === first.unitTitle).slice(0, count4);
-      const numbers = picked.map((row) => row.testNumber).filter((value) => value !== null);
-      const allTopicTests = picked.every((row) => row.contentType === "topic_test");
-      recommendations.push({
-        purpose,
-        topicId: weak.topicId,
-        topic: weak.topic,
-        subject: weak.subject,
-        exam: weak.exam,
-        weakness,
-        minutes,
-        bookId,
-        unitNumber: first.unitNumber,
-        unitTitle: first.unitTitle,
-        contentIds: picked.map((row) => row.id),
-        labels: picked.map((row) => row.label),
-        testRange: allTopicTests && numbers.length ? numbers.length === 1 ? String(numbers[0]) : `${Math.min(...numbers)}-${Math.max(...numbers)}` : null,
-        pageStart: picked[0].pageStart,
-        pageEnd: picked[picked.length - 1].pageEnd ?? picked[picked.length - 1].pageStart,
-        match: Math.min(...picked.map((row) => row.mappingConfidence)) >= bookContentConfig.mapping.autoSuggestMin ? "HIGH" : "MEDIUM",
-        remainingTests: open.length
-      });
-    }
-  }
-  return recommendations.sort((a, b) => b.weakness - a.weakness || a.bookId.localeCompare(b.bookId));
-}
-function computeBookCompletion(input) {
-  const ranges = input.logs.filter((log) => log.pageStart !== null).map((log) => ({ pageStart: log.pageStart, pageEnd: Math.max(log.pageStart, log.pageEnd ?? log.pageStart) }));
-  const questions = input.logs.reduce((sum, log) => sum + log.questions, 0);
-  const correct = input.logs.reduce((sum, log) => sum + log.correct, 0);
-  const accuracy = questions > 0 ? Math.round(correct / questions * 100) : null;
-  const isDone = (row) => row.pageStart !== null && ranges.some((range) => row.pageStart >= range.pageStart && row.pageStart <= range.pageEnd);
-  if (input.contents.length > 0) {
-    const units = [];
-    for (const row of input.contents) {
-      let unit = units[units.length - 1];
-      if (!unit || unit.unitNumber !== row.unitNumber || unit.unitTitle !== row.unitTitle) {
-        unit = { unitNumber: row.unitNumber, unitTitle: row.unitTitle, done: 0, total: 0 };
-        units.push(unit);
-      }
-      unit.total += 1;
-      if (isDone(row)) unit.done += 1;
-    }
-    const total = input.contents.length;
-    const done = units.reduce((sum, unit) => sum + unit.done, 0);
-    return { percent: Math.round(done / total * 100), basis: "contents", done, total, accuracy, questions, units };
-  }
-  if (input.pageCount && input.pageCount > 0) {
-    const covered = /* @__PURE__ */ new Set();
-    for (const range of ranges) for (let page = range.pageStart; page <= Math.min(range.pageEnd, input.pageCount); page++) covered.add(page);
-    return { percent: Math.min(100, Math.round(covered.size / input.pageCount * 100)), basis: "pages", done: covered.size, total: input.pageCount, accuracy, questions, units: [] };
-  }
-  return { percent: null, basis: "none", done: 0, total: 0, accuracy, questions, units: [] };
-}
-function pickStudyDay(input) {
-  const { maxDailyBookMinutes } = bookContentConfig.allocation;
-  const start = /* @__PURE__ */ new Date(`${input.today}T00:00:00Z`);
-  for (let offset = 0; offset < (input.horizonDays ?? 7); offset++) {
-    const date = new Date(start.getTime() + offset * 864e5).toISOString().slice(0, 10);
-    const dayLoad = input.load.filter((item) => item.date === date);
-    const total = dayLoad.reduce((sum, item) => sum + item.minutes, 0);
-    const bookTotal = dayLoad.filter((item) => item.isBook).reduce((sum, item) => sum + item.minutes, 0);
-    if (total + input.minutes <= input.dailyCapacity && bookTotal + input.minutes <= maxDailyBookMinutes) return date;
-  }
-  return null;
-}
+import { and as and14, eq as eq16, inArray as inArray7, isNull as isNull10 } from "drizzle-orm";
 
 // shared/examTopicLinks.ts
 var examTopicKey = (value) => value.replace(/İ/g, "i").replace(/I/g, "\u0131").toLowerCase().replace(/[çğıöşüâîû]/g, (char) => ({ \u00E7: "c", \u011F: "g", \u0131: "i", \u00F6: "o", \u015F: "s", \u00FC: "u", \u00E2: "a", \u00EE: "i", \u00FB: "u" })[char] ?? char).replace(/[^a-z0-9]+/g, " ").trim();
@@ -4128,8 +6175,8 @@ var EXAM_TOPIC_LINKS = new Map(
     })
   ])
 );
-function curriculumSubjectsFor(subject, category) {
-  const key = examTopicKey(category || subject);
+function curriculumSubjectsFor(subject2, category) {
+  const key = examTopicKey(category || subject2);
   if (key.startsWith("fizik")) return ["Fizik"];
   if (key.startsWith("kimya")) return ["Kimya"];
   if (key.startsWith("biyoloji")) return ["Biyoloji"];
@@ -4143,7 +6190,7 @@ function curriculumSubjectsFor(subject, category) {
   if (key.startsWith("edebiyat") || key.startsWith("turk dili")) return ["Edebiyat"];
   if (key === "fen" || key.startsWith("fen ")) return ["Fizik", "Kimya", "Biyoloji"];
   if (key === "sosyal" || key.startsWith("sosyal ")) return ["Tarih", "Co\u011Frafya", "Felsefe", "Din K\xFClt\xFCr\xFC"];
-  return [subject];
+  return [subject2];
 }
 
 // server/bookContent/curriculumMatcher.ts
@@ -4195,96 +6242,47 @@ var CURRICULUM_SLUGS = new Set(CURRICULUM.map((def) => def.slug));
 function resolveToCurriculumTopicIds(row, topics) {
   const idBySlug = new Map(topics.map((topic) => [topic.slug, topic.id]));
   if (CURRICULUM_SLUGS.has(row.slug)) {
-    const id3 = idBySlug.get(row.slug);
-    return id3 === void 0 ? [] : [id3];
+    const id4 = idBySlug.get(row.slug);
+    return id4 === void 0 ? [] : [id4];
   }
   const linked = EXAM_TOPIC_LINKS.get(examTopicKey(row.topic));
-  if (linked) return Array.from(new Set(linked.map((def) => idBySlug.get(def.slug)).filter((id3) => id3 !== void 0)));
+  if (linked) return Array.from(new Set(linked.map((def) => idBySlug.get(def.slug)).filter((id4) => id4 !== void 0)));
   const curriculumTopics = topics.filter((topic) => CURRICULUM_SLUGS.has(topic.slug));
   const subjects = curriculumSubjectsFor(row.subject, row.category);
   const parts = [row.topic, ...row.topic.split(/[,()]/).map((part) => part.trim()).filter((part) => part.length >= 4)];
   const ids = /* @__PURE__ */ new Set();
   for (const part of Array.from(new Set(parts))) {
-    for (const subject of subjects) {
-      const result = matchTopic(part, curriculumTopics, { subject, exam: row.exam });
+    for (const subject2 of subjects) {
+      const result = matchTopic(part, curriculumTopics, { subject: subject2, exam: row.exam });
       if (result.best && result.tier === "auto") ids.add(result.best.topicId);
     }
     if (part === row.topic && ids.size > 0) break;
   }
   return Array.from(ids);
 }
-var DAY_MS2 = 864e5;
+var DAY_MS6 = 864e5;
 function deriveCurriculumWeakTopics(rows, topics) {
   const topicById = new Map(topics.map((topic) => [topic.id, topic]));
   const signals = /* @__PURE__ */ new Map();
   for (const row of rows) {
     if (row.insufficientData) continue;
     const at = row.lastReviewedAt ? new Date(row.lastReviewedAt).getTime() : 0;
-    for (const id3 of resolveToCurriculumTopicIds(row, topics)) signals.set(id3, [...signals.get(id3) ?? [], { accuracy: row.progress, at }]);
+    for (const id4 of resolveToCurriculumTopicIds(row, topics)) signals.set(id4, [...signals.get(id4) ?? [], { accuracy: row.progress, at }]);
   }
   const weak = [];
-  for (const [id3, list] of Array.from(signals)) {
-    const latestDay = Math.floor(Math.max(...list.map((signal) => signal.at)) / DAY_MS2);
-    const latest = list.filter((signal) => Math.floor(signal.at / DAY_MS2) === latestDay);
+  for (const [id4, list] of Array.from(signals)) {
+    const latestDay = Math.floor(Math.max(...list.map((signal) => signal.at)) / DAY_MS6);
+    const latest = list.filter((signal) => Math.floor(signal.at / DAY_MS6) === latestDay);
     const accuracy = Math.round(latest.reduce((sum, signal) => sum + signal.accuracy, 0) / latest.length);
-    const topic = topicById.get(id3);
+    const topic = topicById.get(id4);
     if (!topic || accuracy >= bookContentConfig.allocation.reviewMaxAccuracy) continue;
-    weak.push({ topicId: id3, topic: topic.topic, subject: topic.subject, exam: topic.exam, accuracy });
+    weak.push({ topicId: id4, topic: topic.topic, subject: topic.subject, exam: topic.exam, accuracy });
   }
   return weak;
 }
 
-// server/studyPlan/planTasks.ts
-import { and as and4, eq as eq6, gte as gte3, lte } from "drizzle-orm";
-var PlanTaskError = class extends Error {
-};
-var isoDate = (date) => date.toISOString().slice(0, 10);
-async function pickDayForTask(userId, minutes, when) {
-  const db = await getDb();
-  if (!db) throw new PlanTaskError("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
-  const today = /* @__PURE__ */ new Date();
-  today.setUTCHours(0, 0, 0, 0);
-  if (when === "today") return isoDate(today);
-  const horizonEnd = new Date(today.getTime() + 7 * 864e5);
-  const [profile] = await db.select({ daily: studentProfiles.dailyStudyDuration }).from(studentProfiles).where(eq6(studentProfiles.userId, userId)).limit(1);
-  const sessions = await db.select({ sessionDate: studyPlanSessions.sessionDate, minutes: studyPlanSessions.plannedMinutes, sourceBookId: studyPlanSessions.sourceBookId }).from(studyPlanSessions).where(and4(eq6(studyPlanSessions.userId, userId), eq6(studyPlanSessions.status, "planned"), gte3(studyPlanSessions.sessionDate, today), lte(studyPlanSessions.sessionDate, horizonEnd)));
-  const picked = pickStudyDay({ today: isoDate(today), minutes, dailyCapacity: profile?.daily ?? 120, load: sessions.map((session) => ({ date: isoDate(new Date(session.sessionDate)), minutes: session.minutes, isBook: Boolean(session.sourceBookId) })) });
-  if (!picked) throw new PlanTaskError('\xD6n\xFCm\xFCzdeki 7 g\xFCnde bu g\xF6rev i\xE7in yer yok \u2014 plan\u0131n dolu. "Bug\xFCn \xE7al\u0131\u015F" ile yine de ekleyebilirsin.');
-  return picked;
-}
-async function insertPlanTask(userId, input) {
-  const db = await getDb();
-  if (!db) throw new PlanTaskError("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
-  const noon = /* @__PURE__ */ new Date(`${input.date}T12:00:00Z`);
-  const sessionDate = input.date === isoDate(/* @__PURE__ */ new Date()) ? new Date(Math.max(noon.getTime(), Date.now() + 5 * 6e4)) : noon;
-  const [plan] = await db.select({ id: studyPlans.id }).from(studyPlans).where(and4(eq6(studyPlans.userId, userId), lte(studyPlans.weekStart, sessionDate), gte3(studyPlans.weekEnd, sessionDate))).orderBy(studyPlans.createdAt).limit(1);
-  let planId = plan?.id;
-  if (!planId) {
-    const weekStart = /* @__PURE__ */ new Date(`${input.date}T00:00:00Z`);
-    const weekEnd = new Date(weekStart.getTime() + 6 * 864e5 + 86399e3);
-    const result2 = await db.insert(studyPlans).values({ userId, title: input.planTitle, weekStart, weekEnd, summary: input.planSummary, source: "manual" });
-    planId = Number(result2[0].insertId);
-  }
-  const result = await db.insert(studyPlanSessions).values({
-    planId,
-    userId,
-    sessionDate,
-    title: input.title.slice(0, 180),
-    subject: input.subject,
-    // Tam konu adı: tamamlanınca completeStudySession → upsertTopicProgress aynı
-    // konu satırını günceller; zayıflık mevcut sistem tarafından yeniden hesaplanır.
-    topic: input.topic,
-    kind: input.kind,
-    plannedMinutes: input.minutes,
-    targetPages: input.targetPages ?? null,
-    targetTests: input.targetTests ?? null,
-    sourceBookId: input.sourceBookId ?? null
-  });
-  return { sessionId: Number(result[0].insertId), date: input.date };
-}
-
 // server/bookContent/bookContentDb.ts
-async function requireDb2() {
+async function requireDb5() {
   const db = await getDb();
   if (!db) throw new Error("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
   return db;
@@ -4295,16 +6293,16 @@ async function getMatchableTopics() {
   return catalog.map((row) => ({ id: row.id, slug: row.slug, exam: row.exam, subject: row.subject, unit: row.unit, topic: row.topic, aliases: aliasesBySlug.get(row.slug) ?? [] }));
 }
 async function userOwnsBook(userId, bookId) {
-  const db = await requireDb2();
-  const [row] = await db.select({ id: bookInventory.id }).from(bookInventory).where(and5(eq7(bookInventory.userId, userId), eq7(bookInventory.bookId, bookId), isNull3(bookInventory.removedAt))).limit(1);
+  const db = await requireDb5();
+  const [row] = await db.select({ id: bookInventory.id }).from(bookInventory).where(and14(eq16(bookInventory.userId, userId), eq16(bookInventory.bookId, bookId), isNull10(bookInventory.removedAt))).limit(1);
   return Boolean(row);
 }
-async function replaceBookContents(userId, bookId, subject, items, source) {
-  const db = await requireDb2();
-  const topicIds = Array.from(new Set(items.map((item) => item.topicId).filter((id3) => id3 !== null)));
-  const validTopics = topicIds.length ? await db.select().from(yksTopics).where(inArray3(yksTopics.id, topicIds)) : [];
+async function replaceBookContents(userId, bookId, subject2, items, source) {
+  const db = await requireDb5();
+  const topicIds = Array.from(new Set(items.map((item) => item.topicId).filter((id4) => id4 !== null)));
+  const validTopics = topicIds.length ? await db.select().from(yksTopics).where(inArray7(yksTopics.id, topicIds)) : [];
   const topicById = new Map(validTopics.map((row) => [row.id, row]));
-  const unknown = topicIds.filter((id3) => !topicById.has(id3));
+  const unknown = topicIds.filter((id4) => !topicById.has(id4));
   if (unknown.length) throw new Error("Ge\xE7ersiz m\xFCfredat konusu se\xE7ildi. Sayfay\u0131 yenileyip tekrar dener misin?");
   const mixed = (type) => type === "review" || type === "simulation";
   const rows = items.map((item, index2) => ({
@@ -4326,7 +6324,7 @@ async function replaceBookContents(userId, bookId, subject, items, source) {
     source
   }));
   await db.transaction(async (tx) => {
-    await tx.delete(userBookContents).where(and5(eq7(userBookContents.userId, userId), eq7(userBookContents.bookId, bookId)));
+    await tx.delete(userBookContents).where(and14(eq16(userBookContents.userId, userId), eq16(userBookContents.bookId, bookId)));
     if (rows.length) await tx.insert(userBookContents).values(rows);
   });
   for (const topicId of topicIds) {
@@ -4338,7 +6336,7 @@ async function replaceBookContents(userId, bookId, subject, items, source) {
     await upsertBookTopicMapping(userId, {
       bookId,
       topic: topic.topic,
-      subject: topic.subject || subject,
+      subject: topic.subject || subject2,
       pageStart: pages2.length ? Math.min(...pages2) : null,
       pageEnd: pages2.length ? Math.max(...pages2) : null,
       testStart: singleUnit && tests.length ? Math.min(...tests) : null,
@@ -4348,21 +6346,21 @@ async function replaceBookContents(userId, bookId, subject, items, source) {
   return getBookContents(userId, bookId);
 }
 async function getBookContents(userId, bookId) {
-  const db = await requireDb2();
-  const rows = await db.select().from(userBookContents).where(and5(eq7(userBookContents.userId, userId), eq7(userBookContents.bookId, bookId))).orderBy(userBookContents.sortOrder);
-  const topicIds = Array.from(new Set(rows.map((row) => row.topicId).filter((id3) => id3 !== null)));
-  const topics = topicIds.length ? await db.select({ id: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject, unit: yksTopics.unit }).from(yksTopics).where(inArray3(yksTopics.id, topicIds)) : [];
+  const db = await requireDb5();
+  const rows = await db.select().from(userBookContents).where(and14(eq16(userBookContents.userId, userId), eq16(userBookContents.bookId, bookId))).orderBy(userBookContents.sortOrder);
+  const topicIds = Array.from(new Set(rows.map((row) => row.topicId).filter((id4) => id4 !== null)));
+  const topics = topicIds.length ? await db.select({ id: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject, unit: yksTopics.unit }).from(yksTopics).where(inArray7(yksTopics.id, topicIds)) : [];
   const topicById = new Map(topics.map((row) => [row.id, row]));
   return rows.map((row) => ({ ...row, mappingConfidence: Number(row.mappingConfidence), topic: row.topicId !== null ? topicById.get(row.topicId) ?? null : null }));
 }
 async function getBookContentSummaries(userId) {
-  const db = await requireDb2();
-  const activeBooks = (await db.select({ bookId: bookInventory.bookId }).from(bookInventory).where(and5(eq7(bookInventory.userId, userId), isNull3(bookInventory.removedAt)))).map((row) => row.bookId);
+  const db = await requireDb5();
+  const activeBooks = (await db.select({ bookId: bookInventory.bookId }).from(bookInventory).where(and14(eq16(bookInventory.userId, userId), isNull10(bookInventory.removedAt)))).map((row) => row.bookId);
   if (activeBooks.length === 0) return [];
   const [contentRows, logs, customBooks] = await Promise.all([
-    db.select({ bookId: userBookContents.bookId, topicId: userBookContents.topicId, unitNumber: userBookContents.unitNumber, unitTitle: userBookContents.unitTitle, pageStart: userBookContents.pageStart }).from(userBookContents).where(and5(eq7(userBookContents.userId, userId), inArray3(userBookContents.bookId, activeBooks))).orderBy(userBookContents.sortOrder),
-    db.select({ bookId: bookStudyLogs.bookId, pageStart: bookStudyLogs.pageStart, pageEnd: bookStudyLogs.pageEnd, questions: bookStudyLogs.questions, correct: bookStudyLogs.correct }).from(bookStudyLogs).where(and5(eq7(bookStudyLogs.userId, userId), inArray3(bookStudyLogs.bookId, activeBooks))),
-    db.select({ bookId: userResourceBooks.bookId, pageCount: userResourceBooks.pageCount }).from(userResourceBooks).where(and5(eq7(userResourceBooks.userId, userId), inArray3(userResourceBooks.bookId, activeBooks)))
+    db.select({ bookId: userBookContents.bookId, topicId: userBookContents.topicId, unitNumber: userBookContents.unitNumber, unitTitle: userBookContents.unitTitle, pageStart: userBookContents.pageStart }).from(userBookContents).where(and14(eq16(userBookContents.userId, userId), inArray7(userBookContents.bookId, activeBooks))).orderBy(userBookContents.sortOrder),
+    db.select({ bookId: bookStudyLogs.bookId, pageStart: bookStudyLogs.pageStart, pageEnd: bookStudyLogs.pageEnd, questions: bookStudyLogs.questions, correct: bookStudyLogs.correct }).from(bookStudyLogs).where(and14(eq16(bookStudyLogs.userId, userId), inArray7(bookStudyLogs.bookId, activeBooks))),
+    db.select({ bookId: userResourceBooks.bookId, pageCount: userResourceBooks.pageCount }).from(userResourceBooks).where(and14(eq16(userResourceBooks.userId, userId), inArray7(userResourceBooks.bookId, activeBooks)))
   ]);
   const pageCountByBook = new Map(customBooks.map((row) => [row.bookId, row.pageCount]));
   return activeBooks.map((bookId) => {
@@ -4370,7 +6368,7 @@ async function getBookContentSummaries(userId) {
     return {
       bookId,
       entries: contents.length,
-      topicIds: Array.from(new Set(contents.map((row) => row.topicId).filter((id3) => id3 !== null))),
+      topicIds: Array.from(new Set(contents.map((row) => row.topicId).filter((id4) => id4 !== null))),
       completion: computeBookCompletion({ contents, logs: logs.filter((log) => log.bookId === bookId), pageCount: pageCountByBook.get(bookId) ?? null })
     };
   });
@@ -4382,16 +6380,16 @@ var parseRange = (value) => {
   return { pageStart: start, pageEnd: Number(match[2] ?? match[1]) };
 };
 async function getWeakTopicBookRecommendations(userId) {
-  const db = await requireDb2();
+  const db = await requireDb5();
   const [progress, topics] = await Promise.all([getUserTopicProgress(userId), getMatchableTopics()]);
   const weakTopics = deriveCurriculumWeakTopics(progress, topics);
   if (weakTopics.length === 0) return [];
-  const activeBooks = (await db.select({ bookId: bookInventory.bookId }).from(bookInventory).where(and5(eq7(bookInventory.userId, userId), isNull3(bookInventory.removedAt)))).map((row) => row.bookId);
+  const activeBooks = (await db.select({ bookId: bookInventory.bookId }).from(bookInventory).where(and14(eq16(bookInventory.userId, userId), isNull10(bookInventory.removedAt)))).map((row) => row.bookId);
   if (activeBooks.length === 0) return [];
   const [contentRows, logs, planned] = await Promise.all([
-    db.select().from(userBookContents).where(and5(eq7(userBookContents.userId, userId), eq7(userBookContents.mappingStatus, "confirmed"), inArray3(userBookContents.bookId, activeBooks), inArray3(userBookContents.topicId, weakTopics.map((topic) => topic.topicId)))),
-    db.select({ bookId: bookStudyLogs.bookId, pageStart: bookStudyLogs.pageStart, pageEnd: bookStudyLogs.pageEnd }).from(bookStudyLogs).where(and5(eq7(bookStudyLogs.userId, userId), inArray3(bookStudyLogs.bookId, activeBooks))),
-    db.select({ bookId: studyPlanSessions.sourceBookId, targetPages: studyPlanSessions.targetPages }).from(studyPlanSessions).where(and5(eq7(studyPlanSessions.userId, userId), eq7(studyPlanSessions.status, "planned"), inArray3(studyPlanSessions.sourceBookId, activeBooks)))
+    db.select().from(userBookContents).where(and14(eq16(userBookContents.userId, userId), eq16(userBookContents.mappingStatus, "confirmed"), inArray7(userBookContents.bookId, activeBooks), inArray7(userBookContents.topicId, weakTopics.map((topic) => topic.topicId)))),
+    db.select({ bookId: bookStudyLogs.bookId, pageStart: bookStudyLogs.pageStart, pageEnd: bookStudyLogs.pageEnd }).from(bookStudyLogs).where(and14(eq16(bookStudyLogs.userId, userId), inArray7(bookStudyLogs.bookId, activeBooks))),
+    db.select({ bookId: studyPlanSessions.sourceBookId, targetPages: studyPlanSessions.targetPages }).from(studyPlanSessions).where(and14(eq16(studyPlanSessions.userId, userId), eq16(studyPlanSessions.status, "planned"), inArray7(studyPlanSessions.sourceBookId, activeBooks)))
   ]);
   const donePages = {};
   for (const log of logs) if (log.pageStart !== null) (donePages[log.bookId] ??= []).push({ pageStart: log.pageStart, pageEnd: log.pageEnd ?? log.pageStart });
@@ -4404,13 +6402,13 @@ async function getWeakTopicBookRecommendations(userId) {
   return buildBookRecommendations({ weakTopics, contents, donePages, scheduledPages });
 }
 async function getAutoSchedule(userId) {
-  const db = await requireDb2();
-  const [row] = await db.select({ value: studentProfiles.autoScheduleBookTasks }).from(studentProfiles).where(eq7(studentProfiles.userId, userId)).limit(1);
+  const db = await requireDb5();
+  const [row] = await db.select({ value: studentProfiles.autoScheduleBookTasks }).from(studentProfiles).where(eq16(studentProfiles.userId, userId)).limit(1);
   return row?.value === 1;
 }
 async function setAutoSchedule(userId, enabled) {
-  const db = await requireDb2();
-  await db.insert(studentProfiles).values({ userId, autoScheduleBookTasks: enabled ? 1 : 0 }).onDuplicateKeyUpdate({ set: { autoScheduleBookTasks: enabled ? 1 : 0 } });
+  const db = await requireDb5();
+  await db.insert(studentProfiles).values({ userId, autoScheduleBookTasks: enabled ? 1 : 0 }).onConflictDoUpdate({ target: studentProfiles.userId, set: { autoScheduleBookTasks: enabled ? 1 : 0 } });
   return enabled;
 }
 async function runAutoSchedule(userId, bookTitles, maxTasks = 3) {
@@ -4429,16 +6427,16 @@ async function runAutoSchedule(userId, bookTitles, maxTasks = 3) {
   return { added };
 }
 async function resolveBookTitle(db, userId, bookId, fallback) {
-  const [custom] = await db.select({ title: userResourceBooks.title }).from(userResourceBooks).where(and5(eq7(userResourceBooks.userId, userId), eq7(userResourceBooks.bookId, bookId))).limit(1);
+  const [custom] = await db.select({ title: userResourceBooks.title }).from(userResourceBooks).where(and14(eq16(userResourceBooks.userId, userId), eq16(userResourceBooks.bookId, bookId))).limit(1);
   if (custom) return custom.title;
   if (/^\d+$/.test(bookId)) {
-    const [catalogBook] = await db.select({ name: catalogBooks.name }).from(catalogBooks).where(eq7(catalogBooks.id, Number(bookId))).limit(1);
+    const [catalogBook] = await db.select({ name: catalogBooks.name }).from(catalogBooks).where(eq16(catalogBooks.id, Number(bookId))).limit(1);
     if (catalogBook) return catalogBook.name;
   }
   return fallback.slice(0, 120) || "Kitap";
 }
 async function addRecommendationToPlan(userId, input) {
-  const db = await requireDb2();
+  const db = await requireDb5();
   if (!await userOwnsBook(userId, input.bookId)) throw new Error("Bu kitap k\xFCt\xFCphanende bulunmuyor.");
   const recommendation = (await getWeakTopicBookRecommendations(userId)).find((rec) => rec.topicId === input.topicId && rec.bookId === input.bookId);
   if (!recommendation) throw new Error("Bu \xF6neri art\u0131k ge\xE7erli de\u011Fil (testler \xE7\xF6z\xFClm\xFC\u015F ya da zaten planlanm\u0131\u015F olabilir).");
@@ -4604,15 +6602,15 @@ function filterTocNoise(pages2, context = {}) {
   const repeated = /* @__PURE__ */ new Set();
   if (pages2.length > 1) {
     const seen = /* @__PURE__ */ new Map();
-    for (const page of pages2) {
-      const onPage = new Set(page.items.filter((item) => item.page === null && item.type !== "unit").map((item) => normalizeForComparison(`${item.label ?? ""} ${item.title}`)).filter(Boolean));
+    for (const page2 of pages2) {
+      const onPage = new Set(page2.items.filter((item) => item.page === null && item.type !== "unit").map((item) => normalizeForComparison(`${item.label ?? ""} ${item.title}`)).filter(Boolean));
       for (const key of Array.from(onPage)) seen.set(key, (seen.get(key) ?? 0) + 1);
     }
     for (const [key, count4] of Array.from(seen.entries())) if (count4 >= 2) repeated.add(key);
   }
-  const cleaned = pages2.map((page) => ({
-    ...page,
-    items: page.items.filter((item) => {
+  const cleaned = pages2.map((page2) => ({
+    ...page2,
+    items: page2.items.filter((item) => {
       const reason = noiseReason(item, context) ?? (item.page === null && item.type !== "unit" && repeated.has(normalizeForComparison(`${item.label ?? ""} ${item.title}`)) ? "repeated_header" : null);
       if (reason) removed.push({ text: `${item.label ?? ""} ${item.title}`.trim(), reason });
       return !reason;
@@ -4620,8 +6618,8 @@ function filterTocNoise(pages2, context = {}) {
   }));
   return { pages: cleaned, removed };
 }
-function rawTextOf(page) {
-  return page.items.map((item) => [item.type === "unit" && item.unitNumber !== null && !/ünite|unite/i.test(item.title) ? `${item.unitNumber}. \xDCN\u0130TE` : "", item.label ?? "", item.title, item.pageText ?? (item.page !== null ? String(item.page) : "")].filter(Boolean).join(" ")).join("\n");
+function rawTextOf(page2) {
+  return page2.items.map((item) => [item.type === "unit" && item.unitNumber !== null && !/ünite|unite/i.test(item.title) ? `${item.unitNumber}. \xDCN\u0130TE` : "", item.label ?? "", item.title, item.pageText ?? (item.page !== null ? String(item.page) : "")].filter(Boolean).join(" ")).join("\n");
 }
 
 // server/bookContent/ocrProvider.ts
@@ -4701,12 +6699,12 @@ async function extractPlainTextFromImage(imageDataUrl) {
 }
 
 // server/bookContent/ocrCache.ts
-import { createHash as createHash2 } from "node:crypto";
-import { and as and6, eq as eq8, lt as lt3 } from "drizzle-orm";
+import { createHash as createHash3 } from "node:crypto";
+import { and as and15, eq as eq17, lt as lt8 } from "drizzle-orm";
 var OCR_PIPELINE_VERSION = "toc-2.0";
 var CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1e3;
 var disabledReason = null;
-var imageHash = (buffer) => createHash2("sha256").update(buffer).digest("hex");
+var imageHash = (buffer) => createHash3("sha256").update(buffer).digest("hex");
 function disable(error) {
   const message = error instanceof Error ? error.message : String(error);
   if (!disabledReason) console.warn(`[OCR cache] disabled: ${message.slice(0, 200)}`);
@@ -4717,7 +6715,7 @@ async function readOcrCache(userId, hash) {
   try {
     const db = await getDb();
     if (!db) return null;
-    const [row] = await db.select({ resultJson: ocrPageCache.resultJson, createdAt: ocrPageCache.createdAt }).from(ocrPageCache).where(and6(eq8(ocrPageCache.userId, userId), eq8(ocrPageCache.imageHash, hash), eq8(ocrPageCache.pipelineVersion, OCR_PIPELINE_VERSION))).limit(1);
+    const [row] = await db.select({ resultJson: ocrPageCache.resultJson, createdAt: ocrPageCache.createdAt }).from(ocrPageCache).where(and15(eq17(ocrPageCache.userId, userId), eq17(ocrPageCache.imageHash, hash), eq17(ocrPageCache.pipelineVersion, OCR_PIPELINE_VERSION))).limit(1);
     if (!row || Date.now() - new Date(row.createdAt).getTime() > CACHE_TTL_MS) return null;
     return JSON.parse(row.resultJson);
   } catch (error) {
@@ -4731,8 +6729,8 @@ async function writeOcrCache(userId, hash, result) {
     const db = await getDb();
     if (!db) return;
     const resultJson = JSON.stringify(result);
-    await db.insert(ocrPageCache).values({ userId, imageHash: hash, pipelineVersion: OCR_PIPELINE_VERSION, resultJson }).onDuplicateKeyUpdate({ set: { resultJson, createdAt: /* @__PURE__ */ new Date() } });
-    await db.delete(ocrPageCache).where(and6(eq8(ocrPageCache.userId, userId), lt3(ocrPageCache.createdAt, new Date(Date.now() - CACHE_TTL_MS))));
+    await db.insert(ocrPageCache).values({ userId, imageHash: hash, pipelineVersion: OCR_PIPELINE_VERSION, resultJson }).onConflictDoUpdate({ target: [ocrPageCache.userId, ocrPageCache.imageHash, ocrPageCache.pipelineVersion], set: { resultJson, createdAt: /* @__PURE__ */ new Date() } });
+    await db.delete(ocrPageCache).where(and15(eq17(ocrPageCache.userId, userId), lt8(ocrPageCache.createdAt, new Date(Date.now() - CACHE_TTL_MS))));
   } catch (error) {
     disable(error);
   }
@@ -5503,22 +7501,22 @@ var ocrScoringConfig = {
 };
 var clamp012 = (value) => Math.max(0, Math.min(1, value));
 var mean = (values, fallback = 0) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : fallback;
-var entriesOf = (page) => page.items.filter((item) => item.type === "entry");
+var entriesOf = (page2) => page2.items.filter((item) => item.type === "entry");
 var lineText = (item) => `${item.label ?? ""} ${item.title}`.trim();
 function itemsMatch(a, b, config = ocrScoringConfig) {
   if (a.type !== b.type) return false;
   if (a.type === "unit" && a.unitNumber !== null && a.unitNumber === b.unitNumber) return true;
   return textSimilarity(lineText(a), lineText(b)) >= config.matchSimilarity;
 }
-function structureScore(page) {
-  const entries = entriesOf(page);
+function structureScore(page2) {
+  const entries = entriesOf(page2);
   if (!entries.length) return 0;
   const usable = entries.filter((item) => (item.label || item.title) && item.page !== null).length / entries.length;
-  const units = page.items.filter((item) => item.type === "unit" && item.unitNumber !== null).map((item) => item.unitNumber);
+  const units = page2.items.filter((item) => item.type === "unit" && item.unitNumber !== null).map((item) => item.unitNumber);
   let unitBreaks = 0;
   for (let index2 = 1; index2 < units.length; index2++) if (units[index2] !== units[index2 - 1] + 1) unitBreaks++;
   let testPairs = 0, testBreaks = 0, lastTest = null;
-  for (const item of page.items) {
+  for (const item of page2.items) {
     if (item.type === "unit") {
       lastTest = null;
       continue;
@@ -5535,22 +7533,22 @@ function structureScore(page) {
   const sequence = 1 - (unitBreaks + testBreaks) / Math.max(1, units.length - 1 + testPairs);
   return clamp012(0.6 * usable + 0.4 * sequence);
 }
-function numberConsistency(page) {
-  const entries = entriesOf(page);
+function numberConsistency(page2) {
+  const entries = entriesOf(page2);
   if (!entries.length) return 0;
   const withPage = entries.filter((item) => item.page !== null);
   let decreasing = 0;
   for (let index2 = 1; index2 < withPage.length; index2++) if (withPage[index2].page < withPage[index2 - 1].page) decreasing++;
   return clamp012(withPage.length / entries.length * (1 - decreasing / Math.max(1, withPage.length - 1)));
 }
-function languageScore(page) {
-  const texts = page.items.map((item) => item.title).filter((title) => title.trim());
+function languageScore(page2) {
+  const texts = page2.items.map((item) => item.title).filter((title) => title.trim());
   return mean(texts.map(turkishPlausibility), 0);
 }
-function layoutScore(page) {
-  if (!page.items.length) return 0;
-  if (page.pageKind === "table_of_contents" || page.pageKind === void 0) return 1;
-  return entriesOf(page).filter((item) => item.page !== null).length >= 3 ? 0.7 : 0.2;
+function layoutScore(page2) {
+  if (!page2.items.length) return 0;
+  if (page2.pageKind === "table_of_contents" || page2.pageKind === void 0) return 1;
+  return entriesOf(page2).filter((item) => item.page !== null).length >= 3 ? 0.7 : 0.2;
 }
 function agreementScores(passes, config) {
   return passes.map((pass, index2) => {
@@ -5613,9 +7611,9 @@ function buildConsensus(passes, scores, config = ocrScoringConfig) {
     const support = group.length / passCount;
     const title = voteText(group.map((member) => member.title));
     const label = item.label === null && matches.every((member) => member.label === null) ? { value: null, agreement: 1 } : voteText(group.map((member) => member.label ?? ""));
-    const pages2 = group.map((member) => member.page).filter((page) => page !== null);
+    const pages2 = group.map((member) => member.page).filter((page2) => page2 !== null);
     const pageVotes = /* @__PURE__ */ new Map();
-    for (const page of pages2) pageVotes.set(page, (pageVotes.get(page) ?? 0) + 1);
+    for (const page2 of pages2) pageVotes.set(page2, (pageVotes.get(page2) ?? 0) + 1);
     const topPage = Array.from(pageVotes.entries()).sort((a, b) => b[1] - a[1] || (a[0] === item.page ? -1 : b[0] === item.page ? 1 : 0))[0];
     const pageAgreement = topPage ? topPage[1] / group.length : 0;
     const selfConfidence = mean(group.map((member) => member.confidence ?? 0.7));
@@ -5650,9 +7648,9 @@ function buildConsensus(passes, scores, config = ocrScoringConfig) {
 
 // server/bookContent/tocParser.ts
 init_turkishText();
-function pageIssues(page) {
+function pageIssues(page2) {
   const issues = [];
-  const entries = page.items.filter((item) => item.type === "entry");
+  const entries = page2.items.filter((item) => item.type === "entry");
   const missing = entries.filter((item) => item.page === null).map((item) => `${item.label ?? ""} ${item.title}`.trim());
   if (missing.length) issues.push(`\u015Eu sat\u0131rlar\u0131n sayfa numaras\u0131 okunamad\u0131: ${missing.slice(0, 6).join("; ")}`);
   let previous = null;
@@ -5663,8 +7661,8 @@ function pageIssues(page) {
   }
   return issues;
 }
-function looksLikeTopicList(page) {
-  return page.items.filter((item) => item.type === "entry" && item.page !== null && item.title.trim()).length >= 3;
+function looksLikeTopicList(page2) {
+  return page2.items.filter((item) => item.type === "entry" && item.page !== null && item.title.trim()).length >= 3;
 }
 var UNIT_ONLY = /^\d+\s*\.?\s*unite$/;
 function classify(label, title) {
@@ -5688,8 +7686,8 @@ function parseTableOfContents(pages2) {
   let unitNumber = null;
   let unitTitle = "";
   let awaitingUnitTitle = false;
-  for (const page of pages2) {
-    for (const item of page.items) {
+  for (const page2 of pages2) {
+    for (const item of page2.items) {
       const title = cleanTitle(item.title ?? "");
       if (item.type === "unit") {
         unitNumber = item.unitNumber;
@@ -5824,8 +7822,8 @@ async function readTocImage(dataUrl, options) {
           reports.push({ variantId: spec.id, applied, rotation, status: "skipped", elapsedMs: 0 });
           return;
         }
-        const page = await withTimeout(options.provider.extractTableOfContentsPage(url), Math.min(config.passTimeoutMs, remaining));
-        passes.push({ variantId: spec.id, page, applied, rotation, elapsedMs: Date.now() - passStart });
+        const page2 = await withTimeout(options.provider.extractTableOfContentsPage(url), Math.min(config.passTimeoutMs, remaining));
+        passes.push({ variantId: spec.id, page: page2, applied, rotation, elapsedMs: Date.now() - passStart });
         reports.push({ variantId: spec.id, applied, rotation, status: "ok", elapsedMs: Date.now() - passStart });
       } catch (error) {
         if (isPermanent(error)) throw error;
@@ -5868,8 +7866,8 @@ async function readTocImage(dataUrl, options) {
     const url = spec.kind === "original" || !gray || !quality ? dataUrl : encodeGrayToJpegDataUrl(renderVariant(gray, spec, quality, backbone.rotation).image, config.jpegQuality);
     const rereadStart = Date.now();
     try {
-      const page = await withTimeout(options.provider.extractTableOfContentsPage(url, { previous: consensus.page, issues }), Math.min(config.passTimeoutMs, deadline - Date.now()));
-      passes.push({ variantId: `${backbone.variantId}_reread`, page, applied: backbone.applied, rotation: backbone.rotation, elapsedMs: Date.now() - rereadStart });
+      const page2 = await withTimeout(options.provider.extractTableOfContentsPage(url, { previous: consensus.page, issues }), Math.min(config.passTimeoutMs, deadline - Date.now()));
+      passes.push({ variantId: `${backbone.variantId}_reread`, page: page2, applied: backbone.applied, rotation: backbone.rotation, elapsedMs: Date.now() - rereadStart });
       reports.push({ variantId: `${backbone.variantId}_reread`, applied: backbone.applied, rotation: backbone.rotation, status: "ok", elapsedMs: Date.now() - rereadStart });
       scores = scorePasses(passes, scoring);
       const rebuilt = buildConsensus(passes, scores, scoring);
@@ -5910,14 +7908,14 @@ async function readTocImage(dataUrl, options) {
 }
 
 // server/routers/bookContent.ts
-var bookIdInput = z3.string().min(1).max(120);
-var examInput = z3.enum(["TYT", "AYT"]).nullable().optional();
-var imageInput = z3.object({
-  dataUrl: z3.string().min(20).max(Math.ceil(bookContentConfig.ocr.maxImageBytes * 1.4)),
-  mimeType: z3.enum(["image/png", "image/jpeg", "image/webp"])
+var bookIdInput = z4.string().min(1).max(120);
+var examInput = z4.enum(["TYT", "AYT"]).nullable().optional();
+var imageInput = z4.object({
+  dataUrl: z4.string().min(20).max(Math.ceil(bookContentConfig.ocr.maxImageBytes * 1.4)),
+  mimeType: z4.enum(["image/png", "image/jpeg", "image/webp"])
 });
-var contentTypeInput = z3.enum(["topic_test", "osym_type", "review", "simulation", "topic"]);
-async function matchEntries(entries, subject) {
+var contentTypeInput = z4.enum(["topic_test", "osym_type", "review", "simulation", "topic"]);
+async function matchEntries(entries, subject2) {
   const topics = await getMatchableTopics();
   const topicById = new Map(topics.map((topic) => [topic.id, topic]));
   const describe = (match, reason) => {
@@ -5926,13 +7924,13 @@ async function matchEntries(entries, subject) {
   };
   const matched = entries.map((entry) => {
     if (!entry.matchText) return { ...entry, suggestion: null, alternatives: [], tier: "not_applicable" };
-    let result = matchTopic(entry.matchText, topics, { subject });
-    if (!result.best && subject) result = matchTopic(entry.matchText, topics, {});
+    let result = matchTopic(entry.matchText, topics, { subject: subject2 });
+    if (!result.best && subject2) result = matchTopic(entry.matchText, topics, {});
     return { ...entry, suggestion: result.best && result.tier !== "manual" ? describe(result.best) : null, alternatives: [result.best, ...result.alternatives].filter((item) => Boolean(item)).map((item) => describe(item)), tier: result.tier };
   });
   const unresolvedTexts = Array.from(new Set(matched.filter((entry) => entry.tier === "manual" && entry.matchText).map((entry) => entry.matchText)));
   if (unresolvedTexts.length > 0) {
-    const candidates = topics.filter((topic) => !subject || topic.subject === subject);
+    const candidates = topics.filter((topic) => !subject2 || topic.subject === subject2);
     const ai = await suggestTopicsWithAi(unresolvedTexts.map((text3, key) => ({ key, text: text3, unitTitle: matched.find((entry) => entry.matchText === text3)?.unitTitle ?? "" })), candidates);
     const byText = new Map(ai.map((answer) => [unresolvedTexts[answer.key], answer]));
     for (const entry of matched) {
@@ -5945,13 +7943,13 @@ async function matchEntries(entries, subject) {
   return matched;
 }
 function summarizeConfidence(entries, reports) {
-  const average = (values, fallback) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : fallback;
+  const average2 = (values, fallback) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : fallback;
   const round2 = (value) => Math.round(value * 100) / 100;
   const matchable = entries.filter((entry) => entry.matchText);
-  const imageConfidence = round2(average(reports.map((report) => report.confidence.image), 0.75));
-  const ocrConfidence = round2(average(reports.map((report) => report.confidence.ocr), 0));
-  const structureConfidence = round2(average(reports.map((report) => report.confidence.structure), 0));
-  const mappingConfidence = round2(average(matchable.map((entry) => entry.suggestion?.confidence ?? 0), 1));
+  const imageConfidence = round2(average2(reports.map((report) => report.confidence.image), 0.75));
+  const ocrConfidence = round2(average2(reports.map((report) => report.confidence.ocr), 0));
+  const structureConfidence = round2(average2(reports.map((report) => report.confidence.structure), 0));
+  const mappingConfidence = round2(average2(matchable.map((entry) => entry.suggestion?.confidence ?? 0), 1));
   const weights = bookContentConfig.confidence.weights;
   const finalConfidence = round2(weights.image * imageConfidence + weights.ocr * ocrConfidence + weights.structure * structureConfidence + weights.mapping * mappingConfidence);
   const flagged = entries.filter((entry) => entry.review.title || entry.review.page).length;
@@ -5963,13 +7961,13 @@ async function assertOwnsBook(userId, bookId) {
 var bookContentRouter = router({
   // Fotoğrafları okur ve bir ÖNİZLEME döner — hiçbir şey kaydetmez.
   // Kota: bir kitap taraması (en fazla 8 sayfa) = 1 kullanım.
-  readTableOfContents: metredFeatureProcedure("OCR_BOOK_IMPORT").input(z3.object({
+  readTableOfContents: metredFeatureProcedure("OCR_BOOK_IMPORT").input(z4.object({
     bookId: bookIdInput,
-    subject: z3.string().max(80).nullable().optional(),
+    subject: z4.string().max(80).nullable().optional(),
     exam: examInput,
-    images: z3.array(imageInput).min(1).max(bookContentConfig.ocr.maxTocPages),
+    images: z4.array(imageInput).min(1).max(bookContentConfig.ocr.maxTocPages),
     /** Gürültü filtresi için (kitap adı/yayınevi satırı içerik sayılmaz). */
-    book: z3.object({ title: z3.string().max(180).optional(), publisher: z3.string().max(120).optional() }).optional()
+    book: z4.object({ title: z4.string().max(180).optional(), publisher: z4.string().max(120).optional() }).optional()
   })).mutation(async ({ ctx, input }) => {
     if (!ctx.user) throw new TRPCError2({ code: "UNAUTHORIZED" });
     const userId = ctx.user.id;
@@ -6043,28 +8041,28 @@ var bookContentRouter = router({
     };
   }),
   // Elle eşleştirme listesi (öğrenci "Değiştir" dediğinde).
-  topicOptions: protectedProcedure.input(z3.object({ subject: z3.string().max(80).nullable().optional() }).optional()).query(async ({ input }) => {
+  topicOptions: protectedProcedure.input(z4.object({ subject: z4.string().max(80).nullable().optional() }).optional()).query(async ({ input }) => {
     const topics = await getMatchableTopics();
-    const subject = input?.subject?.trim();
-    return topics.filter((topic) => !subject || topic.subject === subject).map(({ id: id3, exam, subject: topicSubject, unit, topic }) => ({ id: id3, exam, subject: topicSubject, unit, topic })).sort((a, b) => a.exam.localeCompare(b.exam) || a.subject.localeCompare(b.subject, "tr") || a.unit.localeCompare(b.unit, "tr") || a.topic.localeCompare(b.topic, "tr"));
+    const subject2 = input?.subject?.trim();
+    return topics.filter((topic) => !subject2 || topic.subject === subject2).map(({ id: id4, exam, subject: topicSubject, unit, topic }) => ({ id: id4, exam, subject: topicSubject, unit, topic })).sort((a, b) => a.exam.localeCompare(b.exam) || a.subject.localeCompare(b.subject, "tr") || a.unit.localeCompare(b.unit, "tr") || a.topic.localeCompare(b.topic, "tr"));
   }),
   // Öğrencinin onayladığı içerik (OCR'dan ya da tamamen elle).
-  save: protectedProcedure.input(z3.object({
+  save: protectedProcedure.input(z4.object({
     bookId: bookIdInput,
-    subject: z3.string().max(80),
-    source: z3.enum(["ocr", "manual"]),
-    items: z3.array(z3.object({
-      unitNumber: z3.number().int().min(0).max(200).nullable(),
-      unitTitle: z3.string().max(300),
+    subject: z4.string().max(80),
+    source: z4.enum(["ocr", "manual"]),
+    items: z4.array(z4.object({
+      unitNumber: z4.number().int().min(0).max(200).nullable(),
+      unitTitle: z4.string().max(300),
       contentType: contentTypeInput,
-      label: z3.string().min(1).max(120),
-      testNumber: z3.number().int().min(0).max(1e3).nullable(),
-      title: z3.string().max(300),
-      pageStart: z3.number().int().min(1).max(5e3).nullable(),
-      pageEnd: z3.number().int().min(1).max(5e3).nullable(),
-      topicId: z3.number().int().positive().nullable(),
-      mappingMethod: z3.enum(["exact_topic", "exact_alias", "contains_topic", "contains_alias", "fuzzy", "ai", "manual", "none"]),
-      mappingConfidence: z3.number().min(0).max(1)
+      label: z4.string().min(1).max(120),
+      testNumber: z4.number().int().min(0).max(1e3).nullable(),
+      title: z4.string().max(300),
+      pageStart: z4.number().int().min(1).max(5e3).nullable(),
+      pageEnd: z4.number().int().min(1).max(5e3).nullable(),
+      topicId: z4.number().int().positive().nullable(),
+      mappingMethod: z4.enum(["exact_topic", "exact_alias", "contains_topic", "contains_alias", "fuzzy", "ai", "manual", "none"]),
+      mappingConfidence: z4.number().min(0).max(1)
     })).max(400)
   })).mutation(async ({ ctx, input }) => {
     await assertOwnsBook(ctx.user.id, input.bookId);
@@ -6077,17 +8075,17 @@ var bookContentRouter = router({
       throw new TRPCError2({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "\u0130\xE7erik kaydedilemedi." });
     }
   }),
-  contents: protectedProcedure.input(z3.object({ bookId: bookIdInput })).query(async ({ ctx, input }) => {
+  contents: protectedProcedure.input(z4.object({ bookId: bookIdInput })).query(async ({ ctx, input }) => {
     await assertOwnsBook(ctx.user.id, input.bookId);
     return getBookContents(ctx.user.id, input.bookId);
   }),
   summaries: protectedProcedure.query(({ ctx }) => getBookContentSummaries(ctx.user.id)),
   recommendations: protectedProcedure.query(({ ctx }) => getWeakTopicBookRecommendations(ctx.user.id)),
   autoSchedule: protectedProcedure.query(({ ctx }) => getAutoSchedule(ctx.user.id)),
-  setAutoSchedule: protectedProcedure.input(z3.object({ enabled: z3.boolean() })).mutation(({ ctx, input }) => setAutoSchedule(ctx.user.id, input.enabled)),
+  setAutoSchedule: protectedProcedure.input(z4.object({ enabled: z4.boolean() })).mutation(({ ctx, input }) => setAutoSchedule(ctx.user.id, input.enabled)),
   // İstemci günde bir kez çağırır (tercih kapalıysa hiçbir şey yapmaz).
-  runAutoSchedule: protectedProcedure.input(z3.object({ bookTitles: z3.record(z3.string().max(120), z3.string().max(180)) })).mutation(({ ctx, input }) => runAutoSchedule(ctx.user.id, input.bookTitles)),
-  addToPlan: protectedProcedure.input(z3.object({ topicId: z3.number().int().positive(), bookId: bookIdInput, bookTitle: z3.string().max(180), when: z3.enum(["today", "auto"]) })).mutation(async ({ ctx, input }) => {
+  runAutoSchedule: protectedProcedure.input(z4.object({ bookTitles: z4.record(z4.string().max(120), z4.string().max(180)) })).mutation(({ ctx, input }) => runAutoSchedule(ctx.user.id, input.bookTitles)),
+  addToPlan: protectedProcedure.input(z4.object({ topicId: z4.number().int().positive(), bookId: bookIdInput, bookTitle: z4.string().max(180), when: z4.enum(["today", "auto"]) })).mutation(async ({ ctx, input }) => {
     try {
       return await addRecommendationToPlan(ctx.user.id, input);
     } catch (error) {
@@ -6098,7 +8096,7 @@ var bookContentRouter = router({
 
 // server/routers/notes.ts
 import { TRPCError as TRPCError3 } from "@trpc/server";
-import { z as z4 } from "zod";
+import { z as z5 } from "zod";
 
 // server/notes/noteAi.ts
 var INSTRUCTIONS = {
@@ -6128,369 +8126,6 @@ async function runNoteAi(action, plainText, invoke = invokeLLM) {
   const items = (JSON.parse(jsonText).items ?? []).map((item) => ({ front: String(item.front ?? "").trim().slice(0, 500), back: String(item.back ?? "").trim().slice(0, 500) })).filter((item) => item.front).slice(0, 10);
   if (items.length === 0) throw new Error("AI bu nottan bir sonu\xE7 \xE7\u0131karamad\u0131.");
   return items.map((item) => action === "flashcards" && item.back ? item : { front: item.front });
-}
-
-// server/notes/notesDb.ts
-import { and as and7, desc as desc3, eq as eq9, gte as gte5, inArray as inArray4, isNotNull, isNull as isNull4, like, lt as lt4, lte as lte3, ne, or, sql as sql4 } from "drizzle-orm";
-
-// shared/noteContent.ts
-var BLOCK_TYPES = /* @__PURE__ */ new Set(["paragraph", "heading", "listItem", "taskItem", "blockquote", "formula", "noteImage", "voiceClip", "drawing", "horizontalRule"]);
-function extractPlainText(doc) {
-  const parts = [];
-  const walk = (node) => {
-    if (node.type === "text" && typeof node.text === "string") parts.push(node.text);
-    else if (node.type === "hardBreak") parts.push("\n");
-    else if (node.type === "formula" && typeof node.attrs?.latex === "string") parts.push(` ${node.attrs.latex} `);
-    else if (node.type === "noteImage" && typeof node.attrs?.ocrText === "string") parts.push(node.attrs.ocrText);
-    for (const child of node.content ?? []) walk(child);
-    if (BLOCK_TYPES.has(node.type)) parts.push("\n");
-  };
-  walk(doc);
-  return parts.join("").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
-}
-function computeNoteStats(doc) {
-  const stats = { images: 0, voice: 0, voiceSeconds: 0, formulas: 0, drawings: 0, checklist: 0, checklistDone: 0, firstFormula: null };
-  const walk = (node) => {
-    if (node.type === "noteImage") stats.images += 1;
-    if (node.type === "voiceClip") {
-      stats.voice += 1;
-      stats.voiceSeconds += Number(node.attrs?.duration) || 0;
-    }
-    if (node.type === "formula") {
-      stats.formulas += 1;
-      if (!stats.firstFormula && typeof node.attrs?.latex === "string") stats.firstFormula = node.attrs.latex.slice(0, 60);
-    }
-    if (node.type === "drawing") stats.drawings += 1;
-    if (node.type === "taskItem") {
-      stats.checklist += 1;
-      if (node.attrs?.checked) stats.checklistDone += 1;
-    }
-    for (const child of node.content ?? []) walk(child);
-  };
-  walk(doc);
-  return stats;
-}
-function deriveNoteTitle(title, plainText, noteDate) {
-  const clean2 = title.trim();
-  if (clean2) return clean2.slice(0, 200);
-  const firstLine = plainText.split("\n").map((line) => line.trim()).find(Boolean);
-  if (firstLine) return firstLine.length > 60 ? `${firstLine.slice(0, 57)}\u2026` : firstLine;
-  return `Not \xB7 ${noteDate.toLocaleDateString("tr-TR", { day: "numeric", month: "long" })}`;
-}
-function normalizeTag(value) {
-  const tag = value.trim().replace(/^#+/, "").replace(/İ/g, "i").replace(/I/g, "\u0131").toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9çğıöşü_-]/g, "").slice(0, 40);
-  return tag.length >= 2 ? tag : null;
-}
-function isValidNoteDoc(value, limits = { maxNodes: 2e4, maxDepth: 30 }) {
-  if (!value || typeof value !== "object" || value.type !== "doc" || !Array.isArray(value.content)) return false;
-  let count4 = 0;
-  const check2 = (node, depth) => {
-    if (!node || typeof node !== "object" || typeof node.type !== "string") return false;
-    if (++count4 > limits.maxNodes || depth > limits.maxDepth) return false;
-    const children = node.content;
-    if (children !== void 0 && !Array.isArray(children)) return false;
-    return (children ?? []).every((child) => check2(child, depth + 1));
-  };
-  return check2(value, 0);
-}
-var NOTE_AI_ACTIONS = {
-  summarize: { label: "\xD6zet", menu: "\xD6zetle" },
-  keypoints: { label: "\xD6nemli noktalar", menu: "\xD6nemli noktalar\u0131 \xE7\u0131kar" },
-  questions: { label: "Sorular", menu: "Soru olu\u015Ftur" },
-  flashcards: { label: "Flashcard", menu: "Flashcard olu\u015Ftur" },
-  simplify: { label: "Basitle\u015Ftirilmi\u015F", menu: "Basitle\u015Ftir" },
-  review: { label: "Tekrar etmem gerekenler", menu: "Tekrar etmem gerekenleri bul" }
-};
-function aiResultToNodes(action, items) {
-  const text3 = (value) => value.trim() ? [{ type: "text", text: value.trim() }] : [];
-  const listType = action === "questions" ? "orderedList" : "bulletList";
-  const list = {
-    type: listType,
-    content: items.map((item) => ({
-      type: "listItem",
-      content: action === "flashcards" && item.back ? [{ type: "paragraph", content: [{ type: "text", text: "S: ", marks: [{ type: "bold" }] }, ...text3(item.front)] }, { type: "paragraph", content: [{ type: "text", text: "C: ", marks: [{ type: "bold" }] }, ...text3(item.back)] }] : [{ type: "paragraph", content: text3(item.front) }]
-    }))
-  };
-  return [{ type: "blockquote", content: [{ type: "paragraph", content: [{ type: "text", text: `\u2728 AI \xB7 ${NOTE_AI_ACTIONS[action].label}`, marks: [{ type: "bold" }] }] }, list] }];
-}
-
-// server/notes/notesDb.ts
-var NoteError = class extends Error {
-};
-async function requireDb3() {
-  const db = await getDb();
-  if (!db) throw new NoteError("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
-  return db;
-}
-function referencedAttachmentIds(doc) {
-  const ids = /* @__PURE__ */ new Set();
-  const walk = (node) => {
-    if ((node.type === "noteImage" || node.type === "voiceClip") && Number.isInteger(node.attrs?.attachmentId)) ids.add(Number(node.attrs.attachmentId));
-    for (const child of node.content ?? []) walk(child);
-  };
-  walk(doc);
-  return Array.from(ids);
-}
-async function resolveLinks(db, userId, links) {
-  let subject = links.subject?.trim() || null;
-  const topicId = links.topicId ?? null;
-  if (topicId !== null) {
-    const [topic] = await db.select({ subject: yksTopics.subject }).from(yksTopics).where(eq9(yksTopics.id, topicId)).limit(1);
-    if (!topic) throw new NoteError("Se\xE7ilen konu bulunamad\u0131.");
-    subject = subject ?? topic.subject;
-  }
-  const bookId = links.bookId?.trim() || null;
-  if (bookId) {
-    const [owned] = await db.select({ id: bookInventory.id }).from(bookInventory).where(and7(eq9(bookInventory.userId, userId), eq9(bookInventory.bookId, bookId))).limit(1);
-    if (!owned) throw new NoteError("Bu kitap k\xFCt\xFCphanende bulunmuyor.");
-  }
-  const bookContentId = links.bookContentId ?? null;
-  if (bookContentId !== null) {
-    const [content] = await db.select({ bookId: userBookContents.bookId }).from(userBookContents).where(and7(eq9(userBookContents.id, bookContentId), eq9(userBookContents.userId, userId))).limit(1);
-    if (!content || bookId && content.bookId !== bookId) throw new NoteError("Se\xE7ilen kitap b\xF6l\xFCm\xFC ge\xE7ersiz.");
-  }
-  const studySessionId = links.studySessionId ?? null;
-  if (studySessionId !== null) {
-    const [session] = await db.select({ id: studyPlanSessions.id }).from(studyPlanSessions).where(and7(eq9(studyPlanSessions.id, studySessionId), eq9(studyPlanSessions.userId, userId))).limit(1);
-    if (!session) throw new NoteError("\xC7al\u0131\u015Fma oturumu bulunamad\u0131.");
-  }
-  const mockExamId = links.mockExamId ?? null;
-  if (mockExamId !== null) {
-    const [exam] = await db.select({ id: userMockExams.id }).from(userMockExams).where(and7(eq9(userMockExams.id, mockExamId), eq9(userMockExams.userId, userId))).limit(1);
-    if (!exam) throw new NoteError("Deneme bulunamad\u0131.");
-  }
-  return { subject: subject?.slice(0, 80) ?? null, topicId, bookId, bookContentId, studySessionId, mockExamId };
-}
-async function saveNote(userId, input) {
-  const db = await requireDb3();
-  if (!isValidNoteDoc(input.content)) throw new NoteError("Not i\xE7eri\u011Fi okunamad\u0131.");
-  const contentJson = JSON.stringify(input.content);
-  if (Buffer.byteLength(contentJson) > notesConfig.content.maxContentBytes) throw new NoteError("Not \xE7ok b\xFCy\xFCk. Baz\u0131 \xE7izim ya da g\xF6rselleri ayr\u0131 bir nota ta\u015F\u0131r m\u0131s\u0131n?");
-  const plainText = extractPlainText(input.content);
-  const stats = computeNoteStats(input.content);
-  const links = await resolveLinks(db, userId, input);
-  const title = deriveNoteTitle(input.title, plainText, input.noteDate);
-  const tags = Array.from(new Set(input.tags.map(normalizeTag).filter((tag) => Boolean(tag)))).slice(0, notesConfig.content.maxTagsPerNote);
-  const values = {
-    title,
-    content: contentJson,
-    plainText,
-    stats: JSON.stringify(stats),
-    noteDate: input.noteDate,
-    subject: links.subject,
-    topicId: links.topicId,
-    bookId: links.bookId,
-    bookContentId: links.bookContentId,
-    studySessionId: links.studySessionId,
-    mockExamId: links.mockExamId,
-    reviewAt: input.reviewAt ?? null,
-    templateKey: input.templateKey ?? null,
-    ...input.isFavorite !== void 0 ? { isFavorite: input.isFavorite ? 1 : 0 } : {},
-    ...input.isPinned !== void 0 ? { isPinned: input.isPinned ? 1 : 0 } : {}
-  };
-  await db.insert(notes).values({ userId, clientId: input.clientId, ...values, isFavorite: input.isFavorite ? 1 : 0, isPinned: input.isPinned ? 1 : 0 }).onDuplicateKeyUpdate({ set: { ...values, version: sql4`${notes.version} + 1` } });
-  const [saved] = await db.select({ id: notes.id, version: notes.version, updatedAt: notes.updatedAt, title: notes.title }).from(notes).where(and7(eq9(notes.userId, userId), eq9(notes.clientId, input.clientId))).limit(1);
-  if (!saved) throw new NoteError("Not kaydedilemedi.");
-  await db.delete(noteTags).where(and7(eq9(noteTags.userId, userId), eq9(noteTags.noteId, saved.id)));
-  if (tags.length) await db.insert(noteTags).values(tags.map((tag) => ({ noteId: saved.id, userId, tag })));
-  await getAttachmentStorage().syncNoteLinks(userId, saved.id, referencedAttachmentIds(input.content));
-  return { id: saved.id, clientId: input.clientId, version: saved.version, title: saved.title, updatedAt: saved.updatedAt };
-}
-async function describeLinks(db, userId, rows) {
-  const topicIds = Array.from(new Set(rows.map((row) => row.topicId).filter((id3) => id3 !== null)));
-  const bookIds = Array.from(new Set(rows.map((row) => row.bookId).filter((id3) => Boolean(id3))));
-  const numeric = bookIds.filter((id3) => /^\d+$/.test(id3)).map(Number);
-  const [topics, custom, catalog] = await Promise.all([
-    topicIds.length ? db.select({ id: yksTopics.id, topic: yksTopics.topic, unit: yksTopics.unit }).from(yksTopics).where(inArray4(yksTopics.id, topicIds)) : Promise.resolve([]),
-    bookIds.length ? db.select({ bookId: userResourceBooks.bookId, title: userResourceBooks.title }).from(userResourceBooks).where(and7(eq9(userResourceBooks.userId, userId), inArray4(userResourceBooks.bookId, bookIds))) : Promise.resolve([]),
-    numeric.length ? db.select({ id: catalogBooks.id, name: catalogBooks.name }).from(catalogBooks).where(inArray4(catalogBooks.id, numeric)) : Promise.resolve([])
-  ]);
-  const topicById = new Map(topics.map((row) => [row.id, row]));
-  const bookTitle = new Map([...custom.map((row) => [row.bookId, row.title]), ...catalog.map((row) => [String(row.id), row.name])]);
-  return { topicById, bookTitle };
-}
-var parseStats = (value) => {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return computeNoteStats({ type: "doc", content: [] });
-  }
-};
-async function getNote(userId, id3) {
-  const db = await requireDb3();
-  const [row] = await db.select().from(notes).where(and7(eq9(notes.id, id3), eq9(notes.userId, userId))).limit(1);
-  if (!row) return null;
-  const [tags, links] = await Promise.all([
-    db.select({ tag: noteTags.tag }).from(noteTags).where(and7(eq9(noteTags.userId, userId), eq9(noteTags.noteId, id3))),
-    describeLinks(db, userId, [row])
-  ]);
-  return {
-    ...row,
-    content: JSON.parse(row.content),
-    stats: parseStats(row.stats),
-    isFavorite: row.isFavorite === 1,
-    isPinned: row.isPinned === 1,
-    tags: tags.map((item) => item.tag),
-    topic: row.topicId !== null ? links.topicById.get(row.topicId) ?? null : null,
-    bookTitle: row.bookId ? links.bookTitle.get(row.bookId) ?? null : null
-  };
-}
-var escapeLike = (value) => value.replace(/[\\%_]/g, (char) => `\\${char}`);
-async function keywordCondition(db, userId, q) {
-  const term = `%${escapeLike(q.trim().slice(0, 100))}%`;
-  const [topics, books] = await Promise.all([
-    db.select({ id: yksTopics.id }).from(yksTopics).where(like(yksTopics.topic, term)).limit(50),
-    db.select({ bookId: userResourceBooks.bookId }).from(userResourceBooks).where(and7(eq9(userResourceBooks.userId, userId), like(userResourceBooks.title, term))).limit(50)
-  ]);
-  const conditions = [
-    like(notes.title, term),
-    like(notes.plainText, term),
-    like(notes.subject, term),
-    sql4`EXISTS (SELECT 1 FROM ${noteTags} WHERE ${noteTags.noteId} = ${notes.id} AND ${noteTags.tag} LIKE ${term})`
-  ];
-  if (topics.length) conditions.push(inArray4(notes.topicId, topics.map((row) => row.id)));
-  if (books.length) conditions.push(inArray4(notes.bookId, books.map((row) => row.bookId)));
-  return or(...conditions);
-}
-async function listNotes(userId, filters) {
-  const db = await requireDb3();
-  const limit = Math.min(Math.max(filters.limit ?? notesConfig.list.pageSize, 1), 100);
-  const conditions = [eq9(notes.userId, userId), eq9(notes.status, "active")];
-  if (filters.from) conditions.push(gte5(notes.noteDate, filters.from));
-  if (filters.to) conditions.push(lte3(notes.noteDate, filters.to));
-  if (filters.subject) conditions.push(eq9(notes.subject, filters.subject));
-  if (filters.noSubject) conditions.push(isNull4(notes.subject));
-  if (filters.topicId) conditions.push(eq9(notes.topicId, filters.topicId));
-  if (filters.bookId) conditions.push(eq9(notes.bookId, filters.bookId));
-  if (filters.studySessionId) conditions.push(eq9(notes.studySessionId, filters.studySessionId));
-  if (filters.favorite) conditions.push(eq9(notes.isFavorite, 1));
-  if (filters.pinned) conditions.push(eq9(notes.isPinned, 1));
-  if (filters.reviewDue) conditions.push(and7(isNotNull(notes.reviewAt), lte3(notes.reviewAt, endOfToday())));
-  if (filters.questions === "exclude") conditions.push(or(isNull4(notes.templateKey), ne(notes.templateKey, QUESTION_TEMPLATE_KEY)));
-  if (filters.questions === "only") conditions.push(eq9(notes.templateKey, QUESTION_TEMPLATE_KEY));
-  if (filters.tag) {
-    const tag = normalizeTag(filters.tag);
-    if (tag) conditions.push(sql4`EXISTS (SELECT 1 FROM ${noteTags} WHERE ${noteTags.noteId} = ${notes.id} AND ${noteTags.tag} = ${tag})`);
-  }
-  if (filters.kind) {
-    const statKey = { voice: "voice", image: "images", formula: "formulas", drawing: "drawings" };
-    if (filters.kind === "text") conditions.push(sql4`CHAR_LENGTH(${notes.plainText}) > 0`);
-    else conditions.push(sql4`CAST(JSON_UNQUOTE(JSON_EXTRACT(${notes.stats}, ${`$.${statKey[filters.kind]}`})) AS UNSIGNED) > 0`);
-  }
-  if (filters.q?.trim()) conditions.push(await keywordCondition(db, userId, filters.q));
-  if (filters.cursor) {
-    const [time2, id3] = filters.cursor.split("_").map(Number);
-    if (Number.isFinite(time2) && Number.isFinite(id3)) conditions.push(or(lt4(notes.noteDate, new Date(time2)), and7(eq9(notes.noteDate, new Date(time2)), lt4(notes.id, id3))));
-  }
-  const rows = await db.select({
-    id: notes.id,
-    clientId: notes.clientId,
-    title: notes.title,
-    plainText: notes.plainText,
-    stats: notes.stats,
-    noteDate: notes.noteDate,
-    subject: notes.subject,
-    topicId: notes.topicId,
-    bookId: notes.bookId,
-    studySessionId: notes.studySessionId,
-    isFavorite: notes.isFavorite,
-    isPinned: notes.isPinned,
-    reviewAt: notes.reviewAt,
-    templateKey: notes.templateKey,
-    updatedAt: notes.updatedAt,
-    // Soru kartıysa ders defteri akışında kart olarak çizilebilsin diye özet bilgisi.
-    question: { id: notebookQuestions.id, status: notebookQuestions.status, nextReviewAt: notebookQuestions.nextReviewAt, errorType: notebookQuestions.errorType, questionImageId: notebookQuestions.questionImageId, stuckPoint: notebookQuestions.stuckPoint }
-  }).from(notes).leftJoin(notebookQuestions, and7(eq9(notebookQuestions.noteId, notes.id), eq9(notebookQuestions.userId, userId))).where(and7(...conditions)).orderBy(desc3(notes.noteDate), desc3(notes.id)).limit(limit + 1);
-  const page = rows.slice(0, limit);
-  const ids = page.map((row) => row.id);
-  const [tags, links] = await Promise.all([
-    ids.length ? db.select({ noteId: noteTags.noteId, tag: noteTags.tag }).from(noteTags).where(and7(eq9(noteTags.userId, userId), inArray4(noteTags.noteId, ids))) : Promise.resolve([]),
-    describeLinks(db, userId, page)
-  ]);
-  const last = page[page.length - 1];
-  return {
-    items: page.map(({ plainText, stats, ...row }) => ({
-      ...row,
-      snippet: plainText.replace(/\s+/g, " ").slice(0, notesConfig.list.snippetLength),
-      stats: parseStats(stats),
-      isFavorite: row.isFavorite === 1,
-      isPinned: row.isPinned === 1,
-      tags: tags.filter((item) => item.noteId === row.id).map((item) => item.tag),
-      topic: row.topicId !== null ? links.topicById.get(row.topicId)?.topic ?? null : null,
-      bookTitle: row.bookId ? links.bookTitle.get(row.bookId) ?? null : null,
-      question: row.question?.id ? { ...row.question, errorType: row.question.errorType } : null
-    })),
-    nextCursor: rows.length > limit && last ? `${new Date(last.noteDate).getTime()}_${last.id}` : null
-  };
-}
-var endOfToday = () => {
-  const date = /* @__PURE__ */ new Date();
-  date.setHours(23, 59, 59, 999);
-  return date;
-};
-async function updateNoteFlags(userId, id3, flags) {
-  const db = await requireDb3();
-  const set = {
-    ...flags.isFavorite !== void 0 ? { isFavorite: flags.isFavorite ? 1 : 0 } : {},
-    ...flags.isPinned !== void 0 ? { isPinned: flags.isPinned ? 1 : 0 } : {},
-    ...flags.reviewAt !== void 0 ? { reviewAt: flags.reviewAt } : {},
-    ...flags.archived !== void 0 ? { status: flags.archived ? "archived" : "active" } : {}
-  };
-  const [row] = await db.select({ id: notes.id }).from(notes).where(and7(eq9(notes.id, id3), eq9(notes.userId, userId))).limit(1);
-  if (!row) throw new NoteError("Not bulunamad\u0131.");
-  if (Object.keys(set).length === 0) return;
-  await db.update(notes).set(set).where(and7(eq9(notes.id, id3), eq9(notes.userId, userId)));
-}
-async function deleteNote(userId, id3) {
-  const db = await requireDb3();
-  const [row] = await db.select({ id: notes.id }).from(notes).where(and7(eq9(notes.id, id3), eq9(notes.userId, userId))).limit(1);
-  if (!row) throw new NoteError("Not bulunamad\u0131.");
-  await getAttachmentStorage().deleteForNote(userId, id3);
-  const [question] = await db.select({ id: notebookQuestions.id }).from(notebookQuestions).where(and7(eq9(notebookQuestions.userId, userId), eq9(notebookQuestions.noteId, id3))).limit(1);
-  if (question) {
-    await db.delete(questionAttempts).where(and7(eq9(questionAttempts.userId, userId), eq9(questionAttempts.questionId, question.id)));
-    await db.delete(notebookQuestions).where(eq9(notebookQuestions.id, question.id));
-  }
-  await db.delete(noteTags).where(and7(eq9(noteTags.userId, userId), eq9(noteTags.noteId, id3)));
-  await db.delete(notes).where(and7(eq9(notes.id, id3), eq9(notes.userId, userId)));
-}
-async function getNoteCalendar(userId, from, to) {
-  const db = await requireDb3();
-  const [written, reviews] = await Promise.all([
-    db.select({ noteDate: notes.noteDate }).from(notes).where(and7(eq9(notes.userId, userId), eq9(notes.status, "active"), gte5(notes.noteDate, from), lte3(notes.noteDate, to))),
-    db.select({ reviewAt: notes.reviewAt }).from(notes).where(and7(eq9(notes.userId, userId), eq9(notes.status, "active"), gte5(notes.reviewAt, from), lte3(notes.reviewAt, to)))
-  ]);
-  return { notes: written.map((row) => row.noteDate), reviews: reviews.map((row) => row.reviewAt).filter((value) => value !== null) };
-}
-async function listTags(userId) {
-  const db = await requireDb3();
-  const rows = await db.select({ tag: noteTags.tag, count: sql4`COUNT(*)` }).from(noteTags).where(eq9(noteTags.userId, userId)).groupBy(noteTags.tag).orderBy(desc3(sql4`COUNT(*)`)).limit(50);
-  return rows.map((row) => ({ tag: row.tag, count: Number(row.count) }));
-}
-async function getNoteStatsForAdmin(userId) {
-  const db = await requireDb3();
-  const rows = await db.select({ stats: notes.stats, updatedAt: notes.updatedAt }).from(notes).where(eq9(notes.userId, userId));
-  const parsed = rows.map((row) => parseStats(row.stats));
-  return {
-    notes: rows.length,
-    voiceNotes: parsed.filter((stats) => stats.voice > 0).length,
-    imageNotes: parsed.filter((stats) => stats.images > 0).length,
-    lastActivity: rows.reduce((latest, row) => !latest || row.updatedAt > latest ? row.updatedAt : latest, null)
-  };
-}
-async function createTaskFromNote(userId, noteId, input) {
-  const db = await requireDb3();
-  const [note] = await db.select({ id: notes.id, title: notes.title, topicId: notes.topicId }).from(notes).where(and7(eq9(notes.id, noteId), eq9(notes.userId, userId))).limit(1);
-  if (!note) throw new NoteError("Not bulunamad\u0131.");
-  const topicId = input.topicId ?? note.topicId;
-  if (!topicId) throw new NoteError("G\xF6rev olu\u015Fturmak i\xE7in \xF6nce notu bir konuya ba\u011Fla.");
-  const [topic] = await db.select({ topic: yksTopics.topic, subject: yksTopics.subject }).from(yksTopics).where(eq9(yksTopics.id, topicId)).limit(1);
-  if (!topic) throw new NoteError("Se\xE7ilen konu bulunamad\u0131.");
-  const minutes = Math.min(Math.max(input.minutes ?? notesConfig.task.defaultMinutes, 10), 240);
-  const date = await pickDayForTask(userId, minutes, input.when);
-  const title = `${topic.subject} \xB7 ${topic.topic} (nottan: ${note.title})`;
-  await insertPlanTask(userId, { date, title, subject: topic.subject, topic: topic.topic, kind: "Tekrar", minutes, planTitle: "Defter g\xF6revleri", planSummary: "Ak\u0131ll\u0131 Defter'deki notlardan olu\u015Fturulan \xE7al\u0131\u015Fma g\xF6revleri." });
-  return { date, title: title.slice(0, 180), minutes };
 }
 
 // server/_core/voiceTranscription.ts
@@ -6599,11 +8234,11 @@ var whisperSpeechProvider = {
 var getSpeechProvider = () => notesConfig.speech.provider === "whisper" ? whisperSpeechProvider : null;
 
 // server/routers/notes.ts
-var optionalId = z4.number().int().positive().nullable().optional();
+var optionalId = z5.number().int().positive().nullable().optional();
 var linksInput = {
-  subject: z4.string().max(80).nullable().optional(),
+  subject: z5.string().max(80).nullable().optional(),
   topicId: optionalId,
-  bookId: z4.string().max(120).nullable().optional(),
+  bookId: z5.string().max(120).nullable().optional(),
   bookContentId: optionalId,
   studySessionId: optionalId,
   mockExamId: optionalId
@@ -6621,56 +8256,56 @@ var requireUserId = (ctx) => {
   return ctx.user.id;
 };
 var notesRouter = router({
-  list: protectedProcedure.input(z4.object({
-    from: z4.string().datetime().nullable().optional(),
-    to: z4.string().datetime().nullable().optional(),
-    subject: z4.string().max(80).nullable().optional(),
-    noSubject: z4.boolean().optional(),
+  list: protectedProcedure.input(z5.object({
+    from: z5.string().datetime().nullable().optional(),
+    to: z5.string().datetime().nullable().optional(),
+    subject: z5.string().max(80).nullable().optional(),
+    noSubject: z5.boolean().optional(),
     topicId: optionalId,
-    bookId: z4.string().max(120).nullable().optional(),
-    tag: z4.string().max(40).nullable().optional(),
-    kind: z4.enum(["text", "voice", "image", "formula", "drawing"]).nullable().optional(),
-    q: z4.string().max(100).nullable().optional(),
-    favorite: z4.boolean().optional(),
-    pinned: z4.boolean().optional(),
+    bookId: z5.string().max(120).nullable().optional(),
+    tag: z5.string().max(40).nullable().optional(),
+    kind: z5.enum(["text", "voice", "image", "formula", "drawing"]).nullable().optional(),
+    q: z5.string().max(100).nullable().optional(),
+    favorite: z5.boolean().optional(),
+    pinned: z5.boolean().optional(),
     studySessionId: optionalId,
-    reviewDue: z4.boolean().optional(),
-    questions: z4.enum(["exclude", "only"]).optional(),
-    cursor: z4.string().max(40).nullable().optional(),
-    limit: z4.number().int().min(1).max(100).optional()
+    reviewDue: z5.boolean().optional(),
+    questions: z5.enum(["exclude", "only"]).optional(),
+    cursor: z5.string().max(40).nullable().optional(),
+    limit: z5.number().int().min(1).max(100).optional()
   })).query(({ ctx, input }) => userFacing(() => listNotes(ctx.user.id, { ...input, from: input.from ? new Date(input.from) : null, to: input.to ? new Date(input.to) : null }))),
-  get: protectedProcedure.input(z4.object({ id: z4.number().int().positive() })).query(async ({ ctx, input }) => {
+  get: protectedProcedure.input(z5.object({ id: z5.number().int().positive() })).query(async ({ ctx, input }) => {
     const note = await getNote(ctx.user.id, input.id);
     if (!note) throw new TRPCError3({ code: "NOT_FOUND", message: "Not bulunamad\u0131." });
     return note;
   }),
   // Otomatik kayıt da bu uçtan yapılır (istemci 800 ms debounce ile çağırır).
-  save: protectedProcedure.input(z4.object({
-    clientId: z4.string().min(8).max(40).regex(/^[A-Za-z0-9_-]+$/),
-    title: z4.string().max(notesConfig.content.maxTitleLength),
-    content: z4.unknown(),
-    noteDate: z4.string().datetime(),
-    tags: z4.array(z4.string().max(40)).max(notesConfig.content.maxTagsPerNote),
-    isFavorite: z4.boolean().optional(),
-    isPinned: z4.boolean().optional(),
-    reviewAt: z4.string().datetime().nullable().optional(),
-    templateKey: z4.string().max(40).nullable().optional(),
+  save: protectedProcedure.input(z5.object({
+    clientId: z5.string().min(8).max(40).regex(/^[A-Za-z0-9_-]+$/),
+    title: z5.string().max(notesConfig.content.maxTitleLength),
+    content: z5.unknown(),
+    noteDate: z5.string().datetime(),
+    tags: z5.array(z5.string().max(40)).max(notesConfig.content.maxTagsPerNote),
+    isFavorite: z5.boolean().optional(),
+    isPinned: z5.boolean().optional(),
+    reviewAt: z5.string().datetime().nullable().optional(),
+    templateKey: z5.string().max(40).nullable().optional(),
     ...linksInput
   })).mutation(({ ctx, input }) => userFacing(() => saveNote(ctx.user.id, { ...input, noteDate: new Date(input.noteDate), reviewAt: input.reviewAt ? new Date(input.reviewAt) : null }))),
-  updateFlags: protectedProcedure.input(z4.object({ id: z4.number().int().positive(), isFavorite: z4.boolean().optional(), isPinned: z4.boolean().optional(), reviewAt: z4.string().datetime().nullable().optional(), archived: z4.boolean().optional() })).mutation(({ ctx, input }) => userFacing(() => updateNoteFlags(ctx.user.id, input.id, { isFavorite: input.isFavorite, isPinned: input.isPinned, archived: input.archived, reviewAt: input.reviewAt === void 0 ? void 0 : input.reviewAt ? new Date(input.reviewAt) : null }))),
-  delete: protectedProcedure.input(z4.object({ id: z4.number().int().positive() })).mutation(({ ctx, input }) => userFacing(() => deleteNote(ctx.user.id, input.id))),
-  calendar: protectedProcedure.input(z4.object({ from: z4.string().datetime(), to: z4.string().datetime() })).query(({ ctx, input }) => getNoteCalendar(ctx.user.id, new Date(input.from), new Date(input.to))),
+  updateFlags: protectedProcedure.input(z5.object({ id: z5.number().int().positive(), isFavorite: z5.boolean().optional(), isPinned: z5.boolean().optional(), reviewAt: z5.string().datetime().nullable().optional(), archived: z5.boolean().optional() })).mutation(({ ctx, input }) => userFacing(() => updateNoteFlags(ctx.user.id, input.id, { isFavorite: input.isFavorite, isPinned: input.isPinned, archived: input.archived, reviewAt: input.reviewAt === void 0 ? void 0 : input.reviewAt ? new Date(input.reviewAt) : null }))),
+  delete: protectedProcedure.input(z5.object({ id: z5.number().int().positive() })).mutation(({ ctx, input }) => userFacing(() => deleteNote(ctx.user.id, input.id))),
+  calendar: protectedProcedure.input(z5.object({ from: z5.string().datetime(), to: z5.string().datetime() })).query(({ ctx, input }) => getNoteCalendar(ctx.user.id, new Date(input.from), new Date(input.to))),
   tags: protectedProcedure.query(({ ctx }) => listTags(ctx.user.id)),
-  createTask: protectedProcedure.input(z4.object({ id: z4.number().int().positive(), topicId: optionalId, minutes: z4.number().int().min(10).max(240).optional(), when: z4.enum(["today", "auto"]) })).mutation(({ ctx, input }) => userFacing(() => createTaskFromNote(ctx.user.id, input.id, input))),
+  createTask: protectedProcedure.input(z5.object({ id: z5.number().int().positive(), topicId: optionalId, minutes: z5.number().int().min(10).max(240).optional(), when: z5.enum(["today", "auto"]) })).mutation(({ ctx, input }) => userFacing(() => createTaskFromNote(ctx.user.id, input.id, input))),
   // Fotoğraf ekleme (ücretsiz). İstemci fotoğrafı küçültüp gönderir; sunucu tür/boyut/kota doğrular.
-  uploadImage: protectedProcedure.input(z4.object({ dataUrl: z4.string().min(20).max(Math.ceil(notesConfig.attachments.imageMaxBytes * 1.4)) })).mutation(({ ctx, input }) => userFacing(async () => {
+  uploadImage: protectedProcedure.input(z5.object({ dataUrl: z5.string().min(20).max(Math.ceil(notesConfig.attachments.imageMaxBytes * 1.4)) })).mutation(({ ctx, input }) => userFacing(async () => {
     const storage = getAttachmentStorage();
     await storage.cleanupOrphans(ctx.user.id);
     const { mimeType, data } = decodeAttachment(input.dataUrl, "image");
     return storage.put(ctx.user.id, { kind: "image", mimeType, data });
   })),
   // Ses → metin. İsterse ses kaydı da nota eklenir (keepAudio).
-  transcribe: metredFeatureProcedure("NOTE_VOICE", { maxRequests: 10, windowMs: 6e4 }).input(z4.object({ dataUrl: z4.string().min(20).max(Math.ceil(notesConfig.attachments.audioMaxBytes * 1.4)), durationSec: z4.number().min(0).max(notesConfig.speech.maxAudioSeconds + 5), keepAudio: z4.boolean() })).mutation(({ ctx, input }) => userFacing(async () => {
+  transcribe: metredFeatureProcedure("NOTE_VOICE", { maxRequests: 10, windowMs: 6e4 }).input(z5.object({ dataUrl: z5.string().min(20).max(Math.ceil(notesConfig.attachments.audioMaxBytes * 1.4)), durationSec: z5.number().min(0).max(notesConfig.speech.maxAudioSeconds + 5), keepAudio: z5.boolean() })).mutation(({ ctx, input }) => userFacing(async () => {
     const userId = requireUserId(ctx);
     const provider = getSpeechProvider();
     if (!provider) throw new NoteError("Ses \u2192 metin \u015Fu an kapal\u0131.");
@@ -6688,7 +8323,7 @@ var notesRouter = router({
     return { text: text3, durationSec, attachmentId: attachment?.id ?? null };
   })),
   // Fotoğraftaki metni çıkar (kitap OCR'ıyla aynı sağlayıcı).
-  extractText: metredFeatureProcedure("NOTE_OCR").input(z4.object({ attachmentId: z4.number().int().positive() })).mutation(({ ctx, input }) => userFacing(async () => {
+  extractText: metredFeatureProcedure("NOTE_OCR").input(z5.object({ attachmentId: z5.number().int().positive() })).mutation(({ ctx, input }) => userFacing(async () => {
     const userId = requireUserId(ctx);
     const storage = getAttachmentStorage();
     const attachment = await storage.get(userId, input.attachmentId);
@@ -6705,7 +8340,7 @@ var notesRouter = router({
     return { text: text3 };
   })),
   // AI araçları: sonuç notun ÜZERİNE YAZILMAZ; eklenecek blok olarak döner.
-  ai: metredFeatureProcedure("NOTE_AI").input(z4.object({ id: z4.number().int().positive(), action: z4.enum(Object.keys(NOTE_AI_ACTIONS)) })).mutation(({ ctx, input }) => userFacing(async () => {
+  ai: metredFeatureProcedure("NOTE_AI").input(z5.object({ id: z5.number().int().positive(), action: z5.enum(Object.keys(NOTE_AI_ACTIONS)) })).mutation(({ ctx, input }) => userFacing(async () => {
     const userId = requireUserId(ctx);
     const note = await getNote(userId, input.id);
     if (!note) throw new NoteError("Not bulunamad\u0131.");
@@ -6721,7 +8356,7 @@ var notesRouter = router({
 
 // server/routers/questions.ts
 import { TRPCError as TRPCError4 } from "@trpc/server";
-import { z as z5 } from "zod";
+import { z as z6 } from "zod";
 
 // server/notes/questionAi.ts
 async function suggestQuestionDetails(input, invoke = invokeLLM) {
@@ -6779,7 +8414,7 @@ async function suggestQuestionDetails(input, invoke = invokeLLM) {
 // shared/solveRouting.ts
 var MODEL_TIERS = ["light", "medium", "strong"];
 var NUMERIC_SUBJECT = /matematik|geometri|fizik|kimya/;
-var isNumericSubject = (subject) => NUMERIC_SUBJECT.test((subject ?? "").toLocaleLowerCase("tr-TR"));
+var isNumericSubject = (subject2) => NUMERIC_SUBJECT.test((subject2 ?? "").toLocaleLowerCase("tr-TR"));
 function chooseSolveTier(signals) {
   if (signals.escalate) return "strong";
   const numeric = isNumericSubject(signals.subject);
@@ -6799,14 +8434,14 @@ function tierOfTag(tag) {
 }
 
 // server/notes/questionSolver.ts
-function subjectGuidance(subject) {
-  const name = (subject ?? "").toLocaleLowerCase("tr-TR");
+function subjectGuidance(subject2) {
+  const name = (subject2 ?? "").toLocaleLowerCase("tr-TR");
   if (/geometri/.test(name)) return "\u015Eekildeki verileri \xF6nce listele, hangi teoremi/ba\u011F\u0131nt\u0131y\u0131 neden kulland\u0131\u011F\u0131n\u0131 s\xF6yle, en sonda sonucu sa\u011Fla.";
   if (/matematik/.test(name)) return "Bilinmeyeni ve verilenleri yaz, denklemi kur, her i\u015Flemin nedenini s\xF6yle; en sonda buldu\u011Fun de\u011Feri yerine koyarak sa\u011Fla.";
   if (/fizik/.test(name)) return "Verilenleri birimleriyle yaz, do\u011Fru form\xFCl\xFC NEDEN se\xE7ti\u011Fini s\xF6yle, birim kontrol\xFC yap.";
   if (/kimya/.test(name)) return "Mol / k\xFCtle / deri\u015Fim ili\u015Fkisini kur, gerekiyorsa denklemi denkle\u015Ftir, birim ve korunum kontrol\xFC yap.";
   if (/biyoloji/.test(name)) return "Sorunun hangi kavram\u0131 \xF6l\xE7t\xFC\u011F\xFCn\xFC s\xF6yle, do\u011Fru se\xE7ene\u011Fin gerek\xE7esini ve en g\xFC\xE7l\xFC \xE7eldiricinin neden yanl\u0131\u015F oldu\u011Funu a\xE7\u0131kla.";
-  if (subject) return "Sorunun neyi \xF6l\xE7t\xFC\u011F\xFCn\xFC s\xF6yle, metinden/bilgiden kan\u0131tla do\u011Fru se\xE7ene\u011Fe ula\u015F ve en g\xFC\xE7l\xFC \xE7eldiricinin neden yanl\u0131\u015F oldu\u011Funu a\xE7\u0131kla.";
+  if (subject2) return "Sorunun neyi \xF6l\xE7t\xFC\u011F\xFCn\xFC s\xF6yle, metinden/bilgiden kan\u0131tla do\u011Fru se\xE7ene\u011Fe ula\u015F ve en g\xFC\xE7l\xFC \xE7eldiricinin neden yanl\u0131\u015F oldu\u011Funu a\xE7\u0131kla.";
   return "Sorunun t\xFCr\xFCn\xFC belirle ve ona uygun y\xF6ntemle \xE7\xF6z; say\u0131sal ise sa\u011Fla, s\xF6zel ise \xE7eldiricileri a\xE7\u0131kla.";
 }
 async function solveQuestion(input, invoke = invokeLLM, options = {}) {
@@ -6950,304 +8585,6 @@ ${input.solution.steps.map((step, index2) => `${index2 + 1}) ${step.work}`).join
   return similar;
 }
 
-// server/notes/questionsDb.ts
-import { and as and8, asc, desc as desc4, eq as eq10, gte as gte6, isNotNull as isNotNull2, isNull as isNull5, lt as lt5, lte as lte4, ne as ne2, sql as sql5 } from "drizzle-orm";
-async function requireDb4() {
-  const db = await getDb();
-  if (!db) throw new NoteError("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
-  return db;
-}
-var startOfToday = () => {
-  const date = /* @__PURE__ */ new Date();
-  date.setHours(0, 0, 0, 0);
-  return date;
-};
-var endOfToday2 = () => {
-  const date = /* @__PURE__ */ new Date();
-  date.setHours(23, 59, 59, 999);
-  return date;
-};
-var clean = (value, max) => value?.trim() ? value.trim().slice(0, max) : null;
-async function assertAttachment(userId, id3, kind) {
-  if (!id3) return;
-  const attachment = await getAttachmentStorage().get(userId, id3);
-  if (!attachment || attachment.kind !== kind) throw new NoteError(kind === "image" ? "Foto\u011Fraf bulunamad\u0131." : "Ses kayd\u0131 bulunamad\u0131.");
-}
-async function resolveTopic(db, topicId) {
-  if (!topicId) return null;
-  const [topic] = await db.select({ id: yksTopics.id, subject: yksTopics.subject, topic: yksTopics.topic }).from(yksTopics).where(eq10(yksTopics.id, topicId)).limit(1);
-  if (!topic) throw new NoteError("Se\xE7ilen konu bulunamad\u0131.");
-  return topic;
-}
-function ocrTextOf(content, attachmentId) {
-  if (!attachmentId) return null;
-  try {
-    const doc = JSON.parse(content);
-    const image = doc.content.find((node) => node.type === "noteImage" && Number(node.attrs?.attachmentId) === attachmentId);
-    return typeof image?.attrs?.ocrText === "string" ? image.attrs.ocrText : null;
-  } catch {
-    return null;
-  }
-}
-async function createQuestion(userId, input) {
-  const db = await requireDb4();
-  const [existing] = await db.select({ id: notebookQuestions.id }).from(notebookQuestions).innerJoin(notes, eq10(notes.id, notebookQuestions.noteId)).where(and8(eq10(notebookQuestions.userId, userId), eq10(notes.userId, userId), eq10(notes.clientId, input.clientId))).limit(1);
-  if (existing) return await getQuestion(userId, existing.id);
-  const stuckPoint = clean(input.stuckPoint, 4e3);
-  if (!input.questionImageId && !stuckPoint) throw new NoteError("Sorunun foto\u011Fraf\u0131n\u0131 ekle ya da nerede tak\u0131ld\u0131\u011F\u0131n\u0131 yaz.");
-  await assertAttachment(userId, input.questionImageId, "image");
-  await assertAttachment(userId, input.solutionImageId, "image");
-  await assertAttachment(userId, input.voiceAttachmentId, "audio");
-  const topic = await resolveTopic(db, input.topicId);
-  const subject = clean(input.subject, 80) ?? topic?.subject ?? null;
-  const now = /* @__PURE__ */ new Date();
-  const fields2 = {
-    subject,
-    topicId: topic?.id ?? null,
-    questionImageId: input.questionImageId ?? null,
-    solutionImageId: input.solutionImageId ?? null,
-    voiceAttachmentId: input.voiceAttachmentId ?? null,
-    voiceDuration: input.voiceAttachmentId ? Math.round(input.voiceDuration ?? 0) : null,
-    stuckPoint,
-    solutionText: clean(input.solutionText, 4e3),
-    errorType: input.errorType ?? null,
-    errorTypeSource: input.errorType ? input.errorTypeSource ?? "student" : null,
-    difficulty: input.difficulty ?? null
-  };
-  const saved = await saveNote(userId, {
-    clientId: input.clientId,
-    title: questionTitle(subject, topic?.topic ?? null, now),
-    content: buildQuestionDoc({ ...fields2, questionOcrText: clean(input.questionOcrText, 5e3) }),
-    noteDate: now,
-    tags: ["soru"],
-    templateKey: QUESTION_TEMPLATE_KEY,
-    subject,
-    topicId: topic?.id ?? null,
-    bookId: input.bookId ?? null,
-    studySessionId: input.studySessionId ?? null
-  });
-  await db.insert(notebookQuestions).values({ userId, noteId: saved.id, ...fields2, aiTopicId: input.aiTopicId ?? null, nextReviewAt: firstReviewAt(now) }).onDuplicateKeyUpdate({ set: fields2 });
-  const [row] = await db.select({ id: notebookQuestions.id }).from(notebookQuestions).where(and8(eq10(notebookQuestions.userId, userId), eq10(notebookQuestions.noteId, saved.id))).limit(1);
-  if (!row) throw new NoteError("Soru kaydedilemedi.");
-  return await getQuestion(userId, row.id);
-}
-async function updateQuestion(userId, id3, patch) {
-  const db = await requireDb4();
-  const [row] = await db.select().from(notebookQuestions).where(and8(eq10(notebookQuestions.id, id3), eq10(notebookQuestions.userId, userId))).limit(1);
-  if (!row) throw new NoteError("Soru bulunamad\u0131.");
-  const [note] = await db.select({ clientId: notes.clientId, content: notes.content, noteDate: notes.noteDate, bookId: notes.bookId, studySessionId: notes.studySessionId, isFavorite: notes.isFavorite, isPinned: notes.isPinned }).from(notes).where(and8(eq10(notes.id, row.noteId), eq10(notes.userId, userId))).limit(1);
-  if (!note) throw new NoteError("Soru bulunamad\u0131.");
-  if (patch.solutionImageId !== void 0) await assertAttachment(userId, patch.solutionImageId, "image");
-  const topicChanged = patch.topicId !== void 0;
-  const topic = await resolveTopic(db, topicChanged ? patch.topicId : row.topicId);
-  const subject = patch.subject !== void 0 ? clean(patch.subject, 80) ?? topic?.subject ?? null : topicChanged && topic ? topic.subject : row.subject;
-  const errorType = patch.errorType !== void 0 ? patch.errorType : row.errorType;
-  const next = {
-    subject,
-    topicId: topic?.id ?? null,
-    stuckPoint: patch.stuckPoint !== void 0 ? clean(patch.stuckPoint, 4e3) : row.stuckPoint,
-    solutionText: patch.solutionText !== void 0 ? clean(patch.solutionText, 4e3) : row.solutionText,
-    solutionImageId: patch.solutionImageId !== void 0 ? patch.solutionImageId : row.solutionImageId,
-    errorType,
-    errorTypeSource: errorType ? patch.errorType !== void 0 ? patch.errorTypeSource ?? "student" : row.errorTypeSource : null,
-    difficulty: patch.difficulty !== void 0 ? patch.difficulty : row.difficulty
-  };
-  if (!row.questionImageId && !next.stuckPoint) throw new NoteError("Foto\u011Frafs\u0131z bir soruda tak\u0131ld\u0131\u011F\u0131n yer bo\u015F b\u0131rak\u0131lamaz.");
-  await saveNote(userId, {
-    clientId: note.clientId,
-    title: questionTitle(next.subject, topic?.topic ?? null, row.createdAt),
-    content: buildQuestionDoc({ ...row, ...next, questionOcrText: ocrTextOf(note.content, row.questionImageId) }),
-    noteDate: note.noteDate,
-    tags: ["soru"],
-    templateKey: QUESTION_TEMPLATE_KEY,
-    subject: next.subject,
-    topicId: next.topicId,
-    bookId: note.bookId,
-    studySessionId: note.studySessionId,
-    isFavorite: note.isFavorite === 1,
-    isPinned: note.isPinned === 1
-  });
-  await db.update(notebookQuestions).set(next).where(eq10(notebookQuestions.id, id3));
-  return await getQuestion(userId, id3);
-}
-var questionColumns = {
-  id: notebookQuestions.id,
-  noteId: notebookQuestions.noteId,
-  subject: notebookQuestions.subject,
-  topicId: notebookQuestions.topicId,
-  topic: yksTopics.topic,
-  questionImageId: notebookQuestions.questionImageId,
-  solutionImageId: notebookQuestions.solutionImageId,
-  voiceAttachmentId: notebookQuestions.voiceAttachmentId,
-  voiceDuration: notebookQuestions.voiceDuration,
-  stuckPoint: notebookQuestions.stuckPoint,
-  solutionText: notebookQuestions.solutionText,
-  errorType: notebookQuestions.errorType,
-  errorTypeSource: notebookQuestions.errorTypeSource,
-  difficulty: notebookQuestions.difficulty,
-  status: notebookQuestions.status,
-  reviewStage: notebookQuestions.reviewStage,
-  nextReviewAt: notebookQuestions.nextReviewAt,
-  attemptCount: notebookQuestions.attemptCount,
-  lastResult: notebookQuestions.lastResult,
-  lastAttemptAt: notebookQuestions.lastAttemptAt,
-  aiSolution: notebookQuestions.aiSolution,
-  aiSolutionAt: notebookQuestions.aiSolutionAt,
-  aiSolutionModel: notebookQuestions.aiSolutionModel,
-  createdAt: notebookQuestions.createdAt
-};
-var shape = (row) => ({ ...row, errorType: row.errorType, aiSolution: row.aiSolution ? parseAiSolution(row.aiSolution) : null });
-async function getQuestion(userId, id3) {
-  const db = await requireDb4();
-  const [row] = await db.select(questionColumns).from(notebookQuestions).leftJoin(yksTopics, eq10(yksTopics.id, notebookQuestions.topicId)).where(and8(eq10(notebookQuestions.id, id3), eq10(notebookQuestions.userId, userId))).limit(1);
-  if (!row) return null;
-  const attempts = await db.select({ result: questionAttempts.result, sawSolution: questionAttempts.sawSolution, hintLevel: questionAttempts.hintLevel, attemptedAt: questionAttempts.attemptedAt }).from(questionAttempts).where(and8(eq10(questionAttempts.userId, userId), eq10(questionAttempts.questionId, id3))).orderBy(desc4(questionAttempts.attemptedAt), desc4(questionAttempts.id)).limit(20);
-  return { ...shape(row), attempts: attempts.map((attempt) => ({ ...attempt, sawSolution: attempt.sawSolution === 1 })) };
-}
-async function getSolveContext(userId, id3) {
-  const db = await requireDb4();
-  const [row] = await db.select({ questionImageId: notebookQuestions.questionImageId, stuckPoint: notebookQuestions.stuckPoint, subject: notebookQuestions.subject, topic: yksTopics.topic, exam: yksTopics.exam, content: notes.content, aiSolution: notebookQuestions.aiSolution, aiSolutionModel: notebookQuestions.aiSolutionModel, difficulty: notebookQuestions.difficulty, lastResult: notebookQuestions.lastResult }).from(notebookQuestions).innerJoin(notes, eq10(notes.id, notebookQuestions.noteId)).leftJoin(yksTopics, eq10(yksTopics.id, notebookQuestions.topicId)).where(and8(eq10(notebookQuestions.id, id3), eq10(notebookQuestions.userId, userId))).limit(1);
-  if (!row) throw new NoteError("Soru bulunamad\u0131.");
-  return { questionImageId: row.questionImageId, ocrText: ocrTextOf(row.content, row.questionImageId), stuckPoint: row.stuckPoint, subject: row.subject, topic: row.topic, aiSolution: parseAiSolution(row.aiSolution), aiSolutionModel: row.aiSolutionModel, exam: row.exam, difficulty: row.difficulty, lastResult: row.lastResult };
-}
-async function saveAiSolution(userId, id3, solution, aiSolutionModel = null) {
-  const db = await requireDb4();
-  const aiSolutionAt = /* @__PURE__ */ new Date();
-  await db.update(notebookQuestions).set({ aiSolution: JSON.stringify(solution), aiSolutionAt, aiSolutionModel }).where(and8(eq10(notebookQuestions.id, id3), eq10(notebookQuestions.userId, userId)));
-  return { aiSolution: solution, aiSolutionAt, aiSolutionModel };
-}
-async function getQuestionIdByNote(userId, noteId) {
-  const db = await requireDb4();
-  const [row] = await db.select({ id: notebookQuestions.id }).from(notebookQuestions).where(and8(eq10(notebookQuestions.userId, userId), eq10(notebookQuestions.noteId, noteId))).limit(1);
-  return row?.id ?? null;
-}
-async function listQuestions(userId, filters) {
-  const db = await requireDb4();
-  const limit = Math.min(Math.max(filters.limit ?? 30, 1), 100);
-  const conditions = [eq10(notebookQuestions.userId, userId)];
-  if (filters.status === "open" || filters.due) conditions.push(ne2(notebookQuestions.status, "mastered"));
-  if (filters.status === "mastered") conditions.push(eq10(notebookQuestions.status, "mastered"));
-  if (filters.due) conditions.push(and8(isNotNull2(notebookQuestions.nextReviewAt), lte4(notebookQuestions.nextReviewAt, endOfToday2())));
-  conditions.push(...questionSubject(filters.subject));
-  if (filters.topicId) conditions.push(eq10(notebookQuestions.topicId, filters.topicId));
-  if (!filters.due && filters.cursor) conditions.push(lt5(notebookQuestions.id, filters.cursor));
-  const rows = await db.select(questionColumns).from(notebookQuestions).leftJoin(yksTopics, eq10(yksTopics.id, notebookQuestions.topicId)).where(and8(...conditions)).orderBy(...filters.due ? [asc(notebookQuestions.nextReviewAt), asc(notebookQuestions.id)] : [desc4(notebookQuestions.id)]).limit(limit + 1);
-  const page = rows.slice(0, limit).map(shape);
-  return { items: page, nextCursor: !filters.due && rows.length > limit ? page[page.length - 1]?.id ?? null : null };
-}
-async function deleteQuestion(userId, id3) {
-  const db = await requireDb4();
-  const [row] = await db.select({ noteId: notebookQuestions.noteId }).from(notebookQuestions).where(and8(eq10(notebookQuestions.id, id3), eq10(notebookQuestions.userId, userId))).limit(1);
-  if (!row) throw new NoteError("Soru bulunamad\u0131.");
-  await deleteNote(userId, row.noteId);
-}
-async function recordAttempt(userId, id3, input) {
-  const db = await requireDb4();
-  const [row] = await db.select({ reviewStage: notebookQuestions.reviewStage }).from(notebookQuestions).where(and8(eq10(notebookQuestions.id, id3), eq10(notebookQuestions.userId, userId))).limit(1);
-  if (!row) throw new NoteError("Soru bulunamad\u0131.");
-  const now = /* @__PURE__ */ new Date();
-  const hintLevel = Math.min(Math.max(Math.round(input.hintLevel ?? 0), 0), HINT_LEVELS.solution);
-  const next = scheduleAfterAttempt(row, input.result, input.sawSolution, now, hintLevel);
-  await db.insert(questionAttempts).values({ userId, questionId: id3, result: input.result, sawSolution: input.sawSolution ? 1 : 0, hintLevel, seconds: input.seconds ? Math.min(Math.round(input.seconds), 7200) : null, stageBefore: row.reviewStage, attemptedAt: now });
-  await db.update(notebookQuestions).set({ ...next, attemptCount: sql5`${notebookQuestions.attemptCount} + 1`, lastResult: input.result, lastAttemptAt: now }).where(eq10(notebookQuestions.id, id3));
-  return next;
-}
-var questionSubject = (subject) => subject === void 0 ? [] : [subject === null ? isNull5(notebookQuestions.subject) : eq10(notebookQuestions.subject, subject)];
-async function getErrorMap(userId, days, subject) {
-  const db = await requireDb4();
-  const conditions = [eq10(notebookQuestions.userId, userId), ...questionSubject(subject)];
-  if (days) conditions.push(gte6(notebookQuestions.createdAt, new Date(Date.now() - days * 864e5)));
-  const rows = await db.select({ subject: notebookQuestions.subject, topicId: notebookQuestions.topicId, topic: yksTopics.topic, errorType: notebookQuestions.errorType, status: notebookQuestions.status }).from(notebookQuestions).leftJoin(yksTopics, eq10(yksTopics.id, notebookQuestions.topicId)).where(and8(...conditions));
-  return buildErrorMap(rows.map((row) => ({ ...row, status: row.status })));
-}
-async function getNotebookPlanSignal(userId) {
-  return describeErrorMapForPlan(await getErrorMap(userId, 60));
-}
-async function todaysReviewTask(db, userId) {
-  const [task] = await db.select({ id: studyPlanSessions.id, status: studyPlanSessions.status, plannedMinutes: studyPlanSessions.plannedMinutes, title: studyPlanSessions.title }).from(studyPlanSessions).where(and8(eq10(studyPlanSessions.userId, userId), eq10(studyPlanSessions.kind, NOTEBOOK_REVIEW_TASK_KIND), gte6(studyPlanSessions.sessionDate, startOfToday()), lte4(studyPlanSessions.sessionDate, endOfToday2()))).orderBy(desc4(studyPlanSessions.id)).limit(1);
-  return task ?? null;
-}
-var dueCondition = () => and8(ne2(notebookQuestions.status, "mastered"), isNotNull2(notebookQuestions.nextReviewAt), lte4(notebookQuestions.nextReviewAt, endOfToday2()));
-async function countDue(db, userId, subject) {
-  const [row] = await db.select({ count: sql5`COUNT(*)` }).from(notebookQuestions).where(and8(eq10(notebookQuestions.userId, userId), dueCondition(), ...questionSubject(subject)));
-  return Number(row?.count ?? 0);
-}
-async function getReviewSummary(userId, subject) {
-  const db = await requireDb4();
-  const [due, task, totals] = await Promise.all([
-    countDue(db, userId, subject),
-    todaysReviewTask(db, userId),
-    db.select({ status: notebookQuestions.status, count: sql5`COUNT(*)` }).from(notebookQuestions).where(and8(eq10(notebookQuestions.userId, userId), ...questionSubject(subject))).groupBy(notebookQuestions.status)
-  ]);
-  const byStatus = Object.fromEntries(totals.map((row) => [row.status, Number(row.count)]));
-  const reviewCount = Math.min(due, MAX_QUESTIONS_PER_REVIEW);
-  return {
-    due,
-    reviewCount,
-    minutes: reviewTaskMinutes(reviewCount),
-    task,
-    totals: { unsolved: byStatus.unsolved ?? 0, learning: byStatus.learning ?? 0, mastered: byStatus.mastered ?? 0 }
-  };
-}
-async function addReviewTask(userId) {
-  const db = await requireDb4();
-  const existing = await todaysReviewTask(db, userId);
-  if (existing) return { created: false, task: existing };
-  const due = Math.min(await countDue(db, userId), MAX_QUESTIONS_PER_REVIEW);
-  if (due === 0) throw new NoteError("Bug\xFCn tekrar bekleyen soru yok.");
-  const minutes = reviewTaskMinutes(due);
-  const date = await pickDayForTask(userId, minutes, "today");
-  await insertPlanTask(userId, { date, title: `\u{1F4D3} Defterim \xB7 ${due} soru tekrar\u0131`, subject: "Defterim", topic: "Soru tekrar\u0131", kind: NOTEBOOK_REVIEW_TASK_KIND, minutes, planTitle: "Defter g\xF6revleri", planSummary: "Ak\u0131ll\u0131 Defter'deki notlardan ve sorulardan olu\u015Fturulan \xE7al\u0131\u015Fma g\xF6revleri." });
-  return { created: true, task: await todaysReviewTask(db, userId) };
-}
-async function finishReviewSession(userId, input) {
-  const db = await requireDb4();
-  const task = await todaysReviewTask(db, userId);
-  if (!task || task.status !== "planned") return { taskCompleted: false };
-  const total = input.solved + input.partial + input.failed;
-  await db.update(studyPlanSessions).set({ status: "completed", completedAt: /* @__PURE__ */ new Date(), actualMinutes: Math.max(1, Math.round(input.minutes)), actualQuestions: total, correct: input.solved, wrong: input.failed, blank: input.partial }).where(and8(eq10(studyPlanSessions.id, task.id), eq10(studyPlanSessions.userId, userId)));
-  return { taskCompleted: true };
-}
-async function getSubjectSummary(userId) {
-  const db = await requireDb4();
-  const isQuestion = sql5`(${notes.templateKey} <=> ${QUESTION_TEMPLATE_KEY})`;
-  const [noteRows, dueRows] = await Promise.all([
-    db.select({ subject: notes.subject, isQuestion, count: sql5`COUNT(*)` }).from(notes).where(and8(eq10(notes.userId, userId), eq10(notes.status, "active"))).groupBy(notes.subject, isQuestion),
-    db.select({ subject: notebookQuestions.subject, count: sql5`COUNT(*)` }).from(notebookQuestions).where(and8(eq10(notebookQuestions.userId, userId), dueCondition())).groupBy(notebookQuestions.subject)
-  ]);
-  const bySubject = /* @__PURE__ */ new Map();
-  const entry = (subject) => {
-    const key = subject?.trim() || null;
-    const found = bySubject.get(key) ?? { subject: key, notes: 0, questions: 0, due: 0 };
-    bySubject.set(key, found);
-    return found;
-  };
-  for (const row of noteRows) {
-    const item = entry(row.subject);
-    if (Number(row.isQuestion) === 1) item.questions += Number(row.count);
-    else item.notes += Number(row.count);
-  }
-  for (const row of dueRows) entry(row.subject).due += Number(row.count);
-  return Array.from(bySubject.values());
-}
-async function moveNoteToSubject(userId, noteId, subject) {
-  const db = await requireDb4();
-  const target = clean(subject, 80);
-  const [note] = await db.select({ id: notes.id, topicId: notes.topicId, templateKey: notes.templateKey }).from(notes).where(and8(eq10(notes.id, noteId), eq10(notes.userId, userId))).limit(1);
-  if (!note) throw new NoteError("Not bulunamad\u0131.");
-  const topic = note.topicId ? await resolveTopic(db, note.topicId).catch(() => null) : null;
-  const keepTopic = Boolean(topic && target && topic.subject === target);
-  if (note.templateKey === QUESTION_TEMPLATE_KEY) {
-    const questionId = await getQuestionIdByNote(userId, noteId);
-    if (questionId) {
-      await updateQuestion(userId, questionId, { subject: target, topicId: keepTopic ? topic.id : null });
-      return { subject: target };
-    }
-  }
-  await db.update(notes).set({ subject: target, ...keepTopic ? {} : { topicId: null } }).where(and8(eq10(notes.id, noteId), eq10(notes.userId, userId)));
-  return { subject: target };
-}
-
 // server/routers/questions.ts
 async function userFacing2(work) {
   try {
@@ -7257,7 +8594,7 @@ async function userFacing2(work) {
     throw error;
   }
 }
-var id = z5.number().int().positive();
+var id = z6.number().int().positive();
 async function loadQuestionForAi(userId, questionId) {
   const context = await getSolveContext(userId, questionId);
   let imageDataUrl = null;
@@ -7268,56 +8605,56 @@ async function loadQuestionForAi(userId, questionId) {
   if (!imageDataUrl && !context.ocrText?.trim()) throw new NoteError("Bu kartta soru foto\u011Fraf\u0131 yok.");
   return { context, imageDataUrl };
 }
-var subjectScope = z5.string().max(80).nullable().optional();
+var subjectScope = z6.string().max(80).nullable().optional();
 var optionalId2 = id.nullable().optional();
 var fields = {
-  subject: z5.string().max(80).nullable().optional(),
+  subject: z6.string().max(80).nullable().optional(),
   topicId: optionalId2,
-  stuckPoint: z5.string().max(4e3).nullable().optional(),
-  solutionText: z5.string().max(4e3).nullable().optional(),
+  stuckPoint: z6.string().max(4e3).nullable().optional(),
+  solutionText: z6.string().max(4e3).nullable().optional(),
   solutionImageId: optionalId2,
-  errorType: z5.enum(ERROR_TYPE_KEYS).nullable().optional(),
-  errorTypeSource: z5.enum(["student", "ai"]).nullable().optional(),
-  difficulty: z5.enum(DIFFICULTY_KEYS).nullable().optional()
+  errorType: z6.enum(ERROR_TYPE_KEYS).nullable().optional(),
+  errorTypeSource: z6.enum(["student", "ai"]).nullable().optional(),
+  difficulty: z6.enum(DIFFICULTY_KEYS).nullable().optional()
 };
 var questionsRouter = router({
-  list: protectedProcedure.input(z5.object({ status: z5.enum(["open", "mastered", "all"]).optional(), due: z5.boolean().optional(), subject: subjectScope, topicId: optionalId2, cursor: optionalId2, limit: z5.number().int().min(1).max(100).optional() })).query(({ ctx, input }) => userFacing2(() => listQuestions(ctx.user.id, input))),
-  get: protectedProcedure.input(z5.object({ id })).query(async ({ ctx, input }) => {
+  list: protectedProcedure.input(z6.object({ status: z6.enum(["open", "mastered", "all"]).optional(), due: z6.boolean().optional(), subject: subjectScope, topicId: optionalId2, cursor: optionalId2, limit: z6.number().int().min(1).max(100).optional() })).query(({ ctx, input }) => userFacing2(() => listQuestions(ctx.user.id, input))),
+  get: protectedProcedure.input(z6.object({ id })).query(async ({ ctx, input }) => {
     const question = await getQuestion(ctx.user.id, input.id);
     if (!question) throw new TRPCError4({ code: "NOT_FOUND", message: "Soru bulunamad\u0131." });
     return question;
   }),
-  byNote: protectedProcedure.input(z5.object({ noteId: id })).query(({ ctx, input }) => userFacing2(async () => ({ id: await getQuestionIdByNote(ctx.user.id, input.noteId) }))),
-  create: protectedProcedure.input(z5.object({
-    clientId: z5.string().min(8).max(40).regex(/^[A-Za-z0-9_-]+$/),
+  byNote: protectedProcedure.input(z6.object({ noteId: id })).query(({ ctx, input }) => userFacing2(async () => ({ id: await getQuestionIdByNote(ctx.user.id, input.noteId) }))),
+  create: protectedProcedure.input(z6.object({
+    clientId: z6.string().min(8).max(40).regex(/^[A-Za-z0-9_-]+$/),
     questionImageId: optionalId2,
-    questionOcrText: z5.string().max(5e3).nullable().optional(),
+    questionOcrText: z6.string().max(5e3).nullable().optional(),
     voiceAttachmentId: optionalId2,
-    voiceDuration: z5.number().min(0).max(700).nullable().optional(),
+    voiceDuration: z6.number().min(0).max(700).nullable().optional(),
     aiTopicId: optionalId2,
-    bookId: z5.string().max(120).nullable().optional(),
+    bookId: z6.string().max(120).nullable().optional(),
     studySessionId: optionalId2,
     ...fields
   })).mutation(({ ctx, input }) => userFacing2(() => createQuestion(ctx.user.id, input))),
-  update: protectedProcedure.input(z5.object({ id, ...fields })).mutation(({ ctx, input }) => userFacing2(() => {
+  update: protectedProcedure.input(z6.object({ id, ...fields })).mutation(({ ctx, input }) => userFacing2(() => {
     const { id: questionId, ...patch } = input;
     return updateQuestion(ctx.user.id, questionId, patch);
   })),
-  delete: protectedProcedure.input(z5.object({ id })).mutation(({ ctx, input }) => userFacing2(() => deleteQuestion(ctx.user.id, input.id))),
-  attempt: protectedProcedure.input(z5.object({ id, result: z5.enum(ATTEMPT_RESULT_KEYS), sawSolution: z5.boolean(), hintLevel: z5.number().int().min(HINT_LEVELS.none).max(HINT_LEVELS.solution).optional(), seconds: z5.number().min(0).max(7200).nullable().optional() })).mutation(({ ctx, input }) => userFacing2(() => recordAttempt(ctx.user.id, input.id, input))),
+  delete: protectedProcedure.input(z6.object({ id })).mutation(({ ctx, input }) => userFacing2(() => deleteQuestion(ctx.user.id, input.id))),
+  attempt: protectedProcedure.input(z6.object({ id, result: z6.enum(ATTEMPT_RESULT_KEYS), sawSolution: z6.boolean(), hintLevel: z6.number().int().min(HINT_LEVELS.none).max(HINT_LEVELS.solution).optional(), seconds: z6.number().min(0).max(7200).nullable().optional() })).mutation(({ ctx, input }) => userFacing2(() => recordAttempt(ctx.user.id, input.id, input))),
   // subject: verilmezse tüm dersler, null ise derssiz ("Genel"), metinse o dersin defteri.
-  summary: protectedProcedure.input(z5.object({ subject: subjectScope }).optional()).query(({ ctx, input }) => userFacing2(() => getReviewSummary(ctx.user.id, input?.subject))),
-  errorMap: protectedProcedure.input(z5.object({ days: z5.number().int().min(1).max(365).nullable(), subject: subjectScope })).query(({ ctx, input }) => userFacing2(() => getErrorMap(ctx.user.id, input.days, input.subject))),
+  summary: protectedProcedure.input(z6.object({ subject: subjectScope }).optional()).query(({ ctx, input }) => userFacing2(() => getReviewSummary(ctx.user.id, input?.subject))),
+  errorMap: protectedProcedure.input(z6.object({ days: z6.number().int().min(1).max(365).nullable(), subject: subjectScope })).query(({ ctx, input }) => userFacing2(() => getErrorMap(ctx.user.id, input.days, input.subject))),
   /** Ders sekmeleri: ders başına not / soru / tekrar bekleyen sayısı. */
   subjectSummary: protectedProcedure.query(({ ctx }) => userFacing2(() => getSubjectSummary(ctx.user.id))),
   /** Notu ya da soru kartını bir ders defterine koy (null: "Genel"e döndür). */
-  moveToSubject: protectedProcedure.input(z5.object({ noteId: id, subject: z5.string().trim().min(1).max(80).nullable() })).mutation(({ ctx, input }) => userFacing2(() => moveNoteToSubject(ctx.user.id, input.noteId, input.subject))),
+  moveToSubject: protectedProcedure.input(z6.object({ noteId: id, subject: z6.string().trim().min(1).max(80).nullable() })).mutation(({ ctx, input }) => userFacing2(() => moveNoteToSubject(ctx.user.id, input.noteId, input.subject))),
   addReviewTask: protectedProcedure.mutation(({ ctx }) => userFacing2(() => addReviewTask(ctx.user.id))),
-  finishReview: protectedProcedure.input(z5.object({ minutes: z5.number().min(0).max(600), solved: z5.number().int().min(0).max(100), partial: z5.number().int().min(0).max(100), failed: z5.number().int().min(0).max(100) })).mutation(({ ctx, input }) => userFacing2(() => finishReviewSession(ctx.user.id, input))),
+  finishReview: protectedProcedure.input(z6.object({ minutes: z6.number().min(0).max(600), solved: z6.number().int().min(0).max(100), partial: z6.number().int().min(0).max(100), failed: z6.number().int().min(0).max(100) })).mutation(({ ctx, input }) => userFacing2(() => finishReviewSession(ctx.user.id, input))),
   // ✨ Adım adım çöz: kartı AI ile çözer ve karta kaydeder (AI not araçları kotasından sayılır).
   // İstemci kayıtlı çözümü `get` ile zaten alır; bu uç yalnızca ilk çözüm ya da "Yeniden çöz" için çağrılır.
   // Model kademesi kartın zorluk/ders/sınav sinyallerinden seçilir; `escalate` = öğrenci "daha güçlü modelle çöz" dedi.
-  solve: metredFeatureProcedure("NOTE_AI").input(z5.object({ id, escalate: z5.boolean().optional() })).mutation(({ ctx, input }) => userFacing2(async () => {
+  solve: metredFeatureProcedure("NOTE_AI").input(z6.object({ id, escalate: z6.boolean().optional() })).mutation(({ ctx, input }) => userFacing2(async () => {
     const { context, imageDataUrl } = await loadQuestionForAi(ctx.user.id, input.id);
     const tier = chooseSolveTier({ difficulty: context.difficulty, subject: context.subject, exam: context.exam, lastResult: context.lastResult, escalate: input.escalate });
     let routed;
@@ -7332,7 +8669,7 @@ var questionsRouter = router({
     return saveAiSolution(ctx.user.id, input.id, routed.solution, tag);
   })),
   // 🔁 Benzer soru: aynı yöntemi ölçen yeni 5 şıklı alıştırma; kaydedilmez, her üretim AI not hakkından sayılır.
-  similar: metredFeatureProcedure("NOTE_AI").input(z5.object({ id })).mutation(({ ctx, input }) => userFacing2(async () => {
+  similar: metredFeatureProcedure("NOTE_AI").input(z6.object({ id })).mutation(({ ctx, input }) => userFacing2(async () => {
     const { context, imageDataUrl } = await loadQuestionForAi(ctx.user.id, input.id);
     try {
       const tier = atLeastMedium(tierOfTag(context.aiSolutionModel) ?? chooseSolveTier({ difficulty: context.difficulty, subject: context.subject, exam: context.exam, lastResult: context.lastResult }));
@@ -7343,7 +8680,7 @@ var questionsRouter = router({
     }
   })),
   // ✨ Öner: fotoğrafı okur, müfredattan konu + zorluk + olası hata türü önerir (fotoğraf okuma kotasından sayılır).
-  suggest: metredFeatureProcedure("NOTE_OCR").input(z5.object({ attachmentId: optionalId2, stuckPoint: z5.string().max(4e3).nullable().optional() })).mutation(({ ctx, input }) => userFacing2(async () => {
+  suggest: metredFeatureProcedure("NOTE_OCR").input(z6.object({ attachmentId: optionalId2, stuckPoint: z6.string().max(4e3).nullable().optional() })).mutation(({ ctx, input }) => userFacing2(async () => {
     let imageDataUrl = null;
     if (input.attachmentId) {
       const attachment = await getAttachmentStorage().get(ctx.user.id, input.attachmentId);
@@ -7364,10 +8701,10 @@ var questionsRouter = router({
 
 // server/routers/classSchedule.ts
 import { TRPCError as TRPCError5 } from "@trpc/server";
-import { z as z6 } from "zod";
+import { z as z7 } from "zod";
 
 // server/schedule/classScheduleDb.ts
-import { asc as asc2, eq as eq11 } from "drizzle-orm";
+import { asc as asc3, eq as eq18 } from "drizzle-orm";
 
 // shared/classSchedule.ts
 var SCHEDULE_SOURCES = ["school", "course", "tutor", "other"];
@@ -7435,6 +8772,10 @@ function computeFreeSlots(blocks, date, options) {
   return slots.filter((slot) => slot.end > slot.start);
 }
 var freeMinutes = (slots) => slots.reduce((sum, slot) => sum + slot.end - slot.start, 0);
+function findClassConflict(blocks, date, startMinutes, durationMinutes) {
+  const end = startMinutes + durationMinutes;
+  return blocksOn(blocks, date).find((block) => startMinutes < toMinutes(block.endTime) && end > toMinutes(block.startTime)) ?? null;
+}
 function describeWeekForPlan(blocks, weekStart, from) {
   if (blocks.length === 0) return null;
   const lines = [];
@@ -7466,14 +8807,14 @@ function parsePeriods(raw) {
 async function getClassSchedule(userId) {
   const db = await getDb();
   if (!db) return { periods: DEFAULT_SCHOOL_PERIODS, blocks: [] };
-  const [profile] = await db.select({ schoolPeriodsJson: studentProfiles.schoolPeriodsJson }).from(studentProfiles).where(eq11(studentProfiles.userId, userId)).limit(1);
-  const rows = await db.select({ source: classScheduleBlocks.source, dayOfWeek: classScheduleBlocks.dayOfWeek, startTime: classScheduleBlocks.startTime, endTime: classScheduleBlocks.endTime, subject: classScheduleBlocks.subject, label: classScheduleBlocks.label }).from(classScheduleBlocks).where(eq11(classScheduleBlocks.userId, userId)).orderBy(asc2(classScheduleBlocks.dayOfWeek), asc2(classScheduleBlocks.startTime));
+  const [profile] = await db.select({ schoolPeriodsJson: studentProfiles.schoolPeriodsJson }).from(studentProfiles).where(eq18(studentProfiles.userId, userId)).limit(1);
+  const rows = await db.select({ source: classScheduleBlocks.source, dayOfWeek: classScheduleBlocks.dayOfWeek, startTime: classScheduleBlocks.startTime, endTime: classScheduleBlocks.endTime, subject: classScheduleBlocks.subject, label: classScheduleBlocks.label }).from(classScheduleBlocks).where(eq18(classScheduleBlocks.userId, userId)).orderBy(asc3(classScheduleBlocks.dayOfWeek), asc3(classScheduleBlocks.startTime));
   return { periods: parsePeriods(profile?.schoolPeriodsJson), blocks: rows };
 }
 async function getPlanScheduleContext(userId, startDate) {
   const db = await getDb();
   if (!db) return null;
-  const [profile] = await db.select({ start: studentProfiles.preferredStudyStartTime }).from(studentProfiles).where(eq11(studentProfiles.userId, userId)).limit(1);
+  const [profile] = await db.select({ start: studentProfiles.preferredStudyStartTime }).from(studentProfiles).where(eq18(studentProfiles.userId, userId)).limit(1);
   const { blocks } = await getClassSchedule(userId);
   return describeWeekForPlan(blocks, startDate, profile?.start && isValidTime(profile.start) ? profile.start : "16:00");
 }
@@ -7485,9 +8826,9 @@ async function saveClassSchedule(userId, schedule) {
   const blocks = schedule.blocks.map((block) => ({ ...block, label: block.label.trim() || block.subject || "Ders" }));
   const periodsJson = JSON.stringify(schedule.periods);
   await db.transaction(async (tx) => {
-    await tx.delete(classScheduleBlocks).where(eq11(classScheduleBlocks.userId, userId));
+    await tx.delete(classScheduleBlocks).where(eq18(classScheduleBlocks.userId, userId));
     if (blocks.length) await tx.insert(classScheduleBlocks).values(blocks.map((block) => ({ ...block, userId })));
-    await tx.insert(studentProfiles).values({ userId, schoolPeriodsJson: periodsJson }).onDuplicateKeyUpdate({ set: { schoolPeriodsJson: periodsJson } });
+    await tx.insert(studentProfiles).values({ userId, schoolPeriodsJson: periodsJson }).onConflictDoUpdate({ target: studentProfiles.userId, set: { schoolPeriodsJson: periodsJson } });
   });
   return getClassSchedule(userId);
 }
@@ -7508,12 +8849,12 @@ function classifyLesson(name) {
     [/CO[ĞG]RAFYA/, "Co\u011Frafya"],
     [/FELSEFE|MANTIK|PS[İI]KOLOJ[İI]|SOSYOLOJ[İI]/, "Felsefe"]
   ];
-  for (const [pattern, subject] of rules) if (pattern.test(value)) return { known: true, subject };
+  for (const [pattern, subject2] of rules) if (pattern.test(value)) return { known: true, subject: subject2 };
   return { known: false, subject: null };
 }
-function lessonLabel(name, code, subject) {
+function lessonLabel(name, code, subject2) {
   const cleaned = name.replace(/_/g, " ").replace(/\s+/g, " ").trim();
-  if (!cleaned) return subject ?? (code.trim() || "Ders");
+  if (!cleaned) return subject2 ?? (code.trim() || "Ders");
   const titled = cleaned.toLocaleLowerCase("tr-TR").split(" ").map((word) => {
     const index2 = word.search(/[a-zçğıöşü]/);
     return index2 < 0 ? word : word.slice(0, index2) + word[index2].toLocaleUpperCase("tr-TR") + word.slice(index2 + 1);
@@ -7556,8 +8897,8 @@ function parseScheduleImport(raw) {
     seen.add(key);
     const byName = classifyLesson(name || code);
     const fromModel = YKS_SUBJECTS.includes(lesson.subject) ? lesson.subject : null;
-    const subject = byName.known ? byName.subject : fromModel;
-    blocks.push({ source: "school", dayOfWeek: day, startTime: period.start, endTime: period.end, subject, label: subject && !/SE[ÇC]MEL[İI]|HTDE/i.test(name) ? subject : lessonLabel(name, code, subject) });
+    const subject2 = byName.known ? byName.subject : fromModel;
+    blocks.push({ source: "school", dayOfWeek: day, startTime: period.start, endTime: period.end, subject: subject2, label: subject2 && !/SE[ÇC]MEL[İI]|HTDE/i.test(name) ? subject2 : lessonLabel(name, code, subject2) });
   }
   return { periods, blocks, skipped };
 }
@@ -7594,18 +8935,18 @@ async function readScheduleFromImage(dataUrl, invoke = invokeLLM) {
 }
 
 // server/routers/classSchedule.ts
-var time = z6.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Saat SS:dd bi\xE7iminde olmal\u0131.");
+var time = z7.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Saat SS:dd bi\xE7iminde olmal\u0131.");
 var classScheduleRouter = router({
   get: protectedProcedure.query(({ ctx }) => getClassSchedule(ctx.user.id)),
-  save: protectedProcedure.input(z6.object({
-    periods: z6.array(z6.object({ start: time, end: time })).max(MAX_SCHOOL_PERIODS),
-    blocks: z6.array(z6.object({
-      source: z6.enum(SCHEDULE_SOURCES),
-      dayOfWeek: z6.number().int().min(1).max(7),
+  save: protectedProcedure.input(z7.object({
+    periods: z7.array(z7.object({ start: time, end: time })).max(MAX_SCHOOL_PERIODS),
+    blocks: z7.array(z7.object({
+      source: z7.enum(SCHEDULE_SOURCES),
+      dayOfWeek: z7.number().int().min(1).max(7),
       startTime: time,
       endTime: time,
-      subject: z6.enum(YKS_SUBJECTS).nullable(),
-      label: z6.string().max(80)
+      subject: z7.enum(YKS_SUBJECTS).nullable(),
+      label: z7.string().max(80)
     })).max(MAX_SCHEDULE_BLOCKS)
   })).mutation(async ({ ctx, input }) => {
     try {
@@ -7617,7 +8958,7 @@ var classScheduleRouter = router({
   }),
   // 📷 Fotoğraftan aktar: program okunur ama KAYDEDİLMEZ; düzenleyiciye dolar, öğrenci kontrol edip kaydeder.
   // Kota: fotoğraf okuma (NOTE_OCR); yalnızca başarılı okumada sayılır.
-  importPhoto: metredFeatureProcedure("NOTE_OCR").input(z6.object({ dataUrl: z6.string().max(12e6).regex(/^data:image\/(jpeg|png|webp);base64,/, "Foto\u011Fraf JPEG, PNG ya da WEBP olmal\u0131.") })).mutation(async ({ input }) => {
+  importPhoto: metredFeatureProcedure("NOTE_OCR").input(z7.object({ dataUrl: z7.string().max(12e6).regex(/^data:image\/(jpeg|png|webp);base64,/, "Foto\u011Fraf JPEG, PNG ya da WEBP olmal\u0131.") })).mutation(async ({ input }) => {
     try {
       return await readScheduleFromImage(input.dataUrl);
     } catch (error) {
@@ -7627,12 +8968,40 @@ var classScheduleRouter = router({
   })
 });
 
-// server/routers/reading.ts
+// server/routers/push.ts
 import { TRPCError as TRPCError6 } from "@trpc/server";
-import { z as z7 } from "zod";
+import { z as z8 } from "zod";
+var subscriptionInput = z8.object({
+  endpoint: z8.string().url().max(600),
+  keys: z8.object({ p256dh: z8.string().min(1).max(200), auth: z8.string().min(1).max(100) })
+});
+var pushRouter = router({
+  // VAPID anahtarı yoksa null: istemci hatırlatma seçeneğini hiç göstermez.
+  config: publicProcedure.query(() => ({ publicKey: pushPublicKey() })),
+  // Bu cihazın aboneliği sunucuda kayıtlı mı (tarayıcıda abonelik olup sunucuda silinmiş olabilir).
+  status: protectedProcedure.input(z8.object({ endpoint: z8.string().max(600) })).query(async ({ ctx, input }) => ({ subscribed: await hasSubscription(ctx.user.id, input.endpoint) })),
+  subscribe: protectedProcedure.input(subscriptionInput).mutation(async ({ ctx, input }) => {
+    if (!pushPublicKey()) throw new TRPCError6({ code: "PRECONDITION_FAILED", message: "Bildirimler \u015Fu an kullan\u0131lam\u0131yor." });
+    await saveSubscription(ctx.user.id, input, ctx.req.headers["user-agent"] ?? null);
+    return { subscribed: true };
+  }),
+  unsubscribe: protectedProcedure.input(z8.object({ endpoint: z8.string().max(600) })).mutation(async ({ ctx, input }) => {
+    await removeSubscription(ctx.user.id, input.endpoint);
+    return { subscribed: false };
+  }),
+  test: protectedProcedure.mutation(async ({ ctx }) => {
+    const outcome = await sendToUser(ctx.user.id, { title: "Hat\u0131rlatmalar a\xE7\u0131k", body: "Plan\u0131ndaki her oturumdan birka\xE7 dakika \xF6nce burada haber verece\u011Fim.", url: "/takvim", tag: "test" });
+    if (!outcome.delivered) throw new TRPCError6({ code: "BAD_REQUEST", message: "Bildirim g\xF6nderilemedi. Bildirim iznini kontrol edip tekrar dener misin?" });
+    return outcome;
+  })
+});
+
+// server/routers/reading.ts
+import { TRPCError as TRPCError7 } from "@trpc/server";
+import { z as z9 } from "zod";
 
 // server/reading/readingDb.ts
-import { and as and9, count, desc as desc5, eq as eq12 } from "drizzle-orm";
+import { and as and16, count, desc as desc10, eq as eq19 } from "drizzle-orm";
 
 // shared/reading.ts
 var MAX_READING_BOOKS = 50;
@@ -7651,19 +9020,19 @@ var columns = { id: readingBooks.id, title: readingBooks.title, author: readingB
 async function listReadingBooks(userId) {
   const db = await getDb();
   if (!db) return [];
-  const rows = await db.select(columns).from(readingBooks).where(eq12(readingBooks.userId, userId)).orderBy(desc5(readingBooks.updatedAt));
+  const rows = await db.select(columns).from(readingBooks).where(eq19(readingBooks.userId, userId)).orderBy(desc10(readingBooks.updatedAt));
   return [...rows.filter((row) => row.status === "reading"), ...rows.filter((row) => row.status === "finished")];
 }
 async function addReadingBook(userId, input) {
   const db = await getDb();
   if (!db) throw new ReadingError("Veritaban\u0131na ula\u015F\u0131lamad\u0131.");
-  const [{ total }] = await db.select({ total: count() }).from(readingBooks).where(eq12(readingBooks.userId, userId));
+  const [{ total }] = await db.select({ total: count() }).from(readingBooks).where(eq19(readingBooks.userId, userId));
   if (total >= MAX_READING_BOOKS) throw new ReadingError(`En fazla ${MAX_READING_BOOKS} okuma kitab\u0131 eklenebilir.`);
-  const result = await db.insert(readingBooks).values({ userId, title: input.title.trim(), author: input.author?.trim() || null, totalPages: input.totalPages || null });
-  const [row] = await db.select(columns).from(readingBooks).where(and9(eq12(readingBooks.id, Number(result[0].insertId)), eq12(readingBooks.userId, userId))).limit(1);
+  const result = await db.insert(readingBooks).values({ userId, title: input.title.trim(), author: input.author?.trim() || null, totalPages: input.totalPages || null }).returning({ id: readingBooks.id });
+  const [row] = await db.select(columns).from(readingBooks).where(and16(eq19(readingBooks.id, Number(result[0].id)), eq19(readingBooks.userId, userId))).limit(1);
   return row;
 }
-async function updateReadingBook(userId, id3, patch) {
+async function updateReadingBook(userId, id4, patch) {
   const db = await getDb();
   if (!db) throw new ReadingError("Veritaban\u0131na ula\u015F\u0131lamad\u0131.");
   const values = {};
@@ -7672,42 +9041,492 @@ async function updateReadingBook(userId, id3, patch) {
     values.status = patch.status;
     values.finishedAt = patch.status === "finished" ? /* @__PURE__ */ new Date() : null;
   }
-  if (Object.keys(values).length) await db.update(readingBooks).set(values).where(and9(eq12(readingBooks.id, id3), eq12(readingBooks.userId, userId)));
-  const [row] = await db.select(columns).from(readingBooks).where(and9(eq12(readingBooks.id, id3), eq12(readingBooks.userId, userId))).limit(1);
+  if (Object.keys(values).length) await db.update(readingBooks).set(values).where(and16(eq19(readingBooks.id, id4), eq19(readingBooks.userId, userId)));
+  const [row] = await db.select(columns).from(readingBooks).where(and16(eq19(readingBooks.id, id4), eq19(readingBooks.userId, userId))).limit(1);
   if (!row) throw new ReadingError("Kitap bulunamad\u0131.");
   return row;
 }
-async function removeReadingBook(userId, id3) {
+async function removeReadingBook(userId, id4) {
   const db = await getDb();
   if (!db) return;
-  await db.delete(readingBooks).where(and9(eq12(readingBooks.id, id3), eq12(readingBooks.userId, userId)));
+  await db.delete(readingBooks).where(and16(eq19(readingBooks.id, id4), eq19(readingBooks.userId, userId)));
 }
-async function recordReadingPages(userId, id3, pages2) {
+async function recordReadingPages(userId, id4, pages2) {
   const db = await getDb();
   if (!db) return null;
-  const [book] = await db.select(columns).from(readingBooks).where(and9(eq12(readingBooks.id, id3), eq12(readingBooks.userId, userId))).limit(1);
+  const [book] = await db.select(columns).from(readingBooks).where(and16(eq19(readingBooks.id, id4), eq19(readingBooks.userId, userId))).limit(1);
   if (!book) return null;
   const next = applyReadingProgress(book, pages2);
-  await db.update(readingBooks).set({ pagesRead: next.pagesRead, status: next.status, ...next.justFinished ? { finishedAt: /* @__PURE__ */ new Date() } : {} }).where(and9(eq12(readingBooks.id, id3), eq12(readingBooks.userId, userId)));
+  await db.update(readingBooks).set({ pagesRead: next.pagesRead, status: next.status, ...next.justFinished ? { finishedAt: /* @__PURE__ */ new Date() } : {} }).where(and16(eq19(readingBooks.id, id4), eq19(readingBooks.userId, userId)));
   return { ...book, pagesRead: next.pagesRead, status: next.status, justFinished: next.justFinished };
 }
 
 // server/routers/reading.ts
-var id2 = z7.number().int().positive();
-var pages = z7.number().int().min(1).max(1e4).nullable().optional();
+var id2 = z9.number().int().positive();
+var pages = z9.number().int().min(1).max(1e4).nullable().optional();
 async function userFacing3(work) {
   try {
     return await work();
   } catch (error) {
-    if (error instanceof ReadingError) throw new TRPCError6({ code: "BAD_REQUEST", message: error.message });
+    if (error instanceof ReadingError) throw new TRPCError7({ code: "BAD_REQUEST", message: error.message });
     throw error;
   }
 }
 var readingRouter = router({
   list: protectedProcedure.query(({ ctx }) => listReadingBooks(ctx.user.id)),
-  add: protectedProcedure.input(z7.object({ title: z7.string().trim().min(1, "Kitap ad\u0131n\u0131 yaz.").max(180), author: z7.string().trim().max(120).nullable().optional(), totalPages: pages })).mutation(({ ctx, input }) => userFacing3(() => addReadingBook(ctx.user.id, input))),
-  update: protectedProcedure.input(z7.object({ id: id2, status: z7.enum(["reading", "finished"]).optional(), totalPages: pages })).mutation(({ ctx, input }) => userFacing3(() => updateReadingBook(ctx.user.id, input.id, { status: input.status, totalPages: input.totalPages }))),
-  remove: protectedProcedure.input(z7.object({ id: id2 })).mutation(({ ctx, input }) => removeReadingBook(ctx.user.id, input.id))
+  add: protectedProcedure.input(z9.object({ title: z9.string().trim().min(1, "Kitap ad\u0131n\u0131 yaz.").max(180), author: z9.string().trim().max(120).nullable().optional(), totalPages: pages })).mutation(({ ctx, input }) => userFacing3(() => addReadingBook(ctx.user.id, input))),
+  update: protectedProcedure.input(z9.object({ id: id2, status: z9.enum(["reading", "finished"]).optional(), totalPages: pages })).mutation(({ ctx, input }) => userFacing3(() => updateReadingBook(ctx.user.id, input.id, { status: input.status, totalPages: input.totalPages }))),
+  remove: protectedProcedure.input(z9.object({ id: id2 })).mutation(({ ctx, input }) => removeReadingBook(ctx.user.id, input.id))
+});
+
+// server/routers/org.ts
+import { TRPCError as TRPCError9 } from "@trpc/server";
+import { createHash as createHash4, randomInt } from "node:crypto";
+import { z as z11 } from "zod";
+
+// shared/kvkk.ts
+var DEFAULT_KVKK_NOTICE = `K\u0130\u015E\u0130SEL VER\u0130LER\u0130N \u0130\u015ELENMES\u0130NE \u0130L\u0130\u015EK\u0130N AYDINLATMA METN\u0130
+
+1. Veri sorumlusu
+Bu metin, 6698 say\u0131l\u0131 Ki\u015Fisel Verilerin Korunmas\u0131 Kanunu ("KVKK") kapsam\u0131nda veri sorumlusu s\u0131fat\u0131yla {{KURUM_ADI}} ("Kurum") taraf\u0131ndan haz\u0131rlanm\u0131\u015Ft\u0131r. Pusula uygulamas\u0131, Kurum ad\u0131na veri i\u015Fleyen olarak hizmet verir.
+
+2. \u0130\u015Flenen ki\u015Fisel veriler
+Kuruma kat\u0131lmanla birlikte Pusula uygulamas\u0131ndaki \u015Fu verilerin Kurum'un yetkili personeli (y\xF6netici, koordinat\xF6r ve sana atanan \xF6\u011Fretmen) taraf\u0131ndan g\xF6r\xFCnt\xFClenebilir:
+- Kimlik: uygulamadaki ad\u0131n
+- E\u011Fitim: s\u0131n\u0131f seviyen, puan t\xFCr\xFCn, hedef \xFCniversite ve b\xF6l\xFCm\xFCn, s\u0131nav y\u0131l\u0131n
+- Akademik performans: deneme sonu\xE7lar\u0131n (netler, konu baz\u0131nda do\u011Fru/yanl\u0131\u015F/bo\u015F), konu ilerlemen
+- \xC7al\u0131\u015Fma d\xFCzeni: takvimdeki plan\u0131n, tamamlad\u0131\u011F\u0131n g\xF6revler, \xE7al\u0131\u015Fma s\xFCren ve son etkinlik zaman\u0131n
+- Kurum i\xE7i kay\u0131tlar: \xF6\u011Fretmenlerinin sana atad\u0131\u011F\u0131 g\xF6revler ve hakk\u0131nda yazd\u0131\u011F\u0131 g\xF6r\xFC\u015Fme notlar\u0131
+Notlar\u0131n, soru defterin, foto\u011Fraflar\u0131n, ses kay\u0131tlar\u0131n, e-posta adresin ve telefon numaran Kurum ile payla\u015F\u0131lmaz.
+
+3. \u0130\u015Fleme ama\xE7lar\u0131
+Verilerin; e\u011Fitim ve ko\xE7luk hizmetinin y\xFCr\xFCt\xFClmesi, \xE7al\u0131\u015Fma plan\u0131n\u0131n takibi, akademik geli\u015Fiminin izlenmesi, sana uygun g\xF6rev ve geri bildirim verilmesi ve Kurum i\xE7i rehberlik faaliyetlerinin planlanmas\u0131 ama\xE7lar\u0131yla i\u015Flenir.
+
+4. Hukuki sebep ve toplama y\xF6ntemi
+Verilerin, Pusula uygulamas\u0131nda kendi girdi\u011Fin ve uygulaman\u0131n \xFCretti\u011Fi kay\u0131tlardan elektronik ortamda toplan\u0131r. KVKK m.5/2-c (s\xF6zle\u015Fmenin kurulmas\u0131 ve ifas\u0131) ve m.5/2-f (veri sorumlusunun me\u015Fru menfaati) ile ayr\u0131ca verece\u011Fin a\xE7\u0131k r\u0131zaya dayan\u0131larak i\u015Flenir.
+
+5. Aktar\u0131m
+Verilerin \xFC\xE7\xFCnc\xFC ki\u015Filere sat\u0131lmaz ve pazarlama amac\u0131yla kullan\u0131lmaz. Hizmetin sunulmas\u0131 i\xE7in gereken bar\u0131nd\u0131rma ve altyap\u0131 hizmet sa\u011Flay\u0131c\u0131lar\u0131na, yaln\u0131zca bu ama\xE7la s\u0131n\u0131rl\u0131 olarak aktar\u0131labilir; bu sa\u011Flay\u0131c\u0131lar\u0131n bir k\u0131sm\u0131n\u0131n sunucular\u0131 yurt d\u0131\u015F\u0131nda bulunabilir. Yasal zorunluluk h\xE2linde yetkili kamu kurumlar\u0131yla payla\u015F\u0131labilir.
+
+6. Saklama s\xFCresi
+Kurum ile payla\u015F\u0131m, Kurum'dan ayr\u0131ld\u0131\u011F\u0131n anda sona erer; ayr\u0131ld\u0131ktan sonra Kurum personeli verilerini g\xF6remez. Kurum i\xE7i i\u015Flem kay\u0131tlar\u0131 yasal y\xFCk\xFCml\xFCl\xFCkler i\xE7in gerekli s\xFCre boyunca saklan\u0131r.
+
+7. Haklar\u0131n
+KVKK m.11 uyar\u0131nca; verilerinin i\u015Flenip i\u015Flenmedi\u011Fini \xF6\u011Frenme, bilgi talep etme, i\u015Fleme amac\u0131n\u0131 \xF6\u011Frenme, aktar\u0131ld\u0131\u011F\u0131 ki\u015Fileri bilme, eksik veya yanl\u0131\u015F i\u015Flenmi\u015Fse d\xFCzeltilmesini, silinmesini veya yok edilmesini isteme, itiraz etme ve zarara u\u011Framan h\xE2linde giderilmesini talep etme haklar\u0131na sahipsin. Ba\u015Fvurular\u0131n\u0131 {{KURUM_EPOSTA}} adresine ya da {{KURUM_ADRESI}} adresine yaz\u0131l\u0131 olarak iletebilirsin. Telefon: {{KURUM_TELEFON}}.
+
+18 ya\u015F\u0131ndan k\xFC\xE7\xFCksen bu metni velinle birlikte okuman\u0131 \xF6neririz.`;
+var DEFAULT_KVKK_CONSENT = `A\xC7IK RIZA METN\u0130
+
+{{KURUM_ADI}} taraf\u0131ndan haz\u0131rlanan Ayd\u0131nlatma Metni'ni okudum. Pusula uygulamas\u0131ndaki deneme sonu\xE7lar\u0131m\u0131n, konu ilerlememin, \xE7al\u0131\u015Fma plan\u0131m\u0131n ve hedef bilgilerimin, e\u011Fitim ve ko\xE7luk hizmeti amac\u0131yla Kurum'un yetkili personeli taraf\u0131ndan g\xF6r\xFCnt\xFClenmesine ve i\u015Flenmesine a\xE7\u0131k r\u0131za veriyorum. Bu r\u0131zam\u0131 istedi\u011Fim zaman uygulamadaki "Kurumum" b\xF6l\xFCm\xFCnden kurumdan ayr\u0131larak geri alabilece\u011Fimi biliyorum.`;
+function renderKvkk(template, org) {
+  const address = [org.address, org.district, org.city].filter(Boolean).join(", ");
+  const values = {
+    KURUM_ADI: org.name,
+    KURUM_ADRESI: address || "kurumun adresi",
+    KURUM_EPOSTA: org.contactEmail || "kurumun ileti\u015Fim e-postas\u0131",
+    KURUM_TELEFON: org.phone || "belirtilmedi"
+  };
+  return template.replace(/\{\{(KURUM_[A-Z]+)\}\}/g, (match, key) => key in values ? values[key] : match);
+}
+function effectiveKvkk(org) {
+  return {
+    version: org.kvkkVersion,
+    isCustom: Boolean(org.kvkkNotice || org.kvkkConsent),
+    notice: renderKvkk(org.kvkkNotice || DEFAULT_KVKK_NOTICE, org),
+    consent: renderKvkk(org.kvkkConsent || DEFAULT_KVKK_CONSENT, org)
+  };
+}
+
+// server/org/orgAccess.ts
+import { TRPCError as TRPCError8 } from "@trpc/server";
+import { z as z10 } from "zod";
+var notFound = (message = "Bulunamad\u0131.") => new TRPCError8({ code: "NOT_FOUND", message });
+function orgProcedure(minRole, options = {}) {
+  return protectedProcedure.input(z10.object({ orgId: z10.number().int().positive() })).use(async ({ ctx, input, next, type }) => {
+    const membership = await getActiveMembership(ctx.user.id, input.orgId);
+    if (!membership || !hasRole(membership.role, minRole)) throw notFound("Kurum bulunamad\u0131.");
+    if (type === "mutation" && !options.allowInactive && membership.state && membership.state !== "active") {
+      throw new TRPCError8({ code: "FORBIDDEN", message: membership.state === "expired" ? "Kurum \xFCyeli\u011Finin s\xFCresi doldu; panel salt okunur. Yenilemek i\xE7in platform y\xF6neticisiyle g\xF6r\xFC\u015F\xFCn." : "Kurum \xFCyeli\u011Fi hen\xFCz ba\u015Flamad\u0131." });
+    }
+    return next({ ctx: { ...ctx, membership } });
+  });
+}
+async function assertCanViewStudent(ctx, studentUserId) {
+  const { orgId, role } = ctx.membership;
+  if (!await isActiveStudent(orgId, studentUserId)) throw notFound("\xD6\u011Frenci bulunamad\u0131.");
+  if (seesAllStudents(role)) return;
+  if (role === "teacher" && await hasActiveAssignment(orgId, ctx.user.id, studentUserId)) return;
+  throw notFound("\xD6\u011Frenci bulunamad\u0131.");
+}
+function audit(ctx, action, target, metadata) {
+  return writeAudit({ orgId: ctx.membership.orgId, actorUserId: ctx.user.id, action, targetType: target?.type, targetId: target?.id, metadata });
+}
+
+// server/routers/org.ts
+var id3 = z11.number().int().positive();
+var hashCode = (code) => createHash4("sha256").update(normalizeInviteCode(code)).digest("hex");
+var DAY2 = 24 * 60 * 60 * 1e3;
+async function userFacing4(work) {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof OrgError) throw new TRPCError9({ code: "BAD_REQUEST", message: error.message });
+    throw error;
+  }
+}
+function currentWeek(now = /* @__PURE__ */ new Date()) {
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - (start.getDay() + 6) % 7);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 7);
+  return { start, end };
+}
+async function visibleStudentsWithSummary(ctx) {
+  const { orgId, role } = ctx.membership;
+  const students = await listMembers(orgId, seesAllStudents(role) ? { role: "student" } : { role: "student", teacherUserId: ctx.user.id });
+  const { start, end } = currentWeek();
+  const signals = await loadStudentSignals(students.map((student) => student.userId), start, end, new Date(Date.now() - 30 * DAY2));
+  return students.map((student) => ({ ...student, summary: summarizeStudent(signals.get(student.userId)) }));
+}
+var optionalText = (max) => z11.string().trim().max(max).optional().transform((value) => value || null);
+var classInput = z11.object({ name: z11.string().trim().min(1).max(80), gradeLevel: z11.enum(CLASS_GRADES).nullable().optional(), track: z11.enum(CLASS_TRACKS).nullable().optional(), advisorUserId: id3.nullable().optional() });
+async function classFields(orgId, input) {
+  if (input.advisorUserId) {
+    const role = await getMemberRole(orgId, input.advisorUserId);
+    if (!role || !isStaffRole(role)) throw new TRPCError9({ code: "NOT_FOUND", message: "Dan\u0131\u015Fman \xF6\u011Fretmen bulunamad\u0131." });
+  }
+  return { name: input.name, gradeLevel: input.gradeLevel ?? null, track: input.track ?? null, advisorUserId: input.advisorUserId ?? null };
+}
+var average = (values) => values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length * 10) / 10 : null;
+var orgRouter = router({
+  /** Kullanıcının aktif kurum üyelikleri: panel yönlendirmesi ve kurum seçici. */
+  mine: protectedProcedure.query(({ ctx }) => listMyMemberships(ctx.user.id)),
+  /** Personelin pazar akşamı aldığı sınıf özeti (server/digest/teacherDigest.ts); üyelik başına. */
+  myDigest: orgProcedure("teacher").query(async ({ ctx }) => ({ enabled: await getStaffDigestEnabled(ctx.user.id, ctx.membership.orgId) })),
+  setMyDigest: orgProcedure("teacher", { allowInactive: true }).input(z11.object({ enabled: z11.boolean() })).mutation(async ({ ctx, input }) => ({ enabled: await setStaffDigestEnabled(ctx.user.id, ctx.membership.orgId, input.enabled) })),
+  overview: orgProcedure("teacher").query(async ({ ctx }) => {
+    const students = await visibleStudentsWithSummary(ctx);
+    const classes = await listClasses(ctx.membership.orgId);
+    const adherence = students.map((student) => student.summary.adherence).filter((value) => value !== null);
+    const atRisk = students.filter((student) => student.summary.risks.length).sort((a, b) => b.summary.risks.length - a.summary.risks.length).slice(0, 10);
+    return {
+      orgName: ctx.membership.orgName,
+      role: ctx.membership.role,
+      totals: {
+        students: students.length,
+        activeThisWeek: students.filter((student) => student.summary.weekMinutes > 0).length,
+        averageAdherence: average(adherence),
+        averageLastTyt: average(students.map((student) => student.summary.lastTyt?.net).filter((value) => typeof value === "number")),
+        atRisk: students.filter((student) => student.summary.risks.length).length,
+        weekMinutes: students.reduce((sum, student) => sum + student.summary.weekMinutes, 0)
+      },
+      atRisk: atRisk.map((student) => ({ userId: student.userId, name: student.name, risks: student.summary.risks, lastActivityAt: student.summary.lastActivityAt, adherence: student.summary.adherence })),
+      classes: classes.map((item) => {
+        const members = students.filter((student) => item.studentUserIds.includes(student.userId));
+        return { id: item.id, name: item.name, students: members.length, averageAdherence: average(members.map((member) => member.summary.adherence).filter((value) => value !== null)), averageLastTyt: average(members.map((member) => member.summary.lastTyt?.net).filter((value) => typeof value === "number")) };
+      })
+    };
+  }),
+  students: orgProcedure("teacher").input(z11.object({ classId: id3.optional(), teacherUserId: id3.optional(), risk: z11.enum(["inactive", "low_adherence", "net_drop", "any"]).optional(), q: z11.string().max(80).optional() })).query(async ({ ctx, input }) => {
+    const students = await visibleStudentsWithSummary(ctx);
+    const [classes, assignments, teachers] = await Promise.all([listClasses(ctx.membership.orgId), listAssignments(ctx.membership.orgId), listMembers(ctx.membership.orgId, { role: "teacher" })]);
+    const query = input.q?.trim().toLocaleLowerCase("tr") ?? "";
+    return students.map((student) => ({
+      userId: student.userId,
+      name: student.name,
+      joinedAt: student.joinedAt,
+      classes: classes.filter((item) => item.studentUserIds.includes(student.userId)).map((item) => ({ id: item.id, name: item.name })),
+      teachers: assignments.filter((row) => row.studentUserId === student.userId).map((row) => ({ userId: row.teacherUserId, name: teachers.find((teacher) => teacher.userId === row.teacherUserId)?.name ?? "\xD6\u011Fretmen" })),
+      summary: student.summary
+    })).filter((student) => (!input.classId || student.classes.some((item) => item.id === input.classId)) && (!input.teacherUserId || student.teachers.some((teacher) => teacher.userId === input.teacherUserId)) && (!input.risk || (input.risk === "any" ? student.summary.risks.length > 0 : student.summary.risks.includes(input.risk))) && (!query || student.name.toLocaleLowerCase("tr").includes(query)));
+  }),
+  student: orgProcedure("teacher").input(z11.object({ studentUserId: id3 })).query(async ({ ctx, input }) => {
+    await assertCanViewStudent(ctx, input.studentUserId);
+    const since = new Date(Date.now() - 42 * DAY2);
+    const { start, end } = currentWeek();
+    const [profile, exams, topics, calendar, notes2, signals, classes, assignments, teachers] = await Promise.all([
+      getStudentProfile(input.studentUserId),
+      getUserMockExams(input.studentUserId),
+      getUserTopicProgress(input.studentUserId),
+      getStudentCalendarReadOnly(input.studentUserId, since),
+      listNotes2(ctx.membership.orgId, input.studentUserId),
+      loadStudentSignals([input.studentUserId], start, end, new Date(Date.now() - 30 * DAY2)),
+      listClasses(ctx.membership.orgId),
+      listAssignments(ctx.membership.orgId),
+      listMembers(ctx.membership.orgId, { role: "teacher" })
+    ]);
+    const member = (await listMembers(ctx.membership.orgId, { role: "student" })).find((row) => row.userId === input.studentUserId);
+    return {
+      student: { userId: input.studentUserId, name: member.name, joinedAt: member.joinedAt, consentAt: member.consentAt },
+      // Profilden yalnızca koçluk için gerekenler (iletişim/kimlik bilgisi yok).
+      profile: { gradeLevel: profile.gradeLevel, examYear: profile.examYear, targetScoreType: profile.targetScoreType, targetUniversity: profile.targetUniversity, targetDepartment: profile.targetDepartment, dailyStudyDuration: profile.dailyStudyDuration, avatarStyle: profile.avatarStyle },
+      summary: summarizeStudent(signals.get(input.studentUserId)),
+      exams,
+      topics: topics.filter((topic) => !topic.insufficientData),
+      sessions: calendar.sessions.map((session) => ({ id: session.id, sessionDate: session.sessionDate, title: session.title, subject: session.subject, topic: session.topic, kind: session.kind, plannedMinutes: session.plannedMinutes, status: session.status, actualMinutes: session.actualMinutes, actualQuestions: session.actualQuestions, correct: session.correct, assignedByUserId: session.assignedByUserId, abandonedAt: session.abandonedAt })),
+      logs: calendar.logs.map((log) => ({ studyDate: log.studyDate, subject: log.subject, topic: log.topic, minutes: log.minutes, questions: log.questions, correct: log.correct })),
+      notes: notes2,
+      classes: classes.filter((item) => item.studentUserIds.includes(input.studentUserId)).map((item) => ({ id: item.id, name: item.name })),
+      teachers: assignments.filter((row) => row.studentUserId === input.studentUserId).map((row) => ({ userId: row.teacherUserId, name: teachers.find((teacher) => teacher.userId === row.teacherUserId)?.name ?? "\xD6\u011Fretmen" }))
+    };
+  }),
+  /** Ayarlar → Kurum bilgileri: personel görür, yalnızca yönetici düzenler. */
+  settings: router({
+    get: orgProcedure("teacher").query(async ({ ctx }) => {
+      const org = await getOrganization(ctx.membership.orgId);
+      if (!org) throw new TRPCError9({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+      return { ...org, membershipState: membershipState(org), kvkk: effectiveKvkk(org) };
+    }),
+    /** Kurum yöneticisi: öğrenci başına aylık AI kredi üst sınırı (null = sınırsız). */
+    setCreditCap: orgProcedure("admin").input(z11.object({ cap: z11.number().int().min(1).max(1e6).nullable() })).mutation(async ({ ctx, input }) => {
+      await setPerStudentCreditCap(ctx.membership.orgId, input.cap);
+      await audit(ctx, "org.credit_cap", { type: "organization", id: ctx.membership.orgId }, { cap: input.cap });
+      return { ok: true };
+    }),
+    credits: orgProcedure("coordinator").query(async ({ ctx }) => {
+      const org = await getOrganization(ctx.membership.orgId);
+      if (!org) throw new TRPCError9({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+      const report = await orgCreditReport(ctx.membership.orgId);
+      return { monthly: org.aiCreditsMonthly, cap: org.perStudentCreditCap, remaining: Math.max(0, org.aiCreditsMonthly - report.used), ...report };
+    }),
+    /** KVKK metinleri: boş gönderilen metin platform şablonuna döner. Her kayıtta sürüm artar. */
+    updateKvkk: orgProcedure("admin").input(z11.object({ notice: z11.string().trim().max(2e4).nullable(), consent: z11.string().trim().max(5e3).nullable() })).mutation(async ({ ctx, input }) => {
+      await updateKvkk(ctx.membership.orgId, input.notice || null, input.consent || null);
+      await audit(ctx, "org.kvkk", { type: "organization", id: ctx.membership.orgId }, { custom: Boolean(input.notice || input.consent) });
+      return { ok: true };
+    }),
+    /** Paket yükseltme / süre uzatma talebi: kurum yöneticisi gönderir, platform yöneticisi onaylar. Süresi dolmuş kurumda da açık. */
+    upgrades: orgProcedure("admin").query(({ ctx }) => listOrgUpgradeRequests(ctx.membership.orgId)),
+    requestUpgrade: orgProcedure("admin", { allowInactive: true }).input(z11.object({ plan: z11.enum(ORG_PLANS), note: z11.string().trim().max(300).optional() })).mutation(({ ctx, input }) => userFacing4(async () => {
+      const org = await getOrganization(ctx.membership.orgId);
+      if (!org) throw new TRPCError9({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+      if (!canRequestPlan(org.plan, input.plan)) throw new OrgError("Bu pakete ge\xE7i\u015F talep edilemez; yaln\u0131zca \xFCst pakete y\xFCkseltme ya da s\xFCre uzatma istenebilir.");
+      if ((await listOrgUpgradeRequests(ctx.membership.orgId)).some((row) => row.status === "pending")) throw new OrgError("Zaten bekleyen bir talebin var; sonu\xE7lanmas\u0131n\u0131 bekle ya da iptal et.");
+      const requestId = await createUpgradeRequest({ orgId: ctx.membership.orgId, requestedBy: ctx.user.id, currentPlan: org.plan, requestedPlan: input.plan, note: input.note || null });
+      await audit(ctx, "org.upgrade_request", { type: "upgrade", id: requestId }, { from: org.plan, to: input.plan });
+      return { id: requestId };
+    })),
+    cancelUpgrade: orgProcedure("admin", { allowInactive: true }).input(z11.object({ requestId: id3 })).mutation(async ({ ctx, input }) => {
+      if (!await cancelUpgradeRequest(ctx.membership.orgId, input.requestId)) throw new TRPCError9({ code: "NOT_FOUND", message: "Bekleyen talep bulunamad\u0131." });
+      await audit(ctx, "org.upgrade_cancel", { type: "upgrade", id: input.requestId });
+      return { ok: true };
+    }),
+    kvkkStatus: orgProcedure("coordinator").query(async ({ ctx }) => {
+      const [org, versions] = await Promise.all([getOrganization(ctx.membership.orgId), listStudentKvkkVersions(ctx.membership.orgId)]);
+      const current = org?.kvkkVersion ?? 1;
+      return { current, students: versions.length, onCurrent: versions.filter((version) => version === current).length, onOlder: versions.filter((version) => version !== null && version !== current).length, missing: versions.filter((version) => version === null).length };
+    }),
+    update: orgProcedure("admin").input(z11.object({ name: z11.string().trim().min(2).max(160), kind: z11.enum(ORG_KINDS), city: optionalText(80), district: optionalText(80), address: optionalText(300), phone: optionalText(40), contactEmail: z11.union([z11.literal(""), z11.string().trim().email("Ge\xE7erli bir e-posta yaz.").max(160)]).optional().transform((value) => value || null) })).mutation(async ({ ctx, input }) => {
+      await updateOrganization(ctx.membership.orgId, input);
+      await audit(ctx, "org.update", { type: "organization", id: ctx.membership.orgId }, { name: input.name });
+      return { ok: true };
+    })
+  }),
+  invitations: router({
+    list: orgProcedure("teacher").query(async ({ ctx }) => {
+      const rows = await listInvitations(ctx.membership.orgId);
+      return hasRole(ctx.membership.role, "coordinator") ? rows : rows.filter((row) => row.role === "student");
+    }),
+    create: orgProcedure("teacher").input(z11.object({ role: z11.enum(INVITABLE_ROLES), note: z11.string().trim().max(160).optional(), subject: z11.string().trim().max(60).optional(), days: z11.number().int().min(1).max(60).default(14), maxUses: z11.number().int().min(1).max(500).default(1) })).mutation(({ ctx, input }) => userFacing4(async () => {
+      if (!canInviteRole(ctx.membership.role, input.role)) throw new TRPCError9({ code: "FORBIDDEN", message: "Bu rol i\xE7in davet olu\u015Fturma yetkin yok." });
+      const code = generateInviteCode((max) => randomInt(max));
+      const invitationId = await createInvitation({ orgId: ctx.membership.orgId, role: input.role, codeHash: hashCode(code), note: input.note || null, subject: input.role === "student" ? null : input.subject || null, expiresAt: new Date(Date.now() + input.days * DAY2), maxUses: input.maxUses, createdBy: ctx.user.id });
+      await audit(ctx, "invitation.create", { type: "invitation", id: invitationId }, { role: input.role, maxUses: input.maxUses, days: input.days });
+      return { id: invitationId, code };
+    })),
+    revoke: orgProcedure("teacher").input(z11.object({ invitationId: id3 })).mutation(async ({ ctx, input }) => {
+      const rows = await listInvitations(ctx.membership.orgId);
+      const target = rows.find((row) => row.id === input.invitationId);
+      if (!target || !hasRole(ctx.membership.role, "coordinator") && target.role !== "student") throw new TRPCError9({ code: "NOT_FOUND", message: "Davet bulunamad\u0131." });
+      await revokeInvitation(ctx.membership.orgId, input.invitationId);
+      await audit(ctx, "invitation.revoke", { type: "invitation", id: input.invitationId });
+      return { ok: true };
+    })
+  }),
+  members: router({
+    list: orgProcedure("coordinator").query(async ({ ctx }) => (await listMembers(ctx.membership.orgId)).filter((member) => isStaffRole(member.role))),
+    setRole: orgProcedure("admin").input(z11.object({ userId: id3, role: z11.enum(ORG_ROLES) })).mutation(async ({ ctx, input }) => {
+      const current = await getMemberRole(ctx.membership.orgId, input.userId);
+      if (!current || input.userId === ctx.user.id) throw new TRPCError9({ code: "NOT_FOUND", message: "\xDCye bulunamad\u0131." });
+      if (!canAssignRole(ctx.membership.role, current, input.role)) throw new TRPCError9({ code: "FORBIDDEN", message: "Bu rol de\u011Fi\u015Fikli\u011Fini yapma yetkin yok." });
+      if (current === "student" !== (input.role === "student")) throw new TRPCError9({ code: "BAD_REQUEST", message: "\xD6\u011Frenci ve personel rolleri birbirine \xE7evrilemez." });
+      await setMemberRole(ctx.membership.orgId, input.userId, input.role);
+      await audit(ctx, "member.role", { type: "user", id: input.userId }, { from: current, to: input.role });
+      return { ok: true };
+    }),
+    setSubject: orgProcedure("coordinator").input(z11.object({ userId: id3, subject: optionalText(60) })).mutation(async ({ ctx, input }) => {
+      if (!await setMemberSubject(ctx.membership.orgId, input.userId, input.subject)) throw new TRPCError9({ code: "NOT_FOUND", message: "Personel bulunamad\u0131." });
+      await audit(ctx, "member.subject", { type: "user", id: input.userId }, { subject: input.subject });
+      return { ok: true };
+    }),
+    remove: orgProcedure("admin").input(z11.object({ userId: id3 })).mutation(async ({ ctx, input }) => {
+      const current = await getMemberRole(ctx.membership.orgId, input.userId);
+      if (!current || input.userId === ctx.user.id || !canAssignRole(ctx.membership.role, current, current === "student" ? "student" : "teacher")) throw new TRPCError9({ code: "NOT_FOUND", message: "\xDCye bulunamad\u0131." });
+      await endMembership(ctx.membership.orgId, input.userId, "removed");
+      await audit(ctx, "member.remove", { type: "user", id: input.userId }, { role: current });
+      return { ok: true };
+    })
+  }),
+  classes: router({
+    list: orgProcedure("teacher").query(({ ctx }) => listClasses(ctx.membership.orgId)),
+    create: orgProcedure("coordinator").input(classInput).mutation(async ({ ctx, input }) => {
+      const classId = await createClass(ctx.membership.orgId, await classFields(ctx.membership.orgId, input));
+      await audit(ctx, "class.create", { type: "class", id: classId }, { name: input.name });
+      return { id: classId };
+    }),
+    update: orgProcedure("coordinator").input(classInput.extend({ classId: id3 })).mutation(async ({ ctx, input }) => {
+      if (!await updateClass(ctx.membership.orgId, input.classId, await classFields(ctx.membership.orgId, input))) throw new TRPCError9({ code: "NOT_FOUND", message: "S\u0131n\u0131f bulunamad\u0131." });
+      await audit(ctx, "class.update", { type: "class", id: input.classId }, { name: input.name });
+      return { ok: true };
+    }),
+    remove: orgProcedure("coordinator").input(z11.object({ classId: id3 })).mutation(async ({ ctx, input }) => {
+      if (!await deleteClass(ctx.membership.orgId, input.classId)) throw new TRPCError9({ code: "NOT_FOUND", message: "S\u0131n\u0131f bulunamad\u0131." });
+      await audit(ctx, "class.remove", { type: "class", id: input.classId });
+      return { ok: true };
+    }),
+    setStudents: orgProcedure("coordinator").input(z11.object({ classId: id3, studentUserIds: z11.array(id3).max(500) })).mutation(async ({ ctx, input }) => {
+      if (!await setClassStudents(ctx.membership.orgId, input.classId, input.studentUserIds)) throw new TRPCError9({ code: "NOT_FOUND", message: "S\u0131n\u0131f bulunamad\u0131." });
+      await audit(ctx, "class.students", { type: "class", id: input.classId }, { count: input.studentUserIds.length });
+      return { ok: true };
+    })
+  }),
+  assignments: router({
+    list: orgProcedure("coordinator").query(({ ctx }) => listAssignments(ctx.membership.orgId)),
+    setTeacherStudents: orgProcedure("coordinator").input(z11.object({ teacherUserId: id3, studentUserIds: z11.array(id3).max(500) })).mutation(async ({ ctx, input }) => {
+      if (await getMemberRole(ctx.membership.orgId, input.teacherUserId) !== "teacher") throw new TRPCError9({ code: "NOT_FOUND", message: "\xD6\u011Fretmen bulunamad\u0131." });
+      const assigned = await setTeacherStudents(ctx.membership.orgId, input.teacherUserId, input.studentUserIds);
+      await audit(ctx, "assignment.set", { type: "user", id: input.teacherUserId }, { count: assigned.length });
+      return { assigned: assigned.length };
+    })
+  }),
+  tasks: router({
+    assign: orgProcedure("teacher").input(z11.object({ studentUserId: id3, date: z11.string().regex(/^\d{4}-\d{2}-\d{2}$/), time: z11.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), subject: z11.string().trim().min(1).max(80), topic: z11.string().trim().min(1).max(180), kind: z11.enum(["Soru \xE7\xF6z\xFCm\xFC", "Konu tekrar\u0131", "Konu \xE7al\u0131\u015Fmas\u0131"]), minutes: z11.number().int().min(10).max(240), targetQuestions: z11.number().int().min(0).max(300).optional(), note: z11.string().trim().max(300).optional() })).mutation(async ({ ctx, input }) => {
+      await assertCanViewStudent(ctx, input.studentUserId);
+      const start = toMinutes(input.time);
+      if (start + input.minutes > 23 * 60 + 30) throw new TRPCError9({ code: "BAD_REQUEST", message: "G\xF6rev 23:30'dan \xF6nce bitmeli." });
+      const schedule = await getClassSchedule(input.studentUserId);
+      const conflict = findClassConflict(schedule.blocks, /* @__PURE__ */ new Date(`${input.date}T12:00:00`), start, input.minutes);
+      if (conflict) throw new TRPCError9({ code: "BAD_REQUEST", message: `\xD6\u011Frencinin ${conflict.label} dersiyle \xE7ak\u0131\u015F\u0131yor (${conflict.startTime}\u2013${conflict.endTime}).` });
+      const sessionId = await insertAssignedTask({ orgId: ctx.membership.orgId, studentUserId: input.studentUserId, teacherUserId: ctx.user.id, sessionDate: /* @__PURE__ */ new Date(`${input.date}T${input.time}:00`), title: `${input.subject} \xB7 ${input.topic}`, subject: input.subject, topic: input.topic, kind: input.kind, plannedMinutes: input.minutes, targetQuestions: input.targetQuestions || null, summary: input.note || `${ctx.membership.orgName} \xF6\u011Fretmeninin atad\u0131\u011F\u0131 g\xF6rev.` });
+      await audit(ctx, "task.assign", { type: "user", id: input.studentUserId }, { sessionId, subject: input.subject, topic: input.topic });
+      return { sessionId };
+    })
+  }),
+  notes: router({
+    create: orgProcedure("teacher").input(z11.object({ studentUserId: id3, body: z11.string().trim().min(1).max(4e3), visibility: z11.enum(["staff", "student"]) })).mutation(async ({ ctx, input }) => {
+      await assertCanViewStudent(ctx, input.studentUserId);
+      const noteId = await createNote({ orgId: ctx.membership.orgId, studentUserId: input.studentUserId, authorUserId: ctx.user.id, body: input.body, visibility: input.visibility });
+      await audit(ctx, "note.create", { type: "user", id: input.studentUserId }, { noteId, visibility: input.visibility });
+      return { id: noteId };
+    }),
+    remove: orgProcedure("teacher").input(z11.object({ noteId: id3 })).mutation(async ({ ctx, input }) => {
+      const note = await getNote2(ctx.membership.orgId, input.noteId);
+      if (!note) throw new TRPCError9({ code: "NOT_FOUND", message: "Not bulunamad\u0131." });
+      await assertCanViewStudent(ctx, note.studentUserId);
+      if (note.authorUserId !== ctx.user.id && !hasRole(ctx.membership.role, "admin")) throw new TRPCError9({ code: "FORBIDDEN", message: "Yaln\u0131zca notu yazan ya da kurum y\xF6neticisi silebilir." });
+      await deleteNote2(ctx.membership.orgId, input.noteId);
+      await audit(ctx, "note.remove", { type: "user", id: note.studentUserId }, { noteId: input.noteId });
+      return { ok: true };
+    })
+  }),
+  audit: orgProcedure("admin").query(({ ctx }) => listAudit(ctx.membership.orgId)),
+  // --- Öğrenci (ve personel) tarafı: davet kodu ile katılma, ayrılma ---------------
+  /** Davet kodunu doğrular, kurum adını ve rolü gösterir (katılmadan önce). */
+  previewInvitation: protectedProcedure.input(z11.object({ code: z11.string().trim().min(4).max(20) })).mutation(async ({ input }) => {
+    const invitation = await findInvitationByHash(hashCode(input.code));
+    const problem = !invitation || invitation.orgStatus !== "active" ? "Davet kodu bulunamad\u0131." : invitationProblem(invitation);
+    if (problem) throw new TRPCError9({ code: "BAD_REQUEST", message: problem });
+    if (membershipState(invitation) === "expired") throw new TRPCError9({ code: "BAD_REQUEST", message: "Bu kurumun \xFCyelik s\xFCresi dolmu\u015F; yeni kat\u0131l\u0131m al\u0131nm\u0131yor." });
+    const org = invitation.role === "student" ? await getOrganization(invitation.orgId) : null;
+    return { orgName: invitation.orgName, role: invitation.role, kvkk: org ? effectiveKvkk(org) : null };
+  }),
+  join: protectedProcedure.input(z11.object({ code: z11.string().trim().min(4).max(20), consent: z11.literal(true), kvkkVersion: z11.number().int().positive().optional() })).mutation(({ ctx, input }) => userFacing4(async () => {
+    const invitation = await findInvitationByHash(hashCode(input.code));
+    const problem = !invitation || invitation.orgStatus !== "active" ? "Davet kodu bulunamad\u0131." : invitationProblem(invitation);
+    if (problem) throw new OrgError(problem);
+    if (membershipState(invitation) === "expired") throw new OrgError("Bu kurumun \xFCyelik s\xFCresi dolmu\u015F; yeni kat\u0131l\u0131m al\u0131nm\u0131yor.");
+    let kvkkVersion = null;
+    if (invitation.role === "student") {
+      const org = await getOrganization(invitation.orgId);
+      kvkkVersion = org?.kvkkVersion ?? 1;
+      if (input.kvkkVersion !== kvkkVersion) throw new OrgError("Kurumun KVKK metni g\xFCncellendi; l\xFCtfen metni yeniden okuyup onayla.");
+    }
+    const memberships = await listMyMemberships(ctx.user.id);
+    if (memberships.some((row) => row.orgId === invitation.orgId)) throw new OrgError("Bu kuruma zaten ba\u011Fl\u0131s\u0131n.");
+    if (invitation.role === "student" && memberships.some((row) => row.role === "student")) throw new OrgError("\xD6nce \u015Fu anki kurumundan ayr\u0131lman gerekiyor.");
+    await acceptInvitation({ invitationId: invitation.id, orgId: invitation.orgId, userId: ctx.user.id, role: invitation.role, invitedBy: invitation.createdBy, subject: invitation.subject, kvkkVersion });
+    await audit({ user: { id: ctx.user.id }, membership: { orgId: invitation.orgId, orgName: invitation.orgName, role: invitation.role } }, "member.join", { type: "user", id: ctx.user.id }, { role: invitation.role });
+    return { orgId: invitation.orgId, orgName: invitation.orgName, role: invitation.role };
+  })),
+  leave: protectedProcedure.input(z11.object({ orgId: id3 })).mutation(async ({ ctx, input }) => {
+    const memberships = await listMyMemberships(ctx.user.id);
+    const membership = memberships.find((row) => row.orgId === input.orgId);
+    if (!membership) throw new TRPCError9({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+    if (membership.role === "owner") throw new TRPCError9({ code: "BAD_REQUEST", message: "Kurum sahibi kurumdan ayr\u0131lamaz." });
+    await endMembership(input.orgId, ctx.user.id, "left");
+    await audit({ user: { id: ctx.user.id }, membership }, "member.leave", { type: "user", id: ctx.user.id }, { role: membership.role });
+    return { ok: true };
+  }),
+  myFeedback: protectedProcedure.query(({ ctx }) => listStudentFeedback(ctx.user.id)),
+  /** Üyenin bağlı olduğu kurumun KVKK metinleri ve kendi onayladığı sürüm ("Kurumum"). */
+  myKvkk: protectedProcedure.input(z11.object({ orgId: id3 })).query(async ({ ctx, input }) => {
+    const membership = (await listMyMemberships(ctx.user.id)).find((row) => row.orgId === input.orgId);
+    const org = membership ? await getOrganization(input.orgId) : null;
+    if (!membership || !org) throw new TRPCError9({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+    return { ...effectiveKvkk(org), acceptedVersion: membership.kvkkVersion ?? null, consentAt: membership.consentAt ?? null };
+  })
+});
+var adminOrgsRouter = router({
+  list: adminProcedure.query(async () => {
+    const orgs = await listOrganizations();
+    const used = await creditsUsedThisMonth(orgs.map((org) => org.id));
+    return orgs.map((org) => ({ ...org, membershipState: membershipState(org), creditsUsed: used.get(org.id) ?? 0 }));
+  }),
+  upgradeRequests: adminProcedure.query(() => listPendingUpgradeRequests()),
+  /** Onay: paket talep edilene geçer, kredi en az paketin varsayılanı olur, süre 1 yıl uzar (bitmemişse üstüne). */
+  resolveUpgrade: adminProcedure.input(z11.object({ requestId: id3, approve: z11.boolean() })).mutation(async ({ ctx, input }) => {
+    const request = await getUpgradeRequest(input.requestId);
+    if (!request || request.status !== "pending") throw new TRPCError9({ code: "NOT_FOUND", message: "Bekleyen talep bulunamad\u0131." });
+    const org = await getOrganization(request.orgId);
+    if (!org) throw new TRPCError9({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+    if (!await resolveUpgradeRequest(input.requestId, input.approve ? "approved" : "rejected", ctx.user.id)) throw new TRPCError9({ code: "CONFLICT", message: "Talep az \xF6nce sonu\xE7land\u0131r\u0131ld\u0131." });
+    if (input.approve) {
+      const now = /* @__PURE__ */ new Date();
+      const expired = membershipState(org, now) !== "active";
+      await updateOrgMembership(org.id, { plan: request.requestedPlan, membershipStartsAt: expired || !org.membershipStartsAt ? now : org.membershipStartsAt, membershipEndsAt: renewedMembershipEnd(org.membershipEndsAt, now), aiCreditsMonthly: Math.max(org.aiCreditsMonthly, ORG_PLAN_DEFAULT_CREDITS[request.requestedPlan]) });
+    }
+    await writeAudit({ orgId: org.id, actorUserId: ctx.user.id, action: input.approve ? "org.upgrade_approved" : "org.upgrade_rejected", targetType: "upgrade", targetId: input.requestId, metadata: { plan: ORG_PLAN_LABELS[request.requestedPlan] } });
+    return { ok: true };
+  }),
+  setMembership: adminProcedure.input(z11.object({ orgId: id3, plan: z11.enum(ORG_PLANS), startsAt: z11.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), endsAt: z11.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), aiCreditsMonthly: z11.number().int().min(0).max(1e7) })).mutation(async ({ input }) => {
+    if (input.startsAt && input.endsAt && input.endsAt < input.startsAt) throw new TRPCError9({ code: "BAD_REQUEST", message: "Biti\u015F tarihi ba\u015Flang\u0131\xE7tan \xF6nce olamaz." });
+    const day = (value) => value ? /* @__PURE__ */ new Date(`${value}T00:00:00`) : null;
+    await updateOrgMembership(input.orgId, { plan: input.plan, membershipStartsAt: day(input.startsAt), membershipEndsAt: day(input.endsAt), aiCreditsMonthly: input.aiCreditsMonthly });
+    return { ok: true };
+  }),
+  create: adminProcedure.input(z11.object({ name: z11.string().trim().min(2).max(160), slug: z11.string().trim().regex(/^[a-z0-9-]{3,80}$/, "K\u0131sa ad k\xFC\xE7\xFCk harf, rakam ve tire i\xE7ermeli.") })).mutation(({ ctx, input }) => userFacing4(async () => {
+    let orgId;
+    try {
+      orgId = await createOrganization(input.name, input.slug);
+    } catch (error) {
+      if (/Duplicate/i.test(String(error?.message ?? error))) throw new OrgError("Bu k\u0131sa ad kullan\u0131l\u0131yor.");
+      throw error;
+    }
+    await updateOrgMembership(orgId, { plan: "trial", membershipStartsAt: /* @__PURE__ */ new Date(), membershipEndsAt: new Date(Date.now() + 30 * DAY2), aiCreditsMonthly: ORG_PLAN_DEFAULT_CREDITS.trial });
+    const code = generateInviteCode((max) => randomInt(max));
+    await createInvitation({ orgId, role: "admin", codeHash: hashCode(code), note: "Kurum y\xF6neticisi daveti", expiresAt: new Date(Date.now() + 30 * DAY2), maxUses: 1, createdBy: ctx.user.id });
+    return { orgId, adminCode: code };
+  })),
+  inviteAdmin: adminProcedure.input(z11.object({ orgId: id3 })).mutation(async ({ ctx, input }) => {
+    const code = generateInviteCode((max) => randomInt(max));
+    await createInvitation({ orgId: input.orgId, role: "admin", codeHash: hashCode(code), note: "Kurum y\xF6neticisi daveti (platform)", expiresAt: new Date(Date.now() + 30 * DAY2), maxUses: 1, createdBy: ctx.user.id });
+    return { adminCode: code };
+  }),
+  setStatus: adminProcedure.input(z11.object({ orgId: id3, status: z11.enum(["active", "suspended"]) })).mutation(async ({ input }) => {
+    await setOrganizationStatus(input.orgId, input.status);
+    return { ok: true };
+  })
 });
 
 // server/studyPlan/normalizeAiPlan.ts
@@ -7722,7 +9541,7 @@ var text2 = (value, max) => {
   if (Array.isArray(value)) return value.filter((item) => typeof item === "string").join(" ").trim().slice(0, max);
   return "";
 };
-var optionalText = (value, max) => text2(value, max) || null;
+var optionalText2 = (value, max) => text2(value, max) || null;
 var positiveInt = (value, min, max) => {
   const number = Math.round(typeof value === "string" ? Number.parseInt(value, 10) : Number(value));
   return Number.isFinite(number) && number > 0 ? Math.min(max, Math.max(min, number)) : null;
@@ -7745,14 +9564,14 @@ function normalizeAiPlan(raw, fallback) {
     const sessionList = pick(value, SESSION_LIST_KEYS);
     const sessions = (Array.isArray(sessionList) ? sessionList : []).slice(0, 6).flatMap((item) => {
       if (!isObj(item)) return [];
-      const subject = text2(pick(item, ["subject", "ders", "lesson", "course"]), 80);
+      const subject2 = text2(pick(item, ["subject", "ders", "lesson", "course"]), 80);
       const topic = text2(pick(item, ["topic", "konu", "unit"]), 180) || text2(pick(item, ["title", "name"]), 180);
       const minutes = positiveInt(pick(item, ["minutes", "duration", "durationMinutes", "plannedMinutes", "dakika", "sure"]), 10, 240);
-      if (!subject || !topic || !minutes) return [];
+      if (!subject2 || !topic || !minutes) return [];
       const targetQuestions = positiveInt(pick(item, ["targetQuestions", "questionCount", "questions"]), 1, 500);
       return [{
-        title: text2(pick(item, ["title", "name", "activity", "task"]), 180) || `${subject} \xB7 ${topic}`,
-        subject,
+        title: text2(pick(item, ["title", "name", "activity", "task"]), 180) || `${subject2} \xB7 ${topic}`,
+        subject: subject2,
         topic,
         minutes,
         kind: kindOf(pick(item, ["kind", "type", "tur", "category"])),
@@ -7760,8 +9579,8 @@ function normalizeAiPlan(raw, fallback) {
         ...text2(item.bookId, 120) ? { bookId: text2(item.bookId, 120) } : {},
         ...text2(item.bookTitle, 180) ? { bookTitle: text2(item.bookTitle, 180) } : {},
         ...targetQuestions ? { targetQuestions } : {},
-        targetPages: optionalText(item.targetPages, 80),
-        targetTests: optionalText(item.targetTests, 80)
+        targetPages: optionalText2(item.targetPages, 80),
+        targetTests: optionalText2(item.targetTests, 80)
       }];
     });
     if (!sessions.length) return [];
@@ -7772,8 +9591,8 @@ function normalizeAiPlan(raw, fallback) {
   const focus = (Array.isArray(focusList) ? focusList : []).flatMap((item) => {
     if (!isObj(item)) return [];
     const topic = text2(pick(item, ["topic", "konu"]), 180);
-    const subject = text2(pick(item, ["subject", "ders"]), 80);
-    return topic && subject ? [{ topic, subject, reason: text2(pick(item, ["reason", "rationale", "neden"]), 400) }] : [];
+    const subject2 = text2(pick(item, ["subject", "ders"]), 80);
+    return topic && subject2 ? [{ topic, subject: subject2, reason: text2(pick(item, ["reason", "rationale", "neden"]), 400) }] : [];
   });
   return {
     ...fallback,
@@ -7785,51 +9604,38 @@ function normalizeAiPlan(raw, fallback) {
 }
 
 // server/routers/resourceCatalog.ts
-import { TRPCError as TRPCError8 } from "@trpc/server";
-import { z as z9 } from "zod";
+import { TRPCError as TRPCError11 } from "@trpc/server";
+import { z as z13 } from "zod";
 
 // server/resourceCatalog/catalogQueries.ts
-import { and as and10, asc as asc3, desc as desc6, eq as eq13, inArray as inArray5, isNull as isNull6, like as like2, sql as sql6 } from "drizzle-orm";
-import { drizzle as drizzle2 } from "drizzle-orm/mysql2";
-var _db2 = null;
-async function getDb2() {
-  if (!_db2 && ENV.databaseUrl) {
-    try {
-      _db2 = drizzle2(ENV.databaseUrl);
-    } catch (error) {
-      console.warn("[ResourceCatalog] Failed to connect:", error);
-      _db2 = null;
-    }
-  }
-  return _db2;
-}
+import { and as and17, asc as asc4, desc as desc11, eq as eq20, inArray as inArray8, isNull as isNull11, ilike as ilike2, sql as sql9 } from "drizzle-orm";
 var DEFAULT_PAGE_SIZE = 24;
 var MAX_PAGE_SIZE = 60;
-async function listCatalogBooks(filters, page) {
-  const db = await getDb2();
+async function listCatalogBooks(filters, page2) {
+  const db = await getDb();
   if (!db) return { items: [], total: 0 };
-  const pageSize = Math.max(1, Math.min(page.pageSize || DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE));
-  const offset = Math.max(0, (page.page - 1) * pageSize);
-  const conditions = [eq13(catalogBooks.active, 1)];
-  if (filters.exam) conditions.push(eq13(catalogBooks.examScope, filters.exam));
-  if (filters.subject) conditions.push(eq13(catalogBooks.subject, filters.subject));
-  if (filters.publisherId) conditions.push(eq13(catalogBooks.publisherId, filters.publisherId));
-  if (filters.bookType) conditions.push(eq13(catalogBooks.bookType, filters.bookType));
-  if (filters.difficulty) conditions.push(eq13(catalogBooks.difficultyLabel, filters.difficulty));
-  if (filters.search) conditions.push(like2(catalogBooks.name, `%${filters.search}%`));
+  const pageSize = Math.max(1, Math.min(page2.pageSize || DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE));
+  const offset = Math.max(0, (page2.page - 1) * pageSize);
+  const conditions = [eq20(catalogBooks.active, 1)];
+  if (filters.exam) conditions.push(eq20(catalogBooks.examScope, filters.exam));
+  if (filters.subject) conditions.push(eq20(catalogBooks.subject, filters.subject));
+  if (filters.publisherId) conditions.push(eq20(catalogBooks.publisherId, filters.publisherId));
+  if (filters.bookType) conditions.push(eq20(catalogBooks.bookType, filters.bookType));
+  if (filters.difficulty) conditions.push(eq20(catalogBooks.difficultyLabel, filters.difficulty));
+  if (filters.search) conditions.push(ilike2(catalogBooks.name, `%${filters.search}%`));
   let bookIdsForTopic = null;
   if (filters.topic) {
-    const topicRows = await db.select({ bookId: bookCurriculumTopics.bookId }).from(bookCurriculumTopics).innerJoin(yksTopics, eq13(bookCurriculumTopics.topicId, yksTopics.id)).where(eq13(yksTopics.topic, filters.topic));
+    const topicRows = await db.select({ bookId: bookCurriculumTopics.bookId }).from(bookCurriculumTopics).innerJoin(yksTopics, eq20(bookCurriculumTopics.topicId, yksTopics.id)).where(eq20(yksTopics.topic, filters.topic));
     bookIdsForTopic = topicRows.map((r) => r.bookId);
     if (bookIdsForTopic.length === 0) return { items: [], total: 0 };
-    conditions.push(inArray5(catalogBooks.id, bookIdsForTopic));
+    conditions.push(inArray8(catalogBooks.id, bookIdsForTopic));
   }
-  const where = and10(...conditions);
-  const [{ count: count4 }] = await db.select({ count: sql6`count(*)` }).from(catalogBooks).where(where);
-  let rows = await db.select().from(catalogBooks).where(where).orderBy(desc6(catalogBooks.createdAt)).limit(pageSize).offset(offset);
+  const where = and17(...conditions);
+  const [{ count: count4 }] = await db.select({ count: sql9`count(*)::int` }).from(catalogBooks).where(where);
+  let rows = await db.select().from(catalogBooks).where(where).orderBy(desc11(catalogBooks.createdAt)).limit(pageSize).offset(offset);
   if (filters.minPrice !== void 0 || filters.maxPrice !== void 0) {
     const ids = rows.map((r) => r.id);
-    const offerRows2 = ids.length ? await db.select().from(bookOffers).where(inArray5(bookOffers.bookId, ids)) : [];
+    const offerRows2 = ids.length ? await db.select().from(bookOffers).where(inArray8(bookOffers.bookId, ids)) : [];
     const bestPriceByBook = /* @__PURE__ */ new Map();
     for (const offer of offerRows2) {
       if (offer.price === null) continue;
@@ -7845,11 +9651,11 @@ async function listCatalogBooks(filters, page) {
       return true;
     });
   }
-  const publisherIds = Array.from(new Set(rows.map((r) => r.publisherId).filter((id3) => id3 !== null)));
-  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray5(publishers.id, publisherIds)) : [];
+  const publisherIds = Array.from(new Set(rows.map((r) => r.publisherId).filter((id4) => id4 !== null)));
+  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray8(publishers.id, publisherIds)) : [];
   const publisherNameById = new Map(publisherRows.map((p) => [p.id, p.name]));
   const bookIds = rows.map((r) => r.id);
-  const offerRows = bookIds.length ? await db.select().from(bookOffers).where(inArray5(bookOffers.bookId, bookIds)) : [];
+  const offerRows = bookIds.length ? await db.select().from(bookOffers).where(inArray8(bookOffers.bookId, bookIds)) : [];
   const offerByBook = /* @__PURE__ */ new Map();
   for (const offer of offerRows) {
     if (!offerByBook.has(offer.bookId)) offerByBook.set(offer.bookId, { price: offer.price !== null ? Number(offer.price) : null, productUrl: offer.productUrl });
@@ -7871,22 +9677,22 @@ async function listCatalogBooks(filters, page) {
   }));
   return { items, total: Number(count4) };
 }
-async function listCatalogBooksForAdmin(filters, page) {
-  const db = await getDb2();
+async function listCatalogBooksForAdmin(filters, page2) {
+  const db = await getDb();
   if (!db) return { items: [], total: 0 };
-  const pageSize = Math.max(1, Math.min(page.pageSize || DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE));
-  const offset = Math.max(0, (page.page - 1) * pageSize);
+  const pageSize = Math.max(1, Math.min(page2.pageSize || DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE));
+  const offset = Math.max(0, (page2.page - 1) * pageSize);
   const conditions = [];
-  if (filters.active !== void 0) conditions.push(eq13(catalogBooks.active, filters.active ? 1 : 0));
-  if (filters.subject) conditions.push(eq13(catalogBooks.subject, filters.subject));
-  if (filters.search) conditions.push(like2(catalogBooks.name, `%${filters.search}%`));
-  const where = conditions.length ? and10(...conditions) : void 0;
-  const countQuery = db.select({ count: sql6`count(*)` }).from(catalogBooks);
+  if (filters.active !== void 0) conditions.push(eq20(catalogBooks.active, filters.active ? 1 : 0));
+  if (filters.subject) conditions.push(eq20(catalogBooks.subject, filters.subject));
+  if (filters.search) conditions.push(ilike2(catalogBooks.name, `%${filters.search}%`));
+  const where = conditions.length ? and17(...conditions) : void 0;
+  const countQuery = db.select({ count: sql9`count(*)::int` }).from(catalogBooks);
   const [{ count: count4 }] = await (where ? countQuery.where(where) : countQuery);
-  const rowsQuery = db.select().from(catalogBooks).orderBy(desc6(catalogBooks.createdAt)).limit(pageSize).offset(offset);
+  const rowsQuery = db.select().from(catalogBooks).orderBy(desc11(catalogBooks.createdAt)).limit(pageSize).offset(offset);
   const rows = await (where ? rowsQuery.where(where) : rowsQuery);
-  const publisherIds = Array.from(new Set(rows.map((r) => r.publisherId).filter((id3) => id3 !== null)));
-  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray5(publishers.id, publisherIds)) : [];
+  const publisherIds = Array.from(new Set(rows.map((r) => r.publisherId).filter((id4) => id4 !== null)));
+  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray8(publishers.id, publisherIds)) : [];
   const publisherNameById = new Map(publisherRows.map((p) => [p.id, p.name]));
   const items = rows.map((row) => ({
     id: row.id,
@@ -7905,15 +9711,15 @@ async function listCatalogBooksForAdmin(filters, page) {
   return { items, total: Number(count4) };
 }
 async function getCatalogBookBySlug(slug) {
-  const db = await getDb2();
+  const db = await getDb();
   if (!db) return null;
-  const rows = await db.select().from(catalogBooks).where(eq13(catalogBooks.slug, slug)).limit(1);
+  const rows = await db.select().from(catalogBooks).where(eq20(catalogBooks.slug, slug)).limit(1);
   const book = rows[0];
   if (!book) return null;
   const [publisherRow, offerRows, topicRows] = await Promise.all([
-    book.publisherId ? db.select().from(publishers).where(eq13(publishers.id, book.publisherId)).limit(1) : Promise.resolve([]),
-    db.select().from(bookOffers).where(eq13(bookOffers.bookId, book.id)),
-    db.select({ topic: yksTopics.topic, subject: yksTopics.subject, confidence: bookCurriculumTopics.confidence, isVerified: bookCurriculumTopics.isVerified }).from(bookCurriculumTopics).innerJoin(yksTopics, eq13(bookCurriculumTopics.topicId, yksTopics.id)).where(eq13(bookCurriculumTopics.bookId, book.id))
+    book.publisherId ? db.select().from(publishers).where(eq20(publishers.id, book.publisherId)).limit(1) : Promise.resolve([]),
+    db.select().from(bookOffers).where(eq20(bookOffers.bookId, book.id)),
+    db.select({ topic: yksTopics.topic, subject: yksTopics.subject, confidence: bookCurriculumTopics.confidence, isVerified: bookCurriculumTopics.isVerified }).from(bookCurriculumTopics).innerJoin(yksTopics, eq20(bookCurriculumTopics.topicId, yksTopics.id)).where(eq20(bookCurriculumTopics.bookId, book.id))
   ]);
   return {
     id: book.id,
@@ -7931,18 +9737,18 @@ async function getCatalogBookBySlug(slug) {
   };
 }
 async function listPublishersForFilter() {
-  const db = await getDb2();
+  const db = await getDb();
   if (!db) return [];
-  return db.select({ id: publishers.id, name: publishers.name }).from(publishers).where(eq13(publishers.isActive, 1)).orderBy(asc3(publishers.name));
+  return db.select({ id: publishers.id, name: publishers.name }).from(publishers).where(eq20(publishers.isActive, 1)).orderBy(asc4(publishers.name));
 }
-async function listCatalogBooksForRecommendation(subject) {
-  const db = await getDb2();
+async function listCatalogBooksForRecommendation(subject2) {
+  const db = await getDb();
   if (!db) return [];
-  const conditions = [eq13(catalogBooks.active, 1)];
-  if (subject) conditions.push(eq13(catalogBooks.subject, subject));
-  const rows = await db.select().from(catalogBooks).where(and10(...conditions));
+  const conditions = [eq20(catalogBooks.active, 1)];
+  if (subject2) conditions.push(eq20(catalogBooks.subject, subject2));
+  const rows = await db.select().from(catalogBooks).where(and17(...conditions));
   const bookIds = rows.map((r) => r.id);
-  const topicRows = bookIds.length ? await db.select({ bookId: bookCurriculumTopics.bookId, topic: yksTopics.topic }).from(bookCurriculumTopics).innerJoin(yksTopics, eq13(bookCurriculumTopics.topicId, yksTopics.id)).where(inArray5(bookCurriculumTopics.bookId, bookIds)) : [];
+  const topicRows = bookIds.length ? await db.select({ bookId: bookCurriculumTopics.bookId, topic: yksTopics.topic }).from(bookCurriculumTopics).innerJoin(yksTopics, eq20(bookCurriculumTopics.topicId, yksTopics.id)).where(inArray8(bookCurriculumTopics.bookId, bookIds)) : [];
   const topicsByBook = /* @__PURE__ */ new Map();
   for (const row of topicRows) {
     const list = topicsByBook.get(row.bookId) ?? [];
@@ -7963,17 +9769,17 @@ async function listCatalogBooksForRecommendation(subject) {
   }));
 }
 async function listMyLibraryCatalogBooks(userId) {
-  const db = await getDb2();
+  const db = await getDb();
   if (!db) return [];
-  const inventoryRows = await db.select().from(bookInventory).where(and10(eq13(bookInventory.userId, userId), isNull6(bookInventory.removedAt)));
-  const numericIds = Array.from(new Set(inventoryRows.map((row) => row.bookId).filter((id3) => /^\d+$/.test(id3)).map(Number)));
+  const inventoryRows = await db.select().from(bookInventory).where(and17(eq20(bookInventory.userId, userId), isNull11(bookInventory.removedAt)));
+  const numericIds = Array.from(new Set(inventoryRows.map((row) => row.bookId).filter((id4) => /^\d+$/.test(id4)).map(Number)));
   if (numericIds.length === 0) return [];
   const [books, topicRows] = await Promise.all([
-    db.select().from(catalogBooks).where(inArray5(catalogBooks.id, numericIds)),
-    db.select({ bookId: bookCurriculumTopics.bookId, topicId: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject, isVerified: bookCurriculumTopics.isVerified, confidence: bookCurriculumTopics.confidence }).from(bookCurriculumTopics).innerJoin(yksTopics, eq13(bookCurriculumTopics.topicId, yksTopics.id)).where(inArray5(bookCurriculumTopics.bookId, numericIds))
+    db.select().from(catalogBooks).where(inArray8(catalogBooks.id, numericIds)),
+    db.select({ bookId: bookCurriculumTopics.bookId, topicId: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject, isVerified: bookCurriculumTopics.isVerified, confidence: bookCurriculumTopics.confidence }).from(bookCurriculumTopics).innerJoin(yksTopics, eq20(bookCurriculumTopics.topicId, yksTopics.id)).where(inArray8(bookCurriculumTopics.bookId, numericIds))
   ]);
-  const publisherIds = Array.from(new Set(books.map((b) => b.publisherId).filter((id3) => id3 !== null)));
-  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray5(publishers.id, publisherIds)) : [];
+  const publisherIds = Array.from(new Set(books.map((b) => b.publisherId).filter((id4) => id4 !== null)));
+  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray8(publishers.id, publisherIds)) : [];
   const publisherNameById = new Map(publisherRows.map((p) => [p.id, p.name]));
   const topicsByBook = /* @__PURE__ */ new Map();
   for (const row of topicRows) {
@@ -7994,7 +9800,7 @@ async function listMyLibraryCatalogBooks(userId) {
 }
 
 // server/resourceCatalog/config.ts
-var int2 = (value, fallback) => {
+var int = (value, fallback) => {
   const parsed = Number.parseInt(value ?? "", 10);
   return Number.isFinite(parsed) ? parsed : fallback;
 };
@@ -8010,8 +9816,8 @@ var resourceCatalogConfig = {
   difficulty: {
     // 0-100 score thresholds. Score <= easyMax -> easy, <= mediumMax -> medium, else hard.
     thresholds: {
-      easyMax: int2(process.env.RESOURCE_CATALOG_DIFFICULTY_EASY_MAX, 39),
-      mediumMax: int2(process.env.RESOURCE_CATALOG_DIFFICULTY_MEDIUM_MAX, 69)
+      easyMax: int(process.env.RESOURCE_CATALOG_DIFFICULTY_EASY_MAX, 39),
+      mediumMax: int(process.env.RESOURCE_CATALOG_DIFFICULTY_MEDIUM_MAX, 69)
     },
     // Hybrid engine weights. Renormalized at runtime if a layer is unavailable
     // (e.g. no AI signal), so they don't need to sum to 1 here.
@@ -8035,12 +9841,12 @@ var resourceCatalogConfig = {
     }
   },
   importer: {
-    concurrency: int2(process.env.RESOURCE_CATALOG_IMPORT_CONCURRENCY, 1),
-    delayMs: int2(process.env.RESOURCE_CATALOG_IMPORT_DELAY_MS, 800),
-    timeoutMs: int2(process.env.RESOURCE_CATALOG_IMPORT_TIMEOUT_MS, 15e3),
-    maxRetries: int2(process.env.RESOURCE_CATALOG_IMPORT_MAX_RETRIES, 3),
-    maxPages: int2(process.env.RESOURCE_CATALOG_IMPORT_MAX_PAGES, 50),
-    maxProducts: int2(process.env.RESOURCE_CATALOG_IMPORT_MAX_PRODUCTS, 5e3)
+    concurrency: int(process.env.RESOURCE_CATALOG_IMPORT_CONCURRENCY, 1),
+    delayMs: int(process.env.RESOURCE_CATALOG_IMPORT_DELAY_MS, 800),
+    timeoutMs: int(process.env.RESOURCE_CATALOG_IMPORT_TIMEOUT_MS, 15e3),
+    maxRetries: int(process.env.RESOURCE_CATALOG_IMPORT_MAX_RETRIES, 3),
+    maxPages: int(process.env.RESOURCE_CATALOG_IMPORT_MAX_PAGES, 50),
+    maxProducts: int(process.env.RESOURCE_CATALOG_IMPORT_MAX_PRODUCTS, 5e3)
   },
   // In-process background sync (spec: kaynak kataloğu kitapisler.com'dan
   // sürekli güncellenen bir yapı olmalı) — periodically re-runs the same
@@ -8049,9 +9855,9 @@ var resourceCatalogConfig = {
   // under `NODE_ENV=test` so the test suite never makes network calls.
   scheduler: {
     enabled: bool(process.env.RESOURCE_CATALOG_SCHEDULER_ENABLED, process.env.NODE_ENV !== "test"),
-    intervalMs: int2(process.env.RESOURCE_CATALOG_SCHEDULER_INTERVAL_MS, 6 * 60 * 60 * 1e3),
-    initialDelayMs: int2(process.env.RESOURCE_CATALOG_SCHEDULER_INITIAL_DELAY_MS, 3e4),
-    limitPerRun: int2(process.env.RESOURCE_CATALOG_SCHEDULER_LIMIT_PER_RUN, 300)
+    intervalMs: int(process.env.RESOURCE_CATALOG_SCHEDULER_INTERVAL_MS, 6 * 60 * 60 * 1e3),
+    initialDelayMs: int(process.env.RESOURCE_CATALOG_SCHEDULER_INITIAL_DELAY_MS, 3e4),
+    limitPerRun: int(process.env.RESOURCE_CATALOG_SCHEDULER_LIMIT_PER_RUN, 300)
   }
 };
 
@@ -8127,24 +9933,11 @@ function recommendForStudent(topics, books, options = {}, config = resourceCatal
 }
 
 // server/routers/resourceCatalogAdmin.ts
-import { TRPCError as TRPCError7 } from "@trpc/server";
-import { z as z8 } from "zod";
+import { TRPCError as TRPCError10 } from "@trpc/server";
+import { z as z12 } from "zod";
 
 // server/resourceCatalog/catalogDb.ts
-import { and as and11, eq as eq14, inArray as inArray6 } from "drizzle-orm";
-import { drizzle as drizzle3 } from "drizzle-orm/mysql2";
-var _db3 = null;
-async function getDb3() {
-  if (!_db3 && ENV.databaseUrl) {
-    try {
-      _db3 = drizzle3(ENV.databaseUrl);
-    } catch (error) {
-      console.warn("[ResourceCatalog] Failed to connect:", error);
-      _db3 = null;
-    }
-  }
-  return _db3;
-}
+import { and as and18, eq as eq21, inArray as inArray9 } from "drizzle-orm";
 var toCatalogBookRow = (row) => ({
   id: row.id,
   isbn: row.isbn,
@@ -8166,28 +9959,28 @@ var toCatalogBookRow = (row) => ({
 });
 var catalogDb = {
   async findPublisherByNormalizedName(normalizedName) {
-    const db = await getDb3();
+    const db = await getDb();
     if (!db) return null;
-    const rows = await db.select().from(publishers).where(eq14(publishers.normalizedName, normalizedName)).limit(1);
+    const rows = await db.select().from(publishers).where(eq21(publishers.normalizedName, normalizedName)).limit(1);
     return rows[0] ? { id: rows[0].id, name: rows[0].name, slug: rows[0].slug, normalizedName: rows[0].normalizedName } : null;
   },
   async createPublisher(input) {
-    const db = await getDb3();
+    const db = await getDb();
     if (!db) throw new Error("Database not available");
-    const result = await db.insert(publishers).values(input);
-    const id3 = Number(result[0].insertId);
-    return { id: id3, ...input };
+    const result = await db.insert(publishers).values(input).returning({ id: publishers.id });
+    const id4 = Number(result[0].id);
+    return { id: id4, ...input };
   },
   async findExternalSource(source, sourceProductId) {
-    const db = await getDb3();
+    const db = await getDb();
     if (!db) return null;
-    const rows = await db.select().from(externalBookSources).where(and11(eq14(externalBookSources.source, source), eq14(externalBookSources.sourceProductId, sourceProductId))).limit(1);
+    const rows = await db.select().from(externalBookSources).where(and18(eq21(externalBookSources.source, source), eq21(externalBookSources.sourceProductId, sourceProductId))).limit(1);
     return rows[0] ? { id: rows[0].id, source: rows[0].source, sourceProductId: rows[0].sourceProductId, matchedBookId: rows[0].matchedBookId, syncStatus: rows[0].syncStatus } : null;
   },
   async upsertExternalSource(row) {
-    const db = await getDb3();
+    const db = await getDb();
     if (!db) throw new Error("Database not available");
-    const existing = await db.select().from(externalBookSources).where(and11(eq14(externalBookSources.source, row.source), eq14(externalBookSources.sourceProductId, row.sourceProductId))).limit(1);
+    const existing = await db.select().from(externalBookSources).where(and18(eq21(externalBookSources.source, row.source), eq21(externalBookSources.sourceProductId, row.sourceProductId))).limit(1);
     const values = {
       source: row.source,
       sourceProductId: row.sourceProductId,
@@ -8203,38 +9996,38 @@ var catalogDb = {
       rawMetadata: row.rawMetadata ? JSON.stringify(row.rawMetadata) : null
     };
     if (existing[0]) {
-      await db.update(externalBookSources).set(values).where(eq14(externalBookSources.id, existing[0].id));
+      await db.update(externalBookSources).set(values).where(eq21(externalBookSources.id, existing[0].id));
       return { id: existing[0].id, source: row.source, sourceProductId: row.sourceProductId, matchedBookId: existing[0].matchedBookId, syncStatus: existing[0].syncStatus };
     }
-    const result = await db.insert(externalBookSources).values(values);
-    const id3 = Number(result[0].insertId);
-    return { id: id3, source: row.source, sourceProductId: row.sourceProductId, matchedBookId: null, syncStatus: "pending" };
+    const result = await db.insert(externalBookSources).values(values).returning({ id: externalBookSources.id });
+    const id4 = Number(result[0].id);
+    return { id: id4, source: row.source, sourceProductId: row.sourceProductId, matchedBookId: null, syncStatus: "pending" };
   },
-  async markExternalSourceOutcome(id3, patch) {
-    const db = await getDb3();
+  async markExternalSourceOutcome(id4, patch) {
+    const db = await getDb();
     if (!db) return;
-    await db.update(externalBookSources).set({ matchedBookId: patch.matchedBookId, syncStatus: patch.syncStatus, lastSyncedAt: /* @__PURE__ */ new Date(), errorMessage: patch.errorMessage ?? null }).where(eq14(externalBookSources.id, id3));
+    await db.update(externalBookSources).set({ matchedBookId: patch.matchedBookId, syncStatus: patch.syncStatus, lastSyncedAt: /* @__PURE__ */ new Date(), errorMessage: patch.errorMessage ?? null }).where(eq21(externalBookSources.id, id4));
   },
   async findCatalogBookByIsbn(isbn) {
-    const db = await getDb3();
+    const db = await getDb();
     if (!db) return null;
-    const rows = await db.select().from(catalogBooks).where(eq14(catalogBooks.isbn, isbn)).limit(1);
+    const rows = await db.select().from(catalogBooks).where(eq21(catalogBooks.isbn, isbn)).limit(1);
     return rows[0] ? toCatalogBookRow(rows[0]) : null;
   },
   async listCatalogBooksByPublisher(publisherId) {
-    const db = await getDb3();
+    const db = await getDb();
     if (!db) return [];
-    const rows = await db.select().from(catalogBooks).where(eq14(catalogBooks.publisherId, publisherId));
+    const rows = await db.select().from(catalogBooks).where(eq21(catalogBooks.publisherId, publisherId));
     return rows.map((row) => ({ id: row.id, isbn: row.isbn, publisherId: row.publisherId, name: row.name, editionYear: row.editionYear }));
   },
-  async getCatalogBookById(id3) {
-    const db = await getDb3();
+  async getCatalogBookById(id4) {
+    const db = await getDb();
     if (!db) return null;
-    const rows = await db.select().from(catalogBooks).where(eq14(catalogBooks.id, id3)).limit(1);
+    const rows = await db.select().from(catalogBooks).where(eq21(catalogBooks.id, id4)).limit(1);
     return rows[0] ? toCatalogBookRow(rows[0]) : null;
   },
   async createCatalogBook(input) {
-    const db = await getDb3();
+    const db = await getDb();
     if (!db) throw new Error("Database not available");
     const result = await db.insert(catalogBooks).values({
       publisherId: input.publisherId,
@@ -8248,14 +10041,14 @@ var catalogDb = {
       examScope: input.examScope,
       subject: input.subject,
       metadata: input.metadata ? JSON.stringify(input.metadata) : null
-    });
-    const id3 = Number(result[0].insertId);
-    const row = await this.getCatalogBookById(id3);
+    }).returning({ id: catalogBooks.id });
+    const id4 = Number(result[0].id);
+    const row = await this.getCatalogBookById(id4);
     if (!row) throw new Error("Failed to read back created catalog book");
     return row;
   },
-  async updateCatalogBook(id3, patch) {
-    const db = await getDb3();
+  async updateCatalogBook(id4, patch) {
+    const db = await getDb();
     if (!db) throw new Error("Database not available");
     const values = {};
     if (patch.publisherId !== void 0) values.publisherId = patch.publisherId;
@@ -8269,14 +10062,14 @@ var catalogDb = {
     if (patch.subject !== void 0) values.subject = patch.subject;
     if (patch.metadata !== void 0) values.metadata = patch.metadata ? JSON.stringify(patch.metadata) : null;
     if (Object.keys(values).length > 0) {
-      await db.update(catalogBooks).set(values).where(eq14(catalogBooks.id, id3));
+      await db.update(catalogBooks).set(values).where(eq21(catalogBooks.id, id4));
     }
-    const row = await this.getCatalogBookById(id3);
-    if (!row) throw new Error(`Catalog book ${id3} not found after update`);
+    const row = await this.getCatalogBookById(id4);
+    if (!row) throw new Error(`Catalog book ${id4} not found after update`);
     return row;
   },
-  async updateCatalogBookDifficulty(id3, patch) {
-    const db = await getDb3();
+  async updateCatalogBookDifficulty(id4, patch) {
+    const db = await getDb();
     if (!db) return;
     await db.update(catalogBooks).set({
       difficultyScore: patch.difficultyScore,
@@ -8285,45 +10078,45 @@ var catalogDb = {
       classificationMethod: patch.classificationMethod,
       needsReview: patch.needsReview ? 1 : 0,
       classifiedAt: patch.classifiedAt
-    }).where(eq14(catalogBooks.id, id3));
+    }).where(eq21(catalogBooks.id, id4));
   },
   async upsertBookOffer(input) {
-    const db = await getDb3();
+    const db = await getDb();
     if (!db) return;
-    const existing = await db.select().from(bookOffers).where(and11(eq14(bookOffers.bookId, input.bookId), eq14(bookOffers.source, input.source))).limit(1);
+    const existing = await db.select().from(bookOffers).where(and18(eq21(bookOffers.bookId, input.bookId), eq21(bookOffers.source, input.source))).limit(1);
     const values = { price: input.price !== null ? String(input.price) : null, currency: input.currency, productUrl: input.productUrl, lastSyncedAt: /* @__PURE__ */ new Date() };
     if (existing[0]) {
-      await db.update(bookOffers).set(values).where(eq14(bookOffers.id, existing[0].id));
+      await db.update(bookOffers).set(values).where(eq21(bookOffers.id, existing[0].id));
     } else {
       await db.insert(bookOffers).values({ bookId: input.bookId, source: input.source, ...values });
     }
   },
   async listCurriculumTopics() {
-    const db = await getDb3();
+    const db = await getDb();
     if (!db) return [];
     const rows = await db.select().from(yksTopics);
     return rows.map((row) => ({ id: row.id, exam: row.exam, subject: row.subject, topic: row.topic, unit: row.unit }));
   },
   async upsertBookCurriculumMapping(input) {
-    const db = await getDb3();
+    const db = await getDb();
     if (!db) return;
-    const existing = await db.select().from(bookCurriculumTopics).where(and11(eq14(bookCurriculumTopics.bookId, input.bookId), eq14(bookCurriculumTopics.topicId, input.topicId))).limit(1);
+    const existing = await db.select().from(bookCurriculumTopics).where(and18(eq21(bookCurriculumTopics.bookId, input.bookId), eq21(bookCurriculumTopics.topicId, input.topicId))).limit(1);
     if (existing[0]) {
       if (existing[0].isVerified === 1) return;
-      await db.update(bookCurriculumTopics).set({ confidence: String(input.confidence), mappingMethod: "rule" }).where(eq14(bookCurriculumTopics.id, existing[0].id));
+      await db.update(bookCurriculumTopics).set({ confidence: String(input.confidence), mappingMethod: "rule" }).where(eq21(bookCurriculumTopics.id, existing[0].id));
     } else {
       await db.insert(bookCurriculumTopics).values({ bookId: input.bookId, topicId: input.topicId, confidence: String(input.confidence), mappingMethod: "rule" });
     }
   },
   async createSyncLog(input) {
-    const db = await getDb3();
+    const db = await getDb();
     if (!db) return { id: -1 };
-    const result = await db.insert(resourceCatalogSyncLogs).values({ source: input.source, startedAt: input.startedAt, dryRun: input.dryRun ? 1 : 0, triggeredBy: input.triggeredBy });
-    return { id: Number(result[0].insertId) };
+    const result = await db.insert(resourceCatalogSyncLogs).values({ source: input.source, startedAt: input.startedAt, dryRun: input.dryRun ? 1 : 0, triggeredBy: input.triggeredBy }).returning({ id: resourceCatalogSyncLogs.id });
+    return { id: Number(result[0].id) };
   },
-  async finishSyncLog(id3, patch) {
-    if (id3 < 0) return;
-    const db = await getDb3();
+  async finishSyncLog(id4, patch) {
+    if (id4 < 0) return;
+    const db = await getDb();
     if (!db) return;
     await db.update(resourceCatalogSyncLogs).set({
       finishedAt: patch.finishedAt,
@@ -8335,38 +10128,38 @@ var catalogDb = {
       needsReview: patch.needsReview,
       statsJson: patch.statsJson,
       errorLog: patch.errorLog
-    }).where(eq14(resourceCatalogSyncLogs.id, id3));
+    }).where(eq21(resourceCatalogSyncLogs.id, id4));
   }
 };
 async function listResourceCatalogSyncLogs(limit = 20) {
-  const db = await getDb3();
+  const db = await getDb();
   if (!db) return [];
   return db.select().from(resourceCatalogSyncLogs).orderBy(resourceCatalogSyncLogs.id).limit(limit);
 }
 async function listNeedsReviewBooks() {
-  const db = await getDb3();
+  const db = await getDb();
   if (!db) return [];
-  return db.select().from(catalogBooks).where(eq14(catalogBooks.needsReview, 1));
+  return db.select().from(catalogBooks).where(eq21(catalogBooks.needsReview, 1));
 }
 async function setManualDifficulty(bookId, input) {
-  const db = await getDb3();
+  const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(catalogBooks).set({ difficultyLabel: input.label, difficultyScore: input.score, difficultyConfidence: "1", classificationMethod: "manual", manualOverride: 1, needsReview: 0, classifiedAt: /* @__PURE__ */ new Date() }).where(eq14(catalogBooks.id, bookId));
+  await db.update(catalogBooks).set({ difficultyLabel: input.label, difficultyScore: input.score, difficultyConfidence: "1", classificationMethod: "manual", manualOverride: 1, needsReview: 0, classifiedAt: /* @__PURE__ */ new Date() }).where(eq21(catalogBooks.id, bookId));
 }
 async function approveCatalogBookClassification(bookId) {
-  const db = await getDb3();
+  const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(catalogBooks).set({ needsReview: 0 }).where(eq14(catalogBooks.id, bookId));
+  await db.update(catalogBooks).set({ needsReview: 0 }).where(eq21(catalogBooks.id, bookId));
 }
 async function markCatalogBookNeedsReview(bookId, needsReview) {
-  const db = await getDb3();
+  const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(catalogBooks).set({ needsReview: needsReview ? 1 : 0 }).where(eq14(catalogBooks.id, bookId));
+  await db.update(catalogBooks).set({ needsReview: needsReview ? 1 : 0 }).where(eq21(catalogBooks.id, bookId));
 }
 async function setCatalogBookActive(bookId, active) {
-  const db = await getDb3();
+  const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(catalogBooks).set({ active: active ? 1 : 0 }).where(eq14(catalogBooks.id, bookId));
+  await db.update(catalogBooks).set({ active: active ? 1 : 0 }).where(eq21(catalogBooks.id, bookId));
 }
 async function resolveOrCreatePublisherByName(rawName) {
   const trimmed = rawName.trim();
@@ -8419,7 +10212,7 @@ init_turkishText();
 function normalizeProduct(product) {
   const publisher = product.rawPublisher ? normalizePublisherName(product.rawPublisher) : null;
   const metadata = product.rawMetadata ?? {};
-  const subject = typeof metadata.subjectLabel === "string" ? metadata.subjectLabel : null;
+  const subject2 = typeof metadata.subjectLabel === "string" ? metadata.subjectLabel : null;
   const examLabelSource = typeof metadata.examLabel === "string" ? metadata.examLabel : product.rawCategory;
   return {
     raw: product,
@@ -8433,7 +10226,7 @@ function normalizeProduct(product) {
     imageUrl: product.rawImageUrl ?? null,
     bookType: normalizeBookType(product.rawCategory),
     examScope: normalizeExamScope(examLabelSource ?? null),
-    subject,
+    subject: subject2,
     price: typeof product.rawPrice === "number" ? product.rawPrice : null,
     currency: product.rawCurrency ?? "TRY"
   };
@@ -8444,29 +10237,29 @@ function slugForBook(name, publisherName) {
 }
 
 // server/routers/resourceCatalogAdmin.ts
-var bookTypeEnum = z8.enum(["question_bank", "topic_explanation", "topic_explanation_question_bank", "mock_exam", "fasikul", "past_questions", "camp", "test_book", "reference", "other"]);
-var examScopeEnum = z8.enum(["TYT", "AYT", "TYT_AYT", "YKS", "GENEL"]);
-var catalogBookInput = z8.object({
-  name: z8.string().trim().min(1).max(300),
-  publisherName: z8.string().trim().max(120).optional(),
-  isbn: z8.string().trim().max(32).optional(),
-  editionYear: z8.number().int().min(1990).max(2100).optional(),
-  description: z8.string().trim().max(2e3).optional(),
-  imageUrl: z8.string().trim().max(500).optional(),
+var bookTypeEnum = z12.enum(["question_bank", "topic_explanation", "topic_explanation_question_bank", "mock_exam", "fasikul", "past_questions", "camp", "test_book", "reference", "other"]);
+var examScopeEnum = z12.enum(["TYT", "AYT", "TYT_AYT", "YKS", "GENEL"]);
+var catalogBookInput = z12.object({
+  name: z12.string().trim().min(1).max(300),
+  publisherName: z12.string().trim().max(120).optional(),
+  isbn: z12.string().trim().max(32).optional(),
+  editionYear: z12.number().int().min(1990).max(2100).optional(),
+  description: z12.string().trim().max(2e3).optional(),
+  imageUrl: z12.string().trim().max(500).optional(),
   bookType: bookTypeEnum,
   examScope: examScopeEnum,
-  subject: z8.string().trim().max(80).optional()
+  subject: z12.string().trim().max(80).optional()
 });
 var resourceCatalogAdminRouter = router({
   needsReview: adminProcedure.query(() => listNeedsReviewBooks()),
-  syncLogs: adminProcedure.input(z8.object({ limit: z8.number().int().min(1).max(100).default(20) }).optional()).query(({ input }) => listResourceCatalogSyncLogs(input?.limit ?? 20)),
-  approve: adminProcedure.input(z8.object({ bookId: z8.number().int() })).mutation(({ input }) => approveCatalogBookClassification(input.bookId)),
-  setDifficulty: adminProcedure.input(z8.object({ bookId: z8.number().int(), label: z8.enum(["easy", "medium", "hard"]), score: z8.number().int().min(0).max(100) })).mutation(({ input }) => setManualDifficulty(input.bookId, { label: input.label, score: input.score })),
-  markNeedsReview: adminProcedure.input(z8.object({ bookId: z8.number().int(), needsReview: z8.boolean() })).mutation(({ input }) => markCatalogBookNeedsReview(input.bookId, input.needsReview)),
-  list: adminProcedure.input(z8.object({ page: z8.number().int().min(1).default(1), pageSize: z8.number().int().min(1).max(100).default(30), search: z8.string().max(120).optional(), subject: z8.string().max(80).optional(), active: z8.boolean().optional() })).query(async ({ input }) => {
-    const { page, pageSize, ...filters } = input;
-    const { items, total } = await listCatalogBooksForAdmin(filters, { page, pageSize });
-    return { items, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
+  syncLogs: adminProcedure.input(z12.object({ limit: z12.number().int().min(1).max(100).default(20) }).optional()).query(({ input }) => listResourceCatalogSyncLogs(input?.limit ?? 20)),
+  approve: adminProcedure.input(z12.object({ bookId: z12.number().int() })).mutation(({ input }) => approveCatalogBookClassification(input.bookId)),
+  setDifficulty: adminProcedure.input(z12.object({ bookId: z12.number().int(), label: z12.enum(["easy", "medium", "hard"]), score: z12.number().int().min(0).max(100) })).mutation(({ input }) => setManualDifficulty(input.bookId, { label: input.label, score: input.score })),
+  markNeedsReview: adminProcedure.input(z12.object({ bookId: z12.number().int(), needsReview: z12.boolean() })).mutation(({ input }) => markCatalogBookNeedsReview(input.bookId, input.needsReview)),
+  list: adminProcedure.input(z12.object({ page: z12.number().int().min(1).default(1), pageSize: z12.number().int().min(1).max(100).default(30), search: z12.string().max(120).optional(), subject: z12.string().max(80).optional(), active: z12.boolean().optional() })).query(async ({ input }) => {
+    const { page: page2, pageSize, ...filters } = input;
+    const { items, total } = await listCatalogBooksForAdmin(filters, { page: page2, pageSize });
+    return { items, total, page: page2, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
   }),
   create: adminProcedure.input(catalogBookInput).mutation(async ({ input }) => {
     const publisherId = input.publisherName ? await resolveOrCreatePublisherByName(input.publisherName) : null;
@@ -8502,22 +10295,22 @@ var resourceCatalogAdminRouter = router({
           metadata: { source: "admin_manual" }
         });
       } catch {
-        throw new TRPCError7({ code: "CONFLICT", message: "Bu isim ve yay\u0131nevi ile bir kaynak zaten kay\u0131tl\u0131 olabilir. Farkl\u0131 bir isim dener misin?" });
+        throw new TRPCError10({ code: "CONFLICT", message: "Bu isim ve yay\u0131nevi ile bir kaynak zaten kay\u0131tl\u0131 olabilir. Farkl\u0131 bir isim dener misin?" });
       }
     }
   }),
   update: adminProcedure.input(
-    z8.object({
-      bookId: z8.number().int(),
-      name: z8.string().trim().min(1).max(300).optional(),
-      publisherName: z8.string().trim().max(120).optional(),
-      isbn: z8.string().trim().max(32).optional(),
-      editionYear: z8.number().int().min(1990).max(2100).optional(),
-      description: z8.string().trim().max(2e3).optional(),
-      imageUrl: z8.string().trim().max(500).optional(),
+    z12.object({
+      bookId: z12.number().int(),
+      name: z12.string().trim().min(1).max(300).optional(),
+      publisherName: z12.string().trim().max(120).optional(),
+      isbn: z12.string().trim().max(32).optional(),
+      editionYear: z12.number().int().min(1990).max(2100).optional(),
+      description: z12.string().trim().max(2e3).optional(),
+      imageUrl: z12.string().trim().max(500).optional(),
       bookType: bookTypeEnum.optional(),
       examScope: examScopeEnum.optional(),
-      subject: z8.string().trim().max(80).optional()
+      subject: z12.string().trim().max(80).optional()
     })
   ).mutation(async ({ input }) => {
     const { bookId, publisherName, ...rest } = input;
@@ -8527,41 +10320,41 @@ var resourceCatalogAdminRouter = router({
       ...publisherId !== void 0 ? { publisherId } : {}
     });
   }),
-  setActive: adminProcedure.input(z8.object({ bookId: z8.number().int(), active: z8.boolean() })).mutation(({ input }) => setCatalogBookActive(input.bookId, input.active))
+  setActive: adminProcedure.input(z12.object({ bookId: z12.number().int(), active: z12.boolean() })).mutation(({ input }) => setCatalogBookActive(input.bookId, input.active))
 });
 
 // server/routers/resourceCatalog.ts
-var bookTypeEnum2 = z9.enum(["question_bank", "topic_explanation", "topic_explanation_question_bank", "mock_exam", "fasikul", "past_questions", "camp", "test_book", "reference", "other"]);
-var examScopeEnum2 = z9.enum(["TYT", "AYT", "TYT_AYT", "YKS", "GENEL"]);
-var difficultyEnum = z9.enum(["easy", "medium", "hard"]);
-var listInput = z9.object({
-  page: z9.number().int().min(1).default(1),
-  pageSize: z9.number().int().min(1).max(60).default(24),
+var bookTypeEnum2 = z13.enum(["question_bank", "topic_explanation", "topic_explanation_question_bank", "mock_exam", "fasikul", "past_questions", "camp", "test_book", "reference", "other"]);
+var examScopeEnum2 = z13.enum(["TYT", "AYT", "TYT_AYT", "YKS", "GENEL"]);
+var difficultyEnum = z13.enum(["easy", "medium", "hard"]);
+var listInput = z13.object({
+  page: z13.number().int().min(1).default(1),
+  pageSize: z13.number().int().min(1).max(60).default(24),
   exam: examScopeEnum2.optional(),
-  subject: z9.string().max(80).optional(),
-  publisherId: z9.number().int().optional(),
+  subject: z13.string().max(80).optional(),
+  publisherId: z13.number().int().optional(),
   bookType: bookTypeEnum2.optional(),
   difficulty: difficultyEnum.optional(),
-  minPrice: z9.number().min(0).optional(),
-  maxPrice: z9.number().min(0).optional(),
-  search: z9.string().max(120).optional(),
-  topic: z9.string().max(180).optional()
+  minPrice: z13.number().min(0).optional(),
+  maxPrice: z13.number().min(0).optional(),
+  search: z13.string().max(120).optional(),
+  topic: z13.string().max(180).optional()
 });
 var resourceCatalogRouter = router({
   list: publicProcedure.input(listInput).query(async ({ input }) => {
-    const { page, pageSize, ...filters } = input;
-    const { items, total } = await listCatalogBooks(filters, { page, pageSize });
-    return { items, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
+    const { page: page2, pageSize, ...filters } = input;
+    const { items, total } = await listCatalogBooks(filters, { page: page2, pageSize });
+    return { items, total, page: page2, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
   }),
-  get: publicProcedure.input(z9.object({ slug: z9.string().min(1).max(320) })).query(async ({ input }) => {
+  get: publicProcedure.input(z13.object({ slug: z13.string().min(1).max(320) })).query(async ({ input }) => {
     const book = await getCatalogBookBySlug(input.slug);
-    if (!book) throw new TRPCError8({ code: "NOT_FOUND", message: "Kaynak bulunamad\u0131" });
+    if (!book) throw new TRPCError11({ code: "NOT_FOUND", message: "Kaynak bulunamad\u0131" });
     return book;
   }),
   publishers: publicProcedure.query(() => listPublishersForFilter()),
   /** "Seviyene Uygun Kaynaklar" — deterministic, explainable per-topic
    * recommendations built from the student's own topic progress (spec §21/§34). */
-  recommendations: protectedProcedure.input(z9.object({ subject: z9.string().max(80).optional(), limit: z9.number().int().min(1).max(30).default(12) })).query(async ({ ctx, input }) => {
+  recommendations: protectedProcedure.input(z13.object({ subject: z13.string().max(80).optional(), limit: z13.number().int().min(1).max(30).default(12) })).query(async ({ ctx, input }) => {
     const progress = await getUserTopicProgress(ctx.user.id);
     const allTopics = progress.map((p) => ({ subject: p.subject, topic: p.topic, exam: p.exam, accuracy: p.progress, status: p.status }));
     const topics = input.subject ? allTopics.filter((t2) => t2.subject === input.subject) : allTopics;
@@ -8578,8 +10371,8 @@ var resourceCatalogRouter = router({
 });
 
 // server/routers/onboarding.ts
-import { TRPCError as TRPCError9 } from "@trpc/server";
-import { z as z10 } from "zod";
+import { TRPCError as TRPCError12 } from "@trpc/server";
+import { z as z14 } from "zod";
 
 // shared/onboarding.ts
 var AVATAR_STYLES = ["girl", "boy"];
@@ -8665,40 +10458,40 @@ function validateOnboardingStep(step, draft) {
 }
 
 // server/routers/onboarding.ts
-var enumOrBlank = (values) => z10.union([z10.enum(values), z10.literal("")]);
-var draftSchema = z10.object({
-  preferredName: z10.string().trim().max(120).optional(),
+var enumOrBlank = (values) => z14.union([z14.enum(values), z14.literal("")]);
+var draftSchema = z14.object({
+  preferredName: z14.string().trim().max(120).optional(),
   avatarStyle: enumOrBlank(AVATAR_STYLES).optional(),
   gradeLevel: enumOrBlank(GRADE_LEVELS).optional(),
-  examYear: z10.string().max(4).optional(),
+  examYear: z14.string().max(4).optional(),
   targetScoreType: enumOrBlank(TARGET_SCORE_TYPES).optional(),
-  currentTytNet: z10.string().trim().max(40).optional(),
-  currentAytNet: z10.string().trim().max(40).optional(),
+  currentTytNet: z14.string().trim().max(40).optional(),
+  currentAytNet: z14.string().trim().max(40).optional(),
   mockExamFrequency: enumOrBlank(MOCK_EXAM_FREQUENCIES).optional(),
-  strongSubjects: z10.array(z10.string().max(40)).max(15).optional(),
-  weakSubjects: z10.array(z10.string().max(40)).max(15).optional(),
+  strongSubjects: z14.array(z14.string().max(40)).max(15).optional(),
+  weakSubjects: z14.array(z14.string().max(40)).max(15).optional(),
   hasPriorStudyPlan: enumOrBlank(["yes", "no"]).optional(),
-  targetUniversity: z10.string().trim().max(180).optional(),
-  targetDepartment: z10.string().trim().max(180).optional(),
-  targetRanking: z10.string().trim().max(60).optional(),
-  mainGoal: z10.string().trim().max(500).optional(),
-  shortTermGoal: z10.string().trim().max(500).optional(),
-  longTermGoal: z10.string().trim().max(500).optional(),
-  dailyStudyDuration: z10.string().max(6).optional(),
-  preferredStudyStartTime: z10.string().max(5).optional(),
-  availableStudyDays: z10.array(z10.enum(STUDY_DAYS)).max(7).optional(),
-  preferredStudyTimes: z10.array(z10.enum(STUDY_TIMES)).max(4).optional(),
-  preferredStudyMethods: z10.array(z10.enum(STUDY_METHODS)).max(5).optional(),
-  studyObstacles: z10.string().trim().max(500).optional(),
-  coachingExpectations: z10.array(z10.enum(COACHING_EXPECTATIONS)).max(7).optional(),
+  targetUniversity: z14.string().trim().max(180).optional(),
+  targetDepartment: z14.string().trim().max(180).optional(),
+  targetRanking: z14.string().trim().max(60).optional(),
+  mainGoal: z14.string().trim().max(500).optional(),
+  shortTermGoal: z14.string().trim().max(500).optional(),
+  longTermGoal: z14.string().trim().max(500).optional(),
+  dailyStudyDuration: z14.string().max(6).optional(),
+  preferredStudyStartTime: z14.string().max(5).optional(),
+  availableStudyDays: z14.array(z14.enum(STUDY_DAYS)).max(7).optional(),
+  preferredStudyTimes: z14.array(z14.enum(STUDY_TIMES)).max(4).optional(),
+  preferredStudyMethods: z14.array(z14.enum(STUDY_METHODS)).max(5).optional(),
+  studyObstacles: z14.string().trim().max(500).optional(),
+  coachingExpectations: z14.array(z14.enum(COACHING_EXPECTATIONS)).max(7).optional(),
   notificationPreference: enumOrBlank(NOTIFICATION_PREFERENCES).optional(),
   coachingStyle: enumOrBlank(COACHING_STYLES).optional(),
-  additionalNotes: z10.string().trim().max(1e3).optional()
+  additionalNotes: z14.string().trim().max(1e3).optional()
 });
-var saveStepInput = z10.object({
-  step: z10.number().int().min(0).max(TOTAL_ONBOARDING_STEPS - 1),
+var saveStepInput = z14.object({
+  step: z14.number().int().min(0).max(TOTAL_ONBOARDING_STEPS - 1),
   data: draftSchema,
-  complete: z10.boolean().optional()
+  complete: z14.boolean().optional()
 });
 function draftToPatch(data) {
   const patch = {};
@@ -8737,7 +10530,7 @@ var onboardingRouter = router({
     const draftForValidation = { ...emptyOnboardingDraft(), ...input.data };
     const errors = validateOnboardingStep(input.step, draftForValidation);
     if (Object.keys(errors).length > 0) {
-      throw new TRPCError9({ code: "BAD_REQUEST", message: Object.values(errors)[0] });
+      throw new TRPCError12({ code: "BAD_REQUEST", message: Object.values(errors)[0] });
     }
     await upsertStudentProfileStep(ctx.user.id, input.step, draftToPatch(input.data));
     if (input.complete) await completeOnboarding(ctx.user.id);
@@ -8745,17 +10538,20 @@ var onboardingRouter = router({
   }),
   complete: protectedProcedure.mutation(({ ctx }) => completeOnboarding(ctx.user.id)),
   // Genel Bakış'taki tek tıkla avatar seçimi (null = nötr tasarım).
-  setAvatar: protectedProcedure.input(z10.object({ avatarStyle: z10.enum(AVATAR_STYLES).nullable() })).mutation(({ ctx, input }) => setStudentAvatarStyle(ctx.user.id, input.avatarStyle))
+  setAvatar: protectedProcedure.input(z14.object({ avatarStyle: z14.enum(AVATAR_STYLES).nullable() })).mutation(({ ctx, input }) => setStudentAvatarStyle(ctx.user.id, input.avatarStyle)),
+  // Pazar akşamı giden haftalık ilerleme e-postası (profil menüsündeki seçenek).
+  weeklyDigest: protectedProcedure.query(async ({ ctx }) => ({ enabled: await getWeeklyDigestEnabled(ctx.user.id) })),
+  setWeeklyDigest: protectedProcedure.input(z14.object({ enabled: z14.boolean() })).mutation(async ({ ctx, input }) => ({ enabled: await setWeeklyDigestEnabled(ctx.user.id, input.enabled) }))
 });
 
 // server/routers/subscription.ts
-import { z as z11 } from "zod";
+import { z as z15 } from "zod";
 var subscriptionRouter = router({
   getPlans: publicProcedure.query(() => listActivePlans()),
   // Client'ın useEntitlement() hook'unun okuduğu tek snapshot (spec §8).
   getCurrent: protectedProcedure.query(({ ctx }) => getEntitlements(ctx.user.id)),
   getEntitlements: protectedProcedure.query(({ ctx }) => getEntitlements(ctx.user.id)),
-  cancel: protectedProcedure.input(z11.object({ immediate: z11.boolean().optional() })).mutation(async ({ ctx, input }) => {
+  cancel: protectedProcedure.input(z15.object({ immediate: z15.boolean().optional() })).mutation(async ({ ctx, input }) => {
     const current = await getCurrentSubscription(ctx.user.id);
     const nextStatus = input.immediate ? "canceled" : current.status;
     if (input.immediate) assertValidSubscriptionTransition(current.status, "canceled");
@@ -8771,7 +10567,7 @@ var subscriptionRouter = router({
     await writeAuditLog({ userId: ctx.user.id, action: "user_resumed", oldState: { status: current.status }, newState: { status: "active" } });
     return getEntitlements(ctx.user.id);
   }),
-  restore: protectedProcedure.input(z11.object({ providerToken: z11.string().min(1) })).mutation(async ({ ctx, input }) => {
+  restore: protectedProcedure.input(z15.object({ providerToken: z15.string().min(1) })).mutation(async ({ ctx, input }) => {
     const provider = paymentProviderFactory();
     const result = await provider.restorePurchase({ userId: ctx.user.id, providerToken: input.providerToken });
     if (!result.valid) throw new Error(result.reason ?? "Sat\u0131n alma do\u011Frulanamad\u0131");
@@ -8781,9 +10577,9 @@ var subscriptionRouter = router({
 });
 
 // server/routers/payment.ts
-import { z as z12 } from "zod";
+import { z as z16 } from "zod";
 var paymentRouter = router({
-  createCheckout: protectedProcedure.input(z12.object({ planCode: z12.string().min(1), successUrl: z12.string().url(), cancelUrl: z12.string().url() })).mutation(async ({ ctx, input }) => {
+  createCheckout: protectedProcedure.input(z16.object({ planCode: z16.string().min(1), successUrl: z16.string().url(), cancelUrl: z16.string().url() })).mutation(async ({ ctx, input }) => {
     const plan = await getPlanByCode(input.planCode);
     if (!plan || !plan.isActive) throw new Error("Ge\xE7ersiz veya pasif plan.");
     const provider = paymentProviderFactory();
@@ -8801,7 +10597,7 @@ var paymentRouter = router({
    * `PAYMENT_PROVIDER` gerçek bir sağlayıcıya çevrildiğinde bu uç nokta
    * otomatik olarak devre dışı kalır.
    */
-  completeMockCheckout: protectedProcedure.input(z12.object({ planCode: z12.string().min(1) })).mutation(async ({ ctx, input }) => {
+  completeMockCheckout: protectedProcedure.input(z16.object({ planCode: z16.string().min(1) })).mutation(async ({ ctx, input }) => {
     if (ENV.paymentProvider !== "mock") {
       throw new Error("Bu u\xE7 nokta yaln\u0131zca PAYMENT_PROVIDER=mock iken kullan\u0131labilir.");
     }
@@ -8820,7 +10616,7 @@ var paymentRouter = router({
 });
 
 // server/admin/analyticsService.ts
-import { and as and12, count as count2, eq as eq15, gte as gte8, isNotNull as isNotNull3, lt as lt6, sql as sql7 } from "drizzle-orm";
+import { and as and19, count as count2, eq as eq22, gte as gte12, isNotNull as isNotNull6, lt as lt9, sql as sql10 } from "drizzle-orm";
 async function getAdminDashboardKpis() {
   const db = await getDb();
   const empty = {
@@ -8851,15 +10647,15 @@ async function getAdminDashboardKpis() {
   const [approvalCounts, accountStatusCounts, planStatusCounts, activeTodayRow, activeWeekRow, inactive7Row, inactive30Row, totalRow, trialStartedRow, stillTrialingRow, convertedRow] = await Promise.all([
     db.select({ approvalStatus: users.approvalStatus, total: count2() }).from(users).groupBy(users.approvalStatus),
     db.select({ accountStatus: users.accountStatus, total: count2() }).from(users).groupBy(users.accountStatus),
-    db.select({ tier: subscriptionPlans.tier, billingPeriod: subscriptionPlans.billingPeriod, status: subscriptions.status, total: count2() }).from(subscriptions).innerJoin(subscriptionPlans, eq15(subscriptionPlans.id, subscriptions.planId)).groupBy(subscriptionPlans.tier, subscriptionPlans.billingPeriod, subscriptions.status),
-    db.select({ total: count2() }).from(users).where(gte8(users.lastSignedIn, todayStart)),
-    db.select({ total: count2() }).from(users).where(gte8(users.lastSignedIn, weekAgo)),
-    db.select({ total: count2() }).from(users).where(lt6(users.lastSignedIn, weekAgo)),
-    db.select({ total: count2() }).from(users).where(lt6(users.lastSignedIn, monthAgo)),
+    db.select({ tier: subscriptionPlans.tier, billingPeriod: subscriptionPlans.billingPeriod, status: subscriptions.status, total: count2() }).from(subscriptions).innerJoin(subscriptionPlans, eq22(subscriptionPlans.id, subscriptions.planId)).groupBy(subscriptionPlans.tier, subscriptionPlans.billingPeriod, subscriptions.status),
+    db.select({ total: count2() }).from(users).where(gte12(users.lastSignedIn, todayStart)),
+    db.select({ total: count2() }).from(users).where(gte12(users.lastSignedIn, weekAgo)),
+    db.select({ total: count2() }).from(users).where(lt9(users.lastSignedIn, weekAgo)),
+    db.select({ total: count2() }).from(users).where(lt9(users.lastSignedIn, monthAgo)),
     db.select({ total: count2() }).from(users),
-    db.select({ total: count2() }).from(subscriptions).where(isNotNull3(subscriptions.trialStartedAt)),
-    db.select({ total: count2() }).from(subscriptions).where(eq15(subscriptions.status, "trialing")),
-    db.select({ total: count2() }).from(subscriptions).where(and12(isNotNull3(subscriptions.trialStartedAt), sql7`${subscriptions.status} in ('active','past_due','grace_period')`))
+    db.select({ total: count2() }).from(subscriptions).where(isNotNull6(subscriptions.trialStartedAt)),
+    db.select({ total: count2() }).from(subscriptions).where(eq22(subscriptions.status, "trialing")),
+    db.select({ total: count2() }).from(subscriptions).where(and19(isNotNull6(subscriptions.trialStartedAt), sql10`${subscriptions.status} in ('active','past_due','grace_period')`))
   ]);
   const kpis = { ...empty, totalUsers: totalRow[0]?.total ?? 0, activeToday: activeTodayRow[0]?.total ?? 0, activeThisWeek: activeWeekRow[0]?.total ?? 0, inactive7Plus: inactive7Row[0]?.total ?? 0, inactive30Plus: inactive30Row[0]?.total ?? 0 };
   for (const row of approvalCounts) {
@@ -8894,27 +10690,34 @@ var adminAnalyticsRouter = router({
 });
 
 // server/routers/admin/audit.ts
-import { z as z13 } from "zod";
+import { z as z17 } from "zod";
 var adminAuditRouter = router({
-  list: adminProcedure.input(z13.object({ userId: z13.number().int().optional(), limit: z13.number().int().min(1).max(500).default(100) })).query(({ input }) => input.userId ? listAuditLogsForUser(input.userId) : listAllAuditLogs(input.limit))
+  list: adminProcedure.input(z17.object({ userId: z17.number().int().optional(), limit: z17.number().int().min(1).max(500).default(100) })).query(({ input }) => input.userId ? listAuditLogsForUser(input.userId) : listAllAuditLogs(input.limit))
+});
+
+// server/routers/admin/errors.ts
+import { z as z18 } from "zod";
+var adminErrorsRouter = router({
+  list: adminProcedure.input(z18.object({ status: z18.enum(["open", "resolved"]).default("open") })).query(({ input }) => listAppErrors(input.status)),
+  resolve: adminProcedure.input(z18.object({ id: z18.number().int().positive() })).mutation(({ input }) => resolveAppError(input.id))
 });
 
 // server/routers/admin/payments.ts
-import { z as z14 } from "zod";
+import { z as z19 } from "zod";
 var maskId = (value) => !value ? value : value.length <= 8 ? `${value.slice(0, 2)}\u2022\u2022\u2022\u2022` : `${value.slice(0, 4)}\u2022\u2022\u2022\u2022${value.slice(-4)}`;
 var adminPaymentsRouter = router({
   // Kart numarası/CVV gibi bir alan şemada zaten hiç yok (spec §27/§37 — "ASLA saklanmamalı"); providerPaymentId yine de maskelenir.
-  list: adminProcedure.input(z14.object({ limit: z14.number().int().min(1).max(500).default(100) })).query(async ({ input }) => {
+  list: adminProcedure.input(z19.object({ limit: z19.number().int().min(1).max(500).default(100) })).query(async ({ input }) => {
     const rows = await listAllPaymentsForAdmin(input.limit);
     return rows.map((row) => ({ ...row, providerPaymentId: maskId(row.providerPaymentId) }));
   })
 });
 
 // server/routers/admin/subscriptions.ts
-import { z as z15 } from "zod";
+import { z as z20 } from "zod";
 var adminSubscriptionsRouter = router({
   list: adminProcedure.query(() => listAllSubscriptionsForAdmin()),
-  get: adminProcedure.input(z15.object({ userId: z15.number().int() })).query(async ({ input }) => {
+  get: adminProcedure.input(z20.object({ userId: z20.number().int() })).query(async ({ input }) => {
     const [subscription, payments2, auditLogs] = await Promise.all([getSubscriptionByUserId(input.userId), listPaymentsForUser(input.userId), listAuditLogsForUser(input.userId)]);
     return { subscription, payments: payments2, auditLogs };
   }),
@@ -8929,7 +10732,7 @@ var adminSubscriptionsRouter = router({
    * schema'yı yeniden tasarlama, duplicate logic oluşturma" ile tutarlı;
    * bkz. docs/admin/ADMIN-COMMAND-CENTER.md "Known limitations".)
    */
-  grant: adminProcedure.input(z15.object({ userId: z15.number().int(), planCode: z15.string().min(1), days: z15.number().int().min(1).max(3650), reason: z15.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
+  grant: adminProcedure.input(z20.object({ userId: z20.number().int(), planCode: z20.string().min(1), days: z20.number().int().min(1).max(3650), reason: z20.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
     const plan = await getPlanByCode(input.planCode);
     if (!plan) throw new Error(`Plan bulunamad\u0131: ${input.planCode}`);
     const existing = await getSubscriptionByUserId(input.userId);
@@ -8940,7 +10743,7 @@ var adminSubscriptionsRouter = router({
     await writeAuditLog({ userId: input.userId, adminId: ctx.user.id, action: "manual_grant", oldState: existing ? { status: existing.status } : null, newState: { status: "active", planCode: plan.code, until: periodEnd.toISOString() }, reason: input.reason });
     return getSubscriptionByUserId(input.userId);
   }),
-  revoke: adminProcedure.input(z15.object({ userId: z15.number().int(), reason: z15.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
+  revoke: adminProcedure.input(z20.object({ userId: z20.number().int(), reason: z20.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
     const existing = await getSubscriptionByUserId(input.userId);
     if (!existing) throw new Error("Abonelik bulunamad\u0131");
     const freePlan = await getPlanByCode("FREE");
@@ -8950,7 +10753,7 @@ var adminSubscriptionsRouter = router({
     await writeAuditLog({ userId: input.userId, adminId: ctx.user.id, action: "manual_revoke", oldState: { status: existing.status }, newState: { status: "canceled", planCode: "FREE" }, reason: input.reason });
     return getSubscriptionByUserId(input.userId);
   }),
-  cancel: adminProcedure.input(z15.object({ userId: z15.number().int(), reason: z15.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
+  cancel: adminProcedure.input(z20.object({ userId: z20.number().int(), reason: z20.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
     const existing = await getSubscriptionByUserId(input.userId);
     if (!existing) throw new Error("Abonelik bulunamad\u0131");
     assertValidSubscriptionTransition(existing.status, "canceled");
@@ -8958,7 +10761,7 @@ var adminSubscriptionsRouter = router({
     await writeAuditLog({ userId: input.userId, adminId: ctx.user.id, action: "admin_canceled", oldState: { status: existing.status }, newState: { status: "canceled" }, reason: input.reason });
     return getSubscriptionByUserId(input.userId);
   }),
-  resume: adminProcedure.input(z15.object({ userId: z15.number().int() })).mutation(async ({ ctx, input }) => {
+  resume: adminProcedure.input(z20.object({ userId: z20.number().int() })).mutation(async ({ ctx, input }) => {
     const existing = await getSubscriptionByUserId(input.userId);
     if (!existing) throw new Error("Abonelik bulunamad\u0131");
     assertValidSubscriptionTransition(existing.status, "active");
@@ -9037,25 +10840,69 @@ var adminSystemRouter = router({
   })
 });
 
-// server/routers/admin/usage.ts
-import { z as z16 } from "zod";
-var adminUsageRouter = router({
-  get: adminProcedure.input(z16.object({ userId: z16.number().int() })).query(({ input }) => getUsageSummaryForUser(input.userId)),
-  reset: adminProcedure.input(z16.object({ userId: z16.number().int(), featureKey: z16.enum(FEATURE_KEYS) })).mutation(({ ctx, input }) => {
-    const limit = FEATURE_USAGE_LIMITS[input.featureKey] ?? FREE_TIER_LIMITS[input.featureKey];
-    const windowDays = limit?.windowDays ?? 30;
-    return resetFeatureUsage(input.userId, input.featureKey, windowDays, ctx.user.id);
+// server/routers/admin/testimonials.ts
+import { z as z21 } from "zod";
+
+// server/testimonials/testimonials.ts
+import { desc as desc12, eq as eq23 } from "drizzle-orm";
+async function listPublishedTestimonials(limit = 9) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select({ id: testimonials.id, displayName: testimonials.displayName, detail: testimonials.detail, rating: testimonials.rating, body: testimonials.body }).from(testimonials).where(eq23(testimonials.status, "approved")).orderBy(desc12(testimonials.reviewedAt)).limit(limit);
+}
+async function getMyTestimonial(userId) {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.select().from(testimonials).where(eq23(testimonials.userId, userId)).limit(1);
+  return row ?? null;
+}
+async function saveMyTestimonial(userId, input) {
+  const db = await getDb();
+  if (!db) throw new Error("Veritaban\u0131 kullan\u0131lam\u0131yor.");
+  const now = /* @__PURE__ */ new Date();
+  await db.insert(testimonials).values({ userId, ...input, status: "pending", updatedAt: now }).onConflictDoUpdate({ target: testimonials.userId, set: { ...input, status: "pending", updatedAt: now, reviewedAt: null, reviewedBy: null } });
+  return getMyTestimonial(userId);
+}
+async function deleteMyTestimonial(userId) {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(testimonials).where(eq23(testimonials.userId, userId));
+}
+async function listTestimonialsForAdmin(status) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select({ id: testimonials.id, displayName: testimonials.displayName, detail: testimonials.detail, rating: testimonials.rating, body: testimonials.body, status: testimonials.status, updatedAt: testimonials.updatedAt, userId: testimonials.userId, userName: users.name, userEmail: users.email }).from(testimonials).leftJoin(users, eq23(users.id, testimonials.userId)).where(eq23(testimonials.status, status)).orderBy(desc12(testimonials.updatedAt)).limit(200);
+}
+async function reviewTestimonial(id4, status, reviewerId) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(testimonials).set({ status, reviewedAt: /* @__PURE__ */ new Date(), reviewedBy: reviewerId }).where(eq23(testimonials.id, id4));
+}
+
+// server/routers/admin/testimonials.ts
+var adminTestimonialsRouter = router({
+  list: adminProcedure.input(z21.object({ status: z21.enum(["pending", "approved", "rejected"]).default("pending") })).query(({ input }) => listTestimonialsForAdmin(input.status)),
+  review: adminProcedure.input(z21.object({ id: z21.number().int().positive(), status: z21.enum(["approved", "rejected"]) })).mutation(async ({ ctx, input }) => {
+    await reviewTestimonial(input.id, input.status, ctx.user.id);
+    return { ok: true };
   })
 });
 
+// server/routers/admin/usage.ts
+import { z as z22 } from "zod";
+var adminUsageRouter = router({
+  get: adminProcedure.input(z22.object({ userId: z22.number().int() })).query(({ input }) => getUsageSummaryForUser(input.userId)),
+  reset: adminProcedure.input(z22.object({ userId: z22.number().int(), featureKey: z22.enum(FEATURE_KEYS) })).mutation(({ ctx, input }) => resetFeatureUsage(input.userId, input.featureKey, USAGE_WINDOW_DAYS, ctx.user.id))
+});
+
 // server/routers/admin/users.ts
-import { z as z17 } from "zod";
+import { z as z23 } from "zod";
 
 // server/admin/adminUserDb.ts
-import { and as and14, count as count3, desc as desc7, eq as eq17, gte as gte10, inArray as inArray7, isNull as isNull7, like as like3, lt as lt7, or as or2, sql as sql8 } from "drizzle-orm";
+import { and as and21, count as count3, desc as desc13, eq as eq25, gte as gte14, inArray as inArray10, isNull as isNull12, ilike as ilike3, lt as lt10, or as or4, sql as sql11 } from "drizzle-orm";
 
 // server/admin/progressService.ts
-import { and as and13, eq as eq16, gte as gte9 } from "drizzle-orm";
+import { and as and20, eq as eq24, gte as gte13 } from "drizzle-orm";
 
 // shared/progressScore.ts
 var PROGRESS_SCORE_CONFIG = {
@@ -9094,14 +10941,14 @@ async function getStudyProgressScore(userId) {
   const db = await getDb();
   const generatedAt = (/* @__PURE__ */ new Date()).toISOString();
   if (!db) return { overallScore: null, insufficientData: true, components: emptyComponents(), generatedAt };
-  const [userRow] = await db.select({ createdAt: users.createdAt }).from(users).where(eq16(users.id, userId)).limit(1);
+  const [userRow] = await db.select({ createdAt: users.createdAt }).from(users).where(eq24(users.id, userId)).limit(1);
   const accountAgeDays = userRow ? Math.max(0, Math.floor((Date.now() - userRow.createdAt.getTime()) / 864e5)) : 0;
   const windowStart = new Date(Date.now() - CONSISTENCY_WINDOW_DAYS * 864e5);
   const [recentLogs, allLogs, topicRows, examRows] = await Promise.all([
-    db.select({ studyDate: topicStudyLogs.studyDate }).from(topicStudyLogs).where(and13(eq16(topicStudyLogs.userId, userId), gte9(topicStudyLogs.studyDate, windowStart))),
-    db.select({ questions: topicStudyLogs.questions, correct: topicStudyLogs.correct }).from(topicStudyLogs).where(eq16(topicStudyLogs.userId, userId)),
-    db.select({ progress: topicProgress.progress }).from(topicProgress).where(eq16(topicProgress.userId, userId)),
-    db.select({ net: userMockExams.net }).from(userMockExams).where(eq16(userMockExams.userId, userId))
+    db.select({ studyDate: topicStudyLogs.studyDate }).from(topicStudyLogs).where(and20(eq24(topicStudyLogs.userId, userId), gte13(topicStudyLogs.studyDate, windowStart))),
+    db.select({ questions: topicStudyLogs.questions, correct: topicStudyLogs.correct }).from(topicStudyLogs).where(eq24(topicStudyLogs.userId, userId)),
+    db.select({ progress: topicProgress.progress }).from(topicProgress).where(eq24(topicProgress.userId, userId)),
+    db.select({ net: userMockExams.net }).from(userMockExams).where(eq24(userMockExams.userId, userId))
   ]);
   const activeDaysInWindow = new Set(recentLogs.map((row) => toLocalDateKey(row.studyDate))).size;
   const totalQuestions = allLogs.reduce((sum, row) => sum + row.questions, 0);
@@ -9144,24 +10991,24 @@ function emptyComponents() {
 // server/admin/adminUserDb.ts
 async function listUsersForAdminPaginated(filters) {
   const db = await getDb();
-  const page = Math.max(1, filters.page);
+  const page2 = Math.max(1, filters.page);
   const pageSize = Math.min(100, Math.max(1, filters.pageSize));
-  if (!db) return { rows: [], total: 0, page, pageSize };
+  if (!db) return { rows: [], total: 0, page: page2, pageSize };
   const conditions = [];
   if (filters.search?.trim()) {
     const term = `%${filters.search.trim().replace(/[%_]/g, (char) => `\\${char}`)}%`;
     const digits = filters.search.replace(/\D/g, "").replace(/^0/, "");
-    conditions.push(or2(like3(users.name, term), like3(users.email, term), ...digits.length >= 4 ? [like3(users.openId, `dev_phone_%${digits}%`)] : []));
+    conditions.push(or4(ilike3(users.name, term), ilike3(users.email, term), ...digits.length >= 4 ? [ilike3(users.openId, `dev_phone_%${digits}%`)] : []));
   }
-  if (filters.approvalStatus) conditions.push(eq17(users.approvalStatus, filters.approvalStatus));
-  if (filters.accountStatus) conditions.push(eq17(users.accountStatus, filters.accountStatus));
-  if (filters.planCode) conditions.push(eq17(subscriptionPlans.code, filters.planCode));
-  if (filters.subscriptionStatus) conditions.push(eq17(subscriptions.status, filters.subscriptionStatus));
-  if (filters.activity === "today") conditions.push(gte10(users.lastSignedIn, startOfToday2()));
-  else if (filters.activity === "week") conditions.push(gte10(users.lastSignedIn, daysAgo(7)));
-  else if (filters.activity === "inactive") conditions.push(lt7(users.lastSignedIn, daysAgo(7)));
-  const whereClause = conditions.length ? and14(...conditions) : void 0;
-  const countQuery = db.select({ total: count3() }).from(users).leftJoin(subscriptions, eq17(subscriptions.userId, users.id)).leftJoin(subscriptionPlans, eq17(subscriptionPlans.id, subscriptions.planId));
+  if (filters.approvalStatus) conditions.push(eq25(users.approvalStatus, filters.approvalStatus));
+  if (filters.accountStatus) conditions.push(eq25(users.accountStatus, filters.accountStatus));
+  if (filters.planCode) conditions.push(eq25(subscriptionPlans.code, filters.planCode));
+  if (filters.subscriptionStatus) conditions.push(eq25(subscriptions.status, filters.subscriptionStatus));
+  if (filters.activity === "today") conditions.push(gte14(users.lastSignedIn, startOfToday2()));
+  else if (filters.activity === "week") conditions.push(gte14(users.lastSignedIn, daysAgo(7)));
+  else if (filters.activity === "inactive") conditions.push(lt10(users.lastSignedIn, daysAgo(7)));
+  const whereClause = conditions.length ? and21(...conditions) : void 0;
+  const countQuery = db.select({ total: count3() }).from(users).leftJoin(subscriptions, eq25(subscriptions.userId, users.id)).leftJoin(subscriptionPlans, eq25(subscriptionPlans.id, subscriptions.planId));
   const [{ total }] = await (whereClause ? countQuery.where(whereClause) : countQuery);
   const pageQuery = db.select({
     id: users.id,
@@ -9180,13 +11027,13 @@ async function listUsersForAdminPaginated(filters) {
     subscriptionStatus: subscriptions.status,
     trialEndsAt: subscriptions.trialEndsAt,
     currentPeriodEnd: subscriptions.currentPeriodEnd
-  }).from(users).leftJoin(subscriptions, eq17(subscriptions.userId, users.id)).leftJoin(subscriptionPlans, eq17(subscriptionPlans.id, subscriptions.planId)).orderBy(desc7(users.createdAt)).limit(pageSize).offset((page - 1) * pageSize);
+  }).from(users).leftJoin(subscriptions, eq25(subscriptions.userId, users.id)).leftJoin(subscriptionPlans, eq25(subscriptionPlans.id, subscriptions.planId)).orderBy(desc13(users.createdAt)).limit(pageSize).offset((page2 - 1) * pageSize);
   const pageRows = await (whereClause ? pageQuery.where(whereClause) : pageQuery);
   const ids = pageRows.map((row) => row.id);
   const [topicAgg, examAgg, studyAgg] = ids.length ? await Promise.all([
-    db.select({ userId: topicProgress.userId, avgProgress: sql8`avg(${topicProgress.progress})`, topicCount: sql8`count(*)` }).from(topicProgress).where(inArray7(topicProgress.userId, ids)).groupBy(topicProgress.userId),
-    db.select({ userId: userMockExams.userId, examCount: sql8`count(*)`, latestNet: sql8`max(${userMockExams.net})` }).from(userMockExams).where(inArray7(userMockExams.userId, ids)).groupBy(userMockExams.userId),
-    db.select({ userId: topicStudyLogs.userId, totalMinutes: sql8`sum(${topicStudyLogs.minutes})` }).from(topicStudyLogs).where(inArray7(topicStudyLogs.userId, ids)).groupBy(topicStudyLogs.userId)
+    db.select({ userId: topicProgress.userId, avgProgress: sql11`avg(${topicProgress.progress})`, topicCount: sql11`count(*)::int` }).from(topicProgress).where(inArray10(topicProgress.userId, ids)).groupBy(topicProgress.userId),
+    db.select({ userId: userMockExams.userId, examCount: sql11`count(*)::int`, latestNet: sql11`max(${userMockExams.net})` }).from(userMockExams).where(inArray10(userMockExams.userId, ids)).groupBy(userMockExams.userId),
+    db.select({ userId: topicStudyLogs.userId, totalMinutes: sql11`sum(${topicStudyLogs.minutes})` }).from(topicStudyLogs).where(inArray10(topicStudyLogs.userId, ids)).groupBy(topicStudyLogs.userId)
   ]) : [[], [], []];
   const topicMap = new Map(topicAgg.map((row) => [row.userId, row]));
   const examMap = new Map(examAgg.map((row) => [row.userId, row]));
@@ -9209,7 +11056,7 @@ async function listUsersForAdminPaginated(filters) {
       totalStudyMinutes: study ? Number(study.totalMinutes) : 0
     };
   });
-  return { rows, total, page, pageSize };
+  return { rows, total, page: page2, pageSize };
 }
 var startOfToday2 = () => {
   const date = /* @__PURE__ */ new Date();
@@ -9220,19 +11067,19 @@ var daysAgo = (days) => new Date(Date.now() - days * 24 * 60 * 60 * 1e3);
 async function suspendUser(userId, adminId, reason) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ accountStatus: "suspended" }).where(eq17(users.id, userId));
+  await db.update(users).set({ accountStatus: "suspended" }).where(eq25(users.id, userId));
   await writeAuditLog({ userId, adminId, action: "user_suspended", newState: { accountStatus: "suspended" }, reason });
 }
 async function reactivateUser(userId, adminId) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ accountStatus: "active" }).where(eq17(users.id, userId));
+  await db.update(users).set({ accountStatus: "active" }).where(eq25(users.id, userId));
   await writeAuditLog({ userId, adminId, action: "user_reactivated", newState: { accountStatus: "active" } });
 }
 async function verifyUserEmailManually(userId, adminId) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ emailVerifiedAt: /* @__PURE__ */ new Date() }).where(and14(eq17(users.id, userId), isNull7(users.emailVerifiedAt)));
+  await db.update(users).set({ emailVerifiedAt: /* @__PURE__ */ new Date() }).where(and21(eq25(users.id, userId), isNull12(users.emailVerifiedAt)));
   await writeAuditLog({ userId, adminId, action: "email_verified_by_admin", newState: { emailVerified: true } });
 }
 function maskId2(value) {
@@ -9243,19 +11090,19 @@ function maskId2(value) {
 async function getUserDetailForAdmin(userId) {
   const db = await getDb();
   if (!db) return null;
-  const [userRow] = await db.select().from(users).where(eq17(users.id, userId)).limit(1);
+  const [userRow] = await db.select().from(users).where(eq25(users.id, userId)).limit(1);
   if (!userRow) return null;
   const [entitlements, usage, progressScore, payments2, recentExams, topicRows, recentStudyLogs, auditLogs, profile, bookContentRows, notebook] = await Promise.all([
     getEntitlements(userId),
     getUsageSummaryForUser(userId),
     getStudyProgressScore(userId),
     listPaymentsForUser(userId),
-    db.select().from(userMockExams).where(eq17(userMockExams.userId, userId)).orderBy(desc7(userMockExams.examDate)).limit(10),
-    db.select().from(topicProgress).where(eq17(topicProgress.userId, userId)),
-    db.select().from(topicStudyLogs).where(eq17(topicStudyLogs.userId, userId)).orderBy(desc7(topicStudyLogs.studyDate)).limit(20),
+    db.select().from(userMockExams).where(eq25(userMockExams.userId, userId)).orderBy(desc13(userMockExams.examDate)).limit(10),
+    db.select().from(topicProgress).where(eq25(topicProgress.userId, userId)),
+    db.select().from(topicStudyLogs).where(eq25(topicStudyLogs.userId, userId)).orderBy(desc13(topicStudyLogs.studyDate)).limit(20),
     listAuditLogsForUser(userId),
     getStudentProfile(userId),
-    db.select({ bookId: userBookContents.bookId, mappingStatus: userBookContents.mappingStatus, mappingMethod: userBookContents.mappingMethod, mappingConfidence: userBookContents.mappingConfidence, source: userBookContents.source, createdAt: userBookContents.createdAt }).from(userBookContents).where(eq17(userBookContents.userId, userId)),
+    db.select({ bookId: userBookContents.bookId, mappingStatus: userBookContents.mappingStatus, mappingMethod: userBookContents.mappingMethod, mappingConfidence: userBookContents.mappingConfidence, source: userBookContents.source, createdAt: userBookContents.createdAt }).from(userBookContents).where(eq25(userBookContents.userId, userId)),
     // Defter: yalnızca sayılar — öğrencinin not içeriği admin tarafından görülmez.
     getNoteStatsForAdmin(userId)
   ]);
@@ -9270,14 +11117,14 @@ async function getUserDetailForAdmin(userId) {
     return map;
   }, /* @__PURE__ */ new Map()).values());
   const bookIds = bookContents.map((book) => book.bookId);
-  const numericIds = bookIds.filter((id3) => /^\d+$/.test(id3)).map(Number);
+  const numericIds = bookIds.filter((id4) => /^\d+$/.test(id4)).map(Number);
   const [customTitles, catalogTitles] = bookIds.length ? await Promise.all([
-    db.select({ bookId: userResourceBooks.bookId, title: userResourceBooks.title }).from(userResourceBooks).where(and14(eq17(userResourceBooks.userId, userId), inArray7(userResourceBooks.bookId, bookIds))),
-    numericIds.length ? db.select({ id: catalogBooks.id, name: catalogBooks.name }).from(catalogBooks).where(inArray7(catalogBooks.id, numericIds)) : Promise.resolve([])
+    db.select({ bookId: userResourceBooks.bookId, title: userResourceBooks.title }).from(userResourceBooks).where(and21(eq25(userResourceBooks.userId, userId), inArray10(userResourceBooks.bookId, bookIds))),
+    numericIds.length ? db.select({ id: catalogBooks.id, name: catalogBooks.name }).from(catalogBooks).where(inArray10(catalogBooks.id, numericIds)) : Promise.resolve([])
   ]) : [[], []];
   const titleById = new Map([...customTitles.map((row) => [row.bookId, row.title]), ...catalogTitles.map((row) => [String(row.id), row.name])]);
   const bookContentsWithTitles = bookContents.map((book) => ({ ...book, title: titleById.get(book.bookId) ?? null }));
-  const [subscriptionRow] = await db.select().from(subscriptions).where(eq17(subscriptions.userId, userId)).limit(1);
+  const [subscriptionRow] = await db.select().from(subscriptions).where(eq25(subscriptions.userId, userId)).limit(1);
   const plan = subscriptionRow ? await getPlanById(subscriptionRow.planId) : null;
   const { passwordHash: _passwordHash, ...safeUser } = userRow;
   return {
@@ -9300,25 +11147,25 @@ async function getUserDetailForAdmin(userId) {
 // server/routers/admin/users.ts
 var adminUsersRouter = router({
   list: adminProcedure.input(
-    z17.object({
-      search: z17.string().max(120).optional(),
-      approvalStatus: z17.enum(["pending", "approved", "rejected"]).optional(),
-      accountStatus: z17.enum(["active", "suspended", "deleted"]).optional(),
-      planCode: z17.string().max(40).optional(),
-      subscriptionStatus: z17.string().max(40).optional(),
-      activity: z17.enum(["today", "week", "inactive"]).optional(),
-      page: z17.number().int().min(1).default(1),
-      pageSize: z17.number().int().min(1).max(100).default(20)
+    z23.object({
+      search: z23.string().max(120).optional(),
+      approvalStatus: z23.enum(["pending", "approved", "rejected"]).optional(),
+      accountStatus: z23.enum(["active", "suspended", "deleted"]).optional(),
+      planCode: z23.string().max(40).optional(),
+      subscriptionStatus: z23.string().max(40).optional(),
+      activity: z23.enum(["today", "week", "inactive"]).optional(),
+      page: z23.number().int().min(1).default(1),
+      pageSize: z23.number().int().min(1).max(100).default(20)
     })
   ).query(({ input }) => listUsersForAdminPaginated(input)),
-  get: adminProcedure.input(z17.object({ userId: z17.number().int() })).query(({ input }) => getUserDetailForAdmin(input.userId)),
+  get: adminProcedure.input(z23.object({ userId: z23.number().int() })).query(({ input }) => getUserDetailForAdmin(input.userId)),
   listPending: adminProcedure.query(() => listPendingUsers()),
-  approve: adminProcedure.input(z17.object({ userId: z17.number().int() })).mutation(({ ctx, input }) => approveUser(input.userId, ctx.user.id)),
-  reject: adminProcedure.input(z17.object({ userId: z17.number().int(), reason: z17.string().max(300).optional() })).mutation(({ ctx, input }) => rejectUser(input.userId, ctx.user.id, input.reason)),
+  approve: adminProcedure.input(z23.object({ userId: z23.number().int() })).mutation(({ ctx, input }) => approveUser(input.userId, ctx.user.id)),
+  reject: adminProcedure.input(z23.object({ userId: z23.number().int(), reason: z23.string().max(300).optional() })).mutation(({ ctx, input }) => rejectUser(input.userId, ctx.user.id, input.reason)),
   // Hesap yaşam döngüsü — subscription iptaliyle KARIŞTIRILMAZ (spec §5/§23): bir kullanıcı aboneliğini iptal edince hesabı askıya alınmaz.
-  suspend: adminProcedure.input(z17.object({ userId: z17.number().int(), reason: z17.string().max(300).optional() })).mutation(({ ctx, input }) => suspendUser(input.userId, ctx.user.id, input.reason)),
-  reactivate: adminProcedure.input(z17.object({ userId: z17.number().int() })).mutation(({ ctx, input }) => reactivateUser(input.userId, ctx.user.id)),
-  verifyEmail: adminProcedure.input(z17.object({ userId: z17.number().int() })).mutation(({ ctx, input }) => verifyUserEmailManually(input.userId, ctx.user.id))
+  suspend: adminProcedure.input(z23.object({ userId: z23.number().int(), reason: z23.string().max(300).optional() })).mutation(({ ctx, input }) => suspendUser(input.userId, ctx.user.id, input.reason)),
+  reactivate: adminProcedure.input(z23.object({ userId: z23.number().int() })).mutation(({ ctx, input }) => reactivateUser(input.userId, ctx.user.id)),
+  verifyEmail: adminProcedure.input(z23.object({ userId: z23.number().int() })).mutation(({ ctx, input }) => verifyUserEmailManually(input.userId, ctx.user.id))
 });
 
 // server/routers/admin/index.ts
@@ -9329,77 +11176,103 @@ var adminRouter = router({
   analytics: adminAnalyticsRouter,
   audit: adminAuditRouter,
   payments: adminPaymentsRouter,
-  system: adminSystemRouter
+  system: adminSystemRouter,
+  orgs: adminOrgsRouter,
+  errors: adminErrorsRouter,
+  testimonials: adminTestimonialsRouter
+});
+
+// server/routers/testimonials.ts
+import { z as z24 } from "zod";
+
+// shared/testimonials.ts
+var TESTIMONIAL_LIMITS = { displayName: 60, detail: 80, bodyMin: 20, body: 600 };
+
+// server/routers/testimonials.ts
+var testimonialInput = z24.object({
+  displayName: z24.string().trim().min(2, "G\xF6r\xFCnecek ad\u0131n\u0131 yaz.").max(TESTIMONIAL_LIMITS.displayName),
+  detail: z24.string().trim().max(TESTIMONIAL_LIMITS.detail).optional(),
+  rating: z24.number().int().min(1).max(5),
+  body: z24.string().trim().min(TESTIMONIAL_LIMITS.bodyMin, `Yorumun en az ${TESTIMONIAL_LIMITS.bodyMin} karakter olmal\u0131.`).max(TESTIMONIAL_LIMITS.body)
+});
+var testimonialsRouter = router({
+  published: publicProcedure.query(() => listPublishedTestimonials()),
+  mine: protectedProcedure.query(({ ctx }) => getMyTestimonial(ctx.user.id)),
+  save: protectedProcedure.input(testimonialInput).mutation(({ ctx, input }) => saveMyTestimonial(ctx.user.id, { ...input, detail: input.detail || null })),
+  remove: protectedProcedure.mutation(async ({ ctx }) => {
+    await deleteMyTestimonial(ctx.user.id);
+    return { ok: true };
+  })
 });
 
 // server/routers.ts
-var planInput = z18.object({
-  topics: z18.array(z18.object({
-    topic: z18.string(),
-    subject: z18.string(),
-    exam: z18.enum(["TYT", "AYT"]),
-    progress: z18.number(),
-    status: z18.enum(["Zay\u0131f", "Orta", "\u0130yi"])
+var planInput = z25.object({
+  topics: z25.array(z25.object({
+    topic: z25.string(),
+    subject: z25.string(),
+    exam: z25.enum(["TYT", "AYT"]),
+    progress: z25.number(),
+    status: z25.enum(["Zay\u0131f", "Orta", "\u0130yi"])
   })).max(50),
-  exams: z18.array(z18.object({
-    title: z18.string(),
-    date: z18.string(),
-    net: z18.number(),
-    subjects: z18.record(z18.string(), z18.number()),
-    topicDetails: z18.array(z18.object({
-      subject: z18.string(),
-      topic: z18.string(),
-      questionCount: z18.number(),
-      correct: z18.number(),
-      wrong: z18.number(),
-      blank: z18.number(),
-      accuracy: z18.number(),
-      net: z18.number()
+  exams: z25.array(z25.object({
+    title: z25.string(),
+    date: z25.string(),
+    net: z25.number(),
+    subjects: z25.record(z25.string(), z25.number()),
+    topicDetails: z25.array(z25.object({
+      subject: z25.string(),
+      topic: z25.string(),
+      questionCount: z25.number(),
+      correct: z25.number(),
+      wrong: z25.number(),
+      blank: z25.number(),
+      accuracy: z25.number(),
+      net: z25.number()
     })).optional()
   })).max(10),
-  books: z18.array(z18.object({
-    id: z18.string(),
-    title: z18.string(),
-    subject: z18.string(),
-    exam: z18.enum(["TYT", "AYT"]),
-    level: z18.enum(["Kolay", "Orta", "Zor"]),
-    pageCount: z18.number().optional(),
-    totalQuestions: z18.number().optional(),
-    accuracy: z18.number().optional(),
-    activeDays: z18.number().optional(),
-    mappings: z18.array(z18.object({ topic: z18.string(), pageStart: z18.number().optional(), pageEnd: z18.number().optional(), testStart: z18.number().optional(), testEnd: z18.number().optional() })).max(50).optional()
+  books: z25.array(z25.object({
+    id: z25.string(),
+    title: z25.string(),
+    subject: z25.string(),
+    exam: z25.enum(["TYT", "AYT"]),
+    level: z25.enum(["Kolay", "Orta", "Zor"]),
+    pageCount: z25.number().optional(),
+    totalQuestions: z25.number().optional(),
+    accuracy: z25.number().optional(),
+    activeDays: z25.number().optional(),
+    mappings: z25.array(z25.object({ topic: z25.string(), pageStart: z25.number().optional(), pageEnd: z25.number().optional(), testStart: z25.number().optional(), testEnd: z25.number().optional() })).max(50).optional()
   })).max(30).default([]),
-  availableMinutes: z18.number().min(120).max(2400).default(600),
+  availableMinutes: z25.number().min(120).max(2400).default(600),
   // Öğrencinin yerel "bugün"ü (YYYY-MM-DD): plan bugünden başlayan 7 günü kapsar.
-  startDate: z18.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  goal: z18.string().max(120).default("YKS 2027"),
+  startDate: z25.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  goal: z25.string().max(120).default("YKS 2027"),
   // Onboarding'den gelen koçluk bağlamı — tamamen isteğe bağlı, eski
   // istemciler (veya onboarding'i henüz tamamlamamış kullanıcılar) bu alanı
   // hiç göndermeyebilir.
-  studentProfile: z18.object({
+  studentProfile: z25.object({
     // Hedef bilgileri — onboarding'in "Kullanıcı tanımlama" ve "Hedefler"
     // adımlarından. AI planı önceliklendirirken (örn. hedef net/sıralamaya
     // göre tempo) ve dilini kişiselleştirirken kullanır.
-    targetScoreType: z18.string().max(20).optional(),
-    examYear: z18.number().int().optional(),
-    targetUniversity: z18.string().max(180).optional(),
-    targetDepartment: z18.string().max(180).optional(),
-    targetRanking: z18.string().max(60).optional(),
-    dailyStudyDuration: z18.number().int().min(0).max(960).optional(),
-    preferredStudyMethods: z18.array(z18.string().max(40)).max(5).optional(),
-    studyObstacles: z18.string().max(500).optional(),
-    coachingStyle: z18.string().max(40).optional(),
-    mainGoal: z18.string().max(500).optional()
+    targetScoreType: z25.string().max(20).optional(),
+    examYear: z25.number().int().optional(),
+    targetUniversity: z25.string().max(180).optional(),
+    targetDepartment: z25.string().max(180).optional(),
+    targetRanking: z25.string().max(60).optional(),
+    dailyStudyDuration: z25.number().int().min(0).max(960).optional(),
+    preferredStudyMethods: z25.array(z25.string().max(40)).max(5).optional(),
+    studyObstacles: z25.string().max(500).optional(),
+    coachingStyle: z25.string().max(40).optional(),
+    mainGoal: z25.string().max(500).optional()
   }).optional()
 });
-var documentExtractionInput = z18.object({
-  dataUrl: z18.string().min(20).max(12e6),
-  mimeType: z18.enum(["application/pdf", "image/png", "image/jpeg", "image/webp"]),
-  fileName: z18.string().max(180).optional()
+var documentExtractionInput = z25.object({
+  dataUrl: z25.string().min(20).max(12e6),
+  mimeType: z25.enum(["application/pdf", "image/png", "image/jpeg", "image/webp"]),
+  fileName: z25.string().max(180).optional()
 });
-var bookPhotoInput = z18.object({
-  dataUrl: z18.string().min(20).max(12e6),
-  mimeType: z18.enum(["image/png", "image/jpeg", "image/webp"])
+var bookPhotoInput = z25.object({
+  dataUrl: z25.string().min(20).max(12e6),
+  mimeType: z25.enum(["image/png", "image/jpeg", "image/webp"])
 });
 var bookPhotoSchema = {
   type: "object",
@@ -9425,18 +11298,18 @@ var bookPhotoSchema = {
   additionalProperties: false
 };
 var clamp013 = (value) => typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
-var userExamInput = z18.object({
-  title: z18.string().min(1).max(180),
-  exam: z18.enum(["TYT", "AYT"]),
-  date: z18.string().min(8).max(30),
-  net: z18.number().min(-100).max(200),
-  delta: z18.number().min(-200).max(200),
-  subjects: z18.record(z18.string(), z18.number().min(-50).max(100)),
-  timeSpent: z18.record(z18.string(), z18.number().int().min(0).max(1e3)),
-  topicNets: z18.record(z18.string(), z18.number().min(-50).max(100)),
-  topicDetails: z18.array(z18.object({ subject: z18.string(), topic: z18.string(), questionCount: z18.number().int().min(0), correct: z18.number().int().min(0), wrong: z18.number().int().min(0), blank: z18.number().int().min(0), accuracy: z18.number().min(0).max(100), net: z18.number().min(-50).max(100) })).max(300),
-  importedFrom: z18.enum(["manual", "ocr", "pdf", "csv", "xlsx"]),
-  notes: z18.string().max(5e3).optional()
+var userExamInput = z25.object({
+  title: z25.string().min(1).max(180),
+  exam: z25.enum(["TYT", "AYT"]),
+  date: z25.string().min(8).max(30),
+  net: z25.number().min(-100).max(200),
+  delta: z25.number().min(-200).max(200),
+  subjects: z25.record(z25.string(), z25.number().min(-50).max(100)),
+  timeSpent: z25.record(z25.string(), z25.number().int().min(0).max(1e3)),
+  topicNets: z25.record(z25.string(), z25.number().min(-50).max(100)),
+  topicDetails: z25.array(z25.object({ subject: z25.string(), topic: z25.string(), questionCount: z25.number().int().min(0), correct: z25.number().int().min(0), wrong: z25.number().int().min(0), blank: z25.number().int().min(0), accuracy: z25.number().min(0).max(100), net: z25.number().min(-50).max(100) })).max(300),
+  importedFrom: z25.enum(["manual", "ocr", "pdf", "csv", "xlsx"]),
+  notes: z25.string().max(5e3).optional()
 });
 var documentExtractionSchema = {
   type: "object",
@@ -9502,17 +11375,17 @@ var appRouter = router({
     }),
     // Profil menüsündeki "Şifre değiştir". Tahmin denemelerine karşı kullanıcı
     // başına 15 dakikada 5 deneme.
-    changePassword: protectedProcedure.input(z18.object({ currentPassword: z18.string().min(1).max(200), newPassword: z18.string().min(1).max(200) })).mutation(async ({ ctx, input }) => {
+    changePassword: protectedProcedure.input(z25.object({ currentPassword: z25.string().min(1).max(200), newPassword: z25.string().min(1).max(200) })).mutation(async ({ ctx, input }) => {
       try {
         checkRateLimit(`change-password:${ctx.user.id}`, 5, 15 * 6e4);
       } catch {
-        throw new TRPCError10({ code: "TOO_MANY_REQUESTS", message: "\xC7ok fazla deneme yapt\u0131n. 15 dakika sonra tekrar dener misin?" });
+        throw new TRPCError13({ code: "TOO_MANY_REQUESTS", message: "\xC7ok fazla deneme yapt\u0131n. 15 dakika sonra tekrar dener misin?" });
       }
       try {
         await changeLocalPassword(ctx.user.id, input.currentPassword, input.newPassword);
         return { success: true };
       } catch (error) {
-        if (error instanceof PasswordChangeError) throw new TRPCError10({ code: "BAD_REQUEST", message: error.message });
+        if (error instanceof PasswordChangeError) throw new TRPCError13({ code: "BAD_REQUEST", message: error.message });
         throw error;
       }
     }),
@@ -9523,7 +11396,7 @@ var appRouter = router({
         return await sendVerificationEmail(ctx.user, ctx.req);
       } catch (error) {
         console.error("[EmailVerification] resend failed:", error instanceof Error ? error.message : error);
-        throw new TRPCError10({ code: "INTERNAL_SERVER_ERROR", message: "Do\u011Frulama maili \u015Fu an g\xF6nderilemedi. Birka\xE7 dakika sonra tekrar dener misin?" });
+        throw new TRPCError13({ code: "INTERNAL_SERVER_ERROR", message: "Do\u011Frulama maili \u015Fu an g\xF6nderilemedi. Birka\xE7 dakika sonra tekrar dener misin?" });
       }
     })
   }),
@@ -9538,12 +11411,12 @@ var appRouter = router({
       ]);
       return { inventory, logs, mappings, switches, customBooks };
     }),
-    addBook: protectedProcedure.input(z18.object({ bookId: z18.string().max(120) })).mutation(({ ctx, input }) => addBookToInventory(ctx.user.id, input.bookId)),
-    removeBook: protectedProcedure.input(z18.object({ bookId: z18.string().max(120) })).mutation(({ ctx, input }) => removeBookFromInventory(ctx.user.id, input.bookId)),
-    addLog: protectedProcedure.input(z18.object({ bookId: z18.string().max(120), topic: z18.string().max(180).optional(), sessionDate: z18.string(), minutes: z18.number().int().min(0).max(1440), questions: z18.number().int().min(0).max(2e3), correct: z18.number().int().min(0).max(2e3), wrong: z18.number().int().min(0).max(2e3), blank: z18.number().int().min(0).max(2e3), pageStart: z18.number().int().min(0).optional(), pageEnd: z18.number().int().min(0).optional(), testStart: z18.number().int().min(0).optional(), testEnd: z18.number().int().min(0).optional() })).mutation(({ ctx, input }) => addBookStudyLog(ctx.user.id, { ...input, sessionDate: new Date(input.sessionDate) })),
-    upsertMapping: protectedProcedure.input(z18.object({ bookId: z18.string().max(120), topic: z18.string().max(180), subject: z18.string().max(80), pageStart: z18.number().int().min(0).optional(), pageEnd: z18.number().int().min(0).optional(), testStart: z18.number().int().min(0).optional(), testEnd: z18.number().int().min(0).optional() })).mutation(({ ctx, input }) => upsertBookTopicMapping(ctx.user.id, input)),
-    addSwitch: protectedProcedure.input(z18.object({ fromBookId: z18.string().max(120).optional(), toBookId: z18.string().max(120), reason: z18.string().max(300) })).mutation(({ ctx, input }) => addSourceSwitch(ctx.user.id, { ...input, switchedAt: /* @__PURE__ */ new Date() })),
-    importBooks: protectedProcedure.input(z18.object({ books: z18.array(z18.object({ id: z18.string().max(120), title: z18.string().min(1).max(180), publisher: z18.string().max(120), subject: z18.string().max(80), exam: z18.enum(["TYT", "AYT"]), level: z18.enum(["Kolay", "Orta", "Zor"]), format: z18.string().max(120), reason: z18.string().max(1e3), sourceUrl: z18.string().max(500).optional(), pageCount: z18.number().int().min(0).optional(), tone: z18.string().max(20), authors: z18.string().max(300).optional(), isbn: z18.string().max(32).optional() })).min(1).max(500) })).mutation(({ ctx, input }) => addUserResourceBooks(ctx.user.id, input.books)),
+    addBook: protectedProcedure.input(z25.object({ bookId: z25.string().max(120) })).mutation(({ ctx, input }) => addBookToInventory(ctx.user.id, input.bookId)),
+    removeBook: protectedProcedure.input(z25.object({ bookId: z25.string().max(120) })).mutation(({ ctx, input }) => removeBookFromInventory(ctx.user.id, input.bookId)),
+    addLog: protectedProcedure.input(z25.object({ bookId: z25.string().max(120), topic: z25.string().max(180).optional(), sessionDate: z25.string(), minutes: z25.number().int().min(0).max(1440), questions: z25.number().int().min(0).max(2e3), correct: z25.number().int().min(0).max(2e3), wrong: z25.number().int().min(0).max(2e3), blank: z25.number().int().min(0).max(2e3), pageStart: z25.number().int().min(0).optional(), pageEnd: z25.number().int().min(0).optional(), testStart: z25.number().int().min(0).optional(), testEnd: z25.number().int().min(0).optional() })).mutation(({ ctx, input }) => addBookStudyLog(ctx.user.id, { ...input, sessionDate: new Date(input.sessionDate) })),
+    upsertMapping: protectedProcedure.input(z25.object({ bookId: z25.string().max(120), topic: z25.string().max(180), subject: z25.string().max(80), pageStart: z25.number().int().min(0).optional(), pageEnd: z25.number().int().min(0).optional(), testStart: z25.number().int().min(0).optional(), testEnd: z25.number().int().min(0).optional() })).mutation(({ ctx, input }) => upsertBookTopicMapping(ctx.user.id, input)),
+    addSwitch: protectedProcedure.input(z25.object({ fromBookId: z25.string().max(120).optional(), toBookId: z25.string().max(120), reason: z25.string().max(300) })).mutation(({ ctx, input }) => addSourceSwitch(ctx.user.id, { ...input, switchedAt: /* @__PURE__ */ new Date() })),
+    importBooks: protectedProcedure.input(z25.object({ books: z25.array(z25.object({ id: z25.string().max(120), title: z25.string().min(1).max(180), publisher: z25.string().max(120), subject: z25.string().max(80), exam: z25.enum(["TYT", "AYT"]), level: z25.enum(["Kolay", "Orta", "Zor"]), format: z25.string().max(120), reason: z25.string().max(1e3), sourceUrl: z25.string().max(500).optional(), pageCount: z25.number().int().min(0).optional(), tone: z25.string().max(20), authors: z25.string().max(300).optional(), isbn: z25.string().max(32).optional() })).min(1).max(500) })).mutation(({ ctx, input }) => addUserResourceBooks(ctx.user.id, input.books)),
     // Öğrenci elindeki fiziksel kitabın kapak fotoğrafını çeker (telefon
     // kamerası); LLM görselden kitap adı/yayınevi/ders tahmini çıkarır.
     // Sadece TAHMİN döner — hiçbir şeyi otomatik kütüphaneye eklemez, öğrenci
@@ -9585,23 +11458,23 @@ var appRouter = router({
   }),
   exams: router({
     snapshot: protectedProcedure.query(({ ctx }) => getUserMockExams(ctx.user.id)),
-    importMany: protectedProcedure.input(z18.object({ exams: z18.array(userExamInput).min(1).max(200) })).mutation(({ ctx, input }) => addUserMockExams(ctx.user.id, input.exams.map((exam) => ({ ...exam, examDate: new Date(exam.date) }))))
+    importMany: protectedProcedure.input(z25.object({ exams: z25.array(userExamInput).min(1).max(200) })).mutation(({ ctx, input }) => addUserMockExams(ctx.user.id, input.exams.map((exam) => ({ ...exam, examDate: new Date(exam.date) }))))
   }),
   calendar: router({
     snapshot: protectedProcedure.query(({ ctx }) => getStudyCalendar(ctx.user.id)),
-    savePlan: protectedProcedure.input(z18.object({ title: z18.string().max(180), weekStart: z18.string(), weekEnd: z18.string(), summary: z18.string().max(2e3), source: z18.enum(["ai", "manual"]).optional(), replacePrevious: z18.boolean().optional(), sessions: z18.array(z18.object({ sessionDate: z18.string(), title: z18.string().max(180), subject: z18.string().max(80), topic: z18.string().max(180), kind: z18.string().max(40), plannedMinutes: z18.number().int().min(0).max(1440), targetQuestions: z18.number().int().min(0).optional(), targetPages: z18.string().max(80).nullable().optional(), targetTests: z18.string().max(80).nullable().optional() })).max(100) })).mutation(({ ctx, input }) => saveStudyPlan(ctx.user.id, { ...input, weekStart: new Date(input.weekStart), weekEnd: new Date(input.weekEnd), sessions: input.sessions.map((session) => ({ ...session, sessionDate: new Date(session.sessionDate) })) })),
-    completeSession: protectedProcedure.input(z18.object({ sessionId: z18.number().int(), actualMinutes: z18.number().int().min(0).max(1440), actualQuestions: z18.number().int().min(0).max(5e3), correct: z18.number().int().min(0).max(5e3), wrong: z18.number().int().min(0).max(5e3), blank: z18.number().int().min(0).max(5e3), actualPages: z18.number().int().min(0).max(5e3).optional(), note: z18.string().max(1e3).optional() })).mutation(({ ctx, input }) => completeStudySession(ctx.user.id, input)),
-    coachSnapshot: protectedProcedure.input(z18.object({ periodStart: z18.string(), periodEnd: z18.string() })).query(async ({ ctx, input }) => {
+    savePlan: protectedProcedure.input(z25.object({ title: z25.string().max(180), weekStart: z25.string(), weekEnd: z25.string(), summary: z25.string().max(2e3), source: z25.enum(["ai", "manual"]).optional(), replacePrevious: z25.boolean().optional(), sessions: z25.array(z25.object({ sessionDate: z25.string(), title: z25.string().max(180), subject: z25.string().max(80), topic: z25.string().max(180), kind: z25.string().max(40), plannedMinutes: z25.number().int().min(0).max(1440), targetQuestions: z25.number().int().min(0).optional(), targetPages: z25.string().max(80).nullable().optional(), targetTests: z25.string().max(80).nullable().optional() })).max(100) })).mutation(({ ctx, input }) => saveStudyPlan(ctx.user.id, { ...input, weekStart: new Date(input.weekStart), weekEnd: new Date(input.weekEnd), sessions: input.sessions.map((session) => ({ ...session, sessionDate: new Date(session.sessionDate) })) })),
+    completeSession: protectedProcedure.input(z25.object({ sessionId: z25.number().int(), actualMinutes: z25.number().int().min(0).max(1440), actualQuestions: z25.number().int().min(0).max(5e3), correct: z25.number().int().min(0).max(5e3), wrong: z25.number().int().min(0).max(5e3), blank: z25.number().int().min(0).max(5e3), actualPages: z25.number().int().min(0).max(5e3).optional(), note: z25.string().max(1e3).optional() })).mutation(({ ctx, input }) => completeStudySession(ctx.user.id, input)),
+    coachSnapshot: protectedProcedure.input(z25.object({ periodStart: z25.string(), periodEnd: z25.string() })).query(async ({ ctx, input }) => {
       const { sessions, averageAccuracy } = await getPlanAdherenceInputs(ctx.user.id, new Date(input.periodStart), new Date(input.periodEnd));
       return { ...calculatePlanAdherence(sessions, averageAccuracy), averageAccuracy, alerts: await getCoachAlerts(ctx.user.id) };
     }),
-    refreshCoach: protectedProcedure.input(z18.object({ periodStart: z18.string(), periodEnd: z18.string() })).mutation(({ ctx, input }) => savePlanAdherence(ctx.user.id, new Date(input.periodStart), new Date(input.periodEnd))),
+    refreshCoach: protectedProcedure.input(z25.object({ periodStart: z25.string(), periodEnd: z25.string() })).mutation(({ ctx, input }) => savePlanAdherence(ctx.user.id, new Date(input.periodStart), new Date(input.periodEnd))),
     // Üst çubuktaki bildirim zili: okunmamış koç uyarıları (yalnızca okuma; uyarıları refreshCoach üretir).
     alerts: protectedProcedure.query(({ ctx }) => getCoachAlerts(ctx.user.id)),
-    readCoachAlert: protectedProcedure.input(z18.object({ alertId: z18.number().int() })).mutation(({ ctx, input }) => markCoachAlertRead(ctx.user.id, input.alertId)),
-    addFocusLog: protectedProcedure.input(z18.object({ subject: z18.string().max(80), topic: z18.string().max(180), studyDate: z18.string(), minutes: z18.number().int().min(1).max(1440), questions: z18.number().int().min(0).max(5e3), correct: z18.number().int().min(0).max(5e3), wrong: z18.number().int().min(0).max(5e3), blank: z18.number().int().min(0).max(5e3), note: z18.string().max(1e3).optional() })).mutation(({ ctx, input }) => addTopicStudyLog(ctx.user.id, { ...input, studyDate: new Date(input.studyDate), note: input.note ?? null, sessionId: null })),
+    readCoachAlert: protectedProcedure.input(z25.object({ alertId: z25.number().int() })).mutation(({ ctx, input }) => markCoachAlertRead(ctx.user.id, input.alertId)),
+    addFocusLog: protectedProcedure.input(z25.object({ subject: z25.string().max(80), topic: z25.string().max(180), studyDate: z25.string(), minutes: z25.number().int().min(1).max(1440), questions: z25.number().int().min(0).max(5e3), correct: z25.number().int().min(0).max(5e3), wrong: z25.number().int().min(0).max(5e3), blank: z25.number().int().min(0).max(5e3), note: z25.string().max(1e3).optional() })).mutation(({ ctx, input }) => addTopicStudyLog(ctx.user.id, { ...input, studyDate: new Date(input.studyDate), note: input.note ?? null, sessionId: null })),
     // Paragraf pratiği / gece okuması gibi "şimdi yaptım" alışkanlık kayıtları.
-    logRoutine: protectedProcedure.input(z18.object({ title: z18.string().max(180), subject: z18.string().max(80), topic: z18.string().max(180), kind: z18.string().max(40), plannedMinutes: z18.number().int().min(0).max(1440), actualMinutes: z18.number().int().min(0).max(1440), actualPages: z18.number().int().min(0).max(5e3).optional(), note: z18.string().max(1e3).optional(), readingBookId: z18.number().int().positive().optional() })).mutation(async ({ ctx, input }) => {
+    logRoutine: protectedProcedure.input(z25.object({ title: z25.string().max(180), subject: z25.string().max(80), topic: z25.string().max(180), kind: z25.string().max(40), plannedMinutes: z25.number().int().min(0).max(1440), actualMinutes: z25.number().int().min(0).max(1440), actualPages: z25.number().int().min(0).max(5e3).optional(), note: z25.string().max(1e3).optional(), readingBookId: z25.number().int().positive().optional() })).mutation(async ({ ctx, input }) => {
       const { readingBookId, ...routine } = input;
       const calendar = await logCompletedRoutineSession(ctx.user.id, routine);
       const readingBook = readingBookId && input.actualPages ? await recordReadingPages(ctx.user.id, readingBookId, input.actualPages) : null;
@@ -9684,14 +11557,14 @@ ${JSON.stringify(input.books)}${targetContext}${coachingContext}${notebookContex
         const normalized = normalizeAiPlan(parsed, fallbackPlan);
         if (normalized === fallbackPlan) {
           console.warn("[AI Plan] Unusable AI response; keys:", parsed && typeof parsed === "object" ? Object.keys(parsed).join(",") : typeof parsed);
-          throw new TRPCError10({ code: "INTERNAL_SERVER_ERROR", message: "AI plan\u0131 okunamad\u0131. Tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi." });
+          throw new TRPCError13({ code: "INTERNAL_SERVER_ERROR", message: "AI plan\u0131 okunamad\u0131. Tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi." });
         }
         return normalized;
       } catch (error) {
-        if (error instanceof TRPCError10) throw error;
+        if (error instanceof TRPCError13) throw error;
         console.warn("[AI Plan] LLM failed:", error);
         const quota = error instanceof LlmUnavailableError && error.reason === "quota";
-        throw new TRPCError10({
+        throw new TRPCError13({
           code: quota ? "TOO_MANY_REQUESTS" : "INTERNAL_SERVER_ERROR",
           message: quota ? "Yapay zek\xE2 servisinin kotas\u0131 \u015Fu an dolu; AI plan\u0131n\u0131 birka\xE7 saat sonra tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi." : "AI plan\u0131 \u015Fu an haz\u0131rlanamad\u0131; biraz sonra tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi."
         });
@@ -9732,12 +11605,15 @@ ${JSON.stringify(input.books)}${targetContext}${coachingContext}${notebookContex
   notes: notesRouter,
   questions: questionsRouter,
   classSchedule: classScheduleRouter,
+  push: pushRouter,
   reading: readingRouter,
+  org: orgRouter,
   catalog: resourceCatalogRouter,
   onboarding: onboardingRouter,
   subscription: subscriptionRouter,
   payment: paymentRouter,
-  admin: adminRouter
+  admin: adminRouter,
+  testimonials: testimonialsRouter
 });
 
 // server/_core/context.ts
@@ -10090,12 +11966,12 @@ var ResourceCatalogImportPipeline = class {
     const stats = emptyStats(this.source.name, dryRun, startedAt);
     const limit = options.limit ?? Number.POSITIVE_INFINITY;
     const curriculumTopics = await this.db.listCurriculumTopics();
-    let page = 0;
+    let page2 = 0;
     let hasMore = true;
     while (hasMore && stats.fetched < limit) {
-      const { products, hasMore: more } = await this.source.fetchPage(page);
+      const { products, hasMore: more } = await this.source.fetchPage(page2);
       hasMore = more;
-      page += 1;
+      page2 += 1;
       if (products.length === 0 && !hasMore) break;
       for (const product of products) {
         if (stats.fetched >= limit) break;
@@ -10352,9 +12228,9 @@ var HeuristicHtmlExtractor = class {
     const pattern = new RegExp(CATEGORY_LINK_PATTERN.source, "g");
     let match;
     while (match = pattern.exec(html)) {
-      const [, id3, url, rawTitle] = match;
-      if (seen.has(id3)) continue;
-      seen.add(id3);
+      const [, id4, url, rawTitle] = match;
+      if (seen.has(id4)) continue;
+      seen.add(id4);
       const title = decodeEntities(rawTitle).trim();
       if (isYksCategory(title, url)) links.push({ url, title });
     }
@@ -10393,7 +12269,7 @@ var KitapIslerSource = class {
   productsSeen = 0;
   robotsChecked = false;
   robotsAllowed = true;
-  async fetchPage(page) {
+  async fetchPage(page2) {
     if (!this.robotsChecked) {
       this.robotsAllowed = await isCrawlingAllowed();
       this.robotsChecked = true;
@@ -10402,13 +12278,13 @@ var KitapIslerSource = class {
       console.warn("[ResourceCatalog] kitapisler.com robots.txt disallows crawling \u2014 aborting.");
       return { products: [], hasMore: false };
     }
-    if (page >= this.config.maxPages || this.productsSeen >= this.config.maxProducts || this.queue.length === 0) {
+    if (page2 >= this.config.maxPages || this.productsSeen >= this.config.maxProducts || this.queue.length === 0) {
       return { products: [], hasMore: false };
     }
     const next = this.queue.shift();
     if (this.visited.has(next.url)) return { products: [], hasMore: this.queue.length > 0 };
     this.visited.add(next.url);
-    if (page > 0) await sleep2(this.config.delayMs);
+    if (page2 > 0) await sleep2(this.config.delayMs);
     let lastError;
     for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
       try {
@@ -10463,12 +12339,21 @@ function createApiApp() {
   app2.use(express2.urlencoded({ limit: "50mb", extended: true }));
   registerLocalAuthRoutes(app2);
   registerEmailVerificationRoutes(app2);
+  registerWeeklyDigestRoutes(app2);
+  registerErrorLogRoutes(app2);
+  registerSessionReminderRoutes(app2);
   registerNoteAttachmentRoutes(app2);
   app2.use(
     "/api/trpc",
     createExpressMiddleware({
       router: appRouter,
-      createContext
+      createContext,
+      // Yalnızca beklenmeyen hatalar kaydedilir; BAD_REQUEST/UNAUTHORIZED gibi kullanıcıya
+      // gösterilen mesajlar hata değil, akışın parçası.
+      onError: ({ error, path: path2, ctx }) => {
+        if (error.code !== "INTERNAL_SERVER_ERROR") return;
+        void recordAppError({ source: "server", message: error.cause?.message ?? error.message, stack: error.cause?.stack ?? error.stack, path: `trpc ${path2 ?? "?"}`, userId: ctx?.user?.id ?? null });
+      }
     })
   );
   app2.get("/api/cron/resource-catalog-sync", async (req, res) => {
@@ -10488,14 +12373,27 @@ function createApiApp() {
       res.status(500).json({ ok: false, error: error instanceof Error ? error.message : "unknown error" });
     }
   });
+  app2.use(errorLogMiddleware);
   return app2;
 }
 
 // server/subscriptions/seedPlans.ts
+var PAID_PRICES = {
+  basic: { code: "BASIC", monthly: 24900, yearly: 239900 },
+  premium: { code: "PREMIUM", monthly: 99900, yearly: 959900 },
+  premium_plus: { code: "PRO", monthly: 249900, yearly: 2399900 }
+};
+var TRIAL_DAYS = 10;
 var DEFAULT_PLANS = [
   { code: "FREE", name: "\xDCcretsiz", description: "Temel \xE7al\u0131\u015Fma takibi, konu haritas\u0131 ve odak zamanlay\u0131c\u0131.", tier: "free", billingPeriod: "none", price: 0, trialDays: 0 },
-  { code: "PREMIUM_MONTHLY", name: "Premium (Ayl\u0131k)", description: "AI \xE7al\u0131\u015Fma plan\u0131, OCR deneme aktar\u0131m\u0131, geli\u015Fmi\u015F raporlar.", tier: "premium", billingPeriod: "monthly", price: 14900, trialDays: 10 },
-  { code: "PREMIUM_YEARLY", name: "Premium (Y\u0131ll\u0131k)", description: "AI \xE7al\u0131\u015Fma plan\u0131, OCR deneme aktar\u0131m\u0131, geli\u015Fmi\u015F raporlar \u2014 y\u0131ll\u0131k.", tier: "premium", billingPeriod: "yearly", price: 119900, trialDays: 10 }
+  ...PAID_TIERS.flatMap((tier) => {
+    const { code, monthly, yearly } = PAID_PRICES[tier];
+    const label = TIER_LABELS[tier];
+    return [
+      { code: `${code}_MONTHLY`, name: `${label} (Ayl\u0131k)`, description: `${label} kotalar\u0131yla t\xFCm \xF6zellikler, ayl\u0131k.`, tier, billingPeriod: "monthly", price: monthly, trialDays: TRIAL_DAYS },
+      { code: `${code}_YEARLY`, name: `${label} (Y\u0131ll\u0131k)`, description: `${label} kotalar\u0131yla t\xFCm \xF6zellikler, YKS bitene kadar.`, tier, billingPeriod: "yearly", price: yearly, trialDays: TRIAL_DAYS }
+    ];
+  })
 ];
 async function seedSubscriptionPlans() {
   for (const plan of DEFAULT_PLANS) {
@@ -10508,8 +12406,20 @@ process.on("unhandledRejection", (reason) => {
   console.error("[vercelHandler] Yakalanmam\u0131\u015F promise reddi:", reason);
 });
 var app = createApiApp();
-seedSubscriptionPlans().catch((error) => {
-  console.error("[vercelHandler] seedSubscriptionPlans ba\u015Far\u0131s\u0131z (DATABASE_URL kontrol et):", error);
+async function seedPlansWithRetry(attempts = 4) {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      await seedSubscriptionPlans();
+      return;
+    } catch (error) {
+      if (attempt === attempts) throw error;
+      console.warn(`[vercelHandler] seedSubscriptionPlans ${attempt}. deneme ba\u015Far\u0131s\u0131z, yeniden denenecek:`, error instanceof Error ? error.message : error);
+      await new Promise((resolve) => setTimeout(resolve, 1e3 * 2 ** attempt));
+    }
+  }
+}
+seedPlansWithRetry().catch((error) => {
+  console.error("[vercelHandler] seedSubscriptionPlans ba\u015Far\u0131s\u0131z (DATABASE_URL kontrol et; elle: scripts/seed-plans.ts):", error);
 });
 var vercelHandler_default = app;
 export {

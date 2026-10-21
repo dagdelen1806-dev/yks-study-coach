@@ -53,7 +53,7 @@ export async function saveClassSchedule(userId: number, schedule: ClassSchedule)
   await db.transaction(async (tx) => {
     await tx.delete(classScheduleBlocks).where(eq(classScheduleBlocks.userId, userId));
     if (blocks.length) await tx.insert(classScheduleBlocks).values(blocks.map((block) => ({ ...block, userId })));
-    await tx.insert(studentProfiles).values({ userId, schoolPeriodsJson: periodsJson }).onDuplicateKeyUpdate({ set: { schoolPeriodsJson: periodsJson } });
+    await tx.insert(studentProfiles).values({ userId, schoolPeriodsJson: periodsJson }).onConflictDoUpdate({ target: studentProfiles.userId, set: { schoolPeriodsJson: periodsJson } });
   });
   return getClassSchedule(userId);
 }

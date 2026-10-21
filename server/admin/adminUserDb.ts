@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, inArray, isNull, like, lt, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, isNull, ilike, lt, or, sql } from "drizzle-orm";
 import { phoneFromOpenId } from "../_core/loginIdentifier";
 import { getDb, getStudentProfile } from "../db";
 import { getNoteStatsForAdmin } from "../notes/notesDb";
@@ -61,7 +61,7 @@ export async function listUsersForAdminPaginated(filters: AdminUserListFilters):
     const term = `%${filters.search.trim().replace(/[%_]/g, (char) => `\\${char}`)}%`;
     // Telefon `openId`'de tutulduğu için (bkz. phoneFromOpenId) oradan da aranır; 0555… → 555… gibi baştaki 0 atılır.
     const digits = filters.search.replace(/\D/g, "").replace(/^0/, "");
-    conditions.push(or(like(users.name, term), like(users.email, term), ...(digits.length >= 4 ? [like(users.openId, `dev_phone_%${digits}%`)] : [])));
+    conditions.push(or(ilike(users.name, term), ilike(users.email, term), ...(digits.length >= 4 ? [ilike(users.openId, `dev_phone_%${digits}%`)] : [])));
   }
   if (filters.approvalStatus) conditions.push(eq(users.approvalStatus, filters.approvalStatus));
   if (filters.accountStatus) conditions.push(eq(users.accountStatus, filters.accountStatus));
@@ -93,8 +93,8 @@ export async function listUsersForAdminPaginated(filters: AdminUserListFilters):
 
   const [topicAgg, examAgg, studyAgg] = ids.length
     ? await Promise.all([
-        db.select({ userId: topicProgress.userId, avgProgress: sql<string>`avg(${topicProgress.progress})`, topicCount: sql<number>`count(*)` }).from(topicProgress).where(inArray(topicProgress.userId, ids)).groupBy(topicProgress.userId),
-        db.select({ userId: userMockExams.userId, examCount: sql<number>`count(*)`, latestNet: sql<string>`max(${userMockExams.net})` }).from(userMockExams).where(inArray(userMockExams.userId, ids)).groupBy(userMockExams.userId),
+        db.select({ userId: topicProgress.userId, avgProgress: sql<string>`avg(${topicProgress.progress})`, topicCount: sql<number>`count(*)::int` }).from(topicProgress).where(inArray(topicProgress.userId, ids)).groupBy(topicProgress.userId),
+        db.select({ userId: userMockExams.userId, examCount: sql<number>`count(*)::int`, latestNet: sql<string>`max(${userMockExams.net})` }).from(userMockExams).where(inArray(userMockExams.userId, ids)).groupBy(userMockExams.userId),
         db.select({ userId: topicStudyLogs.userId, totalMinutes: sql<string>`sum(${topicStudyLogs.minutes})` }).from(topicStudyLogs).where(inArray(topicStudyLogs.userId, ids)).groupBy(topicStudyLogs.userId),
       ])
     : [[], [], []];

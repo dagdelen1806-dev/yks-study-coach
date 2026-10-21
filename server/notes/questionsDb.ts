@@ -131,7 +131,7 @@ export async function createQuestion(userId: number, input: CreateQuestionInput)
   await db
     .insert(notebookQuestions)
     .values({ userId, noteId: saved.id, ...fields, aiTopicId: input.aiTopicId ?? null, nextReviewAt: firstReviewAt(now) })
-    .onDuplicateKeyUpdate({ set: fields });
+    .onConflictDoUpdate({ target: notebookQuestions.noteId, set: fields });
   const [row] = await db.select({ id: notebookQuestions.id }).from(notebookQuestions).where(and(eq(notebookQuestions.userId, userId), eq(notebookQuestions.noteId, saved.id))).limit(1);
   if (!row) throw new NoteError("Soru kaydedilemedi.");
   return (await getQuestion(userId, row.id))!;
@@ -324,7 +324,7 @@ async function todaysReviewTask(db: Db, userId: number) {
 const dueCondition = () => and(ne(notebookQuestions.status, "mastered"), isNotNull(notebookQuestions.nextReviewAt), lte(notebookQuestions.nextReviewAt, endOfToday()))!;
 
 async function countDue(db: Db, userId: number, subject?: SubjectScope) {
-  const [row] = await db.select({ count: sql<number>`COUNT(*)` }).from(notebookQuestions).where(and(eq(notebookQuestions.userId, userId), dueCondition(), ...questionSubject(subject)));
+  const [row] = await db.select({ count: sql<number>`COUNT(*)::int` }).from(notebookQuestions).where(and(eq(notebookQuestions.userId, userId), dueCondition(), ...questionSubject(subject)));
   return Number(row?.count ?? 0);
 }
 
@@ -334,7 +334,7 @@ export async function getReviewSummary(userId: number, subject?: SubjectScope) {
   const [due, task, totals] = await Promise.all([
     countDue(db, userId, subject),
     todaysReviewTask(db, userId),
-    db.select({ status: notebookQuestions.status, count: sql<number>`COUNT(*)` }).from(notebookQuestions).where(and(eq(notebookQuestions.userId, userId), ...questionSubject(subject))).groupBy(notebookQuestions.status),
+    db.select({ status: notebookQuestions.status, count: sql<number>`COUNT(*)::int` }).from(notebookQuestions).where(and(eq(notebookQuestions.userId, userId), ...questionSubject(subject))).groupBy(notebookQuestions.status),
   ]);
   const byStatus = Object.fromEntries(totals.map((row) => [row.status, Number(row.count)])) as Partial<Record<QuestionStatus, number>>;
   const reviewCount = Math.min(due, MAX_QUESTIONS_PER_REVIEW);
@@ -385,10 +385,11 @@ export async function finishReviewSession(userId: number, input: { minutes: numb
 /** Ders başına not, soru ve bugün tekrar bekleyen soru sayısı (sekme rozetleri). subject = null → "Genel". */
 export async function getSubjectSummary(userId: number) {
   const db = await requireDb();
-  const isQuestion = sql<number>`(${notes.templateKey} <=> ${QUESTION_TEMPLATE_KEY})`;
+  // Sabit metin parametre değil düz yazılır: PG, SELECT ve GROUP BY'daki ifadeyi ayrı parametrelerle aynı saymaz.
+  const isQuestion = sql<number>`(${notes.templateKey} IS NOT DISTINCT FROM ${sql.raw(`'${QUESTION_TEMPLATE_KEY}'`)})::int`;
   const [noteRows, dueRows] = await Promise.all([
-    db.select({ subject: notes.subject, isQuestion, count: sql<number>`COUNT(*)` }).from(notes).where(and(eq(notes.userId, userId), eq(notes.status, "active"))).groupBy(notes.subject, isQuestion),
-    db.select({ subject: notebookQuestions.subject, count: sql<number>`COUNT(*)` }).from(notebookQuestions).where(and(eq(notebookQuestions.userId, userId), dueCondition())).groupBy(notebookQuestions.subject),
+    db.select({ subject: notes.subject, isQuestion, count: sql<number>`COUNT(*)::int` }).from(notes).where(and(eq(notes.userId, userId), eq(notes.status, "active"))).groupBy(notes.subject, isQuestion),
+    db.select({ subject: notebookQuestions.subject, count: sql<number>`COUNT(*)::int` }).from(notebookQuestions).where(and(eq(notebookQuestions.userId, userId), dueCondition())).groupBy(notebookQuestions.subject),
   ]);
   const bySubject = new Map<string | null, { subject: string | null; notes: number; questions: number; due: number }>();
   const entry = (subject: string | null) => { const key = subject?.trim() || null; const found = bySubject.get(key) ?? { subject: key, notes: 0, questions: 0, due: 0 }; bySubject.set(key, found); return found; };

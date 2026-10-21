@@ -28,7 +28,7 @@ export async function saveSubscription(userId: number, subscription: BrowserSubs
   const db = await getDb();
   if (!db) return;
   const values = { userId, endpoint: subscription.endpoint, p256dh: subscription.keys.p256dh, auth: subscription.keys.auth, userAgent: userAgent?.slice(0, 300) ?? null };
-  await db.insert(pushSubscriptions).values(values).onDuplicateKeyUpdate({ set: { userId, p256dh: values.p256dh, auth: values.auth, userAgent: values.userAgent } });
+  await db.insert(pushSubscriptions).values(values).onConflictDoUpdate({ target: pushSubscriptions.endpoint, set: { userId, p256dh: values.p256dh, auth: values.auth, userAgent: values.userAgent } });
 }
 
 export async function removeSubscription(userId: number, endpoint: string) {

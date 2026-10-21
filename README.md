@@ -6,7 +6,7 @@ YKS öğrencilerinin konu ilerlemesini, deneme sonuçlarını, kaynak kullanım�
 
 - Node.js 20 veya üzeri
 - pnpm 9 veya üzeri
-- MySQL/TiDB veritabanı (kalıcı hesap, deneme, kaynak ve takvim verileri için)
+- PostgreSQL 17 veritabanı (canlıda Supabase; kalıcı hesap, deneme, kaynak ve takvim verileri için)
 - Yapay zekâ özellikleri (fotoğraf okuma, AI plan, not AI, ses → metin) için OpenAI uyumlu bir sağlayıcı anahtarı (`LLM_API_KEY`)
 
 ## VS Code ile açma
@@ -56,7 +56,7 @@ pnpm resource-catalog --source=fixture --dry-run   # Kaynak kataloğu senkroniza
 
 `env.template` yalnızca değişken adlarını ve örnek değerleri içerir. Gerçek anahtarları veya veritabanı parolalarını ZIP içine koymayın.
 
-- `DATABASE_URL`: MySQL/TiDB bağlantı adresi.
+- `DATABASE_URL`: PostgreSQL bağlantı adresi (`postgres://...`). Yerel test için: `docker run -d --name pusula-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=pusula -p 127.0.0.1:5433:5432 postgres:17.6` → `postgres://postgres:postgres@127.0.0.1:5433/pusula`.
 - `JWT_SECRET`: Oturum çerezlerini imzalamak için rastgele uzun gizli değer.
 - `ADMIN_LOGINS`: Admin olacak e-posta/telefon listesi.
 - `APP_URL`, `BREVO_API_KEY` / `RESEND_API_KEY`, `MAIL_FROM`: E-posta doğrulaması.

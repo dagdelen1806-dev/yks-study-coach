@@ -22,8 +22,8 @@ export async function addReadingBook(userId: number, input: { title: string; aut
   if (!db) throw new ReadingError("Veritabanına ulaşılamadı.");
   const [{ total }] = await db.select({ total: count() }).from(readingBooks).where(eq(readingBooks.userId, userId));
   if (total >= MAX_READING_BOOKS) throw new ReadingError(`En fazla ${MAX_READING_BOOKS} okuma kitabı eklenebilir.`);
-  const result = await db.insert(readingBooks).values({ userId, title: input.title.trim(), author: input.author?.trim() || null, totalPages: input.totalPages || null });
-  const [row] = await db.select(columns).from(readingBooks).where(and(eq(readingBooks.id, Number(result[0].insertId)), eq(readingBooks.userId, userId))).limit(1);
+  const result = await db.insert(readingBooks).values({ userId, title: input.title.trim(), author: input.author?.trim() || null, totalPages: input.totalPages || null }).returning({ id: readingBooks.id });
+  const [row] = await db.select(columns).from(readingBooks).where(and(eq(readingBooks.id, Number(result[0].id)), eq(readingBooks.userId, userId))).limit(1);
   return row;
 }
 

@@ -15,7 +15,7 @@ async function sumCredits(orgId: number, since: Date, userId?: number): Promise<
   if (!db) return 0;
   const conditions = [eq(organizationCreditUsage.orgId, orgId), gte(organizationCreditUsage.usedAt, since)];
   if (userId) conditions.push(eq(organizationCreditUsage.userId, userId));
-  const [row] = await db.select({ total: sql<number>`COALESCE(SUM(${organizationCreditUsage.credits}), 0)` }).from(organizationCreditUsage).where(and(...conditions));
+  const [row] = await db.select({ total: sql<number>`COALESCE(SUM(${organizationCreditUsage.credits}), 0)`.mapWith(Number) }).from(organizationCreditUsage).where(and(...conditions));
   return Number(row?.total ?? 0);
 }
 
@@ -49,8 +49,8 @@ export async function orgCreditReport(orgId: number, now = new Date()) {
   if (!db) return { periodStart: creditPeriodStart(now), used: 0, byFeature: [], byStudent: [] };
   const since = creditPeriodStart(now);
   const scope = and(eq(organizationCreditUsage.orgId, orgId), gte(organizationCreditUsage.usedAt, since));
-  const total = sql<number>`SUM(${organizationCreditUsage.credits})`;
-  const count = sql<number>`COUNT(*)`;
+  const total = sql<number>`SUM(${organizationCreditUsage.credits})`.mapWith(Number);
+  const count = sql<number>`COUNT(*)::int`;
   const [byFeature, byStudent] = await Promise.all([
     db.select({ featureKey: organizationCreditUsage.featureKey, credits: total, uses: count }).from(organizationCreditUsage).where(scope).groupBy(organizationCreditUsage.featureKey),
     db.select({ userId: organizationCreditUsage.userId, name: users.name, preferredName: studentProfiles.preferredName, credits: total, uses: count })

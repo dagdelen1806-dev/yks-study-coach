@@ -85,7 +85,7 @@ export async function ensureFreeSubscription(userId: number): Promise<Subscripti
   if (existing) return existing;
   const freePlan = await getPlanByCode("FREE");
   if (!freePlan) throw new Error("FREE planı bulunamadı — önce seedSubscriptionPlans() çalıştırılmalı");
-  await db.insert(subscriptions).values({ userId, planId: freePlan.id, status: "active", provider: null }).onDuplicateKeyUpdate({ set: { updatedAt: new Date() } });
+  await db.insert(subscriptions).values({ userId, planId: freePlan.id, status: "active", provider: null }).onConflictDoUpdate({ target: subscriptions.userId, set: { updatedAt: new Date() } });
   const created = await getSubscriptionByUserId(userId);
   if (!created) throw new Error("Free subscription oluşturulamadı");
   return created;
@@ -150,8 +150,8 @@ export async function listAllUsersForAdmin(): Promise<AdminUserOverview[]> {
 
   const [allUsers, topicAgg, examAgg, studyAgg, subs] = await Promise.all([
     db.select({ id: users.id, name: users.name, email: users.email, openId: users.openId, role: users.role, approvalStatus: users.approvalStatus, accountStatus: users.accountStatus, createdAt: users.createdAt, lastSignedIn: users.lastSignedIn }).from(users).orderBy(desc(users.createdAt)),
-    db.select({ userId: topicProgress.userId, avgProgress: sql<string>`avg(${topicProgress.progress})`, topicCount: sql<number>`count(*)` }).from(topicProgress).groupBy(topicProgress.userId),
-    db.select({ userId: userMockExams.userId, examCount: sql<number>`count(*)`, latestNet: sql<string>`max(${userMockExams.net})` }).from(userMockExams).groupBy(userMockExams.userId),
+    db.select({ userId: topicProgress.userId, avgProgress: sql<string>`avg(${topicProgress.progress})`, topicCount: sql<number>`count(*)::int` }).from(topicProgress).groupBy(topicProgress.userId),
+    db.select({ userId: userMockExams.userId, examCount: sql<number>`count(*)::int`, latestNet: sql<string>`max(${userMockExams.net})` }).from(userMockExams).groupBy(userMockExams.userId),
     db.select({ userId: topicStudyLogs.userId, totalMinutes: sql<string>`sum(${topicStudyLogs.minutes})` }).from(topicStudyLogs).groupBy(topicStudyLogs.userId),
     listAllSubscriptionsForAdmin(),
   ]);
@@ -195,8 +195,8 @@ export async function updateSubscription(userId: number, patch: Partial<InsertSu
 export async function createPayment(input: InsertPayment): Promise<number> {
   const db = await getDb();
   if (!db) throw new Error("Veritabanı bağlantısı yok");
-  const result = await db.insert(payments).values(input);
-  return Number(result[0].insertId);
+  const result = await db.insert(payments).values(input).returning({ id: payments.id });
+  return Number(result[0].id);
 }
 
 export async function updatePaymentStatus(paymentId: number, patch: Partial<InsertPayment>): Promise<void> {
@@ -239,8 +239,8 @@ export async function recordEventReceived(input: InsertPaymentEvent): Promise<nu
   const db = await getDb();
   if (!db) return null;
   try {
-    const result = await db.insert(paymentEvents).values(input);
-    return Number(result[0].insertId);
+    const result = await db.insert(paymentEvents).values(input).returning({ id: paymentEvents.id });
+    return Number(result[0].id);
   } catch {
     // UNIQUE(provider, eventId) çakışması — event zaten var, mevcut satırın id'sini döndür.
     const rows = await db.select({ id: paymentEvents.id }).from(paymentEvents).where(and(eq(paymentEvents.provider, input.provider), eq(paymentEvents.eventId, input.eventId))).limit(1);

@@ -52,7 +52,7 @@ Kendi `.env` dosyandaki (`env.template`'teki) isimlerle birebir aynı isimleri k
 
 | Değişken | Not |
 |---|---|
-| `DATABASE_URL` | **Bulutta çalışan** bir MySQL bağlantı string'i olmalı — bkz. aşağıdaki 3. adım. Yerel Laragon MySQL'e Vercel'den erişilemez. |
+| `DATABASE_URL` | Supabase PostgreSQL bağlantısı, **havuzlayıcı (transaction pooler, port 6543)** adresi — bkz. aşağıdaki 3. adım. |
 | `JWT_SECRET` | Uzun, rastgele bir string. |
 | `ADMIN_LOGINS` | Admin olacak e-posta/telefon (virgülle birden fazla yazılabilir, ör. `ben@ornek.com`). E-posta hesabı, adresini **doğruladığı anda** admin + onaylı olur (doğrulanmadan asla). Telefon için doğrulama yok — telefonla admin tanımlarsan deploy'dan hemen sonra o numarayla kayıt ol. |
 | `APP_URL` | **Zorunlu.** Doğrulama linklerinin kök adresi, `https://` ile: ör. `https://yks-study-coach.vercel.app` (kendi alan adın varsa o). Sona `/` koyma. |
@@ -70,21 +70,24 @@ Kendi `.env` dosyandaki (`env.template`'teki) isimlerle birebir aynı isimleri k
 
 **Önemli:** Bu değerleri asla `.env` dosyasından kopyalayıp repoya commit etme — `.gitignore` zaten `.env*` dosyalarını hariç tutuyor, sadece Vercel'in env var ekranını kullan.
 
-## 3) Bulutta MySQL
+## 3) Bulutta veritabanı: Supabase PostgreSQL
 
-Yerel bilgisayarındaki Laragon MySQL'e internetten erişilemez; Vercel'in
-sunucularının bağlanabileceği, herkese açık bir MySQL lazım. Seçenekler:
+Ekim 2026'ya kadar Railway MySQL kullanıldı; o döneme ait migration'lar
+`drizzle/mysql-legacy/` altında arşivde, aşağıdaki MySQL migration notları da
+yalnızca geçmiş içindir. Taşıma betikleri: `scripts/pg-migration/`.
 
-- **PlanetScale** (MySQL uyumlu, ücretsiz katmanı var) — en kolay yol.
-- **Railway MySQL** ya da **Aiven MySQL**.
-- Kendi VPS'inde MySQL (güvenlik grubunda Vercel'in çıkış IP'lerine izin vermen gerekir — daha zahmetli, önerilmez).
+Supabase projesi (Pro plan, bölge **Frankfurt / eu-central-1**; Vercel
+fonksiyonları da `fra1`'de) → **Connect** → iki adres:
 
-Bağlantı string'ini aldıktan sonra:
+- **Transaction pooler** (port **6543**): uygulamanın `DATABASE_URL`'i, Vercel'e bu girer.
+  Sunucusuz fonksiyonlar çok sayıda kısa bağlantı açar; havuzlayıcı bunları toplar.
+  Kod bu kipte hazırlanmış sorgu kullanmaz (`prepare: false`, `server/db.ts`).
+- **Session pooler / direct** (port **5432**): yalnızca migration ve veri taşıma için,
+  kendi bilgisayarından.
 
-1. `DATABASE_URL` olarak Vercel'e ekle (2. adım).
-2. Migration'ları bir kereliğine o veritabanına uygula — kendi bilgisayarından:
+Migration'ları uygulamak için:
    ```bash
-   DATABASE_URL="<bulut-mysql-baglanti-stringi>" npx drizzle-kit migrate
+   DATABASE_URL="<supabase-session-baglanti-adresi>" npx drizzle-kit migrate
    ```
 
 > **E-posta doğrulaması eklendiğinde (migration `0014_email_verification`):**

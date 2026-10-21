@@ -8,7 +8,8 @@ if (!connectionString) {
 export default defineConfig({
   schema: "./drizzle/schema.ts",
   out: "./drizzle",
-  dialect: "mysql",
+  // Ekim 2026'da MySQL'den (Railway) Supabase PostgreSQL'e geçildi; eski MySQL migration'ları drizzle/mysql-legacy/ altında.
+  dialect: "postgresql",
   dbCredentials: {
     url: connectionString,
   },

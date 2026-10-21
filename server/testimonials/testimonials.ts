@@ -30,7 +30,7 @@ export async function saveMyTestimonial(userId: number, input: { displayName: st
   await db
     .insert(testimonials)
     .values({ userId, ...input, status: "pending", updatedAt: now })
-    .onDuplicateKeyUpdate({ set: { ...input, status: "pending", updatedAt: now, reviewedAt: null, reviewedBy: null } });
+    .onConflictDoUpdate({ target: testimonials.userId, set: { ...input, status: "pending", updatedAt: now, reviewedAt: null, reviewedBy: null } });
   return getMyTestimonial(userId);
 }
 

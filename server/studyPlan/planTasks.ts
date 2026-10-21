@@ -44,8 +44,8 @@ export async function insertPlanTask(
   if (!planId) {
     const weekStart = new Date(`${input.date}T00:00:00Z`);
     const weekEnd = new Date(weekStart.getTime() + 6 * 86_400_000 + 86_399_000);
-    const result = await db.insert(studyPlans).values({ userId, title: input.planTitle, weekStart, weekEnd, summary: input.planSummary, source: "manual" });
-    planId = Number(result[0].insertId);
+    const result = await db.insert(studyPlans).values({ userId, title: input.planTitle, weekStart, weekEnd, summary: input.planSummary, source: "manual" }).returning({ id: studyPlans.id });
+    planId = Number(result[0].id);
   }
   const result = await db.insert(studyPlanSessions).values({
     planId,
@@ -61,6 +61,6 @@ export async function insertPlanTask(
     targetPages: input.targetPages ?? null,
     targetTests: input.targetTests ?? null,
     sourceBookId: input.sourceBookId ?? null,
-  });
-  return { sessionId: Number(result[0].insertId), date: input.date };
+  }).returning({ id: studyPlanSessions.id });
+  return { sessionId: Number(result[0].id), date: input.date };
 }

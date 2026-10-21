@@ -45,8 +45,8 @@ async function main() {
       await db.update(users).set({ name, approvalStatus: "approved", emailVerifiedAt: new Date(), passwordHash: hashPassword(PASSWORD) }).where(eq(users.id, existing.id));
       return existing.id;
     }
-    const result = await db.insert(users).values({ openId: identifier.openId, name, email, loginMethod: "dev_email", passwordHash: hashPassword(PASSWORD), approvalStatus: "approved", approvedAt: new Date(), emailVerifiedAt: new Date(), lastSignedIn: new Date() });
-    return Number(result[0].insertId);
+    const result = await db.insert(users).values({ openId: identifier.openId, name, email, loginMethod: "dev_email", passwordHash: hashPassword(PASSWORD), approvalStatus: "approved", approvedAt: new Date(), emailVerifiedAt: new Date(), lastSignedIn: new Date() }).returning({ id: users.id });
+    return Number(result[0].id);
   };
 
   // Eski test kurumunu tümüyle sil.
@@ -58,8 +58,8 @@ async function main() {
     await db.delete(organizations).where(eq(organizations.id, old.id));
   }
 
-  const orgResult = await db.insert(organizations).values({ name: "Test Dershanesi", slug: SLUG, plan: "standard", membershipStartsAt: new Date(), membershipEndsAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), aiCreditsMonthly: 5000, city: "Ankara", district: "Çankaya", contactEmail: "kvkk@test.local" });
-  const orgId = Number(orgResult[0].insertId);
+  const orgResult = await db.insert(organizations).values({ name: "Test Dershanesi", slug: SLUG, plan: "standard", membershipStartsAt: new Date(), membershipEndsAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), aiCreditsMonthly: 5000, city: "Ankara", district: "Çankaya", contactEmail: "kvkk@test.local" }).returning({ id: organizations.id });
+  const orgId = Number(orgResult[0].id);
 
   const staffIds: Record<string, number> = {};
   for (const person of staff) {
@@ -83,8 +83,8 @@ async function main() {
   const existingProfile = await db.select({ userId: studentProfiles.userId }).from(studentProfiles).where(eq(studentProfiles.userId, riskId)).limit(1);
   if (!existingProfile.length) throw new Error("Öğrenci profili yazılmadı");
 
-  const sayClass = Number((await db.insert(organizationClasses).values({ orgId, name: "12-A Sayısal", gradeLevel: "12" }))[0].insertId);
-  const eaClass = Number((await db.insert(organizationClasses).values({ orgId, name: "12-B Eşit Ağırlık", gradeLevel: "12" }))[0].insertId);
+  const sayClass = (await db.insert(organizationClasses).values({ orgId, name: "12-A Sayısal", gradeLevel: "12" }).returning({ id: organizationClasses.id }))[0].id;
+  const eaClass = (await db.insert(organizationClasses).values({ orgId, name: "12-B Eşit Ağırlık", gradeLevel: "12" }).returning({ id: organizationClasses.id }))[0].id;
   await db.insert(classStudents).values([...studentIds.slice(0, 3).map((id) => ({ classId: sayClass, studentUserId: id })), ...studentIds.slice(3).map((id) => ({ classId: eaClass, studentUserId: id }))]);
 
   const murat = staffIds["ogretmen1@test.local"];

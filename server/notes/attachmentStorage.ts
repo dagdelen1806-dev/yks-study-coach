@@ -67,8 +67,8 @@ export const databaseAttachmentStorage: AttachmentStorage = {
     if (used + input.data.byteLength > notesConfig.attachments.perUserQuotaBytes) {
       throw new AttachmentError("Defterindeki ek alanı doldu. Eski notlardaki bazı fotoğraf/ses kayıtlarını silip tekrar dener misin?");
     }
-    const result = await db.insert(noteAttachments).values({ userId, kind: input.kind, mimeType: input.mimeType, byteSize: input.data.byteLength, data: input.data, durationSec: input.durationSec ?? null });
-    return { id: Number(result[0].insertId) };
+    const result = await db.insert(noteAttachments).values({ userId, kind: input.kind, mimeType: input.mimeType, byteSize: input.data.byteLength, data: input.data, durationSec: input.durationSec ?? null }).returning({ id: noteAttachments.id });
+    return { id: Number(result[0].id) };
   },
   async get(userId, id) {
     const db = await requireDb();

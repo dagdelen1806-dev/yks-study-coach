@@ -42,7 +42,7 @@ export async function writeOcrCache(userId: number, hash: string, result: unknow
     const db = await getDb();
     if (!db) return;
     const resultJson = JSON.stringify(result);
-    await db.insert(ocrPageCache).values({ userId, imageHash: hash, pipelineVersion: OCR_PIPELINE_VERSION, resultJson }).onDuplicateKeyUpdate({ set: { resultJson, createdAt: new Date() } });
+    await db.insert(ocrPageCache).values({ userId, imageHash: hash, pipelineVersion: OCR_PIPELINE_VERSION, resultJson }).onConflictDoUpdate({ target: [ocrPageCache.userId, ocrPageCache.imageHash, ocrPageCache.pipelineVersion], set: { resultJson, createdAt: new Date() } });
     // Eski kayıtlar fırsat buldukça temizlenir.
     await db.delete(ocrPageCache).where(and(eq(ocrPageCache.userId, userId), lt(ocrPageCache.createdAt, new Date(Date.now() - CACHE_TTL_MS))));
   } catch (error) {

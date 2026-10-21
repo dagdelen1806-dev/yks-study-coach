@@ -1,21 +1,7 @@
-import { and, asc, desc, eq, gte, inArray, isNull, like, lte, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
+import { and, asc, desc, eq, gte, inArray, isNull, ilike, lte, sql } from "drizzle-orm";
 import { bookCurriculumTopics, bookInventory, bookOffers, catalogBooks, publishers, yksTopics } from "../../drizzle/schema";
-import { ENV } from "../_core/env";
+import { getDb } from "../db";
 import type { BookType, DifficultyLabel, ExamScope } from "./types";
-
-let _db: ReturnType<typeof drizzle> | null = null;
-async function getDb() {
-  if (!_db && ENV.databaseUrl) {
-    try {
-      _db = drizzle(ENV.databaseUrl);
-    } catch (error) {
-      console.warn("[ResourceCatalog] Failed to connect:", error);
-      _db = null;
-    }
-  }
-  return _db;
-}
 
 export type CatalogListFilters = {
   exam?: ExamScope;
@@ -67,7 +53,7 @@ export async function listCatalogBooks(filters: CatalogListFilters, page: Catalo
   if (filters.publisherId) conditions.push(eq(catalogBooks.publisherId, filters.publisherId));
   if (filters.bookType) conditions.push(eq(catalogBooks.bookType, filters.bookType));
   if (filters.difficulty) conditions.push(eq(catalogBooks.difficultyLabel, filters.difficulty));
-  if (filters.search) conditions.push(like(catalogBooks.name, `%${filters.search}%`));
+  if (filters.search) conditions.push(ilike(catalogBooks.name, `%${filters.search}%`));
 
   let bookIdsForTopic: number[] | null = null;
   if (filters.topic) {
@@ -83,7 +69,7 @@ export async function listCatalogBooks(filters: CatalogListFilters, page: Catalo
 
   const where = and(...conditions);
 
-  const [{ count }] = await db.select({ count: sql<number>`count(*)` }).from(catalogBooks).where(where);
+  const [{ count }] = await db.select({ count: sql<number>`count(*)::int` }).from(catalogBooks).where(where);
 
   let rows = await db.select().from(catalogBooks).where(where).orderBy(desc(catalogBooks.createdAt)).limit(pageSize).offset(offset);
 
@@ -165,10 +151,10 @@ export async function listCatalogBooksForAdmin(filters: { search?: string; subje
   const conditions = [];
   if (filters.active !== undefined) conditions.push(eq(catalogBooks.active, filters.active ? 1 : 0));
   if (filters.subject) conditions.push(eq(catalogBooks.subject, filters.subject));
-  if (filters.search) conditions.push(like(catalogBooks.name, `%${filters.search}%`));
+  if (filters.search) conditions.push(ilike(catalogBooks.name, `%${filters.search}%`));
   const where = conditions.length ? and(...conditions) : undefined;
 
-  const countQuery = db.select({ count: sql<number>`count(*)` }).from(catalogBooks);
+  const countQuery = db.select({ count: sql<number>`count(*)::int` }).from(catalogBooks);
   const [{ count }] = await (where ? countQuery.where(where) : countQuery);
 
   const rowsQuery = db.select().from(catalogBooks).orderBy(desc(catalogBooks.createdAt)).limit(pageSize).offset(offset);

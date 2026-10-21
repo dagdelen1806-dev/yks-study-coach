@@ -1,7 +1,7 @@
 name: Duman testi
 
 # Her push ve PR'da: birim testleri + gerçek tarayıcıda kritik akışlar (e2e/smoke.spec.ts).
-# Yapay zekâ ve mail çağrısı yapmaz; boş bir MySQL'e migration'lar ve örnek kurum yazılır.
+# Yapay zekâ ve mail çağrısı yapmaz; boş bir PostgreSQL'e (Supabase ile aynı ana sürüm) migration'lar ve örnek kurum yazılır.
 on:
   push:
     branches: [main]
@@ -18,14 +18,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
-      mysql:
-        image: mysql:8.4
+      postgres:
+        image: postgres:17.6
         env:
-          MYSQL_ROOT_PASSWORD: root
-          MYSQL_DATABASE: pusula_e2e
-        ports: ["3306:3306"]
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pusula_e2e
+        ports: ["5432:5432"]
         options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
+          --health-cmd="pg_isready -U postgres"
           --health-interval=5s --health-timeout=5s --health-retries=20
     steps:
       - uses: actions/checkout@v4
@@ -38,7 +38,7 @@ jobs:
       - name: Test ortamı (.env)
         run: |
           {
-            echo "DATABASE_URL=mysql://root:root@127.0.0.1:3306/pusula_e2e"
+            echo "DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/pusula_e2e"
             echo "JWT_SECRET=e2e-only-not-a-real-secret-0123456789abcdef"
             echo "VITE_APP_ID=pusula-e2e"
           } > .env
@@ -46,7 +46,7 @@ jobs:
       - name: Migration'lar
         run: npx drizzle-kit migrate
         env:
-          DATABASE_URL: mysql://root:root@127.0.0.1:3306/pusula_e2e
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/pusula_e2e
       - run: pnpm test
       - run: npx playwright install --with-deps chromium
       - run: pnpm test:e2e

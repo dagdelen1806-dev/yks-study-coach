@@ -114,8 +114,8 @@ export async function setMemberRole(orgId: number, userId: number, role: OrgRole
 /** Personelin branşı (Ayarlar → Öğretmenler). */
 export async function setMemberSubject(orgId: number, userId: number, subject: string | null): Promise<boolean> {
   const db = await requireDb();
-  const result = await db.update(organizationMembers).set({ subject }).where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, userId), eq(organizationMembers.status, "active"), sql`${organizationMembers.role} <> 'student'`));
-  return Number((result[0] as { affectedRows?: number }).affectedRows ?? 0) > 0;
+  const result = await db.update(organizationMembers).set({ subject }).where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, userId), eq(organizationMembers.status, "active"), sql`${organizationMembers.role} <> 'student'`)).returning();
+  return result.length > 0;
 }
 
 /** Üyeliği bitirir ve kurumdaki tüm erişim bağlarını (atama, sınıf) kaldırır; öğrencinin kendi verisine dokunmaz. */
@@ -131,8 +131,8 @@ export async function endMembership(orgId: number, userId: number, status: "left
 
 export async function createInvitation(input: { orgId: number; role: InvitableRole; codeHash: string; note: string | null; subject?: string | null; expiresAt: Date; maxUses: number; createdBy: number }) {
   const db = await requireDb();
-  const result = await db.insert(organizationInvitations).values(input);
-  return Number(result[0].insertId);
+  const result = await db.insert(organizationInvitations).values(input).returning({ id: organizationInvitations.id });
+  return Number(result[0].id);
 }
 
 export async function listInvitations(orgId: number) {
@@ -143,8 +143,8 @@ export async function listInvitations(orgId: number) {
 
 export async function revokeInvitation(orgId: number, id: number): Promise<boolean> {
   const db = await requireDb();
-  const result = await db.update(organizationInvitations).set({ revokedAt: new Date() }).where(and(eq(organizationInvitations.orgId, orgId), eq(organizationInvitations.id, id), isNull(organizationInvitations.revokedAt)));
-  return Number((result[0] as { affectedRows?: number }).affectedRows ?? 0) > 0;
+  const result = await db.update(organizationInvitations).set({ revokedAt: new Date() }).where(and(eq(organizationInvitations.orgId, orgId), eq(organizationInvitations.id, id), isNull(organizationInvitations.revokedAt))).returning();
+  return result.length > 0;
 }
 
 export async function findInvitationByHash(codeHash: string) {
@@ -181,14 +181,14 @@ export type ClassFields = { name: string; gradeLevel: string | null; track: stri
 
 export async function createClass(orgId: number, fields: ClassFields) {
   const db = await requireDb();
-  const result = await db.insert(organizationClasses).values({ orgId, ...fields });
-  return Number(result[0].insertId);
+  const result = await db.insert(organizationClasses).values({ orgId, ...fields }).returning({ id: organizationClasses.id });
+  return Number(result[0].id);
 }
 
 export async function updateClass(orgId: number, classId: number, fields: ClassFields): Promise<boolean> {
   const db = await requireDb();
-  const result = await db.update(organizationClasses).set(fields).where(and(eq(organizationClasses.orgId, orgId), eq(organizationClasses.id, classId)));
-  return Number((result[0] as { affectedRows?: number }).affectedRows ?? 0) > 0;
+  const result = await db.update(organizationClasses).set(fields).where(and(eq(organizationClasses.orgId, orgId), eq(organizationClasses.id, classId))).returning();
+  return result.length > 0;
 }
 
 export async function deleteClass(orgId: number, classId: number): Promise<boolean> {
@@ -222,7 +222,7 @@ export async function setTeacherStudents(orgId: number, teacherUserId: number, s
   const valid = studentUserIds.length ? (await listMembers(orgId, { role: "student" })).map((member) => member.userId).filter((id) => studentUserIds.includes(id)) : [];
   await db.update(teacherAssignments).set({ active: 0 }).where(and(eq(teacherAssignments.orgId, orgId), eq(teacherAssignments.teacherUserId, teacherUserId)));
   for (const studentUserId of valid) {
-    await db.insert(teacherAssignments).values({ orgId, teacherUserId, studentUserId, active: 1 }).onDuplicateKeyUpdate({ set: { active: 1 } });
+    await db.insert(teacherAssignments).values({ orgId, teacherUserId, studentUserId, active: 1 }).onConflictDoUpdate({ target: [teacherAssignments.orgId, teacherAssignments.teacherUserId, teacherAssignments.studentUserId], set: { active: 1 } });
   }
   return valid;
 }
@@ -238,8 +238,8 @@ export async function listNotes(orgId: number, studentUserId: number) {
 
 export async function createNote(input: { orgId: number; studentUserId: number; authorUserId: number; body: string; visibility: "staff" | "student" }) {
   const db = await requireDb();
-  const result = await db.insert(counselingNotes).values(input);
-  return Number(result[0].insertId);
+  const result = await db.insert(counselingNotes).values(input).returning({ id: counselingNotes.id });
+  return Number(result[0].id);
 }
 
 export async function getNote(orgId: number, id: number) {
@@ -290,7 +290,7 @@ export async function loadStudentSignals(studentUserIds: number[], weekStart: Da
     db.select({ userId: userMockExams.userId, exam: userMockExams.exam, examDate: userMockExams.examDate, net: userMockExams.net }).from(userMockExams).where(inArray(userMockExams.userId, studentUserIds)),
     db.select({ userId: topicStudyLogs.userId, studyDate: topicStudyLogs.studyDate, minutes: topicStudyLogs.minutes }).from(topicStudyLogs).where(and(inArray(topicStudyLogs.userId, studentUserIds), gte(topicStudyLogs.studyDate, logsSince))),
     db.select({ userId: studyPlanSessions.userId, status: studyPlanSessions.status, plannedMinutes: studyPlanSessions.plannedMinutes, actualMinutes: studyPlanSessions.actualMinutes, targetQuestions: studyPlanSessions.targetQuestions, actualQuestions: studyPlanSessions.actualQuestions, sessionDate: studyPlanSessions.sessionDate, rescheduledFrom: studyPlanSessions.rescheduledFrom }).from(studyPlanSessions).where(and(inArray(studyPlanSessions.userId, studentUserIds), gte(studyPlanSessions.sessionDate, weekStart), lt(studyPlanSessions.sessionDate, weekEnd))),
-    db.select({ userId: topicProgress.userId, count: sql<number>`COUNT(*)` }).from(topicProgress).where(and(inArray(topicProgress.userId, studentUserIds), eq(topicProgress.status, "weak"))).groupBy(topicProgress.userId),
+    db.select({ userId: topicProgress.userId, count: sql<number>`COUNT(*)::int` }).from(topicProgress).where(and(inArray(topicProgress.userId, studentUserIds), eq(topicProgress.status, "weak"))).groupBy(topicProgress.userId),
     db.select({ id: users.id, lastSignedIn: users.lastSignedIn }).from(users).where(inArray(users.id, studentUserIds)),
   ]);
   for (const row of exams) signals.get(row.userId)?.exams.push({ exam: row.exam, examDate: row.examDate, net: Number(row.net) });
@@ -316,9 +316,9 @@ export async function insertAssignedTask(input: { orgId: number; studentUserId: 
   const db = await requireDb();
   const dayStart = new Date(input.sessionDate); dayStart.setHours(0, 0, 0, 0);
   const dayEnd = new Date(dayStart); dayEnd.setDate(dayEnd.getDate() + 1);
-  const plan = await db.insert(studyPlans).values({ userId: input.studentUserId, title: "Öğretmenin atadığı görevler", weekStart: dayStart, weekEnd: dayEnd, summary: input.summary, source: "manual" });
-  const session = await db.insert(studyPlanSessions).values({ userId: input.studentUserId, planId: Number(plan[0].insertId), sessionDate: input.sessionDate, title: input.title, subject: input.subject, topic: input.topic, kind: input.kind, plannedMinutes: input.plannedMinutes, targetQuestions: input.targetQuestions, assignedByUserId: input.teacherUserId, assignedOrgId: input.orgId });
-  return Number(session[0].insertId);
+  const plan = await db.insert(studyPlans).values({ userId: input.studentUserId, title: "Öğretmenin atadığı görevler", weekStart: dayStart, weekEnd: dayEnd, summary: input.summary, source: "manual" }).returning({ id: studyPlans.id });
+  const session = await db.insert(studyPlanSessions).values({ userId: input.studentUserId, planId: Number(plan[0].id), sessionDate: input.sessionDate, title: input.title, subject: input.subject, topic: input.topic, kind: input.kind, plannedMinutes: input.plannedMinutes, targetQuestions: input.targetQuestions, assignedByUserId: input.teacherUserId, assignedOrgId: input.orgId }).returning({ id: studyPlanSessions.id });
+  return Number(session[0].id);
 }
 
 // --- Platform admini ----------------------------------------------------------
@@ -366,14 +366,14 @@ export async function updateOrganization(orgId: number, profile: OrganizationPro
 
 export async function createOrganization(name: string, slug: string) {
   const db = await requireDb();
-  const result = await db.insert(organizations).values({ name, slug });
-  return Number(result[0].insertId);
+  const result = await db.insert(organizations).values({ name, slug }).returning({ id: organizations.id });
+  return Number(result[0].id);
 }
 
 export async function listOrganizations() {
   const db = await requireDb();
   const rows = await db.select({ id: organizations.id, name: organizations.name, slug: organizations.slug, status: organizations.status, createdAt: organizations.createdAt, plan: organizations.plan, membershipStartsAt: organizations.membershipStartsAt, membershipEndsAt: organizations.membershipEndsAt, aiCreditsMonthly: organizations.aiCreditsMonthly }).from(organizations).orderBy(desc(organizations.createdAt));
-  const counts = rows.length ? await db.select({ orgId: organizationMembers.orgId, role: organizationMembers.role, count: sql<number>`COUNT(*)` }).from(organizationMembers).where(and(inArray(organizationMembers.orgId, rows.map((row) => row.id)), eq(organizationMembers.status, "active"))).groupBy(organizationMembers.orgId, organizationMembers.role) : [];
+  const counts = rows.length ? await db.select({ orgId: organizationMembers.orgId, role: organizationMembers.role, count: sql<number>`COUNT(*)::int` }).from(organizationMembers).where(and(inArray(organizationMembers.orgId, rows.map((row) => row.id)), eq(organizationMembers.status, "active"))).groupBy(organizationMembers.orgId, organizationMembers.role) : [];
   return rows.map((row) => ({ ...row, students: Number(counts.find((count) => count.orgId === row.id && count.role === "student")?.count ?? 0), staff: counts.filter((count) => count.orgId === row.id && count.role !== "student").reduce((sum, count) => sum + Number(count.count), 0) }));
 }
 
@@ -388,8 +388,8 @@ const upgradeColumns = { id: organizationUpgradeRequests.id, orgId: organization
 
 export async function createUpgradeRequest(input: { orgId: number; requestedBy: number; currentPlan: OrgPlan; requestedPlan: OrgPlan; note: string | null }) {
   const db = await requireDb();
-  const result = await db.insert(organizationUpgradeRequests).values(input);
-  return Number(result[0].insertId);
+  const result = await db.insert(organizationUpgradeRequests).values(input).returning({ id: organizationUpgradeRequests.id });
+  return Number(result[0].id);
 }
 
 /** Kurumun son talepleri (en yeni önce). */
@@ -400,8 +400,8 @@ export async function listOrgUpgradeRequests(orgId: number) {
 
 export async function cancelUpgradeRequest(orgId: number, requestId: number): Promise<boolean> {
   const db = await requireDb();
-  const result = await db.update(organizationUpgradeRequests).set({ status: "canceled", resolvedAt: new Date() }).where(and(eq(organizationUpgradeRequests.orgId, orgId), eq(organizationUpgradeRequests.id, requestId), eq(organizationUpgradeRequests.status, "pending")));
-  return Number((result[0] as { affectedRows?: number }).affectedRows ?? 0) > 0;
+  const result = await db.update(organizationUpgradeRequests).set({ status: "canceled", resolvedAt: new Date() }).where(and(eq(organizationUpgradeRequests.orgId, orgId), eq(organizationUpgradeRequests.id, requestId), eq(organizationUpgradeRequests.status, "pending"))).returning();
+  return result.length > 0;
 }
 
 /** Platform yöneticisi: bekleyen talepler, kurum ve talep eden adıyla. */
@@ -424,6 +424,6 @@ export async function getUpgradeRequest(requestId: number) {
 /** Yalnızca bekleyen talep sonuçlandırılır (aynı talep iki kez onaylanmaz). */
 export async function resolveUpgradeRequest(requestId: number, status: "approved" | "rejected", resolvedBy: number): Promise<boolean> {
   const db = await requireDb();
-  const result = await db.update(organizationUpgradeRequests).set({ status, resolvedBy, resolvedAt: new Date() }).where(and(eq(organizationUpgradeRequests.id, requestId), eq(organizationUpgradeRequests.status, "pending")));
-  return Number((result[0] as { affectedRows?: number }).affectedRows ?? 0) > 0;
+  const result = await db.update(organizationUpgradeRequests).set({ status, resolvedBy, resolvedAt: new Date() }).where(and(eq(organizationUpgradeRequests.id, requestId), eq(organizationUpgradeRequests.status, "pending"))).returning();
+  return result.length > 0;
 }

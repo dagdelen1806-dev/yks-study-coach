@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, isNotNull, isNull, like, lt, lte, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, ilike, lt, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import { bookInventory, catalogBooks, notebookQuestions, noteTags, notes, questionAttempts, studyPlanSessions, userBookContents, userMockExams, userResourceBooks, yksTopics } from "../../drizzle/schema";
 import { computeNoteStats, deriveNoteTitle, extractPlainText, isValidNoteDoc, normalizeTag, type NoteDoc, type NoteNode, type NoteStats } from "../../shared/noteContent";
 import { QUESTION_TEMPLATE_KEY, type ErrorType } from "../../shared/questionNotebook";
@@ -114,7 +114,7 @@ export async function saveNote(userId: number, input: SaveNoteInput) {
   await db
     .insert(notes)
     .values({ userId, clientId: input.clientId, ...values, isFavorite: input.isFavorite ? 1 : 0, isPinned: input.isPinned ? 1 : 0 })
-    .onDuplicateKeyUpdate({ set: { ...values, version: sql`${notes.version} + 1` } });
+    .onConflictDoUpdate({ target: [notes.userId, notes.clientId], set: { ...values, version: sql`${notes.version} + 1` } });
   const [saved] = await db.select({ id: notes.id, version: notes.version, updatedAt: notes.updatedAt, title: notes.title }).from(notes).where(and(eq(notes.userId, userId), eq(notes.clientId, input.clientId))).limit(1);
   if (!saved) throw new NoteError("Not kaydedilemedi.");
 
@@ -191,14 +191,14 @@ const escapeLike = (value: string) => value.replace(/[\\%_]/g, (char) => `\\${ch
 async function keywordCondition(db: Db, userId: number, q: string): Promise<SQL> {
   const term = `%${escapeLike(q.trim().slice(0, 100))}%`;
   const [topics, books] = await Promise.all([
-    db.select({ id: yksTopics.id }).from(yksTopics).where(like(yksTopics.topic, term)).limit(50),
-    db.select({ bookId: userResourceBooks.bookId }).from(userResourceBooks).where(and(eq(userResourceBooks.userId, userId), like(userResourceBooks.title, term))).limit(50),
+    db.select({ id: yksTopics.id }).from(yksTopics).where(ilike(yksTopics.topic, term)).limit(50),
+    db.select({ bookId: userResourceBooks.bookId }).from(userResourceBooks).where(and(eq(userResourceBooks.userId, userId), ilike(userResourceBooks.title, term))).limit(50),
   ]);
   const conditions: SQL[] = [
-    like(notes.title, term),
-    like(notes.plainText, term),
-    like(notes.subject, term),
-    sql`EXISTS (SELECT 1 FROM ${noteTags} WHERE ${noteTags.noteId} = ${notes.id} AND ${noteTags.tag} LIKE ${term})`,
+    ilike(notes.title, term),
+    ilike(notes.plainText, term),
+    ilike(notes.subject, term),
+    sql`EXISTS (SELECT 1 FROM ${noteTags} WHERE ${noteTags.noteId} = ${notes.id} AND ${noteTags.tag} ILIKE ${term})`,
   ];
   if (topics.length) conditions.push(inArray(notes.topicId, topics.map((row) => row.id)));
   if (books.length) conditions.push(inArray(notes.bookId, books.map((row) => row.bookId)));
@@ -232,7 +232,7 @@ export async function listNotes(userId: number, filters: ListFilters) {
   if (filters.kind) {
     const statKey = { voice: "voice", image: "images", formula: "formulas", drawing: "drawings" } as const;
     if (filters.kind === "text") conditions.push(sql`CHAR_LENGTH(${notes.plainText}) > 0`);
-    else conditions.push(sql`CAST(JSON_UNQUOTE(JSON_EXTRACT(${notes.stats}, ${`$.${statKey[filters.kind]}`})) AS UNSIGNED) > 0`);
+    else conditions.push(sql`COALESCE((${notes.stats}::jsonb ->> ${statKey[filters.kind]})::int, 0) > 0`);
   }
   if (filters.q?.trim()) conditions.push(await keywordCondition(db, userId, filters.q));
   if (filters.cursor) {
@@ -316,7 +316,7 @@ export async function getNoteCalendar(userId: number, from: Date, to: Date) {
 
 export async function listTags(userId: number) {
   const db = await requireDb();
-  const rows = await db.select({ tag: noteTags.tag, count: sql<number>`COUNT(*)` }).from(noteTags).where(eq(noteTags.userId, userId)).groupBy(noteTags.tag).orderBy(desc(sql`COUNT(*)`)).limit(50);
+  const rows = await db.select({ tag: noteTags.tag, count: sql<number>`COUNT(*)::int` }).from(noteTags).where(eq(noteTags.userId, userId)).groupBy(noteTags.tag).orderBy(desc(sql`COUNT(*)`)).limit(50);
   return rows.map((row) => ({ tag: row.tag, count: Number(row.count) }));
 }
 

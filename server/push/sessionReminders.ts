@@ -30,8 +30,8 @@ export async function runSessionReminders(now = new Date()) {
     .limit(500);
   result.due = sessions.length;
   for (const session of sessions) {
-    const [claim] = await db.update(studyPlanSessions).set({ reminderSentAt: now }).where(and(eq(studyPlanSessions.id, session.id), isNull(studyPlanSessions.reminderSentAt)));
-    if (!(claim as { affectedRows?: number }).affectedRows) continue;
+    const [claim] = await db.update(studyPlanSessions).set({ reminderSentAt: now }).where(and(eq(studyPlanSessions.id, session.id), isNull(studyPlanSessions.reminderSentAt))).returning({ id: studyPlanSessions.id });
+    if (!claim) continue;
     const outcome = await sendToUser(session.userId, buildReminderMessage(session, now));
     result.sent++;
     result.delivered += outcome.delivered;
