@@ -123,6 +123,16 @@ test("uygulama telefona yüklenebilir: manifest, ikon ve rehber videosu sunulur"
   expect((await request.head("/videos/pusula-nasil-kullanilir.mp4")).ok()).toBeTruthy();
 });
 
+test("tanıtım sayfası paylaşım önizlemesi ve arama motoru dosyaları sunulur", async ({ page, request }) => {
+  await page.goto("/");
+  const ogImage = await page.locator('meta[property="og:image"]').getAttribute("content");
+  expect(ogImage).toMatch(/\/og-image\.png$/);
+  const image = await request.get(new URL(ogImage!).pathname);
+  expect(image.headers()["content-type"]).toContain("image/png");
+  expect(await (await request.get("/robots.txt")).text()).toContain("Sitemap:");
+  expect(await (await request.get("/sitemap.xml")).text()).toContain("<urlset");
+});
+
 test("çıkış yapınca önceki öğrencinin verisi ekranda kalmaz", async ({ page }) => {
   // ogrenci2 = "Kerem": çıkıştan sonra adı hiçbir yerde kalmamalı.
   await signIn(page, "ogrenci2@test.local");
