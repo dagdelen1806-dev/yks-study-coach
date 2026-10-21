@@ -1,8 +1,9 @@
 import { resourceCatalogConfig } from "./config";
 import { normalizeForComparison } from "./normalizers/turkishText";
 import type { BookType, DifficultyLabel, ExamScope } from "./types";
+import type { ExamKind } from "../../shared/exams";
 
-export type ExamType = "TYT" | "AYT";
+export type ExamType = ExamKind;
 export type TopicStatusLabel = "Zayıf" | "Orta" | "İyi";
 
 export type StudentTopicPerformance = {
@@ -57,8 +58,9 @@ const bookTypeFitByStatus = (status: TopicStatusLabel, bookType: BookType): numb
   return EXAM_STAGE_TYPES.includes(bookType) ? 1 : PRACTICE_TYPES.includes(bookType) ? 0.8 : 0.3;
 };
 
+// LGS öğrencisine yalnızca LGS kapsamlı kitap önerilir (bkz. curriculumMapper examScopeAllows).
 const examScopeCovers = (examScope: ExamScope, exam: ExamType): boolean =>
-  examScope === "TYT_AYT" || examScope === "YKS" || examScope === "GENEL" || examScope === exam;
+  exam === "LGS" ? examScope === "LGS" : examScope === "TYT_AYT" || examScope === "YKS" || examScope === "GENEL" || examScope === exam;
 
 const idealDifficultyScore = (accuracy: number): number => Math.max(0, Math.min(100, accuracy + 15));
 

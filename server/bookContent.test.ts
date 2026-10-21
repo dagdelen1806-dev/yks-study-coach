@@ -10,7 +10,8 @@ import { looksLikeTopicList, parseTableOfContents, type TocRawPage } from "./boo
 const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/books/paragraf-soru-bankasi/toc-raw.json"), "utf8")) as { pages: TocRawPage[] };
 
 // Müfredata test için sıralı sahte ID'ler (gerçekte yks_topics.id).
-const topics: MatchableTopic[] = CURRICULUM.map((def, index) => ({ id: index + 1, ...def }));
+// Fixture bir YKS kitabı; üretimde de adaylar öğrencinin sınavına göre süzülür (getMatchableTopics).
+const topics: MatchableTopic[] = CURRICULUM.map((def, index) => ({ id: index + 1, ...def })).filter((def) => def.exam !== "LGS");
 const idOf = (topic: string) => topics.find((item) => item.topic === topic)!.id;
 
 describe("curriculum data", () => {

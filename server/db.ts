@@ -3,6 +3,7 @@ import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { bookInventory, bookStudyLogs, bookTopicMappings, coachAlerts, InsertUser, planAdherenceReports, sourceSwitches, studentProfiles, studyPlanSessions, studyPlans, topicProgress, topicStudyLogs, userMockExams, userResourceBooks, users, yksTopics } from "../drizzle/schema";
 import type { AvatarStyle, CoachingStyle, GradeLevel, TargetScoreType } from "../shared/onboarding";
+import type { ExamTrack, ExamKind } from "../shared/exams";
 import { calculatePlanAdherence, dedupeAlerts, type AdherenceSession } from "../shared/planAdherence";
 import { rescheduleOverdueSessions, buildSessionCompletion } from "../shared/calendarLogic";
 import { normalizeIsbn } from "../shared/bookIdentity";
@@ -130,11 +131,13 @@ export type StudentProfileView = {
   onboardingStep: number;
   preferredName: string | null;
   avatarStyle: AvatarStyle | null;
+  examTrack: ExamTrack;
   gradeLevel: GradeLevel | null;
   examYear: number | null;
   targetScoreType: TargetScoreType | null;
   currentTytNet: string | null;
   currentAytNet: string | null;
+  currentLgsNet: string | null;
   mockExamFrequency: string | null;
   strongSubjects: string[];
   weakSubjects: string[];
@@ -142,6 +145,8 @@ export type StudentProfileView = {
   targetUniversity: string | null;
   targetDepartment: string | null;
   targetRanking: string | null;
+  targetHighSchool: string | null;
+  targetLgsScore: string | null;
   mainGoal: string | null;
   shortTermGoal: string | null;
   longTermGoal: string | null;
@@ -162,11 +167,13 @@ export type StudentProfileView = {
 export type StudentProfilePatch = Partial<{
   preferredName: string | null;
   avatarStyle: AvatarStyle | null;
+  examTrack: ExamTrack;
   gradeLevel: GradeLevel | null;
   examYear: number | null;
   targetScoreType: TargetScoreType | null;
   currentTytNet: string | null;
   currentAytNet: string | null;
+  currentLgsNet: string | null;
   mockExamFrequency: string | null;
   strongSubjects: string[];
   weakSubjects: string[];
@@ -174,6 +181,8 @@ export type StudentProfilePatch = Partial<{
   targetUniversity: string | null;
   targetDepartment: string | null;
   targetRanking: string | null;
+  targetHighSchool: string | null;
+  targetLgsScore: string | null;
   mainGoal: string | null;
   shortTermGoal: string | null;
   longTermGoal: string | null;
@@ -204,11 +213,13 @@ const defaultStudentProfileView: StudentProfileView = {
   onboardingStep: 0,
   preferredName: null,
   avatarStyle: null,
+  examTrack: "YKS",
   gradeLevel: null,
   examYear: null,
   targetScoreType: null,
   currentTytNet: null,
   currentAytNet: null,
+  currentLgsNet: null,
   mockExamFrequency: null,
   strongSubjects: [],
   weakSubjects: [],
@@ -216,6 +227,8 @@ const defaultStudentProfileView: StudentProfileView = {
   targetUniversity: null,
   targetDepartment: null,
   targetRanking: null,
+  targetHighSchool: null,
+  targetLgsScore: null,
   mainGoal: null,
   shortTermGoal: null,
   longTermGoal: null,
@@ -237,11 +250,13 @@ const toStudentProfileView = (row: typeof studentProfiles.$inferSelect): Student
   onboardingStep: row.onboardingStep,
   preferredName: row.preferredName,
   avatarStyle: row.avatarStyle,
+  examTrack: row.examTrack,
   gradeLevel: row.gradeLevel,
   examYear: row.examYear,
   targetScoreType: row.targetScoreType,
   currentTytNet: row.currentTytNet,
   currentAytNet: row.currentAytNet,
+  currentLgsNet: row.currentLgsNet,
   mockExamFrequency: row.mockExamFrequency,
   strongSubjects: parseJsonArray(row.strongSubjectsJson),
   weakSubjects: parseJsonArray(row.weakSubjectsJson),
@@ -249,6 +264,8 @@ const toStudentProfileView = (row: typeof studentProfiles.$inferSelect): Student
   targetUniversity: row.targetUniversity,
   targetDepartment: row.targetDepartment,
   targetRanking: row.targetRanking,
+  targetHighSchool: row.targetHighSchool,
+  targetLgsScore: row.targetLgsScore,
   mainGoal: row.mainGoal,
   shortTermGoal: row.shortTermGoal,
   longTermGoal: row.longTermGoal,
@@ -401,7 +418,7 @@ export async function addSourceSwitch(userId: number, input: Omit<typeof sourceS
 
 type UserMockExamInput = {
   title: string;
-  exam: "TYT" | "AYT";
+  exam: ExamKind;
   examDate: Date;
   net: number;
   delta: number;
@@ -463,7 +480,7 @@ type UserResourceBookInput = {
   title: string;
   publisher: string;
   subject: string;
-  exam: "TYT" | "AYT";
+  exam: ExamKind;
   level: "Kolay" | "Orta" | "Zor";
   format: string;
   reason: string;

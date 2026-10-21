@@ -7,7 +7,7 @@ import { trpc } from "@/lib/trpc";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PAID_TIERS, TIER_LABELS, type PaidTier } from "@shared/entitlements";
-import { nextYksEnd, yksTermPrice } from "@shared/yksCalendar";
+import { nextExamEnd, yksTermPrice } from "@shared/yksCalendar";
 import PlanComparison, { tierHighlights } from "./PlanComparison";
 
 const formatPrice = (minorUnits: number, currency: string) => `${(minorUnits / 100).toLocaleString("tr-TR", { minimumFractionDigits: 0, maximumFractionDigits: 0 })} ${currency === "TRY" ? "₺" : currency}`;
@@ -33,7 +33,10 @@ export default function PaywallSection() {
   const utils = trpc.useUtils();
   const plansQuery = trpc.subscription.getPlans.useQuery();
   // Yıllık plan öğrencinin başlangıç anketinde seçtiği sınav yılına kadar sürer (shared/yksCalendar.ts).
-  const examYear = trpc.onboarding.get.useQuery(undefined, { enabled: Boolean(user), retry: false }).data?.examYear ?? null;
+  const profile = trpc.onboarding.get.useQuery(undefined, { enabled: Boolean(user), retry: false }).data;
+  const examYear = profile?.examYear ?? null;
+  const track = profile?.examTrack ?? "YKS";
+  const examAuthority = track === "LGS" ? "MEB" : "ÖSYM";
   const [billingPeriod, setBillingPeriod] = useState<"monthly" | "yearly">("monthly");
   const [restoreToken, setRestoreToken] = useState("");
   const [showRestore, setShowRestore] = useState(false);
@@ -59,13 +62,13 @@ export default function PaywallSection() {
   const plans = plansQuery.data ?? [];
   const planFor = (tier: PaidTier, period: "monthly" | "yearly") => plans.find((plan) => plan.tier === tier && plan.billingPeriod === period);
   const now = new Date();
-  const yks = nextYksEnd(now, examYear);
+  const yks = nextExamEnd(now, examYear, track);
   const currentPlan = plans.find((plan) => plan.code === entitlement.planCode);
   // Yıllık ("YKS'ye kadar") fiyat sınava kalan süreye göre: tahsilatla aynı hesap (shared/yksCalendar.ts).
   const yearlyQuote = (tier: PaidTier) => {
     const yearly = planFor(tier, "yearly");
     const monthly = planFor(tier, "monthly");
-    return yearly && monthly ? yksTermPrice({ monthlyPrice: monthly.price, now, examYear }) : null;
+    return yearly && monthly ? yksTermPrice({ monthlyPrice: monthly.price, now, examYear, track }) : null;
   };
   const monthsToYks = yearlyQuote("basic")?.months ?? Math.max(1, Math.ceil((yks.endsAt.getTime() - now.getTime()) / MONTH_MS));
 
@@ -83,7 +86,7 @@ export default function PaywallSection() {
               <p className="mt-1 text-[13px] leading-5 text-ink-2">
                 {entitlement.isTrial && entitlement.trialEndsAt
                   ? `Deneme süren ${formatDate(entitlement.trialEndsAt)} tarihinde bitiyor.`
-                  : entitlement.currentPeriodEnd ? (yearly ? `YKS dönemi aboneliğin ${formatDate(entitlement.currentPeriodEnd)} tarihinde sona erer.` : `Sonraki yenileme: ${formatDate(entitlement.currentPeriodEnd)}`) : ""}
+                  : entitlement.currentPeriodEnd ? (yearly ? `${track} dönemi aboneliğin ${formatDate(entitlement.currentPeriodEnd)} tarihinde sona erer.` : `Sonraki yenileme: ${formatDate(entitlement.currentPeriodEnd)}`) : ""}
                 {entitlement.cancelAtPeriodEnd ? " · Dönem sonunda iptal edilecek." : ""}
               </p>
             </div>
@@ -112,12 +115,12 @@ export default function PaywallSection() {
       <div className="mx-auto flex w-fit items-center gap-1 rounded-2xl bg-paper p-1">
         <button onClick={() => setBillingPeriod("monthly")} className={`rounded-xl px-4 py-2 text-[13px] font-semibold transition ${billingPeriod === "monthly" ? "bg-white text-ink shadow-sm" : "text-ink-3"}`}>Aylık</button>
         <button onClick={() => setBillingPeriod("yearly")} className={`rounded-xl px-4 py-2 text-[13px] font-semibold transition ${billingPeriod === "yearly" ? "bg-white text-ink shadow-sm" : "text-ink-3"}`}>
-          Yıllık · YKS'ye kadar <span className="ml-1 rounded-full bg-success-soft px-1.5 py-0.5 text-[11px] font-bold text-success">%20 indirim</span>
+          Yıllık · {track}'ye kadar <span className="ml-1 rounded-full bg-success-soft px-1.5 py-0.5 text-[11px] font-bold text-success">%20 indirim</span>
         </button>
       </div>
       {billingPeriod === "yearly" && (
         <p className="mx-auto max-w-xl text-center text-[12px] leading-5 text-ink-3">
-          {examYear && yks.year === examYear ? `Hedef sınavın: YKS ${examYear}. ` : ""}Yıllık plan YKS {yks.year} sınavının bittiği gün ({formatDate(yks.endsAt)}) sona erer. Fiyatı, sınavına kalan {monthsToYks} aylık dönemi aylık ödemenin %20 eksiğidir; sınav yaklaştıkça düşer.{yks.estimated ? " Sınav tarihi henüz kesinleşmedi; ÖSYM açıklayınca güncellenir." : ""}
+          {examYear && yks.year === examYear ? `Hedef sınavın: ${track} ${examYear}. ` : ""}Yıllık plan {track} {yks.year} sınavının bittiği gün ({formatDate(yks.endsAt)}) sona erer. Fiyatı, sınavına kalan {monthsToYks} aylık dönemi aylık ödemenin %20 eksiğidir; sınav yaklaştıkça düşer.{yks.estimated ? ` Sınav tarihi henüz kesinleşmedi; ${examAuthority} açıklayınca güncellenir.` : ""}
         </p>
       )}
 
@@ -138,7 +141,7 @@ export default function PaywallSection() {
                     <span className="whitespace-nowrap text-[34px] font-semibold text-ink font-display">{formatPrice(displayPrice, plan.currency)}</span>
                     {billingPeriod === "monthly" && <span className="text-[13px] text-ink-4">/ ay</span>}
                   </div>
-                  {billingPeriod === "yearly" && <div className="text-[12px] text-ink-4">tek ödeme · YKS {yks.year} sonuna kadar</div>}
+                  {billingPeriod === "yearly" && <div className="text-[12px] text-ink-4">tek ödeme · {track} {yks.year} sonuna kadar</div>}
                   {quote && yearlySaves > 0 && <p className="mt-1 text-[12px] leading-5 text-success">Sınava kadar aylık ödesen {formatPrice(quote.monthlyTotal, plan.currency)}; yıllıkla {formatPrice(yearlySaves, plan.currency)} daha az ödersin.</p>}
                   {plan.trialDays > 0 && <div className="mt-3 inline-flex w-fit items-center gap-1.5 rounded-full bg-warn-soft px-3 py-1.5 text-[12px] font-semibold text-warn"><Sparkles size={12} /> İlk {plan.trialDays} gün ücretsiz</div>}
                 </>

@@ -10,8 +10,10 @@ import {
   COACHING_STYLE_LABELS,
   COACHING_STYLES,
   emptyOnboardingDraft,
+  EXAM_TRACK_OPTIONS,
   GRADE_LEVEL_LABELS,
-  GRADE_LEVELS,
+  gradeLevelsFor,
+  LGS_SCHOOL_TYPES,
   MOCK_EXAM_FREQUENCY_LABELS,
   MOCK_EXAM_FREQUENCIES,
   NOTIFICATION_PREFERENCE_LABELS,
@@ -22,7 +24,7 @@ import {
   STUDY_METHODS,
   STUDY_TIME_LABELS,
   STUDY_TIMES,
-  SUBJECT_OPTIONS,
+  subjectOptionsFor,
   TARGET_SCORE_TYPE_LABELS,
   TARGET_SCORE_TYPES,
   TOTAL_ONBOARDING_STEPS,
@@ -31,6 +33,7 @@ import {
   type OnboardingDraft,
 } from "@shared/onboarding";
 import { getStoredValue, localStorageKeys, storeValue } from "@shared/yksData";
+import type { ExamTrack } from "@shared/exams";
 import type { AppRouter } from "../../../../server/routers";
 import type { inferRouterOutputs } from "@trpc/server";
 import { ArrowLeft, ArrowRight, Check, Sparkles } from "lucide-react";
@@ -91,8 +94,27 @@ function ChipGroup<T extends string>({ options, labels, value, onChange, multi, 
 }
 
 function StepIdentity({ draft, errors, update }: { draft: OnboardingDraft; errors: FieldErrors; update: Update }) {
+  const track = draft.examTrack || "YKS";
+  const chooseTrack = (next: ExamTrack) => {
+    update("examTrack", next);
+    // Önceki sınavın sınıfı yeni sınavda geçersizse temizlenir (ör. LGS'ye geçen 9. sınıf).
+    if (draft.gradeLevel && !gradeLevelsFor(next).includes(draft.gradeLevel)) update("gradeLevel", "");
+  };
   return (
     <div className="space-y-6">
+      <Field label="Hangi sınava hazırlanıyorsun?" hint="Konu haritan, denemelerin ve AI koçun bu sınava göre hazırlanır." required error={errors.examTrack} htmlFor="onboarding-exam-track">
+        <div id="onboarding-exam-track" role="radiogroup" className="grid gap-2 sm:grid-cols-2">
+          {EXAM_TRACK_OPTIONS.map((option) => {
+            const selected = draft.examTrack === option.value;
+            return (
+              <button key={option.value} type="button" role="radio" aria-checked={selected} onClick={() => chooseTrack(option.value)} className={`rounded-2xl border px-4 py-3 text-left transition ${selected ? "border-brand bg-brand-soft" : "border-rule bg-white hover:border-brand/40"}`}>
+                <div className={`text-[15px] font-bold ${selected ? "text-brand" : "text-ink"}`}>{option.title}</div>
+                <div className="mt-0.5 text-[12px] leading-4 text-ink-3">{option.description}</div>
+              </button>
+            );
+          })}
+        </div>
+      </Field>
       <Field label="Sana nasıl hitap edelim?" required error={errors.preferredName} htmlFor="onboarding-name">
         <Input id="onboarding-name" value={draft.preferredName} onChange={(e) => update("preferredName", e.target.value)} placeholder="Örn. Ece" maxLength={120} aria-invalid={Boolean(errors.preferredName)} />
       </Field>
@@ -100,21 +122,33 @@ function StepIdentity({ draft, errors, update }: { draft: OnboardingDraft; error
         <AvatarPicker id="onboarding-avatar" value={draft.avatarStyle} onChange={(next) => update("avatarStyle", next)} />
       </Field>
       <Field label="Sınıf düzeyin" hint="Sana uygun konu haritasını hazırlamamız için gerekli." required error={errors.gradeLevel} htmlFor="onboarding-grade">
-        <ChipGroup id="onboarding-grade" options={GRADE_LEVELS} labels={GRADE_LEVEL_LABELS} value={draft.gradeLevel ? [draft.gradeLevel] : []} onChange={(next) => update("gradeLevel", (next[0] ?? "") as OnboardingDraft["gradeLevel"])} />
+        <ChipGroup id="onboarding-grade" options={gradeLevelsFor(track)} labels={GRADE_LEVEL_LABELS} value={draft.gradeLevel ? [draft.gradeLevel] : []} onChange={(next) => update("gradeLevel", (next[0] ?? "") as OnboardingDraft["gradeLevel"])} />
       </Field>
       <Field label="Hedef sınav yılın" hint="Örn. 2027" required error={errors.examYear} htmlFor="onboarding-year">
         <Input id="onboarding-year" inputMode="numeric" value={draft.examYear} onChange={(e) => update("examYear", e.target.value.replace(/[^0-9]/g, ""))} placeholder={String(new Date().getFullYear() + 1)} maxLength={4} aria-invalid={Boolean(errors.examYear)} className="max-w-[140px]" />
       </Field>
-      <Field label="Hedef puan türün" hint="Henüz karar vermediysen sorun değil, sonra değiştirebilirsin." required error={errors.targetScoreType} htmlFor="onboarding-score-type">
-        <ChipGroup id="onboarding-score-type" options={TARGET_SCORE_TYPES} labels={TARGET_SCORE_TYPE_LABELS} value={draft.targetScoreType ? [draft.targetScoreType] : []} onChange={(next) => update("targetScoreType", (next[0] ?? "") as OnboardingDraft["targetScoreType"])} />
-      </Field>
+      {track === "YKS" && (
+        <Field label="Hedef puan türün" hint="Henüz karar vermediysen sorun değil, sonra değiştirebilirsin." required error={errors.targetScoreType} htmlFor="onboarding-score-type">
+          <ChipGroup id="onboarding-score-type" options={TARGET_SCORE_TYPES} labels={TARGET_SCORE_TYPE_LABELS} value={draft.targetScoreType ? [draft.targetScoreType] : []} onChange={(next) => update("targetScoreType", (next[0] ?? "") as OnboardingDraft["targetScoreType"])} />
+        </Field>
+      )}
     </div>
   );
 }
 
 function StepAcademic({ draft, update }: { draft: OnboardingDraft; errors: FieldErrors; update: Update }) {
+  const track = draft.examTrack || "YKS";
+  const subjects = subjectOptionsFor(track);
   return (
     <div className="space-y-6">
+      {track === "LGS" ? (
+        <Field label="Mevcut LGS netin" hint="90 soru üzerinden yaklaşık bir sayı ya da aralık yazabilirsin (örn. 60-65)." htmlFor="onboarding-lgs-net">
+          <div className="flex flex-wrap items-center gap-2">
+            <Input id="onboarding-lgs-net" value={draft.currentLgsNet} onChange={(e) => update("currentLgsNet", e.target.value)} placeholder="Örn. 60-65" maxLength={40} className="max-w-[200px]" />
+            <Button type="button" variant="outline" size="sm" onClick={() => update("currentLgsNet", "Henüz deneme çözmedim")}>Henüz deneme çözmedim</Button>
+          </div>
+        </Field>
+      ) : (<>
       <Field label="Mevcut TYT netin" hint="Yaklaşık bir sayı ya da aralık yazabilirsin (örn. 45-50)." htmlFor="onboarding-tyt-net">
         <div className="flex flex-wrap items-center gap-2">
           <Input id="onboarding-tyt-net" value={draft.currentTytNet} onChange={(e) => update("currentTytNet", e.target.value)} placeholder="Örn. 45-50" maxLength={40} className="max-w-[200px]" />
@@ -127,14 +161,15 @@ function StepAcademic({ draft, update }: { draft: OnboardingDraft; errors: Field
           <Button type="button" variant="outline" size="sm" onClick={() => update("currentAytNet", "Henüz deneme çözmedim")}>Henüz deneme çözmedim</Button>
         </div>
       </Field>
+      </>)}
       <Field label="Deneme sınavı çözme sıklığın" htmlFor="onboarding-mock-frequency">
         <ChipGroup id="onboarding-mock-frequency" options={MOCK_EXAM_FREQUENCIES} labels={MOCK_EXAM_FREQUENCY_LABELS} value={draft.mockExamFrequency ? [draft.mockExamFrequency] : []} onChange={(next) => update("mockExamFrequency", (next[0] ?? "") as OnboardingDraft["mockExamFrequency"])} />
       </Field>
       <Field label="En güçlü olduğun dersler" htmlFor="onboarding-strong-subjects">
-        <ChipGroup id="onboarding-strong-subjects" options={SUBJECT_OPTIONS} value={draft.strongSubjects} onChange={(next) => update("strongSubjects", next)} multi />
+        <ChipGroup id="onboarding-strong-subjects" options={subjects} value={draft.strongSubjects} onChange={(next) => update("strongSubjects", next)} multi />
       </Field>
       <Field label="En çok zorlandığın dersler" htmlFor="onboarding-weak-subjects">
-        <ChipGroup id="onboarding-weak-subjects" options={SUBJECT_OPTIONS} value={draft.weakSubjects} onChange={(next) => update("weakSubjects", next)} multi />
+        <ChipGroup id="onboarding-weak-subjects" options={subjects} value={draft.weakSubjects} onChange={(next) => update("weakSubjects", next)} multi />
       </Field>
       <Field label="Daha önce bir çalışma programın oldu mu?" htmlFor="onboarding-prior-plan">
         <div className="flex gap-2">
@@ -146,9 +181,21 @@ function StepAcademic({ draft, update }: { draft: OnboardingDraft; errors: Field
   );
 }
 
-function StepGoals({ draft, update }: { draft: OnboardingDraft; errors: FieldErrors; update: Update }) {
+function StepGoals({ draft, errors, update }: { draft: OnboardingDraft; errors: FieldErrors; update: Update }) {
+  const track = draft.examTrack || "YKS";
   return (
     <div className="space-y-6">
+      {track === "LGS" ? (<>
+      <Field label="Hedef lise türün" hint="Bir tür seç ya da aşağıya okul adını yaz." htmlFor="onboarding-school-type">
+        <ChipGroup id="onboarding-school-type" options={LGS_SCHOOL_TYPES} value={(LGS_SCHOOL_TYPES as readonly string[]).includes(draft.targetHighSchool) ? [draft.targetHighSchool as (typeof LGS_SCHOOL_TYPES)[number]] : []} onChange={(next) => update("targetHighSchool", next[0] ?? "")} />
+      </Field>
+      <Field label="Hedef lise" hint="Bilmiyorsan boş bırakabilirsin." htmlFor="onboarding-high-school">
+        <Input id="onboarding-high-school" value={draft.targetHighSchool} onChange={(e) => update("targetHighSchool", e.target.value)} placeholder="Örn. Kabataş Erkek Lisesi" maxLength={180} />
+      </Field>
+      <Field label="Hedef LGS puanın" hint="500 üzerinden; örn. 450." error={errors.targetLgsScore} htmlFor="onboarding-lgs-score">
+        <Input id="onboarding-lgs-score" inputMode="decimal" value={draft.targetLgsScore} onChange={(e) => update("targetLgsScore", e.target.value.replace(/[^0-9.,]/g, ""))} placeholder="Örn. 450" maxLength={6} className="max-w-[140px]" aria-invalid={Boolean(errors.targetLgsScore)} />
+      </Field>
+      </>) : (<>
       <Field label="Hedef üniversite" hint="Bilmiyorsan boş bırakabilirsin." htmlFor="onboarding-university">
         <Input id="onboarding-university" value={draft.targetUniversity} onChange={(e) => update("targetUniversity", e.target.value)} placeholder="Örn. Boğaziçi Üniversitesi" maxLength={180} />
       </Field>
@@ -158,7 +205,8 @@ function StepGoals({ draft, update }: { draft: OnboardingDraft; errors: FieldErr
       <Field label="Tahmini hedef sıralaman" htmlFor="onboarding-ranking">
         <Input id="onboarding-ranking" value={draft.targetRanking} onChange={(e) => update("targetRanking", e.target.value)} placeholder="Örn. 50.000-70.000" maxLength={60} />
       </Field>
-      <Field label="YKS'ye hazırlanmadaki en önemli amacın" htmlFor="onboarding-main-goal">
+      </>)}
+      <Field label={`${track}'ye hazırlanmadaki en önemli amacın`} htmlFor="onboarding-main-goal">
         <Textarea id="onboarding-main-goal" value={draft.mainGoal} onChange={(e) => update("mainGoal", e.target.value)} maxLength={500} rows={2} />
       </Field>
       <Field label="Kısa vadeli hedefin" htmlFor="onboarding-short-goal">
@@ -239,11 +287,15 @@ function profileToDraft(profile: OnboardingProfile, fallbackName?: string | null
   return {
     preferredName: profile.preferredName ?? fallbackName?.split(" ")[0] ?? "",
     avatarStyle: profile.avatarStyle ?? "",
+    // Anketin ilk adımı hiç kaydedilmediyse sınav seçimi boş başlar (öğrenci kendisi seçer);
+    // sonrasında profildeki seçim (eski hesaplarda varsayılan YKS) gelir.
+    examTrack: profile.gradeLevel ? profile.examTrack : "",
     gradeLevel: profile.gradeLevel ?? "",
     examYear: profile.examYear ? String(profile.examYear) : "",
     targetScoreType: profile.targetScoreType ?? "",
     currentTytNet: profile.currentTytNet ?? "",
     currentAytNet: profile.currentAytNet ?? "",
+    currentLgsNet: profile.currentLgsNet ?? "",
     mockExamFrequency: (profile.mockExamFrequency as OnboardingDraft["mockExamFrequency"]) ?? "",
     strongSubjects: profile.strongSubjects ?? [],
     weakSubjects: profile.weakSubjects ?? [],
@@ -251,6 +303,8 @@ function profileToDraft(profile: OnboardingProfile, fallbackName?: string | null
     targetUniversity: profile.targetUniversity ?? "",
     targetDepartment: profile.targetDepartment ?? "",
     targetRanking: profile.targetRanking ?? "",
+    targetHighSchool: profile.targetHighSchool ?? "",
+    targetLgsScore: profile.targetLgsScore ?? "",
     mainGoal: profile.mainGoal ?? "",
     shortTermGoal: profile.shortTermGoal ?? "",
     longTermGoal: profile.longTermGoal ?? "",
@@ -272,11 +326,11 @@ function profileToDraft(profile: OnboardingProfile, fallbackName?: string | null
 function pickStepFields(step: number, draft: OnboardingDraft): Partial<OnboardingDraft> {
   switch (step) {
     case 0:
-      return { preferredName: draft.preferredName, avatarStyle: draft.avatarStyle, gradeLevel: draft.gradeLevel, examYear: draft.examYear, targetScoreType: draft.targetScoreType };
+      return { preferredName: draft.preferredName, avatarStyle: draft.avatarStyle, examTrack: draft.examTrack, gradeLevel: draft.gradeLevel, examYear: draft.examYear, targetScoreType: draft.targetScoreType };
     case 1:
-      return { currentTytNet: draft.currentTytNet, currentAytNet: draft.currentAytNet, mockExamFrequency: draft.mockExamFrequency, strongSubjects: draft.strongSubjects, weakSubjects: draft.weakSubjects, hasPriorStudyPlan: draft.hasPriorStudyPlan };
+      return { currentTytNet: draft.currentTytNet, currentAytNet: draft.currentAytNet, currentLgsNet: draft.currentLgsNet, mockExamFrequency: draft.mockExamFrequency, strongSubjects: draft.strongSubjects, weakSubjects: draft.weakSubjects, hasPriorStudyPlan: draft.hasPriorStudyPlan };
     case 2:
-      return { targetUniversity: draft.targetUniversity, targetDepartment: draft.targetDepartment, targetRanking: draft.targetRanking, mainGoal: draft.mainGoal, shortTermGoal: draft.shortTermGoal, longTermGoal: draft.longTermGoal };
+      return { targetUniversity: draft.targetUniversity, targetDepartment: draft.targetDepartment, targetRanking: draft.targetRanking, targetHighSchool: draft.targetHighSchool, targetLgsScore: draft.targetLgsScore, mainGoal: draft.mainGoal, shortTermGoal: draft.shortTermGoal, longTermGoal: draft.longTermGoal };
     case 3:
       return { dailyStudyDuration: draft.dailyStudyDuration, preferredStudyStartTime: draft.preferredStudyStartTime, availableStudyDays: draft.availableStudyDays, preferredStudyTimes: draft.preferredStudyTimes, preferredStudyMethods: draft.preferredStudyMethods, studyObstacles: draft.studyObstacles };
     default:
@@ -383,7 +437,7 @@ export default function OnboardingFlow({
         {step === 0 && !onClose && (
           <div className="mb-2">
             <div className="eyebrow mb-2">Hoş geldin{userName ? `, ${userName.split(" ")[0]}` : ""}</div>
-            <h1 className="text-[25px] font-semibold text-ink font-display">YKS çalışma yolculuğunu birlikte planlayalım</h1>
+            <h1 className="text-[25px] font-semibold text-ink font-display">{draft.examTrack || "Sınav"} çalışma yolculuğunu birlikte planlayalım</h1>
             {/* Anket öğrenci içindir; dershane/okul personeli doğrudan Kurum Paneli'ne geçer (App.tsx /kurum'u anketten önce açar). */}
             <p className="mt-3 rounded-xl bg-paper px-3 py-2 text-[13px] text-ink-3">Dershane ya da okul personeli misin? <a href="/kurum" className="font-semibold text-brand hover:underline">Anketi atla, Kurum Paneli'ne geç</a></p>
           </div>

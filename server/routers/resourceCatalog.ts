@@ -7,7 +7,7 @@ import { recommendForStudent, type StudentTopicPerformance } from "../resourceCa
 import { resourceCatalogAdminRouter } from "./resourceCatalogAdmin";
 
 const bookTypeEnum = z.enum(["question_bank", "topic_explanation", "topic_explanation_question_bank", "mock_exam", "fasikul", "past_questions", "camp", "test_book", "reference", "other"]);
-const examScopeEnum = z.enum(["TYT", "AYT", "TYT_AYT", "YKS", "GENEL"]);
+const examScopeEnum = z.enum(["TYT", "AYT", "TYT_AYT", "YKS", "LGS", "GENEL"]);
 const difficultyEnum = z.enum(["easy", "medium", "hard"]);
 
 const listInput = z.object({

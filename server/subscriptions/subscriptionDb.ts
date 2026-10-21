@@ -1,5 +1,6 @@
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import type { PlanTier } from "../../shared/entitlements";
+import type { ExamTrack } from "../../shared/exams";
 import { phoneFromOpenId } from "../_core/loginIdentifier";
 import { getDb } from "../db";
 import {
@@ -37,6 +38,14 @@ export async function getStudentExamYear(userId: number): Promise<number | null>
   if (!db) return null;
   const [row] = await db.select({ examYear: studentProfiles.examYear }).from(studentProfiles).where(eq(studentProfiles.userId, userId)).limit(1);
   return row?.examYear ?? null;
+}
+
+/** Öğrencinin hazırlandığı sınav (yıllık planın bitişi buna göre); profili yoksa YKS. */
+export async function getStudentExamTrack(userId: number): Promise<ExamTrack> {
+  const db = await getDb();
+  if (!db) return "YKS";
+  const [row] = await db.select({ examTrack: studentProfiles.examTrack }).from(studentProfiles).where(eq(studentProfiles.userId, userId)).limit(1);
+  return row?.examTrack ?? "YKS";
 }
 
 export async function getPlanByCode(code: string): Promise<SubscriptionPlan | undefined> {

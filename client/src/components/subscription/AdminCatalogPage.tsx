@@ -18,7 +18,7 @@ const bookTypeLabels: Record<string, string> = {
   other: "Diğer",
 };
 const bookTypeOptions = Object.keys(bookTypeLabels);
-const examScopeOptions = ["TYT", "AYT", "TYT_AYT", "YKS", "GENEL"];
+const examScopeOptions = ["TYT", "AYT", "TYT_AYT", "YKS", "LGS", "GENEL"];
 
 type FormState = {
   bookId: number | null;

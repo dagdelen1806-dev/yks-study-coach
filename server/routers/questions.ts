@@ -2,7 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { llmUnavailableMessage, modelForTier } from "../_core/llm";
 import { metredFeatureProcedure, protectedProcedure, router } from "../_core/trpc";
-import { getMatchableTopics } from "../bookContent/bookContentDb";
+import { getMatchableTopicsFor } from "../bookContent/bookContentDb";
 import { AttachmentError, getAttachmentStorage } from "../notes/attachmentStorage";
 import { NoteError } from "../notes/notesDb";
 import { suggestQuestionDetails } from "../notes/questionAi";
@@ -150,7 +150,7 @@ export const questionsRouter = router({
         if (!attachment || attachment.kind !== "image") throw new NoteError("Fotoğraf bulunamadı.");
         imageDataUrl = `data:${attachment.mimeType};base64,${attachment.data.toString("base64")}`;
       }
-      const topics = (await getMatchableTopics()).map((topic) => ({ id: topic.id, subject: topic.subject, unit: topic.unit, topic: topic.topic }));
+      const topics = (await getMatchableTopicsFor(ctx.user!.id)).map((topic) => ({ id: topic.id, subject: topic.subject, unit: topic.unit, topic: topic.topic }));
       try {
         const suggestion = await suggestQuestionDetails({ imageDataUrl, stuckPoint: input.stuckPoint ?? null, topics });
         if (input.attachmentId && suggestion.ocrText) await getAttachmentStorage().setOcrText(ctx.user!.id, input.attachmentId, suggestion.ocrText);

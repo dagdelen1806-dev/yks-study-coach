@@ -44,6 +44,11 @@ export const subjectPalette: Record<string, string> = {
   Fizik: "#b0476e",
   Kimya: "#4a8f9c",
   Biyoloji: "#5e8a2e",
+  // LGS dersleri
+  "Fen Bilimleri": "#2e8b6e",
+  "İnkılap Tarihi": "#b8741a",
+  "Din Kültürü": "#8a6a3a",
+  İngilizce: "#3a7ab8",
 };
 
 /** Sırası önemli olmayan kategori listeleri için (ör. haftalık konu dağılımı). */

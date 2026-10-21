@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { publicProcedure, protectedProcedure, router } from "../_core/trpc";
 import { getTopicCatalog, getUserTopicProgress, markTopicForReview, upsertTopicProgress } from "../db";
+import { EXAM_KINDS } from "@shared/exams";
 
 export const topicsRouter = router({
   catalog: publicProcedure.query(() => getTopicCatalog()),
@@ -8,7 +9,7 @@ export const topicsRouter = router({
   logResult: protectedProcedure
     .input(
       z.object({
-        exam: z.enum(["TYT", "AYT"]),
+        exam: z.enum(EXAM_KINDS),
         subject: z.string().min(1).max(80),
         topic: z.string().min(1).max(180),
         accuracy: z.number().min(0).max(100),
@@ -19,6 +20,6 @@ export const topicsRouter = router({
     .mutation(({ ctx, input }) => upsertTopicProgress(ctx.user.id, { ...input, studyDate: new Date(input.studyDate) })),
   // Odak oturumu süresi dolmadan bırakıldı: konu tekrar gerektiren konulara eklenir.
   markForReview: protectedProcedure
-    .input(z.object({ exam: z.enum(["TYT", "AYT"]), subject: z.string().min(1).max(80), topic: z.string().min(1).max(180), sessionId: z.number().int().positive().optional() }))
+    .input(z.object({ exam: z.enum(EXAM_KINDS), subject: z.string().min(1).max(80), topic: z.string().min(1).max(180), sessionId: z.number().int().positive().optional() }))
     .mutation(({ ctx, input }) => markTopicForReview(ctx.user.id, input)),
 });

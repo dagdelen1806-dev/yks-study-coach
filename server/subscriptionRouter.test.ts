@@ -17,6 +17,7 @@ function seedPlan(plan: Partial<SubscriptionPlan> & { code: string; tier: "free"
 
 vi.mock("./subscriptions/subscriptionDb", () => ({
   getStudentExamYear: vi.fn(async () => null),
+  getStudentExamTrack: vi.fn(async () => "YKS"),
   getPlanByCode: vi.fn(async (code: string) => plans.get(code)),
   getPlanById: vi.fn(async (id: number) => Array.from(plans.values()).find((p) => p.id === id)),
   listActivePlans: vi.fn(async () => Array.from(plans.values())),

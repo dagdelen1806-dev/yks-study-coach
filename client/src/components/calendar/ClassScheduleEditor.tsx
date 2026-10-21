@@ -6,10 +6,10 @@ import {
   DAY_SHORT_LABELS,
   DEFAULT_SCHOOL_PERIODS,
   MAX_SCHOOL_PERIODS,
-  NON_YKS_PRESETS,
   SCHEDULE_SOURCE_LABELS,
-  YKS_SUBJECTS,
   fromMinutes,
+  nonExamPresetsFor,
+  scheduleSubjectsFor,
   toMinutes,
   validateSchedule,
   type ClassBlock,
@@ -20,6 +20,7 @@ import { CalendarClock, Camera, Loader2, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { compressImage } from "../books/imageCompression";
+import { useExamTrack } from "@/hooks/useExamTrack";
 
 // Ders programım: okul programı gün × ders saati tablosu (fotoğraftaki okul çizelgesi gibi)
 // + dershane/özel ders blokları. Kaydet tüm programı birlikte değiştirir.
@@ -36,17 +37,19 @@ const decode = (value: string): Cell => {
   const label = value.slice(separator + 1);
   return { subject: value.startsWith("y:") && subject ? subject : null, label: label || subject };
 };
-const STANDARD_VALUES = new Set([...YKS_SUBJECTS.map((subject) => encode({ subject, label: subject })), ...NON_YKS_PRESETS.map((label) => encode({ subject: null, label }))]);
-
-/** Ders seçenekleri; hücrede listede olmayan bir etiket varsa (ör. fotoğraftan okunan seçmeli ders) o da seçenek olur. */
+/** Ders seçenekleri (öğrencinin sınavına göre); hücrede listede olmayan bir etiket varsa (ör. fotoğraftan okunan seçmeli ders) o da seçenek olur. */
 function SubjectOptions({ current }: { current?: Cell }) {
-  const extra = current && !STANDARD_VALUES.has(encode(current)) ? current : null;
+  const { track } = useExamTrack();
+  const subjects = scheduleSubjectsFor(track);
+  const presets = nonExamPresetsFor(track);
+  const standard = new Set([...subjects.map((subject) => encode({ subject, label: subject })), ...presets.map((label) => encode({ subject: null, label }))]);
+  const extra = current && !standard.has(encode(current)) ? current : null;
   return (
     <>
       <option value="">—</option>
       {extra && <option value={encode(extra)}>{extra.label}{extra.subject && extra.subject !== extra.label ? ` (${extra.subject})` : ""}</option>}
-      <optgroup label="YKS dersleri">{YKS_SUBJECTS.map((subject) => <option key={subject} value={encode({ subject, label: subject })}>{subject}</option>)}</optgroup>
-      <optgroup label="YKS dışı (gri, plana girmez)">{NON_YKS_PRESETS.map((label) => <option key={label} value={encode({ subject: null, label })}>{label}</option>)}</optgroup>
+      <optgroup label={`${track} dersleri`}>{subjects.map((subject) => <option key={subject} value={encode({ subject, label: subject })}>{subject}</option>)}</optgroup>
+      <optgroup label={`${track} dışı (gri, plana girmez)`}>{presets.map((label) => <option key={label} value={encode({ subject: null, label })}>{label}</option>)}</optgroup>
     </>
   );
 }

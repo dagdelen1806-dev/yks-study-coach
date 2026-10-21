@@ -1,9 +1,10 @@
 import { normalizeForComparison, tokenize } from "./normalizers/turkishText";
 import type { ExamScope } from "./types";
+import type { ExamKind } from "../../shared/exams";
 
 export type CurriculumTopicCandidate = {
   id: number;
-  exam: "TYT" | "AYT";
+  exam: ExamKind;
   subject: string;
   topic: string;
   unit: string;
@@ -13,7 +14,10 @@ export type CurriculumMapping = { topicId: number; confidence: number; reason: s
 
 const STOPWORDS = new Set(["ve", "ile", "soru", "bankasi", "konu", "anlatimi", "anlatimli", "deneme", "kitap", "kitabi", "tyt", "ayt", "fasikul"]);
 
-const examScopeAllows = (examScope: ExamScope, topicExam: "TYT" | "AYT"): boolean => {
+// Katalog YKS kitaplarıyla doldu: geniş kapsamlar (TYT_AYT/YKS/GENEL) yalnız YKS konularını
+// kapsar; LGS konusuna yalnızca açıkça "LGS" kapsamlı kitap eşlenir.
+const examScopeAllows = (examScope: ExamScope, topicExam: ExamKind): boolean => {
+  if (topicExam === "LGS") return examScope === "LGS";
   if (examScope === "TYT_AYT" || examScope === "YKS" || examScope === "GENEL") return true;
   return examScope === topicExam;
 };

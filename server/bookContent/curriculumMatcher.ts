@@ -1,7 +1,8 @@
 import { normalizeForComparison } from "../resourceCatalog/normalizers/turkishText";
 import { bookContentConfig } from "./config";
+import type { ExamKind } from "../../shared/exams";
 
-export type MatchableTopic = { id: number; exam: "TYT" | "AYT"; subject: string; unit: string; topic: string; aliases: string[] };
+export type MatchableTopic = { id: number; exam: ExamKind; subject: string; unit: string; topic: string; aliases: string[] };
 
 export type MatchMethod = "exact_topic" | "exact_alias" | "contains_topic" | "contains_alias" | "fuzzy";
 export type MatchTier = "auto" | "confirm" | "manual";
@@ -37,7 +38,7 @@ export const tierFor = (confidence: number): MatchTier =>
  * Yalnızca verilen `topics` listesinden seçer; yeni konu önermez/oluşturmaz.
  * `subject`/`exam` verilirse aday kümesi o derse/sınava daraltılır.
  */
-export function matchTopic(title: string, topics: MatchableTopic[], filter: { subject?: string | null; exam?: "TYT" | "AYT" | null } = {}): MatchResult {
+export function matchTopic(title: string, topics: MatchableTopic[], filter: { subject?: string | null; exam?: ExamKind | null } = {}): MatchResult {
   const { scores, stemLength, maxAlternatives } = bookContentConfig.mapping;
   const normalizedTitle = normalizeForComparison(title);
   if (!normalizedTitle) return { best: null, alternatives: [], tier: "manual" };

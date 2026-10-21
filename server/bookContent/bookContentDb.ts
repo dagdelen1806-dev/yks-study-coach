@@ -1,7 +1,8 @@
 import { and, eq, inArray, isNull, lte, gte } from "drizzle-orm";
 import { bookInventory, bookStudyLogs, catalogBooks, studentProfiles, studyPlanSessions, studyPlans, userBookContents, userResourceBooks, yksTopics } from "../../drizzle/schema";
 import { CURRICULUM } from "../../shared/curriculum";
-import { getDb, getTopicCatalog, getUserTopicProgress, upsertBookTopicMapping } from "../db";
+import { kindsOf, type ExamTrack } from "../../shared/exams";
+import { getDb, getStudentProfile, getTopicCatalog, getUserTopicProgress, upsertBookTopicMapping } from "../db";
 import { buildBookRecommendations, computeBookCompletion, pickStudyDay, type BookRecommendation, type ContentRow, type PageRange } from "./bookStudyAllocation";
 import { deriveCurriculumWeakTopics, type ResolvableTopic } from "./examTopicResolver";
 import { insertPlanTask, pickDayForTask } from "../studyPlan/planTasks";
@@ -15,12 +16,20 @@ async function requireDb(): Promise<Db> {
   return db;
 }
 
-/** Eşleştirmeye aday konular: `yks_topics`'in tamamı (müfredat + eski konular),
- * müfredattaki alias'larla zenginleştirilmiş. Yeni konu buradan asla doğmaz. */
-export async function getMatchableTopics(): Promise<ResolvableTopic[]> {
+/** Eşleştirmeye aday konular: öğrencinin sınavına (YKS: TYT+AYT, LGS) ait `yks_topics` satırları
+ * (müfredat + eski konular), müfredattaki alias'larla zenginleştirilmiş. Yeni konu buradan asla
+ * doğmaz. Sınava göre süzmek şart: LGS ve TYT'de aynı adlı konular var ("Paragrafta Konu ve Ana
+ * Düşünce"), süzülmezse her eşleşme belirsiz kalır. */
+export async function getMatchableTopics(track: ExamTrack = "YKS"): Promise<ResolvableTopic[]> {
   const catalog = await getTopicCatalog();
   const aliasesBySlug = new Map(CURRICULUM.map((def) => [def.slug, def.aliases]));
-  return catalog.map((row) => ({ id: row.id, slug: row.slug, exam: row.exam, subject: row.subject, unit: row.unit, topic: row.topic, aliases: aliasesBySlug.get(row.slug) ?? [] }));
+  const kinds = kindsOf(track);
+  return catalog.filter((row) => kinds.includes(row.exam)).map((row) => ({ id: row.id, slug: row.slug, exam: row.exam, subject: row.subject, unit: row.unit, topic: row.topic, aliases: aliasesBySlug.get(row.slug) ?? [] }));
+}
+
+/** Bir öğrencinin sınavına göre eşleştirme adayları. */
+export async function getMatchableTopicsFor(userId: number): Promise<ResolvableTopic[]> {
+  return getMatchableTopics((await getStudentProfile(userId)).examTrack);
 }
 
 /** Öğrencinin rafında (aktif) olan kitap mı? İçerik yalnızca kendi kitabına yazılır/okunur. */
@@ -155,7 +164,7 @@ const parseRange = (value: string | null): PageRange | null => {
  */
 export async function getWeakTopicBookRecommendations(userId: number): Promise<BookRecommendation[]> {
   const db = await requireDb();
-  const [progress, topics] = await Promise.all([getUserTopicProgress(userId), getMatchableTopics()]);
+  const [progress, topics] = await Promise.all([getUserTopicProgress(userId), getMatchableTopicsFor(userId)]);
   const weakTopics = deriveCurriculumWeakTopics(progress, topics);
   if (weakTopics.length === 0) return [];
 

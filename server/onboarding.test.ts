@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import { emptyOnboardingDraft, isStepValid, validateOnboardingStep } from "../shared/onboarding";
 
 describe("validateOnboardingStep — adım 0 (kullanıcı tanımlama)", () => {
-  it("ad, sınıf düzeyi, sınav yılı ve hedef puan türü zorunludur", () => {
+  it("sınav, ad, sınıf düzeyi, sınav yılı ve hedef puan türü zorunludur", () => {
     const errors = validateOnboardingStep(0, emptyOnboardingDraft());
+    expect(errors.examTrack).toBeTruthy();
     expect(errors.preferredName).toBeTruthy();
     expect(errors.gradeLevel).toBeTruthy();
     expect(errors.examYear).toBeTruthy();
@@ -11,8 +12,19 @@ describe("validateOnboardingStep — adım 0 (kullanıcı tanımlama)", () => {
   });
 
   it("tüm zorunlu alanlar doluysa geçerlidir", () => {
-    const draft = { ...emptyOnboardingDraft(), preferredName: "Ece", gradeLevel: "12" as const, examYear: String(new Date().getFullYear() + 1), targetScoreType: "SAY" as const };
+    const draft = { ...emptyOnboardingDraft(), examTrack: "YKS" as const, preferredName: "Ece", gradeLevel: "12" as const, examYear: String(new Date().getFullYear() + 1), targetScoreType: "SAY" as const };
     expect(isStepValid(0, draft)).toBe(true);
+  });
+
+  it("LGS öğrencisinde puan türü istenmez, sınıf 7/8 olmalı", () => {
+    const draft = { ...emptyOnboardingDraft(), examTrack: "LGS" as const, preferredName: "Ece", gradeLevel: "8" as const, examYear: String(new Date().getFullYear() + 1) };
+    expect(isStepValid(0, draft)).toBe(true);
+    expect(validateOnboardingStep(0, { ...draft, gradeLevel: "11" }).gradeLevel).toBeTruthy();
+  });
+
+  it("YKS öğrencisi 8. sınıf seçemez", () => {
+    const draft = { ...emptyOnboardingDraft(), examTrack: "YKS" as const, preferredName: "Ece", gradeLevel: "8" as const, examYear: String(new Date().getFullYear() + 1), targetScoreType: "SAY" as const };
+    expect(validateOnboardingStep(0, draft).gradeLevel).toBeTruthy();
   });
 
   it("makul olmayan bir sınav yılını reddeder", () => {
@@ -30,6 +42,11 @@ describe("validateOnboardingStep — adım 1 (akademik durum)", () => {
 describe("validateOnboardingStep — adım 2 (hedefler)", () => {
   it("hedef üniversite/bölüm boş bırakılabilir", () => {
     expect(isStepValid(2, emptyOnboardingDraft())).toBe(true);
+  });
+
+  it("LGS hedef puanı 100–500 arasında olmalı", () => {
+    expect(isStepValid(2, { ...emptyOnboardingDraft(), targetLgsScore: "450" })).toBe(true);
+    expect(validateOnboardingStep(2, { ...emptyOnboardingDraft(), targetLgsScore: "650" }).targetLgsScore).toBeTruthy();
   });
 });
 

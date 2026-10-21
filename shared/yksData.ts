@@ -1,8 +1,9 @@
 import { deriveTopicStatus, MIN_RELIABLE_QUESTION_COUNT } from "./topicStatus";
 import { palette, subjectPalette } from "./palette";
+import { netFor, type ExamKind } from "./exams";
 export { formatDayRange, toLocalDateKey } from "./dates";
 
-export type ExamType = "TYT" | "AYT";
+export type ExamType = ExamKind;
 export type TopicStatus = "Zayıf" | "Orta" | "İyi";
 
 export type Topic = {
@@ -29,7 +30,7 @@ export type Resource = {
 };
 
 export type BookLevel = "Kolay" | "Orta" | "Zor";
-export type BookExam = "TYT" | "AYT";
+export type BookExam = ExamKind;
 
 export type ResourceBook = {
   id: string;
@@ -139,9 +140,9 @@ export type StudyHistoryItem = {
   targetTests?: string | null;
 };
 
-export const calculateTopicResult = (input: Pick<ExamTopicResult, "subject" | "topic" | "questionCount" | "correct" | "wrong" | "blank">): ExamTopicResult => {
+export const calculateTopicResult = (input: Pick<ExamTopicResult, "subject" | "topic" | "questionCount" | "correct" | "wrong" | "blank">, exam?: ExamType): ExamTopicResult => {
   const questionCount = input.questionCount || input.correct + input.wrong + input.blank;
-  const net = Number((input.correct - input.wrong / 4).toFixed(2));
+  const net = netFor(exam, input.correct, input.wrong);
   return { ...input, questionCount, accuracy: questionCount ? Math.round((input.correct / questionCount) * 100) : 0, net };
 };
 

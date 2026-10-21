@@ -5,8 +5,10 @@ import { palette } from "@shared/palette";
 import { getColorForSubject, statusMeta, type DashboardSection, type Topic } from "@shared/yksData";
 import { CalendarPlus, CheckCircle2, ChevronDown, CircleDashed, Compass, ExternalLink, Layers, Play, Plus, RotateCcw, Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
+import type { ExamKind } from "@shared/exams";
+import { useExamTrack } from "@/hooks/useExamTrack";
 
-type ExamFilter = "Tümü" | "TYT" | "AYT";
+type ExamFilter = "Tümü" | ExamKind;
 type StatusFilter = "Tümü" | "İyi" | "Orta" | "Zayıf" | "Veri yok";
 type FocusSeed = { subject: string; topic: string };
 
@@ -61,7 +63,9 @@ export default function TopicMap({ topics, onSection, onStartSession }: { topics
   const [selected, setSelected] = useState<Topic | null>(null);
   const [task, setTask] = useState<TaskDraft | null>(null);
 
-  const ofExam = topics.filter((topic) => exam === "Tümü" || topic.exam === exam);
+  const { track, kinds } = useExamTrack();
+  // Yalnız öğrencinin sınavının konuları (LGS öğrencisi YKS konusu görmez, tersi de).
+  const ofExam = topics.filter((topic) => kinds.includes(topic.exam) && (exam === "Tümü" || topic.exam === exam));
   const subjects = Array.from(new Set(ofExam.map((topic) => topic.subject)));
   const query = search.trim().toLocaleLowerCase("tr");
   const visible = ofExam.filter((topic) => (subject === "Tümü" || topic.subject === subject) && (status === "Tümü" || stateOf(topic) === status) && (!query || `${topic.topic} ${topic.subject} ${topic.unit}`.toLocaleLowerCase("tr").includes(query)));
@@ -83,14 +87,14 @@ export default function TopicMap({ topics, onSection, onStartSession }: { topics
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow="ÖSYM kapsamı · kişisel takip"
+        eyebrow={`${track === "LGS" ? "MEB" : "ÖSYM"} kapsamı · kişisel takip`}
         title="Konu Haritası"
         description="Konularını gerçek soru verine göre izle: hangileri tamam, hangileri tekrar istiyor, hangilerinde henüz veri yok."
         actions={<><button onClick={() => onSection("exams")} className={secondaryButton}><Plus size={16} /> Tarama testi / deneme ekle</button></>}
       />
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
-        <StatCard icon={<Layers size={18} />} label="Takip edilen konu" value={String(ofExam.length)} foot={<span>{exam === "Tümü" ? "TYT + AYT" : exam}</span>} />
+        <StatCard icon={<Layers size={18} />} label="Takip edilen konu" value={String(ofExam.length)} foot={<span>{exam === "Tümü" ? kinds.join(" + ") : exam}</span>} />
         <StatCard tone="good" icon={<CheckCircle2 size={18} />} label="Hâkim olduğun" value={String(count("İyi"))} foot={<span>İyi durumdaki konular</span>} />
         <StatCard tone="warn" icon={<RotateCcw size={18} />} label="Tekrar gerektiren" value={String(count("Zayıf") + count("Orta"))} foot={<span>{count("Zayıf")} zayıf · {count("Orta")} orta</span>} />
         <StatCard icon={<CircleDashed size={18} />} label="Veri yok" value={String(count("Veri yok"))} foot={<span>Henüz yeterli soru çözülmedi</span>} />
@@ -103,7 +107,7 @@ export default function TopicMap({ topics, onSection, onStartSession }: { topics
             <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Konu ara…" aria-label="Konu ara" className="form-input pl-9" />
           </div>
           <div className="flex flex-wrap gap-2">
-            <Segmented value={exam} options={["Tümü", "TYT", "AYT"] as const} onChange={(value) => { setExam(value); setSubject("Tümü"); }} label="Sınav" />
+            {kinds.length > 1 && <Segmented value={exam} options={["Tümü", ...kinds] as ExamFilter[]} onChange={(value) => { setExam(value); setSubject("Tümü"); }} label="Sınav" />}
             <Segmented value={status} options={["Tümü", "Zayıf", "Orta", "İyi", "Veri yok"] as const} onChange={setStatus} label="Durum" />
           </div>
         </div>
@@ -151,8 +155,8 @@ export default function TopicMap({ topics, onSection, onStartSession }: { topics
       )}
 
       <div className="flex flex-col gap-3 rounded-2xl border border-brand/10 bg-brand-soft p-4 text-[13px] text-ink-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className="flex items-start gap-3"><Compass size={17} className="mt-0.5 shrink-0 text-brand" /><span><strong className="font-semibold text-brand-strong">Kapsam notu:</strong> Konu listesi ÖSYM TYT/AYT kapsamına ve MEB programına dayanır; durum, girdiğin deneme ve tarama testlerindeki doğruluk oranından hesaplanır.</span></p>
-        <a href="https://www.osym.gov.tr" target="_blank" rel="noreferrer" className="inline-flex shrink-0 items-center gap-1 font-semibold text-brand">ÖSYM'yi aç <ExternalLink size={12} /></a>
+        <p className="flex items-start gap-3"><Compass size={17} className="mt-0.5 shrink-0 text-brand" /><span><strong className="font-semibold text-brand-strong">Kapsam notu:</strong> {track === "LGS" ? "Konu listesi MEB 8. sınıf öğretim programına dayanır" : "Konu listesi ÖSYM TYT/AYT kapsamına ve MEB programına dayanır"}; durum, girdiğin deneme ve tarama testlerindeki doğruluk oranından hesaplanır.</span></p>
+        <a href={track === "LGS" ? "https://www.meb.gov.tr" : "https://www.osym.gov.tr"} target="_blank" rel="noreferrer" className="inline-flex shrink-0 items-center gap-1 font-semibold text-brand">{track === "LGS" ? "MEB'i aç" : "ÖSYM'yi aç"} <ExternalLink size={12} /></a>
       </div>
 
       {selected && !task && (

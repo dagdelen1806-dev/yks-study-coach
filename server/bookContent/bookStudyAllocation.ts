@@ -1,5 +1,6 @@
 import { TOPIC_STATUS_THRESHOLDS } from "../../shared/topicStatus";
 import { bookContentConfig } from "./config";
+import type { ExamKind } from "../../shared/exams";
 
 // Zayıf konu × kitap içeriği → kitap bazlı çalışma önerisi. Zayıflığı KENDİSİ
 // HESAPLAMAZ: mevcut sistemin konu durumunu (topic_progress → "Zayıf" +
@@ -7,7 +8,7 @@ import { bookContentConfig } from "./config";
 // süreye/test sayısına çevirir. Plan motorunun yerine geçmez; ürettiği şey
 // öğrencinin onayına sunulan bir ÖNERİdir.
 
-export type WeakTopicInput = { topicId: number; topic: string; subject: string; exam: "TYT" | "AYT"; accuracy: number };
+export type WeakTopicInput = { topicId: number; topic: string; subject: string; exam: ExamKind; accuracy: number };
 
 export type ContentRow = {
   id: number;
@@ -32,7 +33,7 @@ export type BookRecommendation = {
   topicId: number;
   topic: string;
   subject: string;
-  exam: "TYT" | "AYT";
+  exam: ExamKind;
   weakness: number;
   minutes: number;
   bookId: string;

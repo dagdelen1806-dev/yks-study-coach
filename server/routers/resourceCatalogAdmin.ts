@@ -15,7 +15,7 @@ import { listCatalogBooksForAdmin } from "../resourceCatalog/catalogQueries";
 import { slugForBook } from "../resourceCatalog/pipeline/normalize";
 
 const bookTypeEnum = z.enum(["question_bank", "topic_explanation", "topic_explanation_question_bank", "mock_exam", "fasikul", "past_questions", "camp", "test_book", "reference", "other"]);
-const examScopeEnum = z.enum(["TYT", "AYT", "TYT_AYT", "YKS", "GENEL"]);
+const examScopeEnum = z.enum(["TYT", "AYT", "TYT_AYT", "YKS", "LGS", "GENEL"]);
 
 const catalogBookInput = z.object({
   name: z.string().trim().min(1).max(300),

@@ -2,17 +2,17 @@ import { trpc } from "@/lib/trpc";
 import { Bar100, EmptyNote, Panel, PageHeader, Segmented, StatCard, primaryButton, secondaryButton } from "@/components/app/kit";
 import TaskDialog, { taskDraftFor, type TaskDraft } from "@/components/app/TaskDialog";
 import { palette } from "@shared/palette";
-import { formatExamDate, getColorForSubject, netDeltaLabel, subjectOrder, toLocalDateKey, tytSubjectTotals, type MockExam } from "@shared/yksData";
-import { AlertTriangle, BarChart3, CalendarPlus, Clock3, FileText, ListChecks, Plus, Target, TrendingUp, Trophy, Upload } from "lucide-react";
-import { useMemo, useState } from "react";
+import { formatExamDate, getColorForSubject, netDeltaLabel, toLocalDateKey, type MockExam } from "@shared/yksData";
+import { estimateLgsScore, subjectTotalsOf, trackSubjects, type ExamKind } from "@shared/exams";
+import { useExamTrack } from "@/hooks/useExamTrack";
+import { AlertTriangle, BarChart3, CalendarPlus, Clock3, FileText, Gauge, ListChecks, Plus, Target, TrendingUp, Trophy, Upload } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { CartesianGrid, ComposedChart, Area, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-type ExamKind = "TYT" | "AYT";
 type Range = "all" | "30" | "90";
 
-/** ÖSYM soru sayıları: TYT 40/40/20/20; AYT'de Türk Dili-Sosyal-1 40, Sosyal-2 46, Matematik 40, Fen 40. */
-const SUBJECT_TOTALS: Record<ExamKind, Record<string, number>> = { TYT: tytSubjectTotals, AYT: { Türkçe: 40, Matematik: 40, Fen: 40, Sosyal: 46 } };
-const kindOf = (exam: MockExam): ExamKind => (exam.exam ?? "TYT") as ExamKind;
+// Ders soru sayıları (ÖSYM/MEB) shared/exams.ts'ten: TYT 40/40/20/20, AYT 40/40/40/46, LGS 20/10/10/10/20/20.
+const kindOf = (exam: MockExam): ExamKind => exam.exam ?? "TYT";
 const netOf = (exam: MockExam) => Object.values(exam.subjects).reduce((sum, value) => sum + value, 0);
 
 /** Aynı türden bir önceki denemeye göre fark (TYT ile AYT kıyaslanmaz). */
@@ -22,7 +22,10 @@ export function previousOfSameKind(exams: MockExam[], exam: MockExam) {
 
 export default function ExamsDashboard({ exams, onAddExam, onAddScan, onUpload }: { exams: MockExam[]; onAddExam: () => void; onAddScan: () => void; onUpload: () => void }) {
   const profile = trpc.onboarding.get.useQuery(undefined, { retry: false }).data;
-  const [kind, setKind] = useState<ExamKind>(() => (exams.some((exam) => kindOf(exam) === "TYT") || !exams.length ? "TYT" : "AYT"));
+  const { track, kinds } = useExamTrack();
+  const subjectOrder = trackSubjects(track);
+  const [kind, setKind] = useState<ExamKind>(() => kinds.find((candidate) => exams.some((exam) => kindOf(exam) === candidate)) ?? kinds[0]);
+  useEffect(() => { if (!kinds.includes(kind)) setKind(kinds[0]); }, [kinds[0]]);
   const [subject, setSubject] = useState("Toplam");
   const [range, setRange] = useState<Range>("all");
   const [task, setTask] = useState<TaskDraft | null>(null);
@@ -36,12 +39,12 @@ export default function ExamsDashboard({ exams, onAddExam, onAddScan, onUpload }
   const ofKind = inRange.filter((exam) => kindOf(exam) === kind);
   const latest = ofKind[0];
   const previous = latest ? previousOfSameKind(exams, latest) : undefined;
-  const latestTyt = byDate.find((exam) => kindOf(exam) === "TYT");
-  const latestAyt = byDate.find((exam) => kindOf(exam) === "AYT");
+  const latestByKind = kinds.map((candidate) => [candidate, byDate.find((exam) => kindOf(exam) === candidate)] as const);
+  const latestLgs = track === "LGS" ? latestByKind[0][1] : undefined;
   const deltaFor = (exam: MockExam | undefined) => { const before = exam && previousOfSameKind(exams, exam); return exam && before ? netOf(exam) - netOf(before) : null; };
 
   const series = ofKind.slice(0, 12).reverse().map((exam) => ({ label: formatExamDate(exam.date), title: exam.title, net: Number((subject === "Toplam" ? netOf(exam) : exam.subjects[subject] ?? 0).toFixed(2)) }));
-  const totals = SUBJECT_TOTALS[kind];
+  const totals = subjectTotalsOf(kind);
   const subjectRows = latest ? subjectOrder.filter((name) => latest.subjects[name] !== undefined).map((name) => {
     const value = latest.subjects[name] ?? 0;
     const before = previous?.subjects[name];
@@ -75,7 +78,7 @@ export default function ExamsDashboard({ exams, onAddExam, onAddScan, onUpload }
       <PageHeader
         eyebrow="Deneme günlüğü"
         title="Denemeler"
-        description="TYT ve AYT netlerini izle, önceki denemelerle karşılaştır; yanlış ve boşlarından doğrudan çalışma görevi oluştur."
+        description={`${kinds.join(" ve ")} netlerini izle, önceki denemelerle karşılaştır; yanlış ve boşlarından doğrudan çalışma görevi oluştur.`}
         actions={<>
           <button onClick={onAddScan} className={secondaryButton}><Plus size={16} /> Konu tarama testi</button>
           <button onClick={onUpload} className={secondaryButton}><Upload size={16} /> Belgeden aktar</button>
@@ -84,16 +87,17 @@ export default function ExamsDashboard({ exams, onAddExam, onAddScan, onUpload }
       />
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
-        {([["TYT", latestTyt], ["AYT", latestAyt]] as const).map(([label, exam]) => {
+        {latestByKind.map(([label, exam], index) => {
           const delta = deltaFor(exam);
-          return <StatCard key={label} tone={label === "TYT" ? "warm" : "plain"} icon={<Trophy size={18} />} label={`Son ${label} neti`} value={exam ? netOf(exam).toFixed(2) : "—"} unit={exam ? "net" : undefined} foot={exam ? <><span>{formatExamDate(exam.date)}</span>{delta !== null && <span className={`font-bold ${delta >= 0 ? "text-success" : "text-danger"}`}>{delta >= 0 ? "↑" : "↓"} {netDeltaLabel(delta)}</span>}</> : <span>Henüz {label} denemesi yok</span>} />;
+          return <StatCard key={label} tone={index === 0 ? "warm" : "plain"} icon={<Trophy size={18} />} label={`Son ${label} neti`} value={exam ? netOf(exam).toFixed(2) : "—"} unit={exam ? "net" : undefined} foot={exam ? <><span>{formatExamDate(exam.date)}</span>{delta !== null && <span className={`font-bold ${delta >= 0 ? "text-success" : "text-danger"}`}>{delta >= 0 ? "↑" : "↓"} {netDeltaLabel(delta)}</span>}</> : <span>Henüz {label} denemesi yok</span>} />;
         })}
-        <StatCard icon={<ListChecks size={18} />} label="Kayıtlı deneme" value={String(exams.length)} foot={<span>{exams.filter((exam) => kindOf(exam) === "TYT").length} TYT · {exams.filter((exam) => kindOf(exam) === "AYT").length} AYT</span>} />
+        {track === "LGS" && <StatCard icon={<Gauge size={18} />} label="Tahmini LGS puanı" value={latestLgs ? estimateLgsScore(latestLgs.subjects).toFixed(1) : "—"} unit={latestLgs ? "/ 500" : undefined} foot={<span>{latestLgs ? "Son denemenden · resmî puan değil" : "LGS denemesi ekleyince görünür"}</span>} />}
+        <StatCard icon={<ListChecks size={18} />} label="Kayıtlı deneme" value={String(exams.length)} foot={<span>{kinds.map((candidate) => `${exams.filter((exam) => kindOf(exam) === candidate).length} ${candidate}`).join(" · ")}</span>} />
         <StatCard tone={losses.length ? "warn" : "plain"} icon={<AlertTriangle size={18} />} label="En çok kaybettiren konu" value={losses[0] ? `%${Math.round(((losses[0].wrong + losses[0].blank) / losses[0].questions) * 100)}` : "—"} foot={<span className="truncate">{losses[0] ? `${losses[0].topic} · yanlış/boş` : "Konu detaylı deneme ekleyince görünür"}</span>} />
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Segmented value={kind} options={["TYT", "AYT"] as const} onChange={setKind} label="Sınav türü" />
+        {kinds.length > 1 && <Segmented value={kind} options={kinds} onChange={setKind} label="Sınav türü" />}
         <Segmented value={range} options={[{ value: "all", label: "Tüm tarihler" }, { value: "90", label: "Son 90 gün" }, { value: "30", label: "Son 30 gün" }]} onChange={setRange} label="Tarih aralığı" />
       </div>
 
@@ -190,7 +194,7 @@ export default function ExamsDashboard({ exams, onAddExam, onAddScan, onUpload }
                   return (
                     <tr key={exam.id} className="hover:bg-paper/50">
                       <td className="px-5 py-3"><div className="font-semibold text-ink">{exam.title}</div><div className="mt-0.5 text-[12px] text-ink-4">{formatExamDate(exam.date)}{exam.topicDetails?.length ? ` · ${exam.topicDetails.length} konu satırı` : ""}{exam.importedFrom && exam.importedFrom !== "manual" ? ` · ${exam.importedFrom === "pdf" ? "PDF" : exam.importedFrom === "csv" ? "CSV" : exam.importedFrom === "xlsx" ? "Excel" : "OCR"} aktarımı` : ""}</div></td>
-                      <td className="px-3 py-3"><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${kindOf(exam) === "TYT" ? "bg-brand-soft text-brand" : "bg-violet-soft text-violet"}`}>{kindOf(exam)}</span></td>
+                      <td className="px-3 py-3"><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${kindOf(exam) !== "AYT" ? "bg-brand-soft text-brand" : "bg-violet-soft text-violet"}`}>{kindOf(exam)}</span></td>
                       {subjectOrder.map((name) => <td key={name} className="px-3 py-3 text-right text-ink-2">{exam.subjects[name] === undefined ? "—" : exam.subjects[name].toFixed(2)}</td>)}
                       <td className="px-3 py-3 text-right text-[15px] font-extrabold text-ink">{netOf(exam).toFixed(2)}</td>
                       <td className={`px-5 py-3 text-right text-[12px] font-bold ${delta === null ? "text-ink-4" : delta >= 0 ? "text-success" : "text-danger"}`}>{delta === null ? "ilk" : netDeltaLabel(delta)}</td>

@@ -24,6 +24,7 @@ const examYears = new Map<number, number>();
 
 vi.mock("./subscriptions/subscriptionDb", () => ({
   getStudentExamYear: vi.fn(async (userId: number) => examYears.get(userId) ?? null),
+  getStudentExamTrack: vi.fn(async () => "YKS"),
   getPlanByCode: vi.fn(async (code: string) => plans.get(code)),
   getPlanById: vi.fn(async (id: number) => Array.from(plans.values()).find((p) => p.id === id)),
   listActivePlans: vi.fn(async () => Array.from(plans.values())),

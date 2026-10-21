@@ -2,7 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { validateDataUrl } from "../_core/fileValidation";
 import { metredFeatureProcedure, protectedProcedure, router } from "../_core/trpc";
-import { addRecommendationToPlan, getAutoSchedule, getBookContents, getBookContentSummaries, getMatchableTopics, getWeakTopicBookRecommendations, replaceBookContents, runAutoSchedule, setAutoSchedule, userOwnsBook } from "../bookContent/bookContentDb";
+import { addRecommendationToPlan, getAutoSchedule, getBookContents, getBookContentSummaries, getMatchableTopicsFor, getWeakTopicBookRecommendations, replaceBookContents, runAutoSchedule, setAutoSchedule, userOwnsBook } from "../bookContent/bookContentDb";
 import { bookContentConfig } from "../bookContent/config";
 import { suggestTopicsWithAi } from "../bookContent/aiMapper";
 import { matchTopic, type MatchMethod, type MatchTier } from "../bookContent/curriculumMatcher";
@@ -12,9 +12,10 @@ import { imageHash, readOcrCache, writeOcrCache } from "../bookContent/ocrCache"
 import { readTocImage, type TocReadReport } from "../bookContent/ocrOrchestrator";
 import { filterTocNoise } from "../bookContent/tocPostprocess";
 import { looksLikeTopicList, parseTableOfContents, type TocEntry } from "../bookContent/tocParser";
+import { EXAM_KINDS } from "@shared/exams";
 
 const bookIdInput = z.string().min(1).max(120);
-const examInput = z.enum(["TYT", "AYT"]).nullable().optional();
+const examInput = z.enum(EXAM_KINDS).nullable().optional();
 
 const imageInput = z.object({
   dataUrl: z.string().min(20).max(Math.ceil(bookContentConfig.ocr.maxImageBytes * 1.4)),
@@ -30,8 +31,8 @@ type Suggestion = { topicId: number; confidence: number; method: MatchMethod | "
  * onun "manuel" bıraktığı başlıklar için (açıksa) tek bir AI isteğiyle aday
  * listesinden öneri. AI önerisi her zaman "onay gerekli" kademesinde kalır.
  */
-async function matchEntries(entries: TocEntry[], subject: string | null) {
-  const topics = await getMatchableTopics();
+async function matchEntries(userId: number, entries: TocEntry[], subject: string | null) {
+  const topics = await getMatchableTopicsFor(userId);
   const topicById = new Map(topics.map((topic) => [topic.id, topic]));
   const describe = (match: { topicId: number; confidence: number; method: MatchMethod | "ai"; matchedText: string }, reason?: string): Suggestion => {
     const topic = topicById.get(match.topicId)!;
@@ -158,7 +159,7 @@ export const bookContentRouter = router({
       if (entries.length === 0) throw new TRPCError({ code: "UNPROCESSABLE_CONTENT", message: "Fotoğraflarda içindekiler satırı bulunamadı. İçindekiler sayfasının tamamı görünecek şekilde tekrar çeker misin?" });
 
       // 5) Müfredat eşleştirme + güven.
-      const matched = await matchEntries(entries, input.subject || null);
+      const matched = await matchEntries(ctx.user!.id, entries, input.subject || null);
       const confidence = summarizeConfidence(matched, tocReports.map(({ report }) => report));
       const withReview = matched.map((entry) => {
         const mapping = entry.matchText ? (entry.suggestion?.confidence ?? 0) : 1;
@@ -190,8 +191,8 @@ export const bookContentRouter = router({
     }),
 
   // Elle eşleştirme listesi (öğrenci "Değiştir" dediğinde).
-  topicOptions: protectedProcedure.input(z.object({ subject: z.string().max(80).nullable().optional() }).optional()).query(async ({ input }) => {
-    const topics = await getMatchableTopics();
+  topicOptions: protectedProcedure.input(z.object({ subject: z.string().max(80).nullable().optional() }).optional()).query(async ({ ctx, input }) => {
+    const topics = await getMatchableTopicsFor(ctx.user.id);
     const subject = input?.subject?.trim();
     return topics
       .filter((topic) => !subject || topic.subject === subject)

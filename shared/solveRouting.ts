@@ -1,4 +1,5 @@
 import type { Difficulty } from "./questionNotebook";
+import type { ExamKind } from "./exams";
 
 /**
  * Soru çözümünde model kademesi: kolay sözel soruyu hafif model, zor sayısal soruyu güçlü
@@ -11,7 +12,7 @@ export type ModelTier = (typeof MODEL_TIERS)[number];
 export type SolveSignals = {
   difficulty: Difficulty | null;
   subject: string | null;
-  exam: "TYT" | "AYT" | null;
+  exam: ExamKind | null;
   lastResult: "solved" | "partial" | "failed" | null;
   /** Öğrenci "daha güçlü modelle çöz" dedi. */
   escalate?: boolean;

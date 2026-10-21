@@ -2,13 +2,14 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { RawExternalProduct } from "../types";
 import type { BookSourceAdapter, FetchPageResult } from "./types";
+import type { ExamKind } from "../../../shared/exams";
 
 type FixtureProduct = {
   id: string;
   title: string;
   publisher: string;
   subject: string;
-  exam: "TYT" | "AYT";
+  exam: ExamKind;
   level: "Kolay" | "Orta" | "Zor";
   format: string;
   pageCount?: number;

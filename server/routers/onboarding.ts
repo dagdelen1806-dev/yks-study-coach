@@ -15,6 +15,7 @@ import {
   TOTAL_ONBOARDING_STEPS,
   validateOnboardingStep,
 } from "@shared/onboarding";
+import { EXAM_TRACKS } from "@shared/exams";
 import { completeOnboarding, getStudentProfile, setStudentAvatarStyle, upsertStudentProfileStep, type StudentProfilePatch } from "../db";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getWeeklyDigestEnabled, setWeeklyDigestEnabled } from "../digest/weeklyDigest";
@@ -29,11 +30,13 @@ const enumOrBlank = <T extends readonly [string, ...string[]]>(values: T) => z.u
 const draftSchema = z.object({
   preferredName: z.string().trim().max(120).optional(),
   avatarStyle: enumOrBlank(AVATAR_STYLES).optional(),
+  examTrack: enumOrBlank(EXAM_TRACKS).optional(),
   gradeLevel: enumOrBlank(GRADE_LEVELS).optional(),
   examYear: z.string().max(4).optional(),
   targetScoreType: enumOrBlank(TARGET_SCORE_TYPES).optional(),
   currentTytNet: z.string().trim().max(40).optional(),
   currentAytNet: z.string().trim().max(40).optional(),
+  currentLgsNet: z.string().trim().max(40).optional(),
   mockExamFrequency: enumOrBlank(MOCK_EXAM_FREQUENCIES).optional(),
   strongSubjects: z.array(z.string().max(40)).max(15).optional(),
   weakSubjects: z.array(z.string().max(40)).max(15).optional(),
@@ -41,6 +44,8 @@ const draftSchema = z.object({
   targetUniversity: z.string().trim().max(180).optional(),
   targetDepartment: z.string().trim().max(180).optional(),
   targetRanking: z.string().trim().max(60).optional(),
+  targetHighSchool: z.string().trim().max(180).optional(),
+  targetLgsScore: z.string().trim().max(20).optional(),
   mainGoal: z.string().trim().max(500).optional(),
   shortTermGoal: z.string().trim().max(500).optional(),
   longTermGoal: z.string().trim().max(500).optional(),
@@ -66,11 +71,13 @@ function draftToPatch(data: z.infer<typeof draftSchema>): StudentProfilePatch {
   const patch: StudentProfilePatch = {};
   if (data.preferredName !== undefined) patch.preferredName = data.preferredName || null;
   if (data.avatarStyle !== undefined) patch.avatarStyle = data.avatarStyle || null;
+  if (data.examTrack) patch.examTrack = data.examTrack;
   if (data.gradeLevel !== undefined) patch.gradeLevel = data.gradeLevel || null;
   if (data.examYear !== undefined) patch.examYear = data.examYear ? Number(data.examYear) : null;
   if (data.targetScoreType !== undefined) patch.targetScoreType = data.targetScoreType || null;
   if (data.currentTytNet !== undefined) patch.currentTytNet = data.currentTytNet || null;
   if (data.currentAytNet !== undefined) patch.currentAytNet = data.currentAytNet || null;
+  if (data.currentLgsNet !== undefined) patch.currentLgsNet = data.currentLgsNet || null;
   if (data.mockExamFrequency !== undefined) patch.mockExamFrequency = data.mockExamFrequency || null;
   if (data.strongSubjects !== undefined) patch.strongSubjects = data.strongSubjects;
   if (data.weakSubjects !== undefined) patch.weakSubjects = data.weakSubjects;
@@ -78,6 +85,8 @@ function draftToPatch(data: z.infer<typeof draftSchema>): StudentProfilePatch {
   if (data.targetUniversity !== undefined) patch.targetUniversity = data.targetUniversity || null;
   if (data.targetDepartment !== undefined) patch.targetDepartment = data.targetDepartment || null;
   if (data.targetRanking !== undefined) patch.targetRanking = data.targetRanking || null;
+  if (data.targetHighSchool !== undefined) patch.targetHighSchool = data.targetHighSchool || null;
+  if (data.targetLgsScore !== undefined) patch.targetLgsScore = data.targetLgsScore || null;
   if (data.mainGoal !== undefined) patch.mainGoal = data.mainGoal || null;
   if (data.shortTermGoal !== undefined) patch.shortTermGoal = data.shortTermGoal || null;
   if (data.longTermGoal !== undefined) patch.longTermGoal = data.longTermGoal || null;
@@ -106,7 +115,8 @@ export const onboardingRouter = router({
     // Defense in depth: the client already blocks "Devam et" on an invalid
     // required field, but the server re-checks so a crafted request can't
     // skip a required step.
-    const draftForValidation = { ...emptyOnboardingDraft(), ...input.data };
+    // examTrack'i göndermeyen eski (önbellekteki) istemci YKS öğrencisidir.
+    const draftForValidation = { ...emptyOnboardingDraft(), examTrack: "YKS" as const, ...input.data };
     const errors = validateOnboardingStep(input.step, draftForValidation as Parameters<typeof validateOnboardingStep>[1]);
     if (Object.keys(errors).length > 0) {
       throw new TRPCError({ code: "BAD_REQUEST", message: Object.values(errors)[0] });

@@ -3,7 +3,9 @@
 // YKS dışı dersler (subject = null) takvimde gri görünür ve meşgul zaman sayılır, ama plana
 // ve analizlere ders olarak girmez.
 
-export const SCHEDULE_SOURCES = ["school", "course", "tutor", "other"] as const;
+import type { ExamTrack } from "./exams";
+
+export const SCHEDULE_SOURCES =["school", "course", "tutor", "other"] as const;
 export type ScheduleSource = (typeof SCHEDULE_SOURCES)[number];
 export const SCHEDULE_SOURCE_LABELS: Record<ScheduleSource, string> = { school: "Okul", course: "Dershane", tutor: "Özel ders", other: "Diğer" };
 
@@ -14,6 +16,14 @@ export const DAY_SHORT_LABELS = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz
 export const YKS_SUBJECTS = ["Türkçe", "Matematik", "Geometri", "Fizik", "Kimya", "Biyoloji", "Edebiyat", "Tarih", "Coğrafya", "Felsefe"] as const;
 /** Okul programında sık geçen, YKS planına girmeyen dersler. */
 export const NON_YKS_PRESETS = ["Din Kültürü", "Yabancı Dil", "Rehberlik", "Beden Eğitimi", "Sanat / Müzik", "Diğer ders"] as const;
+/** LGS öğrencisinin planına giren dersler (shared/exams.ts LGS dersleriyle aynı adlar). */
+export const LGS_SUBJECTS = ["Türkçe", "Matematik", "Fen Bilimleri", "İnkılap Tarihi", "Din Kültürü", "İngilizce"] as const;
+/** 8. sınıf programında olup LGS'de sorulmayan dersler. */
+export const NON_LGS_PRESETS = ["Teknoloji ve Tasarım", "Bilişim Teknolojileri", "Rehberlik", "Beden Eğitimi", "Sanat / Müzik", "Diğer ders"] as const;
+/** Bir ders bloğunun `subject` alanında geçebilecek tüm dersler (iki sınavın birleşimi). */
+export const SCHEDULE_SUBJECTS = [...YKS_SUBJECTS, ...LGS_SUBJECTS.filter((subject) => !(YKS_SUBJECTS as readonly string[]).includes(subject))] as [string, ...string[]];
+export const scheduleSubjectsFor = (track: ExamTrack): readonly string[] => (track === "LGS" ? LGS_SUBJECTS : YKS_SUBJECTS);
+export const nonExamPresetsFor = (track: ExamTrack): readonly string[] => (track === "LGS" ? NON_LGS_PRESETS : NON_YKS_PRESETS);
 
 /** Okul çıkışı (ve her ders bloğu sonrası) yol/dinlenme payı. */
 export const AFTER_CLASS_BUFFER_MINUTES = 30;

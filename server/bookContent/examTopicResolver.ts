@@ -3,6 +3,7 @@ import { EXAM_TOPIC_LINKS, curriculumSubjectsFor, examTopicKey } from "../../sha
 import { bookContentConfig } from "./config";
 import { matchTopic, type MatchableTopic } from "./curriculumMatcher";
 import type { WeakTopicInput } from "./bookStudyAllocation";
+import type { ExamKind } from "../../shared/exams";
 
 const CURRICULUM_SLUGS = new Set(CURRICULUM.map((def) => def.slug));
 
@@ -18,7 +19,7 @@ export type ResolvableTopic = MatchableTopic & { slug: string };
  *     satırı yanlış konuya zayıflık sinyali taşımasın.
  */
 export function resolveToCurriculumTopicIds(
-  row: { slug: string; exam: "TYT" | "AYT"; subject: string; topic: string; category?: string | null },
+  row: { slug: string; exam: ExamKind; subject: string; topic: string; category?: string | null },
   topics: ResolvableTopic[]
 ): number[] {
   const idBySlug = new Map(topics.map((topic) => [topic.slug, topic.id]));
@@ -45,7 +46,7 @@ export function resolveToCurriculumTopicIds(
   return Array.from(ids);
 }
 
-export type ProgressSignal = { slug: string; exam: "TYT" | "AYT"; subject: string; topic: string; progress: number; insufficientData: boolean; lastReviewedAt: Date | string | null };
+export type ProgressSignal = { slug: string; exam: ExamKind; subject: string; topic: string; progress: number; insufficientData: boolean; lastReviewedAt: Date | string | null };
 
 const DAY_MS = 86_400_000;
 

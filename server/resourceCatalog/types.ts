@@ -10,7 +10,7 @@ export type BookType =
   | "reference"
   | "other";
 
-export type ExamScope = "TYT" | "AYT" | "TYT_AYT" | "YKS" | "GENEL";
+export type ExamScope = "TYT" | "AYT" | "TYT_AYT" | "YKS" | "LGS" | "GENEL";
 export type DifficultyLabel = "easy" | "medium" | "hard";
 export type ClassificationMethod = "rule" | "ai" | "hybrid" | "manual";
 export type MappingMethod = "rule" | "ai" | "manual";

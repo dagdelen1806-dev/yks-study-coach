@@ -19,7 +19,7 @@ const shelves: Record<number, string[]> = { 1: ["book-a"], 2: [] };
 const savedCalls: unknown[] = [];
 vi.mock("./bookContent/bookContentDb", () => ({
   userOwnsBook: vi.fn(async (userId: number, bookId: string) => (shelves[userId] ?? []).includes(bookId)),
-  getMatchableTopics: vi.fn(async () => CURRICULUM.map((def, index) => ({ id: index + 1, ...def }))),
+  getMatchableTopicsFor: vi.fn(async () => CURRICULUM.map((def, index) => ({ id: index + 1, ...def })).filter((def) => def.exam !== "LGS")),
   replaceBookContents: vi.fn(async (...args: unknown[]) => { savedCalls.push(args); return []; }),
   getBookContents: vi.fn(async () => []),
   getBookContentSummaries: vi.fn(async () => []),

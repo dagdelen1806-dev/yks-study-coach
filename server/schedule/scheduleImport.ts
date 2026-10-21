@@ -1,5 +1,6 @@
 import { invokeLLM } from "../_core/llm";
-import { YKS_SUBJECTS, isValidTime, toMinutes, type ClassBlock, type ClassPeriod } from "../../shared/classSchedule";
+import { isValidTime, scheduleSubjectsFor, toMinutes, type ClassBlock, type ClassPeriod } from "../../shared/classSchedule";
+import type { ExamTrack } from "../../shared/exams";
 
 // Ders programı fotoğrafı → okul programı (ders saatleri + gün/ders hücreleri). Okunan program
 // kaydedilmez; düzenleyiciye doldurulur, öğrenci kontrol edip kaydeder.
@@ -10,9 +11,18 @@ export type ScheduleImport = { periods: ClassPeriod[]; blocks: ClassBlock[]; ski
  * Okul ders adından YKS dersi (ör. "HTDE_BİYOLOJİ (SEÇMELİ-2)" → Biyoloji). known=false: ad
  * tanınmadı (modelin seçimine bakılır); known=true ve subject=null: tanınan YKS dışı ders.
  */
-export function classifyLesson(name: string): { known: boolean; subject: string | null } {
+export function classifyLesson(name: string, track: ExamTrack = "YKS"): { known: boolean; subject: string | null } {
   const value = name.toLocaleUpperCase("tr-TR");
-  const rules: Array<[RegExp, string | null]> = [
+  const rules: Array<[RegExp, string | null]> = track === "LGS" ? [
+    // 8. sınıf: din kültürü ve İngilizce LGS dersidir; seçmeli/uygulama dersleri plana girmez.
+    [/SE[ÇC]MEL[İI]|REHBERL[İI]K|BEDEN|SPOR|G[ÖO]RSEL SANAT|M[ÜU]Z[İI]K|TEKNOLOJ[İI]|B[İI]L[İI][ŞS][İI]M|PEYGAMBER|KUR.?AN|PROJE/, null],
+    [/D[İI]N K[ÜU]LT[ÜU]R|AHLAK/, "Din Kültürü"],
+    [/YABANCI D[İI]L|[İI]NG[İI]L[İI]ZCE/, "İngilizce"],
+    [/[İI]NKILAP|TAR[İI]H/, "İnkılap Tarihi"],
+    [/FEN/, "Fen Bilimleri"],
+    [/MATEMAT[İI]K/, "Matematik"],
+    [/T[ÜU]RK[ÇC]E/, "Türkçe"],
+  ] : [
     [/D[İI]N K[ÜU]LT[ÜU]R|AHLAK|YABANCI D[İI]L|[İI]NG[İI]L[İI]ZCE|ALMANCA|FRANSIZCA|REHBERL[İI]K|BEDEN|SPOR|G[ÖO]RSEL SANAT|M[ÜU]Z[İI]K|SA[ĞG]LIK B[İI]LG|TRAF[İI]K|PEYGAMBER|KUR.?AN|H[İI]TABET|PROJE/, null],
     [/GEOMETR[İI]/, "Geometri"],
     [/MATEMAT[İI]K/, "Matematik"],
@@ -48,7 +58,8 @@ const normalizeTime = (value: unknown) => {
 };
 
 /** Modelin ham yanıtını doğrular: geçersiz saatler/hücreler atlanır, aynı gün/ders saatine ilk okunan yazılır. */
-export function parseScheduleImport(raw: unknown): ScheduleImport {
+export function parseScheduleImport(raw: unknown, track: ExamTrack = "YKS"): ScheduleImport {
+  const examSubjects: readonly string[] = scheduleSubjectsFor(track);
   const value = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const periods = (Array.isArray(value.periods) ? value.periods : []).flatMap((item) => {
     const period = item as Record<string, unknown>;
@@ -71,8 +82,8 @@ export function parseScheduleImport(raw: unknown): ScheduleImport {
     if (!name.trim() && !code.trim()) { skipped += 1; continue; }
     seen.add(key);
     // Önce ders adından kendi eşlememiz; ad tanınmazsa modelin seçtiği YKS dersi (listedeyse).
-    const byName = classifyLesson(name || code);
-    const fromModel = YKS_SUBJECTS.includes(lesson.subject as (typeof YKS_SUBJECTS)[number]) ? (lesson.subject as string) : null;
+    const byName = classifyLesson(name || code, track);
+    const fromModel = examSubjects.includes(lesson.subject as string) ? (lesson.subject as string) : null;
     const subject = byName.known ? byName.subject : fromModel;
     blocks.push({ source: "school", dayOfWeek: day, startTime: period.start, endTime: period.end, subject, label: subject && !/SE[ÇC]MEL[İI]|HTDE/i.test(name) ? subject : lessonLabel(name, code, subject) });
   }
@@ -90,16 +101,17 @@ const SCHEMA = {
 };
 
 /** Fotoğraftaki haftalık ders programını okur (AI). Hata sağlayıcıdan gelir; çağıran kullanıcı mesajına çevirir. */
-export async function readScheduleFromImage(dataUrl: string, invoke: typeof invokeLLM = invokeLLM): Promise<ScheduleImport> {
+export async function readScheduleFromImage(dataUrl: string, invoke: typeof invokeLLM = invokeLLM, track: ExamTrack = "YKS"): Promise<ScheduleImport> {
+  const examSubjects = scheduleSubjectsFor(track);
   const response = await invoke({
     messages: [
       {
         role: "system",
-        content: `Sen Türk lise/dershane haftalık ders programı okuyucususun. Yalnızca görselde görüleni çıkar, uydurma.
+        content: `Sen Türk ${track === "LGS" ? "ortaokul" : "lise"}/dershane haftalık ders programı okuyucususun. Yalnızca görselde görüleni çıkar, uydurma.
 - periods: ders saatleri sırasıyla (1. ders, 2. ders...), başlangıç/bitiş "SS:dd".
 - lessons: dolu her hücre için bir kayıt. day: 1=Pazartesi … 7=Pazar. period: ders saatinin sıra numarası (1'den başlar).
 - code: hücredeki kısaltma (ör. FİZF4). name: dersin tam adı — programın altındaki ders listesinden (Ders → Dersin Adı) bul; liste yoksa kısaltmadan anla.
-- subject: dersin YKS karşılığı, yalnızca şu listeden biri: ${YKS_SUBJECTS.join(", ")}. YKS'de olmayan dersler (din kültürü, yabancı dil, rehberlik, beden eğitimi, sanat, müzik, seçmeli ahlak vb.) için "YKS dışı" yaz.
+- subject: dersin ${track} karşılığı, yalnızca şu listeden biri: ${examSubjects.join(", ")}. ${track === "LGS" ? "LGS'de olmayan dersler (rehberlik, beden eğitimi, görsel sanatlar, müzik, teknoloji ve tasarım, bilişim, seçmeli dersler vb.) için \"LGS dışı\" yaz." : "YKS'de olmayan dersler (din kültürü, yabancı dil, rehberlik, beden eğitimi, sanat, müzik, seçmeli ahlak vb.) için \"YKS dışı\" yaz."}
 Öğretmen adlarını yazma.`,
       },
       { role: "user", content: [{ type: "text", text: "Bu haftalık ders programını oku." }, { type: "image_url", image_url: { url: dataUrl, detail: "high" } }] },
@@ -108,7 +120,7 @@ export async function readScheduleFromImage(dataUrl: string, invoke: typeof invo
   });
   const content = response.choices[0]?.message?.content;
   const text = typeof content === "string" ? content : content?.map((part) => (part.type === "text" ? part.text : "")).join("") ?? "";
-  const result = parseScheduleImport(JSON.parse(text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "") || "{}"));
+  const result = parseScheduleImport(JSON.parse(text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "") || "{}"), track);
   if (!result.periods.length || !result.blocks.length) throw new Error("Programdan ders saati ya da ders okunamadı.");
   return result;
 }

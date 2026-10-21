@@ -1,5 +1,6 @@
 import type { FeatureKey } from "./entitlements";
 import { calculatePlanAdherence, type AdherenceSession } from "./planAdherence";
+import type { ExamKind } from "./exams";
 
 // Kurum Paneli: roller, davet kodu ve öğrenci özeti kuralları. Saf fonksiyonlar (sunucu ve test).
 
@@ -74,7 +75,7 @@ export function invitationProblem(invitation: InvitationState, now = new Date())
 // ---------------------------------------------------------------------------
 
 export type StudentSignals = {
-  exams: Array<{ exam: "TYT" | "AYT"; examDate: Date; net: number }>;
+  exams: Array<{ exam: ExamKind; examDate: Date; net: number }>;
   logs: Array<{ studyDate: Date; minutes: number }>;
   weekSessions: AdherenceSession[];
   weakTopicCount: number;
@@ -167,7 +168,7 @@ export type StudentSummary = {
 
 const DAY = 24 * 60 * 60 * 1000;
 
-function latestOf(exams: StudentSignals["exams"], kind: "TYT" | "AYT") {
+function latestOf(exams: StudentSignals["exams"], kind: ExamKind) {
   const sorted = exams.filter((exam) => exam.exam === kind).sort((a, b) => b.examDate.getTime() - a.examDate.getTime());
   if (!sorted[0]) return null;
   return { net: sorted[0].net, delta: sorted[1] ? Number((sorted[0].net - sorted[1].net).toFixed(2)) : null, date: sorted[0].examDate };

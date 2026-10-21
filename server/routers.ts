@@ -32,12 +32,13 @@ import { subscriptionRouter } from "./routers/subscription";
 import { paymentRouter } from "./routers/payment";
 import { adminRouter } from "./routers/admin";
 import { testimonialsRouter } from "./routers/testimonials";
+import { EXAM_KINDS } from "@shared/exams";
 
 const planInput = z.object({
   topics: z.array(z.object({
     topic: z.string(),
     subject: z.string(),
-    exam: z.enum(["TYT", "AYT"]),
+    exam: z.enum(EXAM_KINDS),
     progress: z.number(),
     status: z.enum(["Zayıf", "Orta", "İyi"]),
   })).max(50),
@@ -51,7 +52,7 @@ const planInput = z.object({
     })).optional(),
   })).max(10),
   books: z.array(z.object({
-    id: z.string(), title: z.string(), subject: z.string(), exam: z.enum(["TYT", "AYT"]), level: z.enum(["Kolay", "Orta", "Zor"]), pageCount: z.number().optional(), totalQuestions: z.number().optional(), accuracy: z.number().optional(), activeDays: z.number().optional(), mappings: z.array(z.object({ topic: z.string(), pageStart: z.number().optional(), pageEnd: z.number().optional(), testStart: z.number().optional(), testEnd: z.number().optional() })).max(50).optional(),
+    id: z.string(), title: z.string(), subject: z.string(), exam: z.enum(EXAM_KINDS), level: z.enum(["Kolay", "Orta", "Zor"]), pageCount: z.number().optional(), totalQuestions: z.number().optional(), accuracy: z.number().optional(), activeDays: z.number().optional(), mappings: z.array(z.object({ topic: z.string(), pageStart: z.number().optional(), pageEnd: z.number().optional(), testStart: z.number().optional(), testEnd: z.number().optional() })).max(50).optional(),
   })).max(30).default([]),
   availableMinutes: z.number().min(120).max(2400).default(600),
   // Öğrencinin yerel "bugün"ü (YYYY-MM-DD): plan bugünden başlayan 7 günü kapsar.
@@ -131,7 +132,7 @@ const clamp01 = (value: unknown) => (typeof value === "number" && Number.isFinit
 
 const userExamInput = z.object({
   title: z.string().min(1).max(180),
-  exam: z.enum(["TYT", "AYT"]),
+  exam: z.enum(EXAM_KINDS),
   date: z.string().min(8).max(30),
   net: z.number().min(-100).max(200),
   delta: z.number().min(-200).max(200),
@@ -148,7 +149,7 @@ const documentExtractionSchema = {
   properties: {
     title: { type: "string" },
     date: { type: "string" },
-    exam: { type: "string", enum: ["TYT", "AYT"] },
+    exam: { type: "string", enum: ["TYT", "AYT", "LGS"] },
     subjects: { type: "object", additionalProperties: { type: "number" } },
     timeSpent: { type: "object", additionalProperties: { type: "number" } },
     topics: {
@@ -248,7 +249,7 @@ export const appRouter = router({
     addLog: protectedProcedure.input(z.object({ bookId: z.string().max(120), topic: z.string().max(180).optional(), sessionDate: z.string(), minutes: z.number().int().min(0).max(1440), questions: z.number().int().min(0).max(2000), correct: z.number().int().min(0).max(2000), wrong: z.number().int().min(0).max(2000), blank: z.number().int().min(0).max(2000), pageStart: z.number().int().min(0).optional(), pageEnd: z.number().int().min(0).optional(), testStart: z.number().int().min(0).optional(), testEnd: z.number().int().min(0).optional() })).mutation(({ ctx, input }) => addBookStudyLog(ctx.user.id, { ...input, sessionDate: new Date(input.sessionDate) })),
     upsertMapping: protectedProcedure.input(z.object({ bookId: z.string().max(120), topic: z.string().max(180), subject: z.string().max(80), pageStart: z.number().int().min(0).optional(), pageEnd: z.number().int().min(0).optional(), testStart: z.number().int().min(0).optional(), testEnd: z.number().int().min(0).optional() })).mutation(({ ctx, input }) => upsertBookTopicMapping(ctx.user.id, input)),
     addSwitch: protectedProcedure.input(z.object({ fromBookId: z.string().max(120).optional(), toBookId: z.string().max(120), reason: z.string().max(300) })).mutation(({ ctx, input }) => addSourceSwitch(ctx.user.id, { ...input, switchedAt: new Date() })),
-    importBooks: protectedProcedure.input(z.object({ books: z.array(z.object({ id: z.string().max(120), title: z.string().min(1).max(180), publisher: z.string().max(120), subject: z.string().max(80), exam: z.enum(["TYT", "AYT"]), level: z.enum(["Kolay", "Orta", "Zor"]), format: z.string().max(120), reason: z.string().max(1000), sourceUrl: z.string().max(500).optional(), pageCount: z.number().int().min(0).optional(), tone: z.string().max(20), authors: z.string().max(300).optional(), isbn: z.string().max(32).optional() })).min(1).max(500) })).mutation(({ ctx, input }) => addUserResourceBooks(ctx.user.id, input.books)),
+    importBooks: protectedProcedure.input(z.object({ books: z.array(z.object({ id: z.string().max(120), title: z.string().min(1).max(180), publisher: z.string().max(120), subject: z.string().max(80), exam: z.enum(EXAM_KINDS), level: z.enum(["Kolay", "Orta", "Zor"]), format: z.string().max(120), reason: z.string().max(1000), sourceUrl: z.string().max(500).optional(), pageCount: z.number().int().min(0).optional(), tone: z.string().max(20), authors: z.string().max(300).optional(), isbn: z.string().max(32).optional() })).min(1).max(500) })).mutation(({ ctx, input }) => addUserResourceBooks(ctx.user.id, input.books)),
     // Öğrenci elindeki fiziksel kitabın kapak fotoğrafını çeker (telefon
     // kamerası); LLM görselden kitap adı/yayınevi/ders tahmini çıkarır.
     // Sadece TAHMİN döner — hiçbir şeyi otomatik kütüphaneye eklemez, öğrenci

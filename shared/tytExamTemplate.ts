@@ -1,3 +1,4 @@
+import { netFor, type ExamKind } from "./exams";
 import type { ExamTopicResult } from "./yksData";
 
 /**
@@ -143,12 +144,12 @@ export type GroupedExamTotals = { questionCount: number; correct: number; wrong:
 export type GroupedExamCategory = { category: string; rows: Array<{ row: ExamTopicResult; index: number }>; totals: GroupedExamTotals };
 export type GroupedExamSubject = { subject: string; categories: GroupedExamCategory[]; totals: GroupedExamTotals };
 
-function sumTotals(rows: ExamTopicResult[]): GroupedExamTotals {
+function sumTotals(rows: ExamTopicResult[], exam?: ExamKind): GroupedExamTotals {
   const questionCount = rows.reduce((sum, row) => sum + row.questionCount, 0);
   const correct = rows.reduce((sum, row) => sum + row.correct, 0);
   const wrong = rows.reduce((sum, row) => sum + row.wrong, 0);
   const blank = rows.reduce((sum, row) => sum + row.blank, 0);
-  const net = Number((correct - wrong / 4).toFixed(2));
+  const net = netFor(exam, correct, wrong);
   const accuracy = questionCount ? Math.round((correct / questionCount) * 100) : 0;
   return { questionCount, correct, wrong, blank, accuracy, net };
 }
@@ -158,7 +159,7 @@ function sumTotals(rows: ExamTopicResult[]): GroupedExamTotals {
  * toplamlarını hesaplar — referans görsellerdeki "TYT Fen / Fizik / Kimya" hiyerarşisiyle
  * aynı yapı. Orijinal dizideki index'ler korunur ki tablo satırları form state'iyle eşleşsin.
  */
-export function groupTopicDetailsBySubject(rows: ExamTopicResult[]): GroupedExamSubject[] {
+export function groupTopicDetailsBySubject(rows: ExamTopicResult[], exam?: ExamKind): GroupedExamSubject[] {
   const subjectKeys: string[] = [];
   const bySubject = new Map<string, Array<{ row: ExamTopicResult; index: number }>>();
   rows.forEach((row, index) => {
@@ -177,8 +178,8 @@ export function groupTopicDetailsBySubject(rows: ExamTopicResult[]): GroupedExam
     });
     const categories = categoryKeys.map((category) => {
       const entries = byCategory.get(category)!;
-      return { category, rows: entries, totals: sumTotals(entries.map((entry) => entry.row)) };
+      return { category, rows: entries, totals: sumTotals(entries.map((entry) => entry.row), exam) };
     });
-    return { subject, categories, totals: sumTotals(subjectEntries.map((entry) => entry.row)) };
+    return { subject, categories, totals: sumTotals(subjectEntries.map((entry) => entry.row), exam) };
   });
 }

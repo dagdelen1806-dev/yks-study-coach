@@ -1,4 +1,4 @@
-// YKS müfredatı (ÖSYM/MEB konu listesi esas alınarak): ders → ünite → konu.
+// YKS (ÖSYM/MEB) ve LGS (MEB 8. sınıf) müfredatı: sınav → ders → ünite → konu.
 //
 // Tek kaynak `yks_topics` tablosudur; bu dosya yalnızca oraya idempotent
 // olarak yüklenen tohum veridir (bkz. server/db.ts ensureCurriculumSeeded).
@@ -10,7 +10,9 @@
 //    sık görülen başka adlar. Eşleştirme (server/bookContent/curriculumMatcher.ts)
 //    bunları "alias match" adımında kullanır; yeni konu ASLA otomatik oluşmaz.
 
-export type CurriculumExam = "TYT" | "AYT";
+import type { ExamKind } from "./exams";
+
+export type CurriculumExam = ExamKind;
 
 export type CurriculumTopicDef = {
   slug: string;
@@ -179,6 +181,92 @@ const AYT: Record<string, SubjectTree> = {
   },
 };
 
+// LGS: MEB 8. sınıf öğretim programı ünite/konu başlıkları (ders adları shared/exams.ts ile aynı).
+const LGS: Record<string, SubjectTree> = {
+  Türkçe: {
+    "Sözcük ve Cümle Anlamı": [
+      { topic: "Sözcükte Anlam", aliases: ["sözcük anlamı", "deyimler ve atasözleri", "deyim ve atasözleri"] },
+      { topic: "Cümlede Anlam", aliases: ["cümle anlamı", "cümle yorumu", "neden sonuç amaç sonuç koşul"] },
+      { topic: "Söz Sanatları", aliases: ["söz sanatı", "benzetme", "kişileştirme", "abartma"] },
+    ],
+    Paragraf: [
+      { topic: "Paragrafta Konu ve Ana Düşünce", aliases: ["paragrafta konu", "ana düşünce", "ana fikir"] },
+      { topic: "Paragrafta Yardımcı Düşünce", aliases: ["yardımcı düşünce", "yardımcı fikir"] },
+      { topic: "Paragrafın Yapısı", aliases: ["paragrafta yapı", "akışı bozan cümle", "paragraf oluşturma"] },
+      { topic: "Metin Türleri ve Anlatım Biçimleri", aliases: ["metin türleri", "anlatım biçimleri", "düşünceyi geliştirme yolları"] },
+      { topic: "Görsel ve Grafik Okuma", aliases: ["görsel okuma", "grafik yorumlama", "tablo okuma"] },
+      { topic: "Sözel Mantık", aliases: ["sözel mantık soruları", "mantık muhakeme"] },
+    ],
+    "Dil Bilgisi": [
+      { topic: "Fiilimsiler", aliases: ["eylemsiler", "isim fiil", "sıfat fiil", "zarf fiil"] },
+      { topic: "Cümlenin Ögeleri", aliases: ["cümle ögeleri", "öğeler"] },
+      { topic: "Fiilde Çatı", aliases: ["fiillerde çatı", "eylemde çatı"] },
+      { topic: "Cümle Türleri", aliases: ["cümle çeşitleri", "anlamına göre cümleler", "yapısına göre cümleler"] },
+      { topic: "Yazım Kuralları", aliases: ["imla kuralları"] },
+      { topic: "Noktalama İşaretleri", aliases: ["noktalama"] },
+      { topic: "Anlatım Bozuklukları", aliases: ["anlatım bozukluğu"] },
+    ],
+  },
+  Matematik: {
+    "Sayılar ve İşlemler": [
+      { topic: "Çarpanlar ve Katlar", aliases: ["ebob ekok", "asal çarpanlar", "aralarında asal"] },
+      { topic: "Üslü İfadeler", aliases: ["üslü sayılar", "bilimsel gösterim"] },
+      { topic: "Kareköklü İfadeler", aliases: ["karekök", "köklü ifadeler", "köklü sayılar"] },
+    ],
+    "Veri ve Olasılık": [
+      { topic: "Veri Analizi", aliases: ["grafikler", "çizgi grafiği", "sütun grafiği"] },
+      { topic: "Basit Olayların Olma Olasılığı", aliases: ["olasılık"] },
+    ],
+    "Cebir": [
+      { topic: "Cebirsel İfadeler ve Özdeşlikler", aliases: ["özdeşlikler", "çarpanlara ayırma", "cebirsel ifadeler"] },
+      { topic: "Doğrusal Denklemler", aliases: ["denklemler", "eğim", "doğru grafiği"] },
+      { topic: "Eşitsizlikler", aliases: ["doğrusal eşitsizlikler"] },
+    ],
+    "Geometri ve Ölçme": [
+      { topic: "Üçgenler", aliases: ["pisagor bağıntısı", "üçgen eşitsizliği", "kenarortay açıortay yükseklik"] },
+      { topic: "Eşlik ve Benzerlik", aliases: ["benzerlik", "eşlik"] },
+      { topic: "Dönüşüm Geometrisi", aliases: ["öteleme", "yansıma", "öteleme ve yansıma"] },
+      { topic: "Geometrik Cisimler", aliases: ["prizmalar", "silindir", "piramit", "koni"] },
+    ],
+  },
+  "Fen Bilimleri": {
+    "Fen Bilimleri": [
+      { topic: "Mevsimler ve İklim", aliases: ["mevsimlerin oluşumu", "iklim ve hava hareketleri"] },
+      { topic: "DNA ve Genetik Kod", aliases: ["dna", "kalıtım", "mutasyon ve modifikasyon", "adaptasyon", "biyoteknoloji"] },
+      { topic: "Basınç", aliases: ["katı basıncı", "sıvı basıncı", "gaz basıncı"] },
+      { topic: "Madde ve Endüstri", aliases: ["periyodik sistem", "kimyasal tepkimeler", "asitler ve bazlar", "fiziksel ve kimyasal değişimler"] },
+      { topic: "Basit Makineler", aliases: ["kaldıraç", "makara", "eğik düzlem"] },
+      { topic: "Enerji Dönüşümleri ve Çevre Bilimi", aliases: ["besin zinciri", "fotosentez", "solunum", "madde döngüleri"] },
+      { topic: "Elektrik Yükleri ve Elektrik Enerjisi", aliases: ["elektriklenme", "elektrik enerjisi"] },
+    ],
+  },
+  "İnkılap Tarihi": {
+    "T.C. İnkılap Tarihi ve Atatürkçülük": [
+      { topic: "Bir Kahraman Doğuyor", aliases: ["avrupa'daki gelişmeler", "mustafa kemal'in çocukluğu"] },
+      { topic: "Millî Uyanış: Bağımsızlık Yolunda Atılan Adımlar", aliases: ["milli uyanış", "birinci dünya savaşı", "mondros", "kongreler"] },
+      { topic: "Millî Bir Destan: Ya İstiklal Ya Ölüm!", aliases: ["milli bir destan", "kurtuluş savaşı", "milli mücadele", "cepheler"] },
+      { topic: "Atatürkçülük ve Çağdaşlaşan Türkiye", aliases: ["atatürk ilkeleri", "inkılaplar", "çağdaşlaşan türkiye"] },
+      { topic: "Demokratikleşme Çabaları", aliases: ["çok partili hayat", "demokratikleşme"] },
+      { topic: "Atatürk Dönemi Türk Dış Politikası", aliases: ["dış politika"] },
+      { topic: "Atatürk'ün Ölümü ve Sonrası", aliases: ["atatürk'ün ölümü", "ikinci dünya savaşı"] },
+    ],
+  },
+  "Din Kültürü": {
+    "Din Kültürü ve Ahlak Bilgisi": [
+      { topic: "Kader İnancı", aliases: ["kader ve kaza"] },
+      { topic: "Zekât ve Sadaka", aliases: ["zekat", "sadaka", "infak"] },
+      { topic: "Din ve Hayat", aliases: ["din ve aile", "din ve çevre"] },
+      { topic: "Hz. Muhammed'in Örnekliği", aliases: ["peygamberimizin örnekliği"] },
+      { topic: "Kur'an-ı Kerim ve Özellikleri", aliases: ["kuran'ın ana konuları"] },
+    ],
+  },
+  İngilizce: {
+    "English": [
+      "Friendship", "Teen Life", "In the Kitchen", "On the Phone", "The Internet", "Adventures", "Tourism", "Chores", "Science", "Natural Forces",
+    ],
+  },
+};
+
 // Slug'lar sabit olmalı (ID eşlemesi buna dayanıyor) — Türkçe karakterler
 // katlanır, ardışık ayraçlar tekilleşir.
 const slugPart = (value: string) =>
@@ -206,7 +294,7 @@ function flatten(exam: CurriculumExam, tree: Record<string, SubjectTree>): Curri
   );
 }
 
-export const CURRICULUM: CurriculumTopicDef[] = [...flatten("TYT", TYT), ...flatten("AYT", AYT)];
+export const CURRICULUM: CurriculumTopicDef[] = [...flatten("TYT", TYT), ...flatten("AYT", AYT), ...flatten("LGS", LGS)];
 
 /** Müfredattan gelip öğrenci henüz hiç çalışmadığı için konu listelerinde
  * gösterilmeyecek konuları ayırt etmek için (bkz. server/db.ts getUserTopicProgress). */
