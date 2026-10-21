@@ -15,6 +15,10 @@ CREATE TABLE "parent_links" (
 	CONSTRAINT "parent_links_codeHash_unique" UNIQUE("codeHash")
 );
 --> statement-breakpoint
+ALTER TABLE "student_profiles" ADD COLUMN "examTrack" text DEFAULT 'YKS' NOT NULL;--> statement-breakpoint
+ALTER TABLE "student_profiles" ADD COLUMN "currentNet" varchar(40);--> statement-breakpoint
+ALTER TABLE "student_profiles" ADD COLUMN "targetGoal" varchar(180);--> statement-breakpoint
+ALTER TABLE "student_profiles" ADD COLUMN "targetScore" varchar(20);--> statement-breakpoint
 CREATE INDEX "parent_links_student_idx" ON "parent_links" USING btree ("studentUserId");--> statement-breakpoint
 CREATE INDEX "parent_links_parent_idx" ON "parent_links" USING btree ("parentUserId");--> statement-breakpoint
 -- Supabase Data API'den erişilmesin (bkz. 0001_enable_rls.sql).

@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { createHash, randomInt } from "node:crypto";
 import { z } from "zod";
-import { estimateLgsScore } from "../../shared/exams";
+import { EXAM_KIND_DEFS, estimateScore, scoredKindOf } from "../../shared/exams";
 import { generateInviteCode, normalizeInviteCode, summarizeStudent } from "../../shared/org";
 import { PARENT_CONSENT_TEXT, PARENT_CONSENT_VERSION } from "../../shared/parent";
 import { appBaseUrl } from "../_core/emailVerification";
@@ -110,12 +110,15 @@ export const parentRouter = router({
       getStudentCalendarReadOnly(input.studentUserId, since),
       loadStudentSignals([input.studentUserId], start, end, new Date(Date.now() - 30 * DAY_MS)),
     ]);
-    const latestLgs = exams.filter((exam) => exam.exam === "LGS").sort((a, b) => b.date.localeCompare(a.date))[0];
+    // Tahmini puanı olan sınavda (bugün LGS) son denemenin tahmini puanı.
+    const scoredKind = scoredKindOf(profile.examTrack);
+    const latestScored = scoredKind ? exams.filter((exam) => exam.exam === scoredKind).sort((a, b) => b.date.localeCompare(a.date))[0] : undefined;
+    const scoreDef = scoredKind ? EXAM_KIND_DEFS[scoredKind].scoreEstimate! : null;
     return {
       name,
-      profile: { examTrack: profile.examTrack, gradeLevel: profile.gradeLevel, examYear: profile.examYear, targetScoreType: profile.targetScoreType, targetUniversity: profile.targetUniversity, targetDepartment: profile.targetDepartment, targetHighSchool: profile.targetHighSchool, targetLgsScore: profile.targetLgsScore, dailyStudyDuration: profile.dailyStudyDuration },
+      profile: { examTrack: profile.examTrack, gradeLevel: profile.gradeLevel, examYear: profile.examYear, targetScoreType: profile.targetScoreType, targetUniversity: profile.targetUniversity, targetDepartment: profile.targetDepartment, targetGoal: profile.targetGoal, targetScore: profile.targetScore, dailyStudyDuration: profile.dailyStudyDuration },
       summary: summarizeStudent(signals.get(input.studentUserId)!),
-      estimatedLgsScore: latestLgs ? estimateLgsScore(latestLgs.subjects) : null,
+      estimatedScore: scoreDef ? { label: scoreDef.label, max: scoreDef.max, value: latestScored ? estimateScore(scoredKind, latestScored.subjects) : null } : null,
       exams: exams.map((exam) => ({ id: exam.id, title: exam.title, date: exam.date, exam: exam.exam, net: exam.net, subjects: exam.subjects })),
       weakTopics: topics.filter((topic) => !topic.insufficientData && topic.status === "Zayıf").sort((a, b) => a.progress - b.progress).slice(0, 10).map((topic) => ({ slug: topic.slug, subject: topic.subject, topic: topic.topic, progress: topic.progress })),
       sessions: calendar.sessions.map((session) => ({ id: session.id, sessionDate: session.sessionDate, subject: session.subject, topic: session.topic, kind: session.kind, plannedMinutes: session.plannedMinutes, status: session.status, abandonedAt: session.abandonedAt })),

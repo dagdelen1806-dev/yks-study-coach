@@ -45,8 +45,8 @@ describe("validateOnboardingStep — adım 2 (hedefler)", () => {
   });
 
   it("LGS hedef puanı 100–500 arasında olmalı", () => {
-    expect(isStepValid(2, { ...emptyOnboardingDraft(), targetLgsScore: "450" })).toBe(true);
-    expect(validateOnboardingStep(2, { ...emptyOnboardingDraft(), targetLgsScore: "650" }).targetLgsScore).toBeTruthy();
+    expect(isStepValid(2, { ...emptyOnboardingDraft(), examTrack: "LGS", targetScore: "450" })).toBe(true);
+    expect(validateOnboardingStep(2, { ...emptyOnboardingDraft(), examTrack: "LGS", targetScore: "650" }).targetScore).toBeTruthy();
   });
 });
 

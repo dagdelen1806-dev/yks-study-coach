@@ -3,7 +3,7 @@ import { Bar100, EmptyNote, Panel, PageHeader, Segmented, StatCard, primaryButto
 import TaskDialog, { taskDraftFor, type TaskDraft } from "@/components/app/TaskDialog";
 import { palette } from "@shared/palette";
 import { formatExamDate, getColorForSubject, netDeltaLabel, toLocalDateKey, type MockExam } from "@shared/yksData";
-import { estimateLgsScore, subjectTotalsOf, trackSubjects, type ExamKind } from "@shared/exams";
+import { EXAM_KIND_DEFS, estimateScore, scoredKindOf, subjectTotalsOf, trackSubjects, type ExamKind } from "@shared/exams";
 import { useExamTrack } from "@/hooks/useExamTrack";
 import { AlertTriangle, BarChart3, CalendarPlus, Clock3, FileText, Gauge, ListChecks, Plus, Target, TrendingUp, Trophy, Upload } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -40,7 +40,10 @@ export default function ExamsDashboard({ exams, onAddExam, onAddScan, onUpload }
   const latest = ofKind[0];
   const previous = latest ? previousOfSameKind(exams, latest) : undefined;
   const latestByKind = kinds.map((candidate) => [candidate, byDate.find((exam) => kindOf(exam) === candidate)] as const);
-  const latestLgs = track === "LGS" ? latestByKind[0][1] : undefined;
+  // Tahmini puanı olan oturum (bugün LGS) ve son denemesi.
+  const scoredKind = scoredKindOf(track);
+  const scoreDef = scoredKind ? EXAM_KIND_DEFS[scoredKind].scoreEstimate! : null;
+  const latestScored = scoredKind ? byDate.find((exam) => kindOf(exam) === scoredKind) : undefined;
   const deltaFor = (exam: MockExam | undefined) => { const before = exam && previousOfSameKind(exams, exam); return exam && before ? netOf(exam) - netOf(before) : null; };
 
   const series = ofKind.slice(0, 12).reverse().map((exam) => ({ label: formatExamDate(exam.date), title: exam.title, net: Number((subject === "Toplam" ? netOf(exam) : exam.subjects[subject] ?? 0).toFixed(2)) }));
@@ -91,7 +94,7 @@ export default function ExamsDashboard({ exams, onAddExam, onAddScan, onUpload }
           const delta = deltaFor(exam);
           return <StatCard key={label} tone={index === 0 ? "warm" : "plain"} icon={<Trophy size={18} />} label={`Son ${label} neti`} value={exam ? netOf(exam).toFixed(2) : "—"} unit={exam ? "net" : undefined} foot={exam ? <><span>{formatExamDate(exam.date)}</span>{delta !== null && <span className={`font-bold ${delta >= 0 ? "text-success" : "text-danger"}`}>{delta >= 0 ? "↑" : "↓"} {netDeltaLabel(delta)}</span>}</> : <span>Henüz {label} denemesi yok</span>} />;
         })}
-        {track === "LGS" && <StatCard icon={<Gauge size={18} />} label="Tahmini LGS puanı" value={latestLgs ? estimateLgsScore(latestLgs.subjects).toFixed(1) : "—"} unit={latestLgs ? "/ 500" : undefined} foot={<span>{latestLgs ? "Son denemenden · resmî puan değil" : "LGS denemesi ekleyince görünür"}</span>} />}
+        {scoreDef && <StatCard icon={<Gauge size={18} />} label={scoreDef.label} value={latestScored ? estimateScore(scoredKind, latestScored.subjects)!.toFixed(1) : "—"} unit={latestScored ? `/ ${scoreDef.max}` : undefined} foot={<span>{latestScored ? "Son denemenden · resmî puan değil" : `${scoredKind} denemesi ekleyince görünür`}</span>} />}
         <StatCard icon={<ListChecks size={18} />} label="Kayıtlı deneme" value={String(exams.length)} foot={<span>{kinds.map((candidate) => `${exams.filter((exam) => kindOf(exam) === candidate).length} ${candidate}`).join(" · ")}</span>} />
         <StatCard tone={losses.length ? "warn" : "plain"} icon={<AlertTriangle size={18} />} label="En çok kaybettiren konu" value={losses[0] ? `%${Math.round(((losses[0].wrong + losses[0].blank) / losses[0].questions) * 100)}` : "—"} foot={<span className="truncate">{losses[0] ? `${losses[0].topic} · yanlış/boş` : "Konu detaylı deneme ekleyince görünür"}</span>} />
       </div>

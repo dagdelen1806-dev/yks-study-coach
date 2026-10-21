@@ -5,7 +5,7 @@ import { palette } from "@shared/palette";
 import { getColorForSubject, statusMeta, type DashboardSection, type Topic } from "@shared/yksData";
 import { CalendarPlus, CheckCircle2, ChevronDown, CircleDashed, Compass, ExternalLink, Layers, Play, Plus, RotateCcw, Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
-import type { ExamKind } from "@shared/exams";
+import { EXAM_TRACK_DEFS, type ExamKind } from "@shared/exams";
 import { useExamTrack } from "@/hooks/useExamTrack";
 
 type ExamFilter = "Tümü" | ExamKind;
@@ -64,6 +64,7 @@ export default function TopicMap({ topics, onSection, onStartSession }: { topics
   const [task, setTask] = useState<TaskDraft | null>(null);
 
   const { track, kinds } = useExamTrack();
+  const trackInfo = EXAM_TRACK_DEFS[track];
   // Yalnız öğrencinin sınavının konuları (LGS öğrencisi YKS konusu görmez, tersi de).
   const ofExam = topics.filter((topic) => kinds.includes(topic.exam) && (exam === "Tümü" || topic.exam === exam));
   const subjects = Array.from(new Set(ofExam.map((topic) => topic.subject)));
@@ -87,7 +88,7 @@ export default function TopicMap({ topics, onSection, onStartSession }: { topics
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow={`${track === "LGS" ? "MEB" : "ÖSYM"} kapsamı · kişisel takip`}
+        eyebrow={`${trackInfo.authority.name} kapsamı · kişisel takip`}
         title="Konu Haritası"
         description="Konularını gerçek soru verine göre izle: hangileri tamam, hangileri tekrar istiyor, hangilerinde henüz veri yok."
         actions={<><button onClick={() => onSection("exams")} className={secondaryButton}><Plus size={16} /> Tarama testi / deneme ekle</button></>}
@@ -155,8 +156,8 @@ export default function TopicMap({ topics, onSection, onStartSession }: { topics
       )}
 
       <div className="flex flex-col gap-3 rounded-2xl border border-brand/10 bg-brand-soft p-4 text-[13px] text-ink-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className="flex items-start gap-3"><Compass size={17} className="mt-0.5 shrink-0 text-brand" /><span><strong className="font-semibold text-brand-strong">Kapsam notu:</strong> {track === "LGS" ? "Konu listesi MEB 8. sınıf öğretim programına dayanır" : "Konu listesi ÖSYM TYT/AYT kapsamına ve MEB programına dayanır"}; durum, girdiğin deneme ve tarama testlerindeki doğruluk oranından hesaplanır.</span></p>
-        <a href={track === "LGS" ? "https://www.meb.gov.tr" : "https://www.osym.gov.tr"} target="_blank" rel="noreferrer" className="inline-flex shrink-0 items-center gap-1 font-semibold text-brand">{track === "LGS" ? "MEB'i aç" : "ÖSYM'yi aç"} <ExternalLink size={12} /></a>
+        <p className="flex items-start gap-3"><Compass size={17} className="mt-0.5 shrink-0 text-brand" /><span><strong className="font-semibold text-brand-strong">Kapsam notu:</strong> {trackInfo.scopeNote}; durum, girdiğin deneme ve tarama testlerindeki doğruluk oranından hesaplanır.</span></p>
+        <a href={trackInfo.authority.url} target="_blank" rel="noreferrer" className="inline-flex shrink-0 items-center gap-1 font-semibold text-brand">{trackInfo.authority.name} sitesini aç <ExternalLink size={12} /></a>
       </div>
 
       {selected && !task && (

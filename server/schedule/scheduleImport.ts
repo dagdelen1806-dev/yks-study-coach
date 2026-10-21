@@ -1,20 +1,17 @@
 import { invokeLLM } from "../_core/llm";
-import { isValidTime, scheduleSubjectsFor, toMinutes, type ClassBlock, type ClassPeriod } from "../../shared/classSchedule";
-import type { ExamTrack } from "../../shared/exams";
+import { isValidTime, nonExamPresetsFor, scheduleSubjectsFor, toMinutes, type ClassBlock, type ClassPeriod } from "../../shared/classSchedule";
+import { EXAM_TRACK_DEFS, type ExamTrack } from "../../shared/exams";
 
 // Ders programı fotoğrafı → okul programı (ders saatleri + gün/ders hücreleri). Okunan program
 // kaydedilmez; düzenleyiciye doldurulur, öğrenci kontrol edip kaydeder.
 
 export type ScheduleImport = { periods: ClassPeriod[]; blocks: ClassBlock[]; skipped: number };
 
-/**
- * Okul ders adından YKS dersi (ör. "HTDE_BİYOLOJİ (SEÇMELİ-2)" → Biyoloji). known=false: ad
- * tanınmadı (modelin seçimine bakılır); known=true ve subject=null: tanınan YKS dışı ders.
- */
-export function classifyLesson(name: string, track: ExamTrack = "YKS"): { known: boolean; subject: string | null } {
-  const value = name.toLocaleUpperCase("tr-TR");
-  const rules: Array<[RegExp, string | null]> = track === "LGS" ? [
-    // 8. sınıf: din kültürü ve İngilizce LGS dersidir; seçmeli/uygulama dersleri plana girmez.
+// Okul ders adı → sınavın dersi; ilk eşleşen kural kazanır (null = tanınan ama plana girmeyen ders).
+// Yeni sınav buraya kendi kurallarıyla eklenir (Record olduğu için TypeScript hatırlatır).
+const LESSON_RULES: Record<ExamTrack, Array<[RegExp, string | null]>> = {
+  // 8. sınıf: din kültürü ve İngilizce LGS dersidir; seçmeli/uygulama dersleri plana girmez.
+  LGS: [
     [/SE[ÇC]MEL[İI]|REHBERL[İI]K|BEDEN|SPOR|G[ÖO]RSEL SANAT|M[ÜU]Z[İI]K|TEKNOLOJ[İI]|B[İI]L[İI][ŞS][İI]M|PEYGAMBER|KUR.?AN|PROJE/, null],
     [/D[İI]N K[ÜU]LT[ÜU]R|AHLAK/, "Din Kültürü"],
     [/YABANCI D[İI]L|[İI]NG[İI]L[İI]ZCE/, "İngilizce"],
@@ -22,7 +19,8 @@ export function classifyLesson(name: string, track: ExamTrack = "YKS"): { known:
     [/FEN/, "Fen Bilimleri"],
     [/MATEMAT[İI]K/, "Matematik"],
     [/T[ÜU]RK[ÇC]E/, "Türkçe"],
-  ] : [
+  ],
+  YKS: [
     [/D[İI]N K[ÜU]LT[ÜU]R|AHLAK|YABANCI D[İI]L|[İI]NG[İI]L[İI]ZCE|ALMANCA|FRANSIZCA|REHBERL[İI]K|BEDEN|SPOR|G[ÖO]RSEL SANAT|M[ÜU]Z[İI]K|SA[ĞG]LIK B[İI]LG|TRAF[İI]K|PEYGAMBER|KUR.?AN|H[İI]TABET|PROJE/, null],
     [/GEOMETR[İI]/, "Geometri"],
     [/MATEMAT[İI]K/, "Matematik"],
@@ -34,8 +32,16 @@ export function classifyLesson(name: string, track: ExamTrack = "YKS"): { known:
     [/TAR[İI]H|[İI]NKILAP/, "Tarih"],
     [/CO[ĞG]RAFYA/, "Coğrafya"],
     [/FELSEFE|MANTIK|PS[İI]KOLOJ[İI]|SOSYOLOJ[İI]/, "Felsefe"],
-  ];
-  for (const [pattern, subject] of rules) if (pattern.test(value)) return { known: true, subject };
+  ],
+};
+
+/**
+ * Okul ders adından sınavın dersi (ör. YKS: "HTDE_BİYOLOJİ (SEÇMELİ-2)" → Biyoloji). known=false: ad
+ * tanınmadı (modelin seçimine bakılır); known=true ve subject=null: tanınan ama sınav dışı ders.
+ */
+export function classifyLesson(name: string, track: ExamTrack = "YKS"): { known: boolean; subject: string | null } {
+  const value = name.toLocaleUpperCase("tr-TR");
+  for (const [pattern, subject] of LESSON_RULES[track]) if (pattern.test(value)) return { known: true, subject };
   return { known: false, subject: null };
 }
 
@@ -107,11 +113,11 @@ export async function readScheduleFromImage(dataUrl: string, invoke: typeof invo
     messages: [
       {
         role: "system",
-        content: `Sen Türk ${track === "LGS" ? "ortaokul" : "lise"}/dershane haftalık ders programı okuyucususun. Yalnızca görselde görüleni çıkar, uydurma.
+        content: `Sen Türk ${EXAM_TRACK_DEFS[track].schoolKind}/dershane haftalık ders programı okuyucususun. Yalnızca görselde görüleni çıkar, uydurma.
 - periods: ders saatleri sırasıyla (1. ders, 2. ders...), başlangıç/bitiş "SS:dd".
 - lessons: dolu her hücre için bir kayıt. day: 1=Pazartesi … 7=Pazar. period: ders saatinin sıra numarası (1'den başlar).
 - code: hücredeki kısaltma (ör. FİZF4). name: dersin tam adı — programın altındaki ders listesinden (Ders → Dersin Adı) bul; liste yoksa kısaltmadan anla.
-- subject: dersin ${track} karşılığı, yalnızca şu listeden biri: ${examSubjects.join(", ")}. ${track === "LGS" ? "LGS'de olmayan dersler (rehberlik, beden eğitimi, görsel sanatlar, müzik, teknoloji ve tasarım, bilişim, seçmeli dersler vb.) için \"LGS dışı\" yaz." : "YKS'de olmayan dersler (din kültürü, yabancı dil, rehberlik, beden eğitimi, sanat, müzik, seçmeli ahlak vb.) için \"YKS dışı\" yaz."}
+- subject: dersin ${track} karşılığı, yalnızca şu listeden biri: ${examSubjects.join(", ")}. Bu sınavda sorulmayan dersler (ör. ${nonExamPresetsFor(track).filter((label) => label !== "Diğer ders").join(", ").toLocaleLowerCase("tr")}, seçmeli dersler) için "${EXAM_TRACK_DEFS[track].label} dışı" yaz.
 Öğretmen adlarını yazma.`,
       },
       { role: "user", content: [{ type: "text", text: "Bu haftalık ders programını oku." }, { type: "image_url", image_url: { url: dataUrl, detail: "high" } }] },

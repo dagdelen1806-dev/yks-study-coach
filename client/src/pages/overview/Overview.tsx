@@ -10,7 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { TARGET_SCORE_TYPE_LABELS, type AvatarStyle } from "@shared/onboarding";
 import { NOTEBOOK_REVIEW_TASK_KIND } from "@shared/questionNotebook";
 import { palette } from "@shared/palette";
-import { estimateLgsScore, trackSubjects, type ExamKind } from "@shared/exams";
+import { EXAM_KIND_DEFS, estimateScore, targetSummary, trackSubjects, type ExamKind } from "@shared/exams";
 import { useExamTrack } from "@/hooks/useExamTrack";
 import { getStatusFromProgress, statusMeta } from "@shared/yksData";
 import {
@@ -161,7 +161,9 @@ export default function Overview({ topics, exams, onSection, onStartSession, onE
   const previous = latest ? byDate.find((exam) => exam !== latest && (exam.exam ?? "TYT") === (latest.exam ?? "TYT")) : undefined;
   const netChange = latest && previous ? latest.net - previous.net : null;
   const coachNote = buildCoachNote(latest, previous, weakTopic, subjectOrder);
-  const latestLgsScore = latest?.exam === "LGS" ? estimateLgsScore(latest.subjects) : null;
+  // Tahmini puanı olan sınavda (bugün LGS) son denemenin tahmini puanı.
+  const latestScoreDef = latest?.exam ? EXAM_KIND_DEFS[latest.exam].scoreEstimate ?? null : null;
+  const latestScore = latest ? estimateScore(latest.exam, latest.subjects) : null;
 
   // Net gelişimi: seçilen sınav türünün denemeleri, eskiden yeniye.
   const netSeries = useMemo(() => exams
@@ -197,10 +199,9 @@ export default function Overview({ topics, exams, onSection, onStartSession, onE
     ? notebook.startReview()
     : onStartSession(nextSession ? { sessionId: typeof nextSession.id === "number" ? nextSession.id : undefined, subject: nextSession.subject, topic: nextSession.topic, plannedMinutes: nextSession.plannedMinutes, sessionDate: nextSession.sessionDate } : undefined));
 
-  const targetSchool = track === "LGS" ? profile?.targetHighSchool ?? "" : [profile?.targetUniversity, profile?.targetDepartment].filter(Boolean).join(" · ");
-  const targetLine = track === "LGS"
-    ? [profile?.targetLgsScore ? `Hedef ${profile.targetLgsScore} puan` : null, profile?.examYear ? `LGS ${profile.examYear}` : null]
-    : [profile?.targetScoreType ? TARGET_SCORE_TYPE_LABELS[profile.targetScoreType] : null, profile?.targetRanking ? `İlk ${profile.targetRanking}` : null, profile?.examYear ? `YKS ${profile.examYear}` : null];
+  const target = targetSummary(track, { ...profile, targetScoreTypeLabel: profile?.targetScoreType ? TARGET_SCORE_TYPE_LABELS[profile.targetScoreType] : null });
+  const targetSchool = target.goal;
+  const targetLine = target.details;
   const quote = motivationalLines[now.getDate() % motivationalLines.length];
 
   const planLine = sessions.length === 0
@@ -271,7 +272,7 @@ export default function Overview({ topics, exams, onSection, onStartSession, onE
           <StatCard icon={<Clock3 size={18} />} label="Bugünkü çalışma hedefi" value={formatMinutes(plannedMinutes)} progress={plannedMinutes ? (doneMinutes / plannedMinutes) * 100 : 0} foot={<><span>Planlanan süre</span><span>{doneMinutes} / {plannedMinutes} dk</span></>} />
           <StatCard icon={<PenLine size={18} />} label="Bugünkü soru hedefi" value={String(plannedQuestions)} unit="soru" progress={plannedQuestions ? (doneQuestions / plannedQuestions) * 100 : 0} foot={<><span>{plannedQuestions ? "Planlanan" : "Görevlerde soru hedefi yok"}</span><span>{doneQuestions} / {plannedQuestions}</span></>} />
           <StatCard icon={<ListChecks size={18} />} label="Bugünkü görev" value={String(sessions.length)} unit="görev" progress={sessions.length ? (doneCount / sessions.length) * 100 : 0} foot={<><span>Tamamlanan</span><span>{doneCount} / {sessions.length}</span></>} />
-          <StatCard tone="warm" icon={<Trophy size={18} />} label="Son deneme neti" value={latest ? latest.net.toFixed(2) : "—"} unit={latest ? "net" : undefined} foot={latest ? <><span>{latest.exam ?? "TYT"} · {formatExamDate(latest.date)}{latestLgsScore !== null ? ` · ~${latestLgsScore.toFixed(0)} puan` : ""}</span>{netChange !== null && <span className={`font-bold ${netChange >= 0 ? "text-success" : "text-danger"}`}>{netChange >= 0 ? "↑" : "↓"} {netDeltaLabel(netChange)}</span>}</> : <button onClick={() => onSection("exams")} className="font-semibold text-brand">İlk denemeni ekle →</button>} />
+          <StatCard tone="warm" icon={<Trophy size={18} />} label="Son deneme neti" value={latest ? latest.net.toFixed(2) : "—"} unit={latest ? "net" : undefined} foot={latest ? <><span>{latest.exam ?? "TYT"} · {formatExamDate(latest.date)}{latestScore !== null ? ` · ~${latestScore.toFixed(0)} puan` : ""}</span>{netChange !== null && <span className={`font-bold ${netChange >= 0 ? "text-success" : "text-danger"}`}>{netChange >= 0 ? "↑" : "↓"} {netDeltaLabel(netChange)}</span>}</> : <button onClick={() => onSection("exams")} className="font-semibold text-brand">İlk denemeni ekle →</button>} />
         </div>
 
         {user && <ReviewDueNotes />}
@@ -376,10 +377,10 @@ export default function Overview({ topics, exams, onSection, onStartSession, onE
                   <span className="text-ink-3">Net</span>
                   <span className="flex items-baseline gap-2"><strong className="text-[18px] font-extrabold text-ink">{latest.net.toFixed(2)}</strong>{netChange !== null && <span className={`text-[12px] font-bold ${netChange >= 0 ? "text-success" : "text-danger"}`}>{netDeltaLabel(netChange)}</span>}</span>
                 </div>
-                {latestLgsScore !== null && (
+                {latestScore !== null && latestScoreDef && (
                   <div className="flex items-center justify-between pt-2 text-[13px]">
-                    <span className="text-ink-3">Tahmini LGS puanı <span className="text-[11px] text-ink-4">(resmî değil)</span></span>
-                    <strong className="text-ink">{latestLgsScore.toFixed(1)} / 500</strong>
+                    <span className="text-ink-3">{latestScoreDef.label} <span className="text-[11px] text-ink-4">(resmî değil)</span></span>
+                    <strong className="text-ink">{latestScore.toFixed(1)} / {latestScoreDef.max}</strong>
                   </div>
                 )}
               </div>
@@ -397,7 +398,7 @@ export default function Overview({ topics, exams, onSection, onStartSession, onE
             {targetSchool ? (
               <p className="mt-2 text-[14px] font-semibold leading-5 text-ink">{targetSchool}</p>
             ) : (
-              <p className="mt-2 text-[13px] text-ink-3">{track === "LGS" ? "Hedef liseni henüz yazmadın." : "Hedef üniversite ve bölümünü henüz yazmadın."}</p>
+              <p className="mt-2 text-[13px] text-ink-3">{target.emptyText}</p>
             )}
             {targetLine.some(Boolean) && <p className="mt-1 text-[12px] text-ink-3">{targetLine.filter(Boolean).join(" · ")}</p>}
             <button onClick={onEditProfile} className="mt-3 text-[12px] font-semibold text-brand hover:text-brand-strong">{targetSchool ? "Hedefini düzenle" : "Hedefini belirle"} →</button>

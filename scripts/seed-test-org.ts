@@ -112,7 +112,7 @@ async function main() {
   await db.delete(parentLinks).where(eq(parentLinks.parentUserId, parentId));
   await db.delete(studentProfiles).where(inArray(studentProfiles.userId, [lgsId, parentId]));
   await db.delete(userMockExams).where(eq(userMockExams.userId, lgsId));
-  await db.insert(studentProfiles).values({ userId: lgsId, onboardingCompleted: 1, onboardingStep: 4, preferredName: LGS_STUDENT.name, avatarStyle: "boy", examTrack: "LGS", gradeLevel: "8", examYear: new Date().getFullYear() + 1, targetHighSchool: "Fen Lisesi", targetLgsScore: "450", dailyStudyDuration: 90, preferredStudyStartTime: "16:00" });
+  await db.insert(studentProfiles).values({ userId: lgsId, onboardingCompleted: 1, onboardingStep: 4, preferredName: LGS_STUDENT.name, avatarStyle: "boy", examTrack: "LGS", gradeLevel: "8", examYear: new Date().getFullYear() + 1, targetGoal: "Fen Lisesi", targetScore: "450", dailyStudyDuration: 90, preferredStudyStartTime: "16:00" });
 
   console.log(`\nKurum hazır (id ${orgId}). Şifre: ${PASSWORD}`);
   console.log(`  LGS öğrencisi: ${LGS_STUDENT.email} · Veli: ${PARENT.email}`);

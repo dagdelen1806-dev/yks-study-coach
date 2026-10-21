@@ -294,7 +294,10 @@ function flatten(exam: CurriculumExam, tree: Record<string, SubjectTree>): Curri
   );
 }
 
-export const CURRICULUM: CurriculumTopicDef[] = [...flatten("TYT", TYT), ...flatten("AYT", AYT), ...flatten("LGS", LGS)];
+/** Her oturumun konu ağacı; yeni sınav oturumu buraya eklenir (Record olduğu için TypeScript hatırlatır). */
+const TREES: Record<CurriculumExam, Record<string, SubjectTree>> = { TYT, AYT, LGS };
+
+export const CURRICULUM: CurriculumTopicDef[] = (Object.keys(TREES) as CurriculumExam[]).flatMap((exam) => flatten(exam, TREES[exam]));
 
 /** Müfredattan gelip öğrenci henüz hiç çalışmadığı için konu listelerinde
  * gösterilmeyecek konuları ayırt etmek için (bkz. server/db.ts getUserTopicProgress). */

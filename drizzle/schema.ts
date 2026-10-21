@@ -1,4 +1,5 @@
 import { customType, decimal, index, integer, pgTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/pg-core";
+import { CATALOG_EXAM_SCOPES, EXAM_KINDS, EXAM_TRACKS, GRADE_LEVELS } from "../shared/exams";
 
 export const users = pgTable("users", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
@@ -38,7 +39,7 @@ export const users = pgTable("users", {
 export const yksTopics = pgTable("yks_topics", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   slug: varchar("slug", { length: 120 }).notNull().unique(),
-  exam: text("exam", { enum: ["TYT", "AYT", "LGS"] }).notNull(),
+  exam: text("exam", { enum: EXAM_KINDS }).notNull(),
   subject: varchar("subject", { length: 80 }).notNull(),
   topic: varchar("topic", { length: 180 }).notNull(),
   unit: varchar("unit", { length: 120 }).notNull(),
@@ -60,7 +61,7 @@ export const mockExams = pgTable("mock_exams", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   userId: integer("userId").notNull(),
   title: varchar("title", { length: 180 }).notNull(),
-  exam: text("exam", { enum: ["TYT", "AYT", "LGS"] }).default("TYT").notNull(),
+  exam: text("exam", { enum: EXAM_KINDS }).default("TYT").notNull(),
   examDate: timestamp("examDate", { withTimezone: true }).notNull(),
   turkceNet: integer("turkceNet").default(0).notNull(),
   matematikNet: integer("matematikNet").default(0).notNull(),
@@ -74,7 +75,7 @@ export const userMockExams = pgTable("user_mock_exams", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   userId: integer("userId").notNull(),
   title: varchar("title", { length: 180 }).notNull(),
-  exam: text("exam", { enum: ["TYT", "AYT", "LGS"] }).notNull(),
+  exam: text("exam", { enum: EXAM_KINDS }).notNull(),
   examDate: timestamp("examDate", { withTimezone: true }).notNull(),
   net: decimal("net", { precision: 6, scale: 2 }).notNull(),
   delta: decimal("delta", { precision: 6, scale: 2 }).default("0").notNull(),
@@ -113,7 +114,7 @@ export const userResourceBooks = pgTable("user_resource_books", {
   title: varchar("title", { length: 180 }).notNull(),
   publisher: varchar("publisher", { length: 120 }).notNull(),
   subject: varchar("subject", { length: 80 }).notNull(),
-  exam: text("exam", { enum: ["TYT", "AYT", "LGS"] }).notNull(),
+  exam: text("exam", { enum: EXAM_KINDS }).notNull(),
   level: text("level", { enum: ["Kolay", "Orta", "Zor"] }).notNull(),
   format: varchar("format", { length: 120 }).notNull(),
   reason: text("reason").notNull(),
@@ -705,8 +706,8 @@ export const studentProfiles = pgTable("student_profiles", {
   // Arayüz avatarı (öğrencinin seçimi; boşsa nötr tasarım). Bkz. shared/onboarding.ts AVATAR_STYLES.
   avatarStyle: text("avatarStyle", { enum: ["girl", "boy"] }),
   // Hazırlandığı sınav (bkz. shared/exams.ts): YKS (TYT+AYT) ya da LGS (8. sınıf).
-  examTrack: text("examTrack", { enum: ["YKS", "LGS"] }).default("YKS").notNull(),
-  gradeLevel: text("gradeLevel", { enum: ["7", "8", "9", "10", "11", "12", "mezun"] }),
+  examTrack: text("examTrack", { enum: EXAM_TRACKS }).default("YKS").notNull(),
+  gradeLevel: text("gradeLevel", { enum: GRADE_LEVELS }),
   examYear: integer("examYear"),
   targetScoreType: text("targetScoreType", { enum: ["SAY", "EA", "SOZ", "DIL", "TYT", "belirsiz"] }),
 
@@ -714,7 +715,7 @@ export const studentProfiles = pgTable("student_profiles", {
   // metinsel değerlere izin vermek için sayısal değil varchar.
   currentTytNet: varchar("currentTytNet", { length: 40 }),
   currentAytNet: varchar("currentAytNet", { length: 40 }),
-  currentLgsNet: varchar("currentLgsNet", { length: 40 }),
+  currentNet: varchar("currentNet", { length: 40 }),
   mockExamFrequency: varchar("mockExamFrequency", { length: 60 }),
   strongSubjectsJson: text("strongSubjectsJson"),
   weakSubjectsJson: text("weakSubjectsJson"),
@@ -724,9 +725,10 @@ export const studentProfiles = pgTable("student_profiles", {
   targetUniversity: varchar("targetUniversity", { length: 180 }),
   targetDepartment: varchar("targetDepartment", { length: 180 }),
   targetRanking: varchar("targetRanking", { length: 60 }),
-  // LGS hedefi: lise (ör. "Fen Lisesi", okul adı) ve 500 üzerinden puan.
-  targetHighSchool: varchar("targetHighSchool", { length: 180 }),
-  targetLgsScore: varchar("targetLgsScore", { length: 20 }),
+  // Üniversite dışı sınavların hedefi (LGS: lise; ileride KPSS: kadro…) ve hedef puanı;
+  // etiketleri ve puan aralığı shared/exams.ts EXAM_TRACK_DEFS'ten.
+  targetGoal: varchar("targetGoal", { length: 180 }),
+  targetScore: varchar("targetScore", { length: 20 }),
   mainGoal: text("mainGoal"),
   shortTermGoal: text("shortTermGoal"),
   longTermGoal: text("longTermGoal"),
@@ -807,7 +809,7 @@ export const catalogBooks = pgTable("catalog_books", {
     "reference",
     "other",
   ] }).default("other").notNull(),
-  examScope: text("examScope", { enum: ["TYT", "AYT", "TYT_AYT", "YKS", "LGS", "GENEL"] }).default("GENEL").notNull(),
+  examScope: text("examScope", { enum: CATALOG_EXAM_SCOPES }).default("GENEL").notNull(),
   // Free-text subject label kept consistent with `yks_topics.subject` /
   // `resources.subject` conventions (e.g. "Matematik", "Türkçe") — no parallel
   // subject table is introduced. Null means multi-subject/general product.

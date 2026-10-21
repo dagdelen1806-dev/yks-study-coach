@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PAID_TIERS, TIER_LABELS, type PaidTier } from "@shared/entitlements";
 import { nextExamEnd, yksTermPrice } from "@shared/yksCalendar";
+import { EXAM_TRACK_DEFS } from "@shared/exams";
 import PlanComparison, { tierHighlights } from "./PlanComparison";
 
 const formatPrice = (minorUnits: number, currency: string) => `${(minorUnits / 100).toLocaleString("tr-TR", { minimumFractionDigits: 0, maximumFractionDigits: 0 })} ${currency === "TRY" ? "₺" : currency}`;
@@ -36,7 +37,7 @@ export default function PaywallSection() {
   const profile = trpc.onboarding.get.useQuery(undefined, { enabled: Boolean(user), retry: false }).data;
   const examYear = profile?.examYear ?? null;
   const track = profile?.examTrack ?? "YKS";
-  const examAuthority = track === "LGS" ? "MEB" : "ÖSYM";
+  const examAuthority = EXAM_TRACK_DEFS[track].authority.name;
   const [billingPeriod, setBillingPeriod] = useState<"monthly" | "yearly">("monthly");
   const [restoreToken, setRestoreToken] = useState("");
   const [showRestore, setShowRestore] = useState(false);

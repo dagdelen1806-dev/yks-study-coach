@@ -2,7 +2,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { Bar100, EmptyNote, PageHeader, Panel, Segmented, StatCard, primaryButton, secondaryButton } from "@/components/app/kit";
 import { startLogin } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { kindsOf, type ExamKind } from "@shared/exams";
+import { EXAM_TRACK_DEFS, GRADE_LEVEL_LABELS, kindsOf, targetSummary, type ExamKind } from "@shared/exams";
 import { PARENT_CONSENT_TEXT } from "@shared/parent";
 import { statusMeta } from "@shared/yksData";
 import { CalendarCheck, Clock3, Eye, Gauge, KeyRound, ListChecks, LogOut, Target, TrendingUp, Trophy, UserRound } from "lucide-react";
@@ -80,26 +80,28 @@ function ParentStudentView({ studentUserId }: { studentUserId: number }) {
 
   if (detail.isError) return <EmptyNote>{detail.error.message || "Öğrenci bilgileri yüklenemedi."}</EmptyNote>;
   if (!detail.data) return <EmptyNote>Yükleniyor…</EmptyNote>;
-  const { name, profile, summary, estimatedLgsScore, sessions, weakTopics } = detail.data;
-  const lastPrimary = track === "LGS" ? summary.lastLgs : summary.lastTyt;
-  const target = track === "LGS" ? [profile.targetHighSchool, profile.targetLgsScore ? `${profile.targetLgsScore} puan` : null] : [profile.targetUniversity, profile.targetDepartment];
+  const { name, profile, summary, estimatedScore, sessions, weakTopics } = detail.data;
+  const lastPrimary = summary.lastByKind[kinds[0]] ?? null;
+  const secondKind = kinds[1];
+  const lastSecond = secondKind ? summary.lastByKind[secondKind] ?? null : null;
+  const target = targetSummary(track, profile);
   const recent = sessions.filter((session) => new Date(session.sessionDate).getTime() <= Date.now() + 7 * 24 * 60 * 60 * 1000).slice(-14).reverse();
 
   return (
     <div className="space-y-5">
       <div>
         <h2 className="text-[24px] font-extrabold text-ink">{name}</h2>
-        <p className="mt-1 text-[13px] text-ink-3">{[profile.gradeLevel ? (profile.gradeLevel === "mezun" ? "Mezun" : `${profile.gradeLevel}. sınıf`) : null, profile.examYear ? `${track} ${profile.examYear}` : track].filter(Boolean).join(" · ")}</p>
-        {target.some(Boolean) && <p className="mt-0.5 flex items-center gap-1.5 text-[13px] font-semibold text-ink-2"><Target size={14} className="text-brand" />Hedef: {target.filter(Boolean).join(" · ")}</p>}
+        <p className="mt-1 text-[13px] text-ink-3">{[profile.gradeLevel ? GRADE_LEVEL_LABELS[profile.gradeLevel] : null, profile.examYear ? `${EXAM_TRACK_DEFS[track].label} ${profile.examYear}` : EXAM_TRACK_DEFS[track].label].filter(Boolean).join(" · ")}</p>
+        {(target.goal || target.score) && <p className="mt-0.5 flex items-center gap-1.5 text-[13px] font-semibold text-ink-2"><Target size={14} className="text-brand" />Hedef: {[target.goal, target.score].filter(Boolean).join(" · ")}</p>}
       </div>
 
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <StatCard icon={<Clock3 size={18} />} label="Son 7 gün çalışma" value={`${summary.weekMinutes}`} unit="dk" foot={<span>{profile.dailyStudyDuration ? `Günlük hedefi ${profile.dailyStudyDuration} dk` : "Günlük hedef girilmemiş"}</span>} />
         <StatCard icon={<CalendarCheck size={18} />} label="Bu hafta plan uyumu" value={summary.adherence !== null ? `%${summary.adherence}` : "—"} progress={summary.adherence ?? undefined} foot={<span>{summary.plannedThisWeek} görev planlandı</span>} />
         <StatCard tone="warm" icon={<Trophy size={18} />} label={`Son ${kinds[0]} neti`} value={lastPrimary ? lastPrimary.net.toFixed(2) : "—"} foot={lastPrimary ? <><span>{new Date(lastPrimary.date).toLocaleDateString("tr-TR")}</span>{lastPrimary.delta !== null && <span className={`font-bold ${lastPrimary.delta < 0 ? "text-danger" : "text-success"}`}>{lastPrimary.delta > 0 ? "+" : ""}{lastPrimary.delta.toFixed(2)}</span>}</> : <span>Deneme yok</span>} />
-        {track === "LGS"
-          ? <StatCard icon={<Gauge size={18} />} label="Tahmini LGS puanı" value={estimatedLgsScore !== null ? estimatedLgsScore.toFixed(1) : "—"} unit={estimatedLgsScore !== null ? "/ 500" : undefined} foot={<span>Son denemeden · resmî değil</span>} />
-          : <StatCard icon={<TrendingUp size={18} />} label="Son AYT neti" value={summary.lastAyt ? summary.lastAyt.net.toFixed(2) : "—"} foot={<span>{summary.lastAyt ? new Date(summary.lastAyt.date).toLocaleDateString("tr-TR") : "Deneme yok"}</span>} />}
+        {estimatedScore
+          ? <StatCard icon={<Gauge size={18} />} label={estimatedScore.label} value={estimatedScore.value !== null ? estimatedScore.value.toFixed(1) : "—"} unit={estimatedScore.value !== null ? `/ ${estimatedScore.max}` : undefined} foot={<span>Son denemeden · resmî değil</span>} />
+          : secondKind && <StatCard icon={<TrendingUp size={18} />} label={`Son ${secondKind} neti`} value={lastSecond ? lastSecond.net.toFixed(2) : "—"} foot={<span>{lastSecond ? new Date(lastSecond.date).toLocaleDateString("tr-TR") : "Deneme yok"}</span>} />}
       </div>
 
       <div className="grid gap-5 xl:grid-cols-2">

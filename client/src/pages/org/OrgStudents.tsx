@@ -46,17 +46,18 @@ export default function OrgStudents({ scope }: { scope: OrgScope }) {
         <EmptyNote>{risk === "all" && !q && !classId && !teacherUserId ? "Henüz öğrenci yok. Davetler sayfasından bir öğrenci davet kodu oluştur; öğrenci kodu uygulamada girip onay verdiğinde burada görünür." : "Bu filtrelerle eşleşen öğrenci yok."}</EmptyNote>
       ) : (
         <section className="soft-card overflow-hidden">
-          <div className="hidden grid-cols-[1.6fr_0.8fr_0.8fr_0.8fr_0.7fr_1.2fr] gap-3 border-b border-rule bg-paper/70 px-5 py-2.5 text-[12px] font-semibold text-ink-3 lg:grid"><span>Öğrenci</span><span>Son TYT / LGS</span><span>Son AYT</span><span>Plan uyumu</span><span>7 gün</span><span>Durum</span></div>
+          <div className="hidden grid-cols-[1.6fr_0.8fr_0.8fr_0.8fr_0.7fr_1.2fr] gap-3 border-b border-rule bg-paper/70 px-5 py-2.5 text-[12px] font-semibold text-ink-3 lg:grid"><span>Öğrenci</span><span>Son TYT / diğer</span><span>Son AYT</span><span>Plan uyumu</span><span>7 gün</span><span>Durum</span></div>
           <ul className="divide-y divide-rule">
             {students.data.map((student) => (
               <li key={student.userId}>
                 <button onClick={() => setSelected(student.userId)} className="grid w-full grid-cols-1 gap-2 px-5 py-3 text-left hover:bg-paper/60 lg:grid-cols-[1.6fr_0.8fr_0.8fr_0.8fr_0.7fr_1.2fr] lg:items-center lg:gap-3">
                   <span className="flex min-w-0 items-center gap-3"><Initials name={student.name} /><span className="min-w-0"><span className="block truncate text-[13.5px] font-semibold text-ink">{student.name}</span><span className="block truncate text-[12px] text-ink-3">{[student.classes.map((item) => item.name).join(", "), student.teachers.map((teacher) => teacher.name).join(", ")].filter(Boolean).join(" · ") || "Sınıf yok"} · {relativeTime(student.summary.lastActivityAt)}</span></span></span>
                   {(() => {
-                    // LGS öğrencisinin TYT'si olmaz: aynı sütunda son LGS neti "LGS" etiketiyle gösterilir.
-                    const first = student.summary.lastTyt ?? student.summary.lastLgs;
-                    const isLgs = !student.summary.lastTyt && Boolean(student.summary.lastLgs);
-                    return <span className="text-[13px] text-ink"><span className={`text-[11px] text-ink-4 ${isLgs ? "" : "lg:hidden"}`}>{isLgs ? "LGS " : "TYT "}</span>{formatNet(first?.net)} <span className={`text-[11px] font-bold ${(first?.delta ?? 0) < 0 ? "text-danger" : "text-success"}`}>{deltaText(first?.delta)}</span></span>;
+                    // TYT'si olmayan öğrencide (LGS, ileride KPSS…) aynı sütunda AYT dışındaki ilk sınavın son neti, türüyle etiketli.
+                    const fallback = (Object.entries(student.summary.lastByKind) as Array<[string, { net: number; delta: number | null }]>).find(([kind]) => kind !== "AYT");
+                    const first = student.summary.lastTyt ?? fallback?.[1] ?? null;
+                    const otherKind = !student.summary.lastTyt && fallback ? fallback[0] : null;
+                    return <span className="text-[13px] text-ink"><span className={`text-[11px] text-ink-4 ${otherKind ? "" : "lg:hidden"}`}>{otherKind ? `${otherKind} ` : "TYT "}</span>{formatNet(first?.net)} <span className={`text-[11px] font-bold ${(first?.delta ?? 0) < 0 ? "text-danger" : "text-success"}`}>{deltaText(first?.delta)}</span></span>;
                   })()}
                   <span className="text-[13px] text-ink"><span className="text-[11px] text-ink-4 lg:hidden">AYT </span>{formatNet(student.summary.lastAyt?.net)} <span className={`text-[11px] font-bold ${(student.summary.lastAyt?.delta ?? 0) < 0 ? "text-danger" : "text-success"}`}>{deltaText(student.summary.lastAyt?.delta)}</span></span>
                   <span className="text-[13px] text-ink"><span className="text-[11px] text-ink-4 lg:hidden">Uyum </span>{student.summary.adherence !== null ? `%${student.summary.adherence}` : "plan yok"}</span>

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getStaffDigestEnabled, setStaffDigestEnabled } from "../digest/teacherDigest";
 import { findClassConflict, toMinutes } from "../../shared/classSchedule";
 import { effectiveKvkk } from "../../shared/kvkk";
+import { EXAM_KINDS, type ExamKind } from "../../shared/exams";
 import { CLASS_GRADES, CLASS_TRACKS, INVITABLE_ROLES, ORG_KINDS, ORG_PLANS, ORG_PLAN_DEFAULT_CREDITS, ORG_PLAN_LABELS, ORG_ROLES, canRequestPlan, membershipState, renewedMembershipEnd, canAssignRole, canInviteRole, generateInviteCode, hasRole, invitationProblem, isStaffRole, normalizeInviteCode, seesAllStudents, summarizeStudent, type RiskKey, type StudentSummary } from "../../shared/org";
 import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 import { getStudentProfile, getUserMockExams, getUserTopicProgress } from "../db";
@@ -122,7 +123,11 @@ export const orgRouter = router({
         activeThisWeek: students.filter((student) => student.summary.weekMinutes > 0).length,
         averageAdherence: average(adherence),
         averageLastTyt: average(students.map((student) => student.summary.lastTyt?.net).filter((value): value is number => typeof value === "number")),
-        averageLastLgs: average(students.map((student) => student.summary.lastLgs?.net).filter((value): value is number => typeof value === "number")),
+        // Her sınav türü için öğrencilerin son denemelerinin ortalaması (yalnız denemesi olan türler).
+        averageByKind: Object.fromEntries(EXAM_KINDS.flatMap((kind) => {
+          const value = average(students.map((student) => student.summary.lastByKind[kind]?.net).filter((net): net is number => typeof net === "number"));
+          return value === null ? [] : [[kind, value]];
+        })) as Partial<Record<ExamKind, number>>,
         atRisk: students.filter((student) => student.summary.risks.length).length,
         weekMinutes: students.reduce((sum, student) => sum + student.summary.weekMinutes, 0),
       },
@@ -174,7 +179,7 @@ export const orgRouter = router({
     return {
       student: { userId: input.studentUserId, name: member.name, joinedAt: member.joinedAt, consentAt: member.consentAt },
       // Profilden yalnızca koçluk için gerekenler (iletişim/kimlik bilgisi yok).
-      profile: { examTrack: profile.examTrack, gradeLevel: profile.gradeLevel, examYear: profile.examYear, targetScoreType: profile.targetScoreType, targetUniversity: profile.targetUniversity, targetDepartment: profile.targetDepartment, targetHighSchool: profile.targetHighSchool, targetLgsScore: profile.targetLgsScore, dailyStudyDuration: profile.dailyStudyDuration, avatarStyle: profile.avatarStyle },
+      profile: { examTrack: profile.examTrack, gradeLevel: profile.gradeLevel, examYear: profile.examYear, targetScoreType: profile.targetScoreType, targetUniversity: profile.targetUniversity, targetDepartment: profile.targetDepartment, targetGoal: profile.targetGoal, targetScore: profile.targetScore, dailyStudyDuration: profile.dailyStudyDuration, avatarStyle: profile.avatarStyle },
       summary: summarizeStudent(signals.get(input.studentUserId)!),
       exams,
       topics: topics.filter((topic) => !topic.insufficientData),

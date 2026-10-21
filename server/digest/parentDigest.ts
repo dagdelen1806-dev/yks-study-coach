@@ -1,6 +1,6 @@
 import { and, desc, eq, gte, isNotNull, isNull, lt, or } from "drizzle-orm";
 import { parentLinks, studentProfiles, userMockExams, users } from "../../drizzle/schema";
-import { estimateLgsScore } from "../../shared/exams";
+import { estimateScore } from "../../shared/exams";
 import { weeklyDigestWindow } from "../../shared/weeklyDigest";
 import { buildParentDigestEmail } from "../_core/emails/parentEmails";
 import { MailNotConfiguredError, sendMail, type OutgoingMail } from "../_core/mailer";
@@ -50,7 +50,7 @@ export async function runParentDigest(options: { now?: Date; appUrl: string; max
       const digest = await collectDigest(row.studentUserId, start, now);
       const [exam] = await db.select({ title: userMockExams.title, exam: userMockExams.exam, net: userMockExams.net, subjectsJson: userMockExams.subjectsJson }).from(userMockExams)
         .where(and(eq(userMockExams.userId, row.studentUserId), gte(userMockExams.examDate, new Date(now.getTime() - 30 * DAY_MS)))).orderBy(desc(userMockExams.examDate)).limit(1);
-      const lastExam = exam ? { title: exam.title, exam: exam.exam, net: Number(exam.net), estimatedScore: exam.exam === "LGS" ? estimateLgsScore(safeJson(exam.subjectsJson)) : null } : null;
+      const lastExam = exam ? { title: exam.title, exam: exam.exam, net: Number(exam.net), estimatedScore: estimateScore(exam.exam, safeJson(exam.subjectsJson)) } : null;
       const unsubscribeUrl = await unsubscribeUrlFor(options.appUrl, "parent", row.linkId);
       const mail = buildParentDigestEmail({ to: row.email!, studentName, digest, start, end: now, appUrl: options.appUrl, unsubscribeUrl, lastExam });
       if (options.dryRun) { result.previews!.push(mail); continue; }

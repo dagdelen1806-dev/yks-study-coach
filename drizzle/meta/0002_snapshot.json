@@ -1,5 +1,5 @@
 {
-  "id": "944aef50-a71d-42b6-b8a2-86641e0783a9",
+  "id": "936de878-e3c0-49a0-b07e-f500ae1f7975",
   "prevId": "8ee081d0-efaf-4807-a4df-ca2fb1e9a55e",
   "version": "7",
   "dialect": "postgresql",
@@ -3346,6 +3346,150 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.parent_links": {
+      "name": "parent_links",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "byDefault",
+            "name": "parent_links_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "2147483647",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "studentUserId": {
+          "name": "studentUserId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "parentUserId": {
+          "name": "parentUserId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "codeHash": {
+          "name": "codeHash",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'invited'"
+        },
+        "expiresAt": {
+          "name": "expiresAt",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "parentConsentAt": {
+          "name": "parentConsentAt",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "parentConsentVersion": {
+          "name": "parentConsentVersion",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "studentApprovedAt": {
+          "name": "studentApprovedAt",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revokedAt": {
+          "name": "revokedAt",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "weeklyDigestOptOut": {
+          "name": "weeklyDigestOptOut",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "weeklyDigestLastSentAt": {
+          "name": "weeklyDigestLastSentAt",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "parent_links_student_idx": {
+          "name": "parent_links_student_idx",
+          "columns": [
+            {
+              "expression": "studentUserId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "parent_links_parent_idx": {
+          "name": "parent_links_parent_idx",
+          "columns": [
+            {
+              "expression": "parentUserId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "parent_links_codeHash_unique": {
+          "name": "parent_links_codeHash_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "codeHash"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.payment_events": {
       "name": "payment_events",
       "schema": "",
@@ -4573,8 +4717,8 @@
           "primaryKey": false,
           "notNull": false
         },
-        "currentLgsNet": {
-          "name": "currentLgsNet",
+        "currentNet": {
+          "name": "currentNet",
           "type": "varchar(40)",
           "primaryKey": false,
           "notNull": false
@@ -4621,14 +4765,14 @@
           "primaryKey": false,
           "notNull": false
         },
-        "targetHighSchool": {
-          "name": "targetHighSchool",
+        "targetGoal": {
+          "name": "targetGoal",
           "type": "varchar(180)",
           "primaryKey": false,
           "notNull": false
         },
-        "targetLgsScore": {
-          "name": "targetLgsScore",
+        "targetScore": {
+          "name": "targetScore",
           "type": "varchar(20)",
           "primaryKey": false,
           "notNull": false

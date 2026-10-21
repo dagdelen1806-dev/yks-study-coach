@@ -1,6 +1,6 @@
 import { invokeLLM } from "../_core/llm";
 import { OPTION_LETTERS, parseSimilarQuestion, type AiSolution, type SimilarQuestion } from "../../shared/questionNotebook";
-import { examPromptContext, examStudentPhrase, optionCountOf } from "../../shared/exams";
+import { EXAM_TRACK_DEFS, examPromptContext, examStudentPhrase, optionCountOf } from "../../shared/exams";
 import { subjectGuidance, type SolveInput } from "./questionSolver";
 
 /**
@@ -14,7 +14,7 @@ export async function generateSimilarQuestion(input: SolveInput & { solution: Ai
   const track = input.track ?? "YKS";
   const optionCount = optionCountOf(track);
   const letters = OPTION_LETTERS.slice(0, optionCount);
-  const style = track === "LGS" ? "LGS (MEB) üslubunda, beceri temelli" : "YKS (ÖSYM) üslubunda";
+  const style = EXAM_TRACK_DEFS[track].questionStyle;
   const system = [
     `${examStudentPhrase(track)} çözemediği soruya BENZER yeni bir alıştırma sorusu yazıyorsun (Türkçe).`,
     examPromptContext(track),

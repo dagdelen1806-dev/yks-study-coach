@@ -110,6 +110,119 @@ import { eq as eq3 } from "drizzle-orm";
 
 // drizzle/schema.ts
 import { customType, decimal, index, integer, pgTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/pg-core";
+
+// shared/exams.ts
+var EXAM_TRACKS = ["YKS", "LGS"];
+var EXAM_KINDS = ["TYT", "AYT", "LGS"];
+var CATALOG_EXAM_SCOPES = [...EXAM_KINDS, "TYT_AYT", "YKS", "GENEL"];
+var GRADE_LEVELS = ["7", "8", "9", "10", "11", "12", "mezun"];
+var EXAM_KIND_DEFS = {
+  TYT: {
+    kind: "TYT",
+    track: "YKS",
+    label: "TYT",
+    optionCount: 5,
+    wrongsPerCorrect: 4,
+    formRows: "dershaneTemplate",
+    subjects: [
+      { name: "T\xFCrk\xE7e", questions: 40, weight: 1 },
+      { name: "Matematik", questions: 40, weight: 1 },
+      { name: "Fen", questions: 20, weight: 1 },
+      { name: "Sosyal", questions: 20, weight: 1 }
+    ]
+  },
+  AYT: {
+    kind: "AYT",
+    track: "YKS",
+    label: "AYT",
+    optionCount: 5,
+    wrongsPerCorrect: 4,
+    formRows: "studentTopics",
+    subjects: [
+      { name: "T\xFCrk\xE7e", questions: 40, weight: 1 },
+      { name: "Matematik", questions: 40, weight: 1 },
+      { name: "Fen", questions: 40, weight: 1 },
+      { name: "Sosyal", questions: 46, weight: 1 }
+    ]
+  },
+  // MEB LGS: sözel oturum 50 soru / 75 dk, sayısal oturum 40 soru / 80 dk.
+  LGS: {
+    kind: "LGS",
+    track: "LGS",
+    label: "LGS",
+    optionCount: 4,
+    wrongsPerCorrect: 3,
+    formRows: "curriculum",
+    scoreEstimate: { label: "Tahmini LGS puan\u0131", min: 100, max: 500 },
+    subjects: [
+      { name: "T\xFCrk\xE7e", questions: 20, weight: 4, session: "S\xF6zel" },
+      { name: "\u0130nk\u0131lap Tarihi", questions: 10, weight: 1, session: "S\xF6zel" },
+      { name: "Din K\xFClt\xFCr\xFC", questions: 10, weight: 1, session: "S\xF6zel" },
+      { name: "\u0130ngilizce", questions: 10, weight: 1, session: "S\xF6zel" },
+      { name: "Matematik", questions: 20, weight: 4, session: "Say\u0131sal" },
+      { name: "Fen Bilimleri", questions: 20, weight: 4, session: "Say\u0131sal" }
+    ]
+  }
+};
+var EXAM_TRACK_DEFS = {
+  YKS: {
+    track: "YKS",
+    label: "YKS",
+    authority: { name: "\xD6SYM", url: "https://www.osym.gov.tr" },
+    scopeNote: "Konu listesi \xD6SYM TYT/AYT kapsam\u0131na ve MEB program\u0131na dayan\u0131r",
+    onboarding: { title: "YKS", description: "\xDCniversite s\u0131nav\u0131 (TYT + AYT) \xB7 lise \xF6\u011Frencisi ya da mezun" },
+    gradeLevels: ["9", "10", "11", "12", "mezun"],
+    asksScoreType: true,
+    goal: { kind: "university" },
+    currentNet: { kind: "tytAyt" },
+    studentNoun: "Bir YKS \xF6\u011Frencisi",
+    studentPhrase: "Bir YKS \xF6\u011Frencisinin",
+    promptContext: "\xD6\u011Frenci YKS'ye (\xD6SYM; TYT ve AYT oturumlar\u0131) haz\u0131rlan\u0131yor. Sorular 5 \u015F\u0131kl\u0131 (A-E), 4 yanl\u0131\u015F 1 do\u011Fruyu g\xF6t\xFCr\xFCr; \xD6SYM tarz\u0131.",
+    questionStyle: "YKS (\xD6SYM) \xFCslubunda",
+    dailyPlanRule: "Her g\xFCn toplam 60-150 dakika ve 2-4 oturum planla.",
+    schoolKind: "lise",
+    catalogBroadScopes: ["TYT_AYT", "YKS", "GENEL"]
+  },
+  LGS: {
+    track: "LGS",
+    label: "LGS",
+    authority: { name: "MEB", url: "https://www.meb.gov.tr" },
+    scopeNote: "Konu listesi MEB 8. s\u0131n\u0131f \xF6\u011Fretim program\u0131na dayan\u0131r",
+    onboarding: { title: "LGS", description: "Liselere ge\xE7i\u015F s\u0131nav\u0131 \xB7 7. ya da 8. s\u0131n\u0131f" },
+    gradeLevels: ["7", "8"],
+    asksScoreType: false,
+    goal: { kind: "custom", label: "Hedef lise", placeholder: "\xD6rn. Kabata\u015F Erkek Lisesi", options: ["Fen Lisesi", "Sosyal Bilimler Lisesi", "Anadolu Lisesi", "Proje Okulu", "Mesleki ve Teknik Anadolu Lisesi", "\u0130mam Hatip Lisesi", "Hen\xFCz karar vermedim"], emptyText: "Hedef liseni hen\xFCz yazmad\u0131n." },
+    targetScore: { label: "Hedef LGS puan\u0131n", placeholder: "\xD6rn. 450", min: 100, max: 500 },
+    currentNet: { kind: "single", hint: "90 soru \xFCzerinden yakla\u015F\u0131k bir say\u0131 ya da aral\u0131k yazabilirsin (\xF6rn. 60-65).", placeholder: "\xD6rn. 60-65" },
+    studentNoun: "LGS'ye haz\u0131rlanan bir ortaokul \xF6\u011Frencisi",
+    studentPhrase: "LGS'ye haz\u0131rlanan bir ortaokul \xF6\u011Frencisinin",
+    promptContext: "\xD6\u011Frenci LGS'ye (MEB Liselere Ge\xE7i\u015F Sistemi, 8. s\u0131n\u0131f) haz\u0131rlan\u0131yor; 13-14 ya\u015F\u0131nda. Dersler: T\xFCrk\xE7e, Matematik, Fen Bilimleri, T.C. \u0130nk\u0131lap Tarihi ve Atat\xFCrk\xE7\xFCl\xFCk, Din K\xFClt\xFCr\xFC ve Ahlak Bilgisi, \u0130ngilizce. Sorular 4 \u015F\u0131kl\u0131 (A-D), 3 yanl\u0131\u015F 1 do\u011Fruyu g\xF6t\xFCr\xFCr; MEB \xF6rnek soru tarz\u0131, beceri temelli. K\u0131sa ve a\xE7\u0131k c\xFCmleler kur, sakin ve cesaretlendirici ol, s\u0131nav kayg\u0131s\u0131n\u0131 art\u0131racak dil kullanma.",
+    questionStyle: "LGS (MEB) \xFCslubunda, beceri temelli",
+    dailyPlanRule: "Her g\xFCn toplam 45-120 dakika ve 2-4 k\u0131sa oturum planla (okul ve \xF6devlerle birlikte yorucu olmas\u0131n).",
+    schoolKind: "ortaokul",
+    catalogBroadScopes: []
+  }
+};
+var EXAM_TRACK_LABELS = Object.fromEntries(EXAM_TRACKS.map((track) => [track, EXAM_TRACK_DEFS[track].label]));
+var trackOf = (kind) => EXAM_KIND_DEFS[kind].track;
+var kindsOf = (track) => EXAM_KINDS.filter((kind) => EXAM_KIND_DEFS[kind].track === track);
+var defaultKindOf = (track) => kindsOf(track)[0];
+var subjectNamesOf = (kind) => EXAM_KIND_DEFS[kind].subjects.map((subject2) => subject2.name);
+function estimateScore(kind, nets) {
+  const def = kind ? EXAM_KIND_DEFS[kind] : null;
+  if (!def?.scoreEstimate) return null;
+  const { min, max } = def.scoreEstimate;
+  const ceiling = def.subjects.reduce((sum, subject2) => sum + subject2.questions * subject2.weight, 0);
+  const weighted = def.subjects.reduce((sum, subject2) => sum + Math.min(subject2.questions, Math.max(0, Number(nets[subject2.name]) || 0)) * subject2.weight, 0);
+  return Math.round((min + (max - min) * weighted / ceiling) * 100) / 100;
+}
+var scoredKindOf = (track) => kindsOf(track).find((kind) => EXAM_KIND_DEFS[kind].scoreEstimate) ?? null;
+var examStudentPhrase = (track) => EXAM_TRACK_DEFS[track].studentPhrase;
+var optionCountOf = (track) => EXAM_KIND_DEFS[defaultKindOf(track)].optionCount;
+var examPromptContext = (track) => EXAM_TRACK_DEFS[track].promptContext;
+var catalogScopeCovers = (scope, kind) => scope === kind || EXAM_TRACK_DEFS[trackOf(kind)].catalogBroadScopes.includes(scope);
+
+// drizzle/schema.ts
 var users = pgTable("users", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   openId: varchar("openId", { length: 64 }).notNull().unique(),
@@ -147,7 +260,7 @@ var users = pgTable("users", {
 var yksTopics = pgTable("yks_topics", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   slug: varchar("slug", { length: 120 }).notNull().unique(),
-  exam: text("exam", { enum: ["TYT", "AYT", "LGS"] }).notNull(),
+  exam: text("exam", { enum: EXAM_KINDS }).notNull(),
   subject: varchar("subject", { length: 80 }).notNull(),
   topic: varchar("topic", { length: 180 }).notNull(),
   unit: varchar("unit", { length: 120 }).notNull(),
@@ -167,7 +280,7 @@ var mockExams = pgTable("mock_exams", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   userId: integer("userId").notNull(),
   title: varchar("title", { length: 180 }).notNull(),
-  exam: text("exam", { enum: ["TYT", "AYT", "LGS"] }).default("TYT").notNull(),
+  exam: text("exam", { enum: EXAM_KINDS }).default("TYT").notNull(),
   examDate: timestamp("examDate", { withTimezone: true }).notNull(),
   turkceNet: integer("turkceNet").default(0).notNull(),
   matematikNet: integer("matematikNet").default(0).notNull(),
@@ -180,7 +293,7 @@ var userMockExams = pgTable("user_mock_exams", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   userId: integer("userId").notNull(),
   title: varchar("title", { length: 180 }).notNull(),
-  exam: text("exam", { enum: ["TYT", "AYT", "LGS"] }).notNull(),
+  exam: text("exam", { enum: EXAM_KINDS }).notNull(),
   examDate: timestamp("examDate", { withTimezone: true }).notNull(),
   net: decimal("net", { precision: 6, scale: 2 }).notNull(),
   delta: decimal("delta", { precision: 6, scale: 2 }).default("0").notNull(),
@@ -216,7 +329,7 @@ var userResourceBooks = pgTable("user_resource_books", {
   title: varchar("title", { length: 180 }).notNull(),
   publisher: varchar("publisher", { length: 120 }).notNull(),
   subject: varchar("subject", { length: 80 }).notNull(),
-  exam: text("exam", { enum: ["TYT", "AYT", "LGS"] }).notNull(),
+  exam: text("exam", { enum: EXAM_KINDS }).notNull(),
   level: text("level", { enum: ["Kolay", "Orta", "Zor"] }).notNull(),
   format: varchar("format", { length: 120 }).notNull(),
   reason: text("reason").notNull(),
@@ -718,15 +831,15 @@ var studentProfiles = pgTable("student_profiles", {
   // Arayüz avatarı (öğrencinin seçimi; boşsa nötr tasarım). Bkz. shared/onboarding.ts AVATAR_STYLES.
   avatarStyle: text("avatarStyle", { enum: ["girl", "boy"] }),
   // Hazırlandığı sınav (bkz. shared/exams.ts): YKS (TYT+AYT) ya da LGS (8. sınıf).
-  examTrack: text("examTrack", { enum: ["YKS", "LGS"] }).default("YKS").notNull(),
-  gradeLevel: text("gradeLevel", { enum: ["7", "8", "9", "10", "11", "12", "mezun"] }),
+  examTrack: text("examTrack", { enum: EXAM_TRACKS }).default("YKS").notNull(),
+  gradeLevel: text("gradeLevel", { enum: GRADE_LEVELS }),
   examYear: integer("examYear"),
   targetScoreType: text("targetScoreType", { enum: ["SAY", "EA", "SOZ", "DIL", "TYT", "belirsiz"] }),
   // 2) Akademik durum — free text: "yaklaşık net aralığı" veya "Bilmiyorum" gibi
   // metinsel değerlere izin vermek için sayısal değil varchar.
   currentTytNet: varchar("currentTytNet", { length: 40 }),
   currentAytNet: varchar("currentAytNet", { length: 40 }),
-  currentLgsNet: varchar("currentLgsNet", { length: 40 }),
+  currentNet: varchar("currentNet", { length: 40 }),
   mockExamFrequency: varchar("mockExamFrequency", { length: 60 }),
   strongSubjectsJson: text("strongSubjectsJson"),
   weakSubjectsJson: text("weakSubjectsJson"),
@@ -735,9 +848,10 @@ var studentProfiles = pgTable("student_profiles", {
   targetUniversity: varchar("targetUniversity", { length: 180 }),
   targetDepartment: varchar("targetDepartment", { length: 180 }),
   targetRanking: varchar("targetRanking", { length: 60 }),
-  // LGS hedefi: lise (ör. "Fen Lisesi", okul adı) ve 500 üzerinden puan.
-  targetHighSchool: varchar("targetHighSchool", { length: 180 }),
-  targetLgsScore: varchar("targetLgsScore", { length: 20 }),
+  // Üniversite dışı sınavların hedefi (LGS: lise; ileride KPSS: kadro…) ve hedef puanı;
+  // etiketleri ve puan aralığı shared/exams.ts EXAM_TRACK_DEFS'ten.
+  targetGoal: varchar("targetGoal", { length: 180 }),
+  targetScore: varchar("targetScore", { length: 20 }),
   mainGoal: text("mainGoal"),
   shortTermGoal: text("shortTermGoal"),
   longTermGoal: text("longTermGoal"),
@@ -804,7 +918,7 @@ var catalogBooks = pgTable("catalog_books", {
     "reference",
     "other"
   ] }).default("other").notNull(),
-  examScope: text("examScope", { enum: ["TYT", "AYT", "TYT_AYT", "YKS", "LGS", "GENEL"] }).default("GENEL").notNull(),
+  examScope: text("examScope", { enum: CATALOG_EXAM_SCOPES }).default("GENEL").notNull(),
   // Free-text subject label kept consistent with `yks_topics.subject` /
   // `resources.subject` conventions (e.g. "Matematik", "Türkçe") — no parallel
   // subject table is introduced. Null means multi-subject/general product.
@@ -1064,73 +1178,6 @@ var appErrors = pgTable("app_errors", {
 import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-
-// shared/exams.ts
-var EXAM_TRACKS = ["YKS", "LGS"];
-var EXAM_KINDS = ["TYT", "AYT", "LGS"];
-var EXAM_KIND_DEFS = {
-  TYT: {
-    kind: "TYT",
-    track: "YKS",
-    label: "TYT",
-    optionCount: 5,
-    wrongsPerCorrect: 4,
-    subjects: [
-      { name: "T\xFCrk\xE7e", questions: 40, weight: 1 },
-      { name: "Matematik", questions: 40, weight: 1 },
-      { name: "Fen", questions: 20, weight: 1 },
-      { name: "Sosyal", questions: 20, weight: 1 }
-    ]
-  },
-  AYT: {
-    kind: "AYT",
-    track: "YKS",
-    label: "AYT",
-    optionCount: 5,
-    wrongsPerCorrect: 4,
-    subjects: [
-      { name: "T\xFCrk\xE7e", questions: 40, weight: 1 },
-      { name: "Matematik", questions: 40, weight: 1 },
-      { name: "Fen", questions: 40, weight: 1 },
-      { name: "Sosyal", questions: 46, weight: 1 }
-    ]
-  },
-  // MEB LGS: sözel oturum 50 soru / 75 dk, sayısal oturum 40 soru / 80 dk.
-  LGS: {
-    kind: "LGS",
-    track: "LGS",
-    label: "LGS",
-    optionCount: 4,
-    wrongsPerCorrect: 3,
-    subjects: [
-      { name: "T\xFCrk\xE7e", questions: 20, weight: 4, session: "S\xF6zel" },
-      { name: "\u0130nk\u0131lap Tarihi", questions: 10, weight: 1, session: "S\xF6zel" },
-      { name: "Din K\xFClt\xFCr\xFC", questions: 10, weight: 1, session: "S\xF6zel" },
-      { name: "\u0130ngilizce", questions: 10, weight: 1, session: "S\xF6zel" },
-      { name: "Matematik", questions: 20, weight: 4, session: "Say\u0131sal" },
-      { name: "Fen Bilimleri", questions: 20, weight: 4, session: "Say\u0131sal" }
-    ]
-  }
-};
-var kindsOf = (track) => EXAM_KINDS.filter((kind) => EXAM_KIND_DEFS[kind].track === track);
-var defaultKindOf = (track) => kindsOf(track)[0];
-function estimateLgsScore(nets) {
-  const subjects = EXAM_KIND_DEFS.LGS.subjects;
-  const max = subjects.reduce((sum, subject2) => sum + subject2.questions * subject2.weight, 0);
-  const weighted = subjects.reduce((sum, subject2) => {
-    const net = Math.min(subject2.questions, Math.max(0, Number(nets[subject2.name]) || 0));
-    return sum + net * subject2.weight;
-  }, 0);
-  return Math.round((100 + 400 * weighted / max) * 100) / 100;
-}
-var examStudentPhrase = (track) => track === "LGS" ? "LGS'ye haz\u0131rlanan bir ortaokul \xF6\u011Frencisinin" : "Bir YKS \xF6\u011Frencisinin";
-var optionCountOf = (track) => EXAM_KIND_DEFS[defaultKindOf(track)].optionCount;
-function examPromptContext(track) {
-  if (track === "LGS") {
-    return "\xD6\u011Frenci LGS'ye (MEB Liselere Ge\xE7i\u015F Sistemi, 8. s\u0131n\u0131f) haz\u0131rlan\u0131yor; 13-14 ya\u015F\u0131nda. Dersler: T\xFCrk\xE7e, Matematik, Fen Bilimleri, T.C. \u0130nk\u0131lap Tarihi ve Atat\xFCrk\xE7\xFCl\xFCk, Din K\xFClt\xFCr\xFC ve Ahlak Bilgisi, \u0130ngilizce. Sorular 4 \u015F\u0131kl\u0131 (A-D), 3 yanl\u0131\u015F 1 do\u011Fruyu g\xF6t\xFCr\xFCr; MEB \xF6rnek soru tarz\u0131, beceri temelli. K\u0131sa ve a\xE7\u0131k c\xFCmleler kur, sakin ve cesaretlendirici ol, s\u0131nav kayg\u0131s\u0131n\u0131 art\u0131racak dil kullanma.";
-  }
-  return "\xD6\u011Frenci YKS'ye (\xD6SYM; TYT ve AYT oturumlar\u0131) haz\u0131rlan\u0131yor. Sorular 5 \u015F\u0131kl\u0131 (A-E), 4 yanl\u0131\u015F 1 do\u011Fruyu g\xF6t\xFCr\xFCr; \xD6SYM tarz\u0131.";
-}
 
 // shared/planAdherence.ts
 var cap = (value) => Math.max(0, Math.min(100, Math.round(value)));
@@ -1605,7 +1652,8 @@ function flatten(exam, tree) {
     )
   );
 }
-var CURRICULUM = [...flatten("TYT", TYT), ...flatten("AYT", AYT), ...flatten("LGS", LGS)];
+var TREES = { TYT, AYT, LGS };
+var CURRICULUM = Object.keys(TREES).flatMap((exam) => flatten(exam, TREES[exam]));
 var isCurriculumOnlySlug = (slug) => slug.startsWith("cur-");
 
 // shared/topicStatus.ts
@@ -1935,7 +1983,7 @@ var defaultStudentProfileView = {
   targetScoreType: null,
   currentTytNet: null,
   currentAytNet: null,
-  currentLgsNet: null,
+  currentNet: null,
   mockExamFrequency: null,
   strongSubjects: [],
   weakSubjects: [],
@@ -1943,8 +1991,8 @@ var defaultStudentProfileView = {
   targetUniversity: null,
   targetDepartment: null,
   targetRanking: null,
-  targetHighSchool: null,
-  targetLgsScore: null,
+  targetGoal: null,
+  targetScore: null,
   mainGoal: null,
   shortTermGoal: null,
   longTermGoal: null,
@@ -1971,7 +2019,7 @@ var toStudentProfileView = (row) => ({
   targetScoreType: row.targetScoreType,
   currentTytNet: row.currentTytNet,
   currentAytNet: row.currentAytNet,
-  currentLgsNet: row.currentLgsNet,
+  currentNet: row.currentNet,
   mockExamFrequency: row.mockExamFrequency,
   strongSubjects: parseJsonArray(row.strongSubjectsJson),
   weakSubjects: parseJsonArray(row.weakSubjectsJson),
@@ -1979,8 +2027,8 @@ var toStudentProfileView = (row) => ({
   targetUniversity: row.targetUniversity,
   targetDepartment: row.targetDepartment,
   targetRanking: row.targetRanking,
-  targetHighSchool: row.targetHighSchool,
-  targetLgsScore: row.targetLgsScore,
+  targetGoal: row.targetGoal,
+  targetScore: row.targetScore,
   mainGoal: row.mainGoal,
   shortTermGoal: row.shortTermGoal,
   longTermGoal: row.longTermGoal,
@@ -4061,7 +4109,9 @@ var INVITABLE_ROLES = ["admin", "coordinator", "teacher", "student"];
 var ROLE_RANK = { student: 0, teacher: 1, coordinator: 2, admin: 3, owner: 4 };
 var ORG_KINDS = ["dershane", "okul", "etut", "kocluk", "diger"];
 var CLASS_GRADES = ["7", "8", "9", "10", "11", "12", "Mezun"];
-var CLASS_TRACKS = ["SAY", "EA", "S\xD6Z", "D\u0130L", "TYT", "LGS"];
+var YKS_CLASS_TRACKS = ["SAY", "EA", "S\xD6Z", "D\u0130L", "TYT"];
+var CLASS_TRACKS = [...YKS_CLASS_TRACKS, ...EXAM_TRACKS.filter((track) => track !== "YKS")];
+var CLASS_TRACK_LABELS = { SAY: "Say\u0131sal", EA: "E\u015Fit A\u011F\u0131rl\u0131k", "S\xD6Z": "S\xF6zel", "D\u0130L": "Dil", TYT: "TYT (ortak)", ...EXAM_TRACK_LABELS };
 var isStaffRole = (role) => role !== "student";
 var hasRole = (role, minimum) => ROLE_RANK[role] >= ROLE_RANK[minimum];
 var seesAllStudents = (role) => hasRole(role, "coordinator");
@@ -4135,9 +4185,13 @@ function latestOf(exams, kind) {
   return { net: sorted[0].net, delta: sorted[1] ? Number((sorted[0].net - sorted[1].net).toFixed(2)) : null, date: sorted[0].examDate };
 }
 function summarizeStudent(signals, now = /* @__PURE__ */ new Date()) {
-  const lastTyt = latestOf(signals.exams, "TYT");
-  const lastAyt = latestOf(signals.exams, "AYT");
-  const lastLgs = latestOf(signals.exams, "LGS");
+  const lastByKind = {};
+  for (const kind of EXAM_KINDS) {
+    const last = latestOf(signals.exams, kind);
+    if (last) lastByKind[kind] = last;
+  }
+  const lastTyt = lastByKind.TYT ?? null;
+  const lastAyt = lastByKind.AYT ?? null;
   const weekMinutes = signals.logs.filter((log) => now.getTime() - log.studyDate.getTime() <= 7 * DAY).reduce((sum, log) => sum + log.minutes, 0);
   const due = signals.weekSessions.filter((session) => new Date(session.sessionDate).getTime() <= now.getTime());
   const adherence = due.length ? calculatePlanAdherence(due).overallScore : null;
@@ -4147,8 +4201,8 @@ function summarizeStudent(signals, now = /* @__PURE__ */ new Date()) {
   const risks = [];
   if (!lastActivityAt || now.getTime() - lastActivityAt.getTime() > RISK_RULES.inactiveDays * DAY) risks.push("inactive");
   if (adherence !== null && adherence < RISK_RULES.lowAdherence) risks.push("low_adherence");
-  if ([lastTyt, lastAyt, lastLgs].some((exam) => exam?.delta !== null && exam?.delta !== void 0 && exam.delta <= -RISK_RULES.netDrop)) risks.push("net_drop");
-  return { lastTyt, lastAyt, lastLgs, weekMinutes, adherence, plannedThisWeek: due.length, weakTopicCount: signals.weakTopicCount, lastActivityAt, risks };
+  if (Object.values(lastByKind).some((exam) => exam.delta !== null && exam.delta <= -RISK_RULES.netDrop)) risks.push("net_drop");
+  return { lastTyt, lastAyt, lastByKind, weekMinutes, adherence, plannedThisWeek: due.length, weakTopicCount: signals.weakTopicCount, lastActivityAt, risks };
 }
 
 // shared/teacherDigest.ts
@@ -4750,7 +4804,7 @@ async function runParentDigest(options) {
       const studentName = student?.preferredName || student?.name?.split(" ")[0] || "\xD6\u011Frenci";
       const digest = await collectDigest(row.studentUserId, start, now);
       const [exam] = await db.select({ title: userMockExams.title, exam: userMockExams.exam, net: userMockExams.net, subjectsJson: userMockExams.subjectsJson }).from(userMockExams).where(and8(eq10(userMockExams.userId, row.studentUserId), gte6(userMockExams.examDate, new Date(now.getTime() - 30 * DAY_MS4)))).orderBy(desc6(userMockExams.examDate)).limit(1);
-      const lastExam = exam ? { title: exam.title, exam: exam.exam, net: Number(exam.net), estimatedScore: exam.exam === "LGS" ? estimateLgsScore(safeJson(exam.subjectsJson)) : null } : null;
+      const lastExam = exam ? { title: exam.title, exam: exam.exam, net: Number(exam.net), estimatedScore: estimateScore(exam.exam, safeJson(exam.subjectsJson)) } : null;
       const unsubscribeUrl = await unsubscribeUrlFor(options.appUrl, "parent", row.linkId);
       const mail = buildParentDigestEmail({ to: row.email, studentName, digest, start, end: now, appUrl: options.appUrl, unsubscribeUrl, lastExam });
       if (options.dryRun) {
@@ -9002,7 +9056,7 @@ async function generateSimilarQuestion(input, invoke = invokeLLM, options = {}) 
   const track = input.track ?? "YKS";
   const optionCount = optionCountOf(track);
   const letters = OPTION_LETTERS.slice(0, optionCount);
-  const style = track === "LGS" ? "LGS (MEB) \xFCslubunda, beceri temelli" : "YKS (\xD6SYM) \xFCslubunda";
+  const style = EXAM_TRACK_DEFS[track].questionStyle;
   const system = [
     `${examStudentPhrase(track)} \xE7\xF6zemedi\u011Fi soruya BENZER yeni bir al\u0131\u015Ft\u0131rma sorusu yaz\u0131yorsun (T\xFCrk\xE7e).`,
     examPromptContext(track),
@@ -9184,9 +9238,16 @@ import { asc as asc3, eq as eq20 } from "drizzle-orm";
 var SCHEDULE_SOURCES = ["school", "course", "tutor", "other"];
 var DAY_LABELS = ["Pazartesi", "Sal\u0131", "\xC7ar\u015Famba", "Per\u015Fembe", "Cuma", "Cumartesi", "Pazar"];
 var YKS_SUBJECTS = ["T\xFCrk\xE7e", "Matematik", "Geometri", "Fizik", "Kimya", "Biyoloji", "Edebiyat", "Tarih", "Co\u011Frafya", "Felsefe"];
+var NON_YKS_PRESETS = ["Din K\xFClt\xFCr\xFC", "Yabanc\u0131 Dil", "Rehberlik", "Beden E\u011Fitimi", "Sanat / M\xFCzik", "Di\u011Fer ders"];
 var LGS_SUBJECTS = ["T\xFCrk\xE7e", "Matematik", "Fen Bilimleri", "\u0130nk\u0131lap Tarihi", "Din K\xFClt\xFCr\xFC", "\u0130ngilizce"];
-var SCHEDULE_SUBJECTS = [...YKS_SUBJECTS, ...LGS_SUBJECTS.filter((subject2) => !YKS_SUBJECTS.includes(subject2))];
-var scheduleSubjectsFor = (track) => track === "LGS" ? LGS_SUBJECTS : YKS_SUBJECTS;
+var NON_LGS_PRESETS = ["Teknoloji ve Tasar\u0131m", "Bili\u015Fim Teknolojileri", "Rehberlik", "Beden E\u011Fitimi", "Sanat / M\xFCzik", "Di\u011Fer ders"];
+var SCHEDULE_SUBJECTS_BY_TRACK = {
+  YKS: { subjects: YKS_SUBJECTS, nonExamPresets: NON_YKS_PRESETS },
+  LGS: { subjects: LGS_SUBJECTS, nonExamPresets: NON_LGS_PRESETS }
+};
+var SCHEDULE_SUBJECTS = Array.from(new Set(Object.values(SCHEDULE_SUBJECTS_BY_TRACK).flatMap((entry) => entry.subjects)));
+var scheduleSubjectsFor = (track) => SCHEDULE_SUBJECTS_BY_TRACK[track].subjects;
+var nonExamPresetsFor = (track) => SCHEDULE_SUBJECTS_BY_TRACK[track].nonExamPresets;
 var AFTER_CLASS_BUFFER_MINUTES = 30;
 var PLAN_DAY_END = "23:30";
 var MAX_SCHEDULE_BLOCKS = 120;
@@ -9311,10 +9372,9 @@ async function saveClassSchedule(userId, schedule) {
 }
 
 // server/schedule/scheduleImport.ts
-function classifyLesson(name, track = "YKS") {
-  const value = name.toLocaleUpperCase("tr-TR");
-  const rules = track === "LGS" ? [
-    // 8. sınıf: din kültürü ve İngilizce LGS dersidir; seçmeli/uygulama dersleri plana girmez.
+var LESSON_RULES = {
+  // 8. sınıf: din kültürü ve İngilizce LGS dersidir; seçmeli/uygulama dersleri plana girmez.
+  LGS: [
     [/SE[ÇC]MEL[İI]|REHBERL[İI]K|BEDEN|SPOR|G[ÖO]RSEL SANAT|M[ÜU]Z[İI]K|TEKNOLOJ[İI]|B[İI]L[İI][ŞS][İI]M|PEYGAMBER|KUR.?AN|PROJE/, null],
     [/D[İI]N K[ÜU]LT[ÜU]R|AHLAK/, "Din K\xFClt\xFCr\xFC"],
     [/YABANCI D[İI]L|[İI]NG[İI]L[İI]ZCE/, "\u0130ngilizce"],
@@ -9322,7 +9382,8 @@ function classifyLesson(name, track = "YKS") {
     [/FEN/, "Fen Bilimleri"],
     [/MATEMAT[İI]K/, "Matematik"],
     [/T[ÜU]RK[ÇC]E/, "T\xFCrk\xE7e"]
-  ] : [
+  ],
+  YKS: [
     [/D[İI]N K[ÜU]LT[ÜU]R|AHLAK|YABANCI D[İI]L|[İI]NG[İI]L[İI]ZCE|ALMANCA|FRANSIZCA|REHBERL[İI]K|BEDEN|SPOR|G[ÖO]RSEL SANAT|M[ÜU]Z[İI]K|SA[ĞG]LIK B[İI]LG|TRAF[İI]K|PEYGAMBER|KUR.?AN|H[İI]TABET|PROJE/, null],
     [/GEOMETR[İI]/, "Geometri"],
     [/MATEMAT[İI]K/, "Matematik"],
@@ -9334,8 +9395,11 @@ function classifyLesson(name, track = "YKS") {
     [/TAR[İI]H|[İI]NKILAP/, "Tarih"],
     [/CO[ĞG]RAFYA/, "Co\u011Frafya"],
     [/FELSEFE|MANTIK|PS[İI]KOLOJ[İI]|SOSYOLOJ[İI]/, "Felsefe"]
-  ];
-  for (const [pattern, subject2] of rules) if (pattern.test(value)) return { known: true, subject: subject2 };
+  ]
+};
+function classifyLesson(name, track = "YKS") {
+  const value = name.toLocaleUpperCase("tr-TR");
+  for (const [pattern, subject2] of LESSON_RULES[track]) if (pattern.test(value)) return { known: true, subject: subject2 };
   return { known: false, subject: null };
 }
 function lessonLabel(name, code, subject2) {
@@ -9404,11 +9468,11 @@ async function readScheduleFromImage(dataUrl, invoke = invokeLLM, track = "YKS")
     messages: [
       {
         role: "system",
-        content: `Sen T\xFCrk ${track === "LGS" ? "ortaokul" : "lise"}/dershane haftal\u0131k ders program\u0131 okuyucususun. Yaln\u0131zca g\xF6rselde g\xF6r\xFCleni \xE7\u0131kar, uydurma.
+        content: `Sen T\xFCrk ${EXAM_TRACK_DEFS[track].schoolKind}/dershane haftal\u0131k ders program\u0131 okuyucususun. Yaln\u0131zca g\xF6rselde g\xF6r\xFCleni \xE7\u0131kar, uydurma.
 - periods: ders saatleri s\u0131ras\u0131yla (1. ders, 2. ders...), ba\u015Flang\u0131\xE7/biti\u015F "SS:dd".
 - lessons: dolu her h\xFCcre i\xE7in bir kay\u0131t. day: 1=Pazartesi \u2026 7=Pazar. period: ders saatinin s\u0131ra numaras\u0131 (1'den ba\u015Flar).
 - code: h\xFCcredeki k\u0131saltma (\xF6r. F\u0130ZF4). name: dersin tam ad\u0131 \u2014 program\u0131n alt\u0131ndaki ders listesinden (Ders \u2192 Dersin Ad\u0131) bul; liste yoksa k\u0131saltmadan anla.
-- subject: dersin ${track} kar\u015F\u0131l\u0131\u011F\u0131, yaln\u0131zca \u015Fu listeden biri: ${examSubjects.join(", ")}. ${track === "LGS" ? `LGS'de olmayan dersler (rehberlik, beden e\u011Fitimi, g\xF6rsel sanatlar, m\xFCzik, teknoloji ve tasar\u0131m, bili\u015Fim, se\xE7meli dersler vb.) i\xE7in "LGS d\u0131\u015F\u0131" yaz.` : `YKS'de olmayan dersler (din k\xFClt\xFCr\xFC, yabanc\u0131 dil, rehberlik, beden e\u011Fitimi, sanat, m\xFCzik, se\xE7meli ahlak vb.) i\xE7in "YKS d\u0131\u015F\u0131" yaz.`}
+- subject: dersin ${track} kar\u015F\u0131l\u0131\u011F\u0131, yaln\u0131zca \u015Fu listeden biri: ${examSubjects.join(", ")}. Bu s\u0131navda sorulmayan dersler (\xF6r. ${nonExamPresetsFor(track).filter((label) => label !== "Di\u011Fer ders").join(", ").toLocaleLowerCase("tr")}, se\xE7meli dersler) i\xE7in "${EXAM_TRACK_DEFS[track].label} d\u0131\u015F\u0131" yaz.
 \xD6\u011Fretmen adlar\u0131n\u0131 yazma.`
       },
       { role: "user", content: [{ type: "text", text: "Bu haftal\u0131k ders program\u0131n\u0131 oku." }, { type: "image_url", image_url: { url: dataUrl, detail: "high" } }] }
@@ -9707,7 +9771,11 @@ var orgRouter = router({
         activeThisWeek: students.filter((student) => student.summary.weekMinutes > 0).length,
         averageAdherence: average(adherence),
         averageLastTyt: average(students.map((student) => student.summary.lastTyt?.net).filter((value) => typeof value === "number")),
-        averageLastLgs: average(students.map((student) => student.summary.lastLgs?.net).filter((value) => typeof value === "number")),
+        // Her sınav türü için öğrencilerin son denemelerinin ortalaması (yalnız denemesi olan türler).
+        averageByKind: Object.fromEntries(EXAM_KINDS.flatMap((kind) => {
+          const value = average(students.map((student) => student.summary.lastByKind[kind]?.net).filter((net) => typeof net === "number"));
+          return value === null ? [] : [[kind, value]];
+        })),
         atRisk: students.filter((student) => student.summary.risks.length).length,
         weekMinutes: students.reduce((sum, student) => sum + student.summary.weekMinutes, 0)
       },
@@ -9750,7 +9818,7 @@ var orgRouter = router({
     return {
       student: { userId: input.studentUserId, name: member.name, joinedAt: member.joinedAt, consentAt: member.consentAt },
       // Profilden yalnızca koçluk için gerekenler (iletişim/kimlik bilgisi yok).
-      profile: { examTrack: profile.examTrack, gradeLevel: profile.gradeLevel, examYear: profile.examYear, targetScoreType: profile.targetScoreType, targetUniversity: profile.targetUniversity, targetDepartment: profile.targetDepartment, targetHighSchool: profile.targetHighSchool, targetLgsScore: profile.targetLgsScore, dailyStudyDuration: profile.dailyStudyDuration, avatarStyle: profile.avatarStyle },
+      profile: { examTrack: profile.examTrack, gradeLevel: profile.gradeLevel, examYear: profile.examYear, targetScoreType: profile.targetScoreType, targetUniversity: profile.targetUniversity, targetDepartment: profile.targetDepartment, targetGoal: profile.targetGoal, targetScore: profile.targetScore, dailyStudyDuration: profile.dailyStudyDuration, avatarStyle: profile.avatarStyle },
       summary: summarizeStudent(signals.get(input.studentUserId)),
       exams,
       topics: topics.filter((topic) => !topic.insufficientData),
@@ -10082,12 +10150,14 @@ var parentRouter = router({
       getStudentCalendarReadOnly(input.studentUserId, since),
       loadStudentSignals([input.studentUserId], start, end, new Date(Date.now() - 30 * DAY_MS9))
     ]);
-    const latestLgs = exams.filter((exam) => exam.exam === "LGS").sort((a, b) => b.date.localeCompare(a.date))[0];
+    const scoredKind = scoredKindOf(profile.examTrack);
+    const latestScored = scoredKind ? exams.filter((exam) => exam.exam === scoredKind).sort((a, b) => b.date.localeCompare(a.date))[0] : void 0;
+    const scoreDef = scoredKind ? EXAM_KIND_DEFS[scoredKind].scoreEstimate : null;
     return {
       name,
-      profile: { examTrack: profile.examTrack, gradeLevel: profile.gradeLevel, examYear: profile.examYear, targetScoreType: profile.targetScoreType, targetUniversity: profile.targetUniversity, targetDepartment: profile.targetDepartment, targetHighSchool: profile.targetHighSchool, targetLgsScore: profile.targetLgsScore, dailyStudyDuration: profile.dailyStudyDuration },
+      profile: { examTrack: profile.examTrack, gradeLevel: profile.gradeLevel, examYear: profile.examYear, targetScoreType: profile.targetScoreType, targetUniversity: profile.targetUniversity, targetDepartment: profile.targetDepartment, targetGoal: profile.targetGoal, targetScore: profile.targetScore, dailyStudyDuration: profile.dailyStudyDuration },
       summary: summarizeStudent(signals.get(input.studentUserId)),
-      estimatedLgsScore: latestLgs ? estimateLgsScore(latestLgs.subjects) : null,
+      estimatedScore: scoreDef ? { label: scoreDef.label, max: scoreDef.max, value: latestScored ? estimateScore(scoredKind, latestScored.subjects) : null } : null,
       exams: exams.map((exam) => ({ id: exam.id, title: exam.title, date: exam.date, exam: exam.exam, net: exam.net, subjects: exam.subjects })),
       weakTopics: topics.filter((topic) => !topic.insufficientData && topic.status === "Zay\u0131f").sort((a, b) => a.progress - b.progress).slice(0, 10).map((topic) => ({ slug: topic.slug, subject: topic.subject, topic: topic.topic, progress: topic.progress })),
       sessions: calendar.sessions.map((session) => ({ id: session.id, sessionDate: session.sessionDate, subject: session.subject, topic: session.topic, kind: session.kind, plannedMinutes: session.plannedMinutes, status: session.status, abandonedAt: session.abandonedAt })),
@@ -10444,7 +10514,7 @@ var bookTypeFitByStatus = (status, bookType) => {
   if (status === "Orta") return PRACTICE_TYPES2.includes(bookType) ? 1 : LEARNING_TYPES.includes(bookType) ? 0.6 : 0.4;
   return EXAM_STAGE_TYPES.includes(bookType) ? 1 : PRACTICE_TYPES2.includes(bookType) ? 0.8 : 0.3;
 };
-var examScopeCovers = (examScope, exam) => exam === "LGS" ? examScope === "LGS" : examScope === "TYT_AYT" || examScope === "YKS" || examScope === "GENEL" || examScope === exam;
+var examScopeCovers = (examScope, exam) => catalogScopeCovers(examScope, exam);
 var idealDifficultyScore = (accuracy) => Math.max(0, Math.min(100, accuracy + 15));
 var labelFor = (bookDifficulty, status) => {
   const idealRank = DIFFICULTY_FIT_BY_STATUS[status].indexOf(Math.max(...DIFFICULTY_FIT_BY_STATUS[status]));
@@ -10805,7 +10875,7 @@ function slugForBook(name, publisherName) {
 
 // server/routers/resourceCatalogAdmin.ts
 var bookTypeEnum = z13.enum(["question_bank", "topic_explanation", "topic_explanation_question_bank", "mock_exam", "fasikul", "past_questions", "camp", "test_book", "reference", "other"]);
-var examScopeEnum = z13.enum(["TYT", "AYT", "TYT_AYT", "YKS", "LGS", "GENEL"]);
+var examScopeEnum = z13.enum(CATALOG_EXAM_SCOPES);
 var catalogBookInput = z13.object({
   name: z13.string().trim().min(1).max(300),
   publisherName: z13.string().trim().max(120).optional(),
@@ -10892,7 +10962,7 @@ var resourceCatalogAdminRouter = router({
 
 // server/routers/resourceCatalog.ts
 var bookTypeEnum2 = z14.enum(["question_bank", "topic_explanation", "topic_explanation_question_bank", "mock_exam", "fasikul", "past_questions", "camp", "test_book", "reference", "other"]);
-var examScopeEnum2 = z14.enum(["TYT", "AYT", "TYT_AYT", "YKS", "LGS", "GENEL"]);
+var examScopeEnum2 = z14.enum(CATALOG_EXAM_SCOPES);
 var difficultyEnum = z14.enum(["easy", "medium", "hard"]);
 var listInput = z14.object({
   page: z14.number().int().min(1).default(1),
@@ -10943,8 +11013,8 @@ import { z as z15 } from "zod";
 
 // shared/onboarding.ts
 var AVATAR_STYLES = ["girl", "boy"];
-var GRADE_LEVELS = ["7", "8", "9", "10", "11", "12", "mezun"];
-var gradeLevelsFor = (track) => track === "LGS" ? ["7", "8"] : ["9", "10", "11", "12", "mezun"];
+var EXAM_TRACK_OPTIONS = EXAM_TRACKS.map((track) => ({ value: track, ...EXAM_TRACK_DEFS[track].onboarding }));
+var gradeLevelsFor = (track) => [...EXAM_TRACK_DEFS[track].gradeLevels];
 var TARGET_SCORE_TYPES = ["SAY", "EA", "SOZ", "DIL", "TYT", "belirsiz"];
 var MOCK_EXAM_FREQUENCIES = ["haftada_birkac", "haftada_bir", "ayda_birkac", "nadiren", "henuz_cozmedim"];
 var STUDY_DAYS = ["Pazartesi", "Sal\u0131", "\xC7ar\u015Famba", "Per\u015Fembe", "Cuma", "Cumartesi", "Pazar"];
@@ -10970,7 +11040,7 @@ var emptyOnboardingDraft = () => ({
   targetScoreType: "",
   currentTytNet: "",
   currentAytNet: "",
-  currentLgsNet: "",
+  currentNet: "",
   mockExamFrequency: "",
   strongSubjects: [],
   weakSubjects: [],
@@ -10978,8 +11048,8 @@ var emptyOnboardingDraft = () => ({
   targetUniversity: "",
   targetDepartment: "",
   targetRanking: "",
-  targetHighSchool: "",
-  targetLgsScore: "",
+  targetGoal: "",
+  targetScore: "",
   mainGoal: "",
   shortTermGoal: "",
   longTermGoal: "",
@@ -11009,11 +11079,12 @@ function validateOnboardingStep(step, draft) {
         errors.examYear = `${currentYear} ile ${currentYear + 6} aras\u0131nda bir y\u0131l gir.`;
       }
     }
-    if (draft.examTrack !== "LGS" && !draft.targetScoreType) errors.targetScoreType = "Hedef puan t\xFCr\xFCn\xFC se\xE7.";
+    if (EXAM_TRACK_DEFS[draft.examTrack || "YKS"].asksScoreType && !draft.targetScoreType) errors.targetScoreType = "Hedef puan t\xFCr\xFCn\xFC se\xE7.";
   }
-  if (step === 2 && draft.targetLgsScore.trim()) {
-    const score = Number(draft.targetLgsScore.replace(",", "."));
-    if (!Number.isFinite(score) || score < 100 || score > 500) errors.targetLgsScore = "LGS puan\u0131 100 ile 500 aras\u0131nda olmal\u0131 (iste\u011Fe ba\u011Fl\u0131).";
+  const scoreRule = EXAM_TRACK_DEFS[draft.examTrack || "YKS"].targetScore;
+  if (step === 2 && scoreRule && draft.targetScore.trim()) {
+    const score = Number(draft.targetScore.replace(",", "."));
+    if (!Number.isFinite(score) || score < scoreRule.min || score > scoreRule.max) errors.targetScore = `Puan ${scoreRule.min} ile ${scoreRule.max} aras\u0131nda olmal\u0131 (iste\u011Fe ba\u011Fl\u0131).`;
   }
   if (step === 1) {
   }
@@ -11046,7 +11117,7 @@ var draftSchema = z15.object({
   targetScoreType: enumOrBlank(TARGET_SCORE_TYPES).optional(),
   currentTytNet: z15.string().trim().max(40).optional(),
   currentAytNet: z15.string().trim().max(40).optional(),
-  currentLgsNet: z15.string().trim().max(40).optional(),
+  currentNet: z15.string().trim().max(40).optional(),
   mockExamFrequency: enumOrBlank(MOCK_EXAM_FREQUENCIES).optional(),
   strongSubjects: z15.array(z15.string().max(40)).max(15).optional(),
   weakSubjects: z15.array(z15.string().max(40)).max(15).optional(),
@@ -11054,8 +11125,8 @@ var draftSchema = z15.object({
   targetUniversity: z15.string().trim().max(180).optional(),
   targetDepartment: z15.string().trim().max(180).optional(),
   targetRanking: z15.string().trim().max(60).optional(),
-  targetHighSchool: z15.string().trim().max(180).optional(),
-  targetLgsScore: z15.string().trim().max(20).optional(),
+  targetGoal: z15.string().trim().max(180).optional(),
+  targetScore: z15.string().trim().max(20).optional(),
   mainGoal: z15.string().trim().max(500).optional(),
   shortTermGoal: z15.string().trim().max(500).optional(),
   longTermGoal: z15.string().trim().max(500).optional(),
@@ -11085,7 +11156,7 @@ function draftToPatch(data) {
   if (data.targetScoreType !== void 0) patch.targetScoreType = data.targetScoreType || null;
   if (data.currentTytNet !== void 0) patch.currentTytNet = data.currentTytNet || null;
   if (data.currentAytNet !== void 0) patch.currentAytNet = data.currentAytNet || null;
-  if (data.currentLgsNet !== void 0) patch.currentLgsNet = data.currentLgsNet || null;
+  if (data.currentNet !== void 0) patch.currentNet = data.currentNet || null;
   if (data.mockExamFrequency !== void 0) patch.mockExamFrequency = data.mockExamFrequency || null;
   if (data.strongSubjects !== void 0) patch.strongSubjects = data.strongSubjects;
   if (data.weakSubjects !== void 0) patch.weakSubjects = data.weakSubjects;
@@ -11093,8 +11164,8 @@ function draftToPatch(data) {
   if (data.targetUniversity !== void 0) patch.targetUniversity = data.targetUniversity || null;
   if (data.targetDepartment !== void 0) patch.targetDepartment = data.targetDepartment || null;
   if (data.targetRanking !== void 0) patch.targetRanking = data.targetRanking || null;
-  if (data.targetHighSchool !== void 0) patch.targetHighSchool = data.targetHighSchool || null;
-  if (data.targetLgsScore !== void 0) patch.targetLgsScore = data.targetLgsScore || null;
+  if (data.targetGoal !== void 0) patch.targetGoal = data.targetGoal || null;
+  if (data.targetScore !== void 0) patch.targetScore = data.targetScore || null;
   if (data.mainGoal !== void 0) patch.mainGoal = data.mainGoal || null;
   if (data.shortTermGoal !== void 0) patch.shortTermGoal = data.shortTermGoal || null;
   if (data.longTermGoal !== void 0) patch.longTermGoal = data.longTermGoal || null;
@@ -11866,7 +11937,7 @@ var bookPhotoSchema = {
     title: { type: "string" },
     publisher: { type: "string" },
     subject: { type: "string" },
-    exam: { type: "string", enum: ["TYT", "AYT", "LGS", "GENEL"] },
+    exam: { type: "string", enum: [...EXAM_KINDS, "GENEL"] },
     authors: { type: "array", items: { type: "string" } },
     isbn: { type: "string" },
     edition: { type: "string" },
@@ -11902,7 +11973,7 @@ var documentExtractionSchema = {
   properties: {
     title: { type: "string" },
     date: { type: "string" },
-    exam: { type: "string", enum: ["TYT", "AYT", "LGS"] },
+    exam: { type: "string", enum: [...EXAM_KINDS] },
     subjects: { type: "object", additionalProperties: { type: "number" } },
     timeSpent: { type: "object", additionalProperties: { type: "number" } },
     topics: {
@@ -12079,10 +12150,12 @@ var appRouter = router({
       const profile = input.studentProfile;
       const serverProfile = ctx.user ? await getStudentProfile(ctx.user.id) : null;
       const track = serverProfile?.examTrack ?? "YKS";
-      const lgsTargetContext = track === "LGS" && serverProfile && (serverProfile.targetHighSchool || serverProfile.targetLgsScore || serverProfile.examYear) ? `
+      const trackInfo = EXAM_TRACK_DEFS[track];
+      const customGoal = trackInfo.goal.kind === "custom" ? trackInfo.goal : null;
+      const customTargetContext = customGoal && serverProfile && (serverProfile.targetGoal || serverProfile.targetScore || serverProfile.examYear) ? `
 
-\xD6\u011Frencinin hedefi (onboarding'den \u2014 kesin bir puan/okul garantisi verme, yaln\u0131zca bu hedefe uygun tempo ve odak \xF6ner): LGS ${serverProfile.examYear ?? "y\u0131l\u0131 belirtilmemi\u015F"}, hedef lise ${serverProfile.targetHighSchool || "belirtilmemi\u015F"}, hedef puan ${serverProfile.targetLgsScore || "belirtilmemi\u015F"} / 500.` : "";
-      const targetContext = track === "LGS" ? lgsTargetContext : profile && (profile.targetScoreType || profile.targetUniversity || profile.targetDepartment || profile.targetRanking || profile.examYear) ? `
+\xD6\u011Frencinin hedefi (onboarding'den \u2014 kesin bir puan/okul garantisi verme, yaln\u0131zca bu hedefe uygun tempo ve odak \xF6ner): ${trackInfo.label} ${serverProfile.examYear ?? "y\u0131l\u0131 belirtilmemi\u015F"}, ${customGoal.label.toLocaleLowerCase("tr")} ${serverProfile.targetGoal || "belirtilmemi\u015F"}${trackInfo.targetScore ? `, hedef puan ${serverProfile.targetScore || "belirtilmemi\u015F"} / ${trackInfo.targetScore.max}` : ""}.` : "";
+      const targetContext = customGoal ? customTargetContext : profile && (profile.targetScoreType || profile.targetUniversity || profile.targetDepartment || profile.targetRanking || profile.examYear) ? `
 
 \xD6\u011Frencinin hedefi (onboarding'den \u2014 plan\u0131n \xF6nceliklerini buna g\xF6re kur, ama kesin bir s\u0131ralama/puan garantisi verme, sadece bu hedefe uygun bir tempo ve odak \xF6ner): hedef s\u0131nav y\u0131l\u0131 ${profile.examYear ?? "belirtilmemi\u015F"}, hedef puan t\xFCr\xFC ${profile.targetScoreType ?? "belirtilmemi\u015F"}, hedef \xFCniversite ${profile.targetUniversity || "belirtilmemi\u015F"}, hedef b\xF6l\xFCm ${profile.targetDepartment || "belirtilmemi\u015F"}, tahmini hedef s\u0131ralama ${profile.targetRanking || "belirtilmemi\u015F"}.` : "";
       const coachingContext = profile && (profile.dailyStudyDuration || profile.preferredStudyMethods?.length || profile.studyObstacles || profile.coachingStyle || profile.mainGoal) ? `
@@ -12103,7 +12176,7 @@ ${notebookSignal}` : "";
 
 \xD6\u011Frencinin okul/dershane program\u0131na g\xF6re bu haftan\u0131n bo\u015F zaman\u0131 (oturumlar\u0131 yaln\u0131zca bu aral\u0131klara ve her g\xFCn\xFCn bo\u015F dakikas\u0131n\u0131 a\u015Fmayacak \u015Fekilde planla; 23:30'dan sonra oturum koyma; o g\xFCn okulda i\u015Flenen ${track} derslerine ak\u015Fam k\u0131sa bir peki\u015Ftirme oturumu eklemek iyi olur):
 ${scheduleSignal}` : "";
-      const prompt = `${track === "LGS" ? "LGS'ye haz\u0131rlanan bir ortaokul \xF6\u011Frencisi" : "Bir YKS \xF6\u011Frencisi"} i\xE7in 7 g\xFCnl\xFCk uygulanabilir \xE7al\u0131\u015Fma program\u0131 olu\u015Ftur. Plan bug\xFCnden ba\u015Flar; days dizisi s\u0131ras\u0131yla \u015Fu 7 g\xFCn olsun ve her g\xFCn\xFCn day alan\u0131na g\xFCn ad\u0131n\u0131, date alan\u0131na YYYY-MM-DD tarihini yaz: ${planDays.join(", ")}. Hedef: ${input.goal}. Haftal\u0131k toplam s\xFCre: ${input.availableMinutes} dakika. \xD6ncelik, zay\u0131f konular ve son deneme performans\u0131 olsun. Zay\u0131f konular\u0131 tamamen yok sayma; orta konulara peki\u015Ftirme, iyi konulara koruma oturumu ekle. ${track === "LGS" ? "Her g\xFCn toplam 45-120 dakika ve 2-4 k\u0131sa oturum planla (okul ve \xF6devlerle birlikte yorucu olmas\u0131n)." : "Her g\xFCn toplam 60-150 dakika ve 2-4 oturum planla."} T\xFCrk\xE7e yan\u0131t \xFCret. Ki\u015Fisel raftaki kitaplar\u0131 m\xFCmk\xFCn oldu\u011Funca ilgili zay\u0131f konu oturumlar\u0131na ba\u011Fla. Bir kitab\u0131n mappings alan\u0131nda ilgili konu varsa targetPages alan\u0131na ger\xE7ek sayfa aral\u0131\u011F\u0131n\u0131 ve targetTests alan\u0131na ger\xE7ek test aral\u0131\u011F\u0131n\u0131 yaz; e\u015Fle\u015Ftirme yoksa uydurma aral\u0131k verme, bo\u015F metin ("") b\u0131rak. Soru oturumlar\u0131nda ger\xE7ek\xE7i g\xFCnl\xFCk soru hedefi yaz.
+      const prompt = `${trackInfo.studentNoun} i\xE7in 7 g\xFCnl\xFCk uygulanabilir \xE7al\u0131\u015Fma program\u0131 olu\u015Ftur. Plan bug\xFCnden ba\u015Flar; days dizisi s\u0131ras\u0131yla \u015Fu 7 g\xFCn olsun ve her g\xFCn\xFCn day alan\u0131na g\xFCn ad\u0131n\u0131, date alan\u0131na YYYY-MM-DD tarihini yaz: ${planDays.join(", ")}. Hedef: ${input.goal}. Haftal\u0131k toplam s\xFCre: ${input.availableMinutes} dakika. \xD6ncelik, zay\u0131f konular ve son deneme performans\u0131 olsun. Zay\u0131f konular\u0131 tamamen yok sayma; orta konulara peki\u015Ftirme, iyi konulara koruma oturumu ekle. ${trackInfo.dailyPlanRule} T\xFCrk\xE7e yan\u0131t \xFCret. Ki\u015Fisel raftaki kitaplar\u0131 m\xFCmk\xFCn oldu\u011Funca ilgili zay\u0131f konu oturumlar\u0131na ba\u011Fla. Bir kitab\u0131n mappings alan\u0131nda ilgili konu varsa targetPages alan\u0131na ger\xE7ek sayfa aral\u0131\u011F\u0131n\u0131 ve targetTests alan\u0131na ger\xE7ek test aral\u0131\u011F\u0131n\u0131 yaz; e\u015Fle\u015Ftirme yoksa uydurma aral\u0131k verme, bo\u015F metin ("") b\u0131rak. Soru oturumlar\u0131nda ger\xE7ek\xE7i g\xFCnl\xFCk soru hedefi yaz.
 
 Zay\u0131f/orta/iyi konu verisi:
 ${JSON.stringify(input.topics)}
@@ -12170,7 +12243,7 @@ ${JSON.stringify(input.books)}${targetContext}${coachingContext}${notebookContex
     // önceden yalnızca client'taki 8MB kontrolüne güveniliyordu).
     extract: metredFeatureProcedure("OCR_EXAM_IMPORT").input(documentExtractionInput).mutation(async ({ ctx, input }) => {
       const track = ctx.user ? (await getStudentProfile(ctx.user.id)).examTrack : "YKS";
-      const examHint = track === "LGS" ? "Bu bir LGS denemesi (exam = 'LGS'): dersler T\xFCrk\xE7e, \u0130nk\u0131lap Tarihi, Din K\xFClt\xFCr\xFC, \u0130ngilizce, Matematik, Fen Bilimleri adlar\u0131yla yaz\u0131ls\u0131n; neti do\u011Fru - yanl\u0131\u015F/3 olarak hesapla." : "Neti do\u011Fru - yanl\u0131\u015F/4 olarak hesapla.";
+      const examHint = kindsOf(track).map((kind) => `${kind} denemesiyse exam = '${kind}', ders netleri \u015Fu adlarla: ${subjectNamesOf(kind).join(", ")}; neti do\u011Fru - yanl\u0131\u015F/${EXAM_KIND_DEFS[kind].wrongsPerCorrect} olarak hesapla.`).join(" ");
       const fileCheck = validateDataUrl(input.dataUrl, input.mimeType);
       if (!fileCheck.valid) throw new Error(fileCheck.reason);
       const isImage = input.mimeType.startsWith("image/");
@@ -12402,11 +12475,7 @@ var RuleBasedDifficultyClassifier = class {
 // server/resourceCatalog/curriculumMapper.ts
 init_turkishText();
 var STOPWORDS2 = /* @__PURE__ */ new Set(["ve", "ile", "soru", "bankasi", "konu", "anlatimi", "anlatimli", "deneme", "kitap", "kitabi", "tyt", "ayt", "fasikul"]);
-var examScopeAllows = (examScope, topicExam) => {
-  if (topicExam === "LGS") return examScope === "LGS";
-  if (examScope === "TYT_AYT" || examScope === "YKS" || examScope === "GENEL") return true;
-  return examScope === topicExam;
-};
+var examScopeAllows = (examScope, topicExam) => catalogScopeCovers(examScope, topicExam);
 function mapBookToCurriculumTopics(book, topics, options = {}) {
   if (!book.subject) return [];
   const maxMatches = options.maxMatches ?? 3;

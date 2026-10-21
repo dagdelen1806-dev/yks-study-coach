@@ -26,10 +26,13 @@ export default function OrgDashboard({ scope }: { scope: OrgScope }) {
           <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
             <StatCard icon={<GraduationCap size={18} />} label="Aktif öğrenci" value={totals ? String(totals.students) : "…"} foot={totals ? <span>Bu hafta çalışan: {totals.activeThisWeek}</span> : undefined} />
             <StatCard icon={<CalendarCheck size={18} />} label="Haftalık plan uyumu" value={totals?.averageAdherence !== null && totals?.averageAdherence !== undefined ? `%${Math.round(totals.averageAdherence)}` : "—"} progress={totals?.averageAdherence ?? undefined} foot={<span>Planı olan öğrencilerin ortalaması</span>} />
-            {/* Yalnız LGS öğrencisi olan kurumda (ortaokul) TYT ortalaması yerine LGS ortalaması. */}
-            {totals && totals.averageLastTyt === null && totals.averageLastLgs !== null
-              ? <StatCard tone="warm" icon={<Trophy size={18} />} label="Ortalama son LGS" value={formatNet(totals.averageLastLgs)} unit="net" foot={<span>Her öğrencinin son LGS denemesi</span>} />
-              : <StatCard tone="warm" icon={<Trophy size={18} />} label="Ortalama son TYT" value={formatNet(totals?.averageLastTyt)} unit={totals?.averageLastTyt ? "net" : undefined} foot={<span>{totals?.averageLastLgs !== null && totals?.averageLastLgs !== undefined ? `Her öğrencinin son TYT denemesi · LGS ort. ${formatNet(totals.averageLastLgs)}` : "Her öğrencinin son TYT denemesi"}</span>} />}
+            {(() => {
+              // TYT ortalaması varsa o; yoksa (ör. yalnız LGS'li ortaokul) denemesi olan ilk tür. Diğer türler alt satırda.
+              const averages = Object.entries(totals?.averageByKind ?? {}) as Array<[string, number]>;
+              const [mainKind, mainValue] = averages.find(([kind]) => kind === "TYT") ?? averages[0] ?? ["TYT", null];
+              const others = averages.filter(([kind]) => kind !== mainKind).map(([kind, value]) => `${kind} ort. ${formatNet(value)}`);
+              return <StatCard tone="warm" icon={<Trophy size={18} />} label={`Ortalama son ${mainKind}`} value={formatNet(mainValue)} unit={mainValue !== null ? "net" : undefined} foot={<span>{[`Her öğrencinin son ${mainKind} denemesi`, ...others].join(" · ")}</span>} />;
+            })()}
             <StatCard tone={totals?.atRisk ? "warn" : "plain"} icon={<AlertTriangle size={18} />} label="Takip gereken" value={totals ? String(totals.atRisk) : "…"} foot={totals ? <span>Toplam çalışma: {Math.round(totals.weekMinutes / 60)} sa / 7 gün</span> : undefined} />
           </div>
 

@@ -20,10 +20,15 @@ export const NON_YKS_PRESETS = ["Din Kültürü", "Yabancı Dil", "Rehberlik", "
 export const LGS_SUBJECTS = ["Türkçe", "Matematik", "Fen Bilimleri", "İnkılap Tarihi", "Din Kültürü", "İngilizce"] as const;
 /** 8. sınıf programında olup LGS'de sorulmayan dersler. */
 export const NON_LGS_PRESETS = ["Teknoloji ve Tasarım", "Bilişim Teknolojileri", "Rehberlik", "Beden Eğitimi", "Sanat / Müzik", "Diğer ders"] as const;
-/** Bir ders bloğunun `subject` alanında geçebilecek tüm dersler (iki sınavın birleşimi). */
-export const SCHEDULE_SUBJECTS = [...YKS_SUBJECTS, ...LGS_SUBJECTS.filter((subject) => !(YKS_SUBJECTS as readonly string[]).includes(subject))] as [string, ...string[]];
-export const scheduleSubjectsFor = (track: ExamTrack): readonly string[] => (track === "LGS" ? LGS_SUBJECTS : YKS_SUBJECTS);
-export const nonExamPresetsFor = (track: ExamTrack): readonly string[] => (track === "LGS" ? NON_LGS_PRESETS : NON_YKS_PRESETS);
+/** Her sınavın ders programında ders sayılan dersleri ve plana girmeyen sık okul dersleri. Yeni sınav buraya eklenir. */
+export const SCHEDULE_SUBJECTS_BY_TRACK: Record<ExamTrack, { subjects: readonly string[]; nonExamPresets: readonly string[] }> = {
+  YKS: { subjects: YKS_SUBJECTS, nonExamPresets: NON_YKS_PRESETS },
+  LGS: { subjects: LGS_SUBJECTS, nonExamPresets: NON_LGS_PRESETS },
+};
+/** Bir ders bloğunun `subject` alanında geçebilecek tüm dersler (tüm sınavların birleşimi). */
+export const SCHEDULE_SUBJECTS = Array.from(new Set(Object.values(SCHEDULE_SUBJECTS_BY_TRACK).flatMap((entry) => entry.subjects))) as [string, ...string[]];
+export const scheduleSubjectsFor = (track: ExamTrack): readonly string[] => SCHEDULE_SUBJECTS_BY_TRACK[track].subjects;
+export const nonExamPresetsFor = (track: ExamTrack): readonly string[] => SCHEDULE_SUBJECTS_BY_TRACK[track].nonExamPresets;
 
 /** Okul çıkışı (ve her ders bloğu sonrası) yol/dinlenme payı. */
 export const AFTER_CLASS_BUFFER_MINUTES = 30;

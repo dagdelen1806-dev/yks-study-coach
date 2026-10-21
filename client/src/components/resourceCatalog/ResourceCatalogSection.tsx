@@ -1,4 +1,5 @@
 import { PageHeader } from "@/components/app/kit";
+import type { CatalogExamScope } from "@shared/exams";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -172,7 +173,7 @@ export default function ResourceCatalogSection() {
     page,
     pageSize: 12,
     search: search || undefined,
-    exam: exam === "all" ? undefined : (exam as "TYT" | "AYT" | "TYT_AYT" | "YKS" | "GENEL"),
+    exam: exam === "all" ? undefined : (exam as CatalogExamScope),
     difficulty: difficulty === "all" ? undefined : (difficulty as "easy" | "medium" | "hard"),
     bookType:
       bookType === "all"

@@ -2,7 +2,7 @@ import { trpc } from "@/lib/trpc";
 import { Bar100, EmptyNote, PageHeader, Panel, Segmented, StatCard, primaryButton, secondaryButton } from "@/components/app/kit";
 import { TARGET_SCORE_TYPE_LABELS } from "@shared/onboarding";
 import { getStatusFromProgress, statusMeta, toLocalDateKey } from "@shared/yksData";
-import { estimateLgsScore, kindsOf, trackSubjects, type ExamKind, type ExamTrack } from "@shared/exams";
+import { EXAM_KIND_DEFS, GRADE_LEVEL_LABELS, estimateScore, kindsOf, scoredKindOf, targetSummary, trackSubjects, type ExamKind, type ExamTrack } from "@shared/exams";
 import { ArrowLeft, CalendarCheck, CalendarPlus, Clock3, Eye, EyeOff, NotebookPen, Target, Trash2, Trophy, TrendingUp } from "lucide-react";
 import { lazy, Suspense, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -39,7 +39,11 @@ export function StudentDetail({ scope, studentUserId, compact = false }: { scope
   const { student, profile, summary, exams, topics, sessions, logs, notes, classes, teachers } = detail.data;
   const upcoming = sessions.filter((session) => session.status === "planned" && new Date(session.sessionDate).getTime() >= Date.now() - 60 * 60 * 1000).slice(0, 12);
   const recent = sessions.filter((session) => new Date(session.sessionDate).getTime() < Date.now()).slice(-12).reverse();
-  const latestLgsExam = exams.filter((exam) => exam.exam === "LGS").sort((a, b) => b.date.localeCompare(a.date))[0];
+  const scoredKind = scoredKindOf(track);
+  const latestScoredExam = scoredKind ? exams.filter((exam) => exam.exam === scoredKind).sort((a, b) => b.date.localeCompare(a.date))[0] : undefined;
+  const scoreValue = latestScoredExam ? estimateScore(scoredKind, latestScoredExam.subjects) : null;
+  const examCards = ([...kinds.map((kind) => ({ type: "net" as const, kind })), ...(scoredKind ? [{ type: "score" as const, kind: scoredKind }] : [])]).slice(0, 2);
+  const target = targetSummary(track, { ...profile, targetScoreTypeLabel: profile.targetScoreType ? TARGET_SCORE_TYPE_LABELS[profile.targetScoreType] : null });
   const weakTopics = topics.filter((topic) => getStatusFromProgress(topic.progress) === "Zayıf").sort((a, b) => a.progress - b.progress);
   const submitTask = () => {
     if (!task.topic.trim()) { toast.error("Konu yaz."); return; }
@@ -52,22 +56,21 @@ export function StudentDetail({ scope, studentUserId, compact = false }: { scope
         <Initials name={student.name} size={compact ? 52 : 64} />
         <div className="min-w-0 flex-1">
           <h2 className={`${compact ? "text-[21px]" : "text-[26px]"} font-extrabold leading-tight text-ink`}>{student.name}</h2>
-          <p className="mt-1 text-[13px] text-ink-3">{[profile.gradeLevel ? (profile.gradeLevel === "mezun" ? "Mezun" : `${profile.gradeLevel}. sınıf`) : null, track === "YKS" && profile.targetScoreType ? TARGET_SCORE_TYPE_LABELS[profile.targetScoreType] : null, track === "LGS" && profile.targetLgsScore ? `Hedef ${profile.targetLgsScore} puan` : null, profile.examYear ? `${track} ${profile.examYear}` : null].filter(Boolean).join(" · ")}</p>
-          {track === "LGS" ? profile.targetHighSchool && <p className="mt-0.5 flex items-center gap-1.5 text-[13px] font-semibold text-ink-2"><Target size={14} className="text-brand" />{profile.targetHighSchool}</p>
-            : (profile.targetUniversity || profile.targetDepartment) && <p className="mt-0.5 flex items-center gap-1.5 text-[13px] font-semibold text-ink-2"><Target size={14} className="text-brand" />{[profile.targetUniversity, profile.targetDepartment].filter(Boolean).join(" · ")}</p>}
+          <p className="mt-1 text-[13px] text-ink-3">{[profile.gradeLevel ? GRADE_LEVEL_LABELS[profile.gradeLevel] : null, ...target.details].filter(Boolean).join(" · ")}</p>
+          {target.goal && <p className="mt-0.5 flex items-center gap-1.5 text-[13px] font-semibold text-ink-2"><Target size={14} className="text-brand" />{target.goal}</p>}
           <p className="mt-1 text-[12px] text-ink-4">{[classes.map((item) => item.name).join(", "), teachers.length ? `Öğretmen: ${teachers.map((teacher) => teacher.name).join(", ")}` : null, `Kuruma katılım: ${new Date(student.joinedAt).toLocaleDateString("tr-TR")}`].filter(Boolean).join(" · ")}</p>
           <div className="mt-2"><RiskBadges risks={summary.risks} /></div>
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        {track === "LGS" ? <>
-          <StatCard tone="warm" icon={<Trophy size={18} />} label="Son LGS" value={formatNet(summary.lastLgs?.net)} foot={summary.lastLgs ? <><span>{new Date(summary.lastLgs.date).toLocaleDateString("tr-TR")}</span><span className={`font-bold ${(summary.lastLgs.delta ?? 0) < 0 ? "text-danger" : "text-success"}`}>{deltaText(summary.lastLgs.delta)}</span></> : <span>Deneme yok</span>} />
-          <StatCard icon={<TrendingUp size={18} />} label="Tahmini LGS puanı" value={latestLgsExam ? estimateLgsScore(latestLgsExam.subjects).toFixed(1) : "—"} unit={latestLgsExam ? "/ 500" : undefined} foot={<span>{latestLgsExam ? "Son denemeden · resmî değil" : "Deneme yok"}</span>} />
-        </> : <>
-        <StatCard tone="warm" icon={<Trophy size={18} />} label="Son TYT" value={formatNet(summary.lastTyt?.net)} foot={summary.lastTyt ? <><span>{new Date(summary.lastTyt.date).toLocaleDateString("tr-TR")}</span><span className={`font-bold ${(summary.lastTyt.delta ?? 0) < 0 ? "text-danger" : "text-success"}`}>{deltaText(summary.lastTyt.delta)}</span></> : <span>Deneme yok</span>} />
-        <StatCard icon={<TrendingUp size={18} />} label="Son AYT" value={formatNet(summary.lastAyt?.net)} foot={summary.lastAyt ? <><span>{new Date(summary.lastAyt.date).toLocaleDateString("tr-TR")}</span><span className={`font-bold ${(summary.lastAyt.delta ?? 0) < 0 ? "text-danger" : "text-success"}`}>{deltaText(summary.lastAyt.delta)}</span></> : <span>Deneme yok</span>} />
-        </>}
+        {/* İlk iki kart: sınavın oturumlarının son netleri; tahmini puanı olan sınavda ikinci kart tahmini puan. */}
+        {examCards.map((card, index) => card.type === "score" ? (
+          <StatCard key="score" icon={<TrendingUp size={18} />} label={EXAM_KIND_DEFS[card.kind].scoreEstimate!.label} value={scoreValue !== null ? scoreValue.toFixed(1) : "—"} unit={scoreValue !== null ? `/ ${EXAM_KIND_DEFS[card.kind].scoreEstimate!.max}` : undefined} foot={<span>{scoreValue !== null ? "Son denemeden · resmî değil" : "Deneme yok"}</span>} />
+        ) : (() => {
+          const last = summary.lastByKind[card.kind];
+          return <StatCard key={card.kind} tone={index === 0 ? "warm" : "plain"} icon={index === 0 ? <Trophy size={18} /> : <TrendingUp size={18} />} label={`Son ${card.kind}`} value={formatNet(last?.net)} foot={last ? <><span>{new Date(last.date).toLocaleDateString("tr-TR")}</span><span className={`font-bold ${(last.delta ?? 0) < 0 ? "text-danger" : "text-success"}`}>{deltaText(last.delta)}</span></> : <span>Deneme yok</span>} />;
+        })())}
         <StatCard icon={<CalendarCheck size={18} />} label="Bu hafta plan uyumu" value={summary.adherence !== null ? `%${summary.adherence}` : "—"} progress={summary.adherence ?? undefined} foot={<span>{summary.plannedThisWeek} görev planlandı</span>} />
         <StatCard icon={<Clock3 size={18} />} label="Son 7 gün" value={`${summary.weekMinutes}`} unit="dk" foot={<span>Son etkinlik: {relativeTime(summary.lastActivityAt)}</span>} />
       </div>

@@ -1,3 +1,5 @@
+import type { CatalogExamScope } from "../../shared/exams";
+
 export type BookType =
   | "question_bank"
   | "topic_explanation"
@@ -10,7 +12,7 @@ export type BookType =
   | "reference"
   | "other";
 
-export type ExamScope = "TYT" | "AYT" | "TYT_AYT" | "YKS" | "LGS" | "GENEL";
+export type ExamScope = CatalogExamScope;
 export type DifficultyLabel = "easy" | "medium" | "hard";
 export type ClassificationMethod = "rule" | "ai" | "hybrid" | "manual";
 export type MappingMethod = "rule" | "ai" | "manual";

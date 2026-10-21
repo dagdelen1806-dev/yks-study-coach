@@ -1,6 +1,6 @@
 import { normalizeForComparison, tokenize } from "./normalizers/turkishText";
 import type { ExamScope } from "./types";
-import type { ExamKind } from "../../shared/exams";
+import { catalogScopeCovers, type ExamKind } from "../../shared/exams";
 
 export type CurriculumTopicCandidate = {
   id: number;
@@ -14,13 +14,9 @@ export type CurriculumMapping = { topicId: number; confidence: number; reason: s
 
 const STOPWORDS = new Set(["ve", "ile", "soru", "bankasi", "konu", "anlatimi", "anlatimli", "deneme", "kitap", "kitabi", "tyt", "ayt", "fasikul"]);
 
-// Katalog YKS kitaplarıyla doldu: geniş kapsamlar (TYT_AYT/YKS/GENEL) yalnız YKS konularını
-// kapsar; LGS konusuna yalnızca açıkça "LGS" kapsamlı kitap eşlenir.
-const examScopeAllows = (examScope: ExamScope, topicExam: ExamKind): boolean => {
-  if (topicExam === "LGS") return examScope === "LGS";
-  if (examScope === "TYT_AYT" || examScope === "YKS" || examScope === "GENEL") return true;
-  return examScope === topicExam;
-};
+// Kitap yalnızca kendi oturumunun ya da o sınavın geniş etiketinin (YKS için TYT_AYT/YKS/GENEL)
+// konularına eşlenir; LGS (ve ileride KPSS…) konusuna yalnızca açıkça o kapsamlı kitap (shared/exams.ts).
+const examScopeAllows = (examScope: ExamScope, topicExam: ExamKind): boolean => catalogScopeCovers(examScope, topicExam);
 
 /**
  * Deterministic subject/exam filter + token-overlap scoring against the

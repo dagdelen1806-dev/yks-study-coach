@@ -33,7 +33,7 @@ import { subscriptionRouter } from "./routers/subscription";
 import { paymentRouter } from "./routers/payment";
 import { adminRouter } from "./routers/admin";
 import { testimonialsRouter } from "./routers/testimonials";
-import { EXAM_KINDS, examPromptContext, type ExamKind } from "@shared/exams";
+import { EXAM_KIND_DEFS, EXAM_KINDS, EXAM_TRACK_DEFS, examPromptContext, kindsOf, subjectNamesOf, type ExamKind } from "@shared/exams";
 
 const planInput = z.object({
   topics: z.array(z.object({
@@ -98,7 +98,7 @@ const bookPhotoSchema = {
     title: { type: "string" },
     publisher: { type: "string" },
     subject: { type: "string" },
-    exam: { type: "string", enum: ["TYT", "AYT", "LGS", "GENEL"] },
+    exam: { type: "string", enum: [...EXAM_KINDS, "GENEL"] },
     authors: { type: "array", items: { type: "string" } },
     isbn: { type: "string" },
     edition: { type: "string" },
@@ -150,7 +150,7 @@ const documentExtractionSchema = {
   properties: {
     title: { type: "string" },
     date: { type: "string" },
-    exam: { type: "string", enum: ["TYT", "AYT", "LGS"] },
+    exam: { type: "string", enum: [...EXAM_KINDS] },
     subjects: { type: "object", additionalProperties: { type: "number" } },
     timeSpent: { type: "object", additionalProperties: { type: "number" } },
     topics: {
@@ -332,10 +332,13 @@ export const appRouter = router({
       // Sınav (YKS/LGS) istemciye değil sunucudaki profile dayanır.
       const serverProfile = ctx.user ? await getStudentProfile(ctx.user.id) : null;
       const track = serverProfile?.examTrack ?? "YKS";
-      const lgsTargetContext = track === "LGS" && serverProfile && (serverProfile.targetHighSchool || serverProfile.targetLgsScore || serverProfile.examYear)
-        ? `\n\nÖğrencinin hedefi (onboarding'den — kesin bir puan/okul garantisi verme, yalnızca bu hedefe uygun tempo ve odak öner): LGS ${serverProfile.examYear ?? "yılı belirtilmemiş"}, hedef lise ${serverProfile.targetHighSchool || "belirtilmemiş"}, hedef puan ${serverProfile.targetLgsScore || "belirtilmemiş"} / 500.`
+      const trackInfo = EXAM_TRACK_DEFS[track];
+      // Üniversite dışı hedef (lise, kadro…): etiketi ve puan aralığı sınav tanımından.
+      const customGoal = trackInfo.goal.kind === "custom" ? trackInfo.goal : null;
+      const customTargetContext = customGoal && serverProfile && (serverProfile.targetGoal || serverProfile.targetScore || serverProfile.examYear)
+        ? `\n\nÖğrencinin hedefi (onboarding'den — kesin bir puan/okul garantisi verme, yalnızca bu hedefe uygun tempo ve odak öner): ${trackInfo.label} ${serverProfile.examYear ?? "yılı belirtilmemiş"}, ${customGoal.label.toLocaleLowerCase("tr")} ${serverProfile.targetGoal || "belirtilmemiş"}${trackInfo.targetScore ? `, hedef puan ${serverProfile.targetScore || "belirtilmemiş"} / ${trackInfo.targetScore.max}` : ""}.`
         : "";
-      const targetContext = track === "LGS" ? lgsTargetContext : profile && (profile.targetScoreType || profile.targetUniversity || profile.targetDepartment || profile.targetRanking || profile.examYear)
+      const targetContext = customGoal ? customTargetContext : profile &&(profile.targetScoreType || profile.targetUniversity || profile.targetDepartment || profile.targetRanking || profile.examYear)
         ? `\n\nÖğrencinin hedefi (onboarding'den — planın önceliklerini buna göre kur, ama kesin bir sıralama/puan garantisi verme, sadece bu hedefe uygun bir tempo ve odak öner): hedef sınav yılı ${profile.examYear ?? "belirtilmemiş"}, hedef puan türü ${profile.targetScoreType ?? "belirtilmemiş"}, hedef üniversite ${profile.targetUniversity || "belirtilmemiş"}, hedef bölüm ${profile.targetDepartment || "belirtilmemiş"}, tahmini hedef sıralama ${profile.targetRanking || "belirtilmemiş"}.`
         : "";
       const coachingContext = profile && (profile.dailyStudyDuration || profile.preferredStudyMethods?.length || profile.studyObstacles || profile.coachingStyle || profile.mainGoal)
@@ -354,7 +357,7 @@ export const appRouter = router({
       const scheduleContext = scheduleSignal
         ? `\n\nÖğrencinin okul/dershane programına göre bu haftanın boş zamanı (oturumları yalnızca bu aralıklara ve her günün boş dakikasını aşmayacak şekilde planla; 23:30'dan sonra oturum koyma; o gün okulda işlenen ${track} derslerine akşam kısa bir pekiştirme oturumu eklemek iyi olur):\n${scheduleSignal}`
         : "";
-      const prompt = `${track === "LGS" ? "LGS'ye hazırlanan bir ortaokul öğrencisi" : "Bir YKS öğrencisi"} için 7 günlük uygulanabilir çalışma programı oluştur. Plan bugünden başlar; days dizisi sırasıyla şu 7 gün olsun ve her günün day alanına gün adını, date alanına YYYY-MM-DD tarihini yaz: ${planDays.join(", ")}. Hedef: ${input.goal}. Haftalık toplam süre: ${input.availableMinutes} dakika. Öncelik, zayıf konular ve son deneme performansı olsun. Zayıf konuları tamamen yok sayma; orta konulara pekiştirme, iyi konulara koruma oturumu ekle. ${track === "LGS" ? "Her gün toplam 45-120 dakika ve 2-4 kısa oturum planla (okul ve ödevlerle birlikte yorucu olmasın)." : "Her gün toplam 60-150 dakika ve 2-4 oturum planla."} Türkçe yanıt üret. Kişisel raftaki kitapları mümkün olduğunca ilgili zayıf konu oturumlarına bağla. Bir kitabın mappings alanında ilgili konu varsa targetPages alanına gerçek sayfa aralığını ve targetTests alanına gerçek test aralığını yaz; eşleştirme yoksa uydurma aralık verme, boş metin ("") bırak. Soru oturumlarında gerçekçi günlük soru hedefi yaz.\n\nZayıf/orta/iyi konu verisi:\n${JSON.stringify(input.topics)}\n\nÖncelikli zayıf konular:\n${JSON.stringify(weakTopics)}\n\nSon denemeler:\n${JSON.stringify(recentExams)}\n\nKişisel raf ve çözüm durumu:\n${JSON.stringify(input.books)}${targetContext}${coachingContext}${notebookContext}${scheduleContext}`;
+      const prompt = `${trackInfo.studentNoun} için 7 günlük uygulanabilir çalışma programı oluştur. Plan bugünden başlar; days dizisi sırasıyla şu 7 gün olsun ve her günün day alanına gün adını, date alanına YYYY-MM-DD tarihini yaz: ${planDays.join(", ")}. Hedef: ${input.goal}. Haftalık toplam süre: ${input.availableMinutes} dakika. Öncelik, zayıf konular ve son deneme performansı olsun. Zayıf konuları tamamen yok sayma; orta konulara pekiştirme, iyi konulara koruma oturumu ekle. ${trackInfo.dailyPlanRule} Türkçe yanıt üret. Kişisel raftaki kitapları mümkün olduğunca ilgili zayıf konu oturumlarına bağla. Bir kitabın mappings alanında ilgili konu varsa targetPages alanına gerçek sayfa aralığını ve targetTests alanına gerçek test aralığını yaz; eşleştirme yoksa uydurma aralık verme, boş metin ("") bırak. Soru oturumlarında gerçekçi günlük soru hedefi yaz.\n\nZayıf/orta/iyi konu verisi:\n${JSON.stringify(input.topics)}\n\nÖncelikli zayıf konular:\n${JSON.stringify(weakTopics)}\n\nSon denemeler:\n${JSON.stringify(recentExams)}\n\nKişisel raf ve çözüm durumu:\n${JSON.stringify(input.books)}${targetContext}${coachingContext}${notebookContext}${scheduleContext}`;
       try {
         const response = await invokeLLM({
           reasoningEffort: "low",
@@ -414,9 +417,8 @@ export const appRouter = router({
     // önceden yalnızca client'taki 8MB kontrolüne güveniliyordu).
     extract: metredFeatureProcedure("OCR_EXAM_IMPORT").input(documentExtractionInput).mutation(async ({ ctx, input }) => {
       const track = ctx.user ? (await getStudentProfile(ctx.user.id)).examTrack : "YKS";
-      const examHint = track === "LGS"
-        ? "Bu bir LGS denemesi (exam = 'LGS'): dersler Türkçe, İnkılap Tarihi, Din Kültürü, İngilizce, Matematik, Fen Bilimleri adlarıyla yazılsın; neti doğru - yanlış/3 olarak hesapla."
-        : "Neti doğru - yanlış/4 olarak hesapla.";
+      // Öğrencinin sınavının oturumları, ders adları ve net kuralı (shared/exams.ts).
+      const examHint = kindsOf(track).map((kind) => `${kind} denemesiyse exam = '${kind}', ders netleri şu adlarla: ${subjectNamesOf(kind).join(", ")}; neti doğru - yanlış/${EXAM_KIND_DEFS[kind].wrongsPerCorrect} olarak hesapla.`).join(" ");
       const fileCheck = validateDataUrl(input.dataUrl, input.mimeType);
       if (!fileCheck.valid) throw new Error(fileCheck.reason);
       const isImage = input.mimeType.startsWith("image/");

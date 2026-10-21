@@ -5,31 +5,19 @@
 // round-trip, the same way `shared/topicStatus.ts` / `shared/planTargets.ts`
 // back both sides of existing features.
 
-import { trackSubjects, type ExamTrack } from "./exams";
+import { EXAM_TRACK_DEFS, EXAM_TRACKS, GRADE_LEVEL_LABELS, GRADE_LEVELS, trackSubjects, type ExamTrack, type GradeLevel } from "./exams";
 
 /** Arayüz avatarı ve karşılama illüstrasyonu. Öğrenci seçer; addan tahmin edilmez. Seçilmemişse nötr tasarım. */
 export const AVATAR_STYLES = ["girl", "boy"] as const;
 export type AvatarStyle = (typeof AVATAR_STYLES)[number];
 export const AVATAR_STYLE_LABELS: Record<AvatarStyle, string> = { girl: "Kız avatarı", boy: "Erkek avatarı" };
 
-export const EXAM_TRACK_OPTIONS = [
-  { value: "YKS", title: "YKS", description: "Üniversite sınavı (TYT + AYT) · lise öğrencisi ya da mezun" },
-  { value: "LGS", title: "LGS", description: "Liselere geçiş sınavı · 7. ya da 8. sınıf" },
-] as const satisfies ReadonlyArray<{ value: ExamTrack; title: string; description: string }>;
+/** Anketin ilk adımındaki sınav kartları (shared/exams.ts kaydından; yeni sınav kendiliğinden eklenir). */
+export const EXAM_TRACK_OPTIONS: ReadonlyArray<{ value: ExamTrack; title: string; description: string }> = EXAM_TRACKS.map((track) => ({ value: track, ...EXAM_TRACK_DEFS[track].onboarding }));
 
-export const GRADE_LEVELS = ["7", "8", "9", "10", "11", "12", "mezun"] as const;
-export type GradeLevel = (typeof GRADE_LEVELS)[number];
+export { GRADE_LEVELS, GRADE_LEVEL_LABELS, type GradeLevel };
 /** Bir sınava hazırlanan öğrencinin seçebileceği sınıflar. */
-export const gradeLevelsFor = (track: ExamTrack): GradeLevel[] => (track === "LGS" ? ["7", "8"] : ["9", "10", "11", "12", "mezun"]);
-export const GRADE_LEVEL_LABELS: Record<GradeLevel, string> = {
-  "7": "7. sınıf",
-  "8": "8. sınıf",
-  "9": "9. sınıf",
-  "10": "10. sınıf",
-  "11": "11. sınıf",
-  "12": "12. sınıf",
-  mezun: "Mezun",
-};
+export const gradeLevelsFor = (track: ExamTrack): GradeLevel[] => [...EXAM_TRACK_DEFS[track].gradeLevels];
 
 export const TARGET_SCORE_TYPES = ["SAY", "EA", "SOZ", "DIL", "TYT", "belirsiz"] as const;
 export type TargetScoreType = (typeof TARGET_SCORE_TYPES)[number];
@@ -53,11 +41,8 @@ export const MOCK_EXAM_FREQUENCY_LABELS: Record<MockExamFrequency, string> = {
 };
 
 export const SUBJECT_OPTIONS = ["Türkçe", "Matematik", "Fizik", "Kimya", "Biyoloji", "Tarih", "Coğrafya", "Felsefe", "Din Kültürü", "Edebiyat"] as const;
-/** Güçlü/zayıf ders seçenekleri sınava göre. */
-export const subjectOptionsFor = (track: ExamTrack): readonly string[] => (track === "LGS" ? trackSubjects("LGS") : SUBJECT_OPTIONS);
-
-/** LGS hedef lise türleri (öğrenci okul adını da yazabilir). */
-export const LGS_SCHOOL_TYPES = ["Fen Lisesi", "Sosyal Bilimler Lisesi", "Anadolu Lisesi", "Proje Okulu", "Mesleki ve Teknik Anadolu Lisesi", "İmam Hatip Lisesi", "Henüz karar vermedim"] as const;
+/** Güçlü/zayıf ders seçenekleri: YKS'de branş düzeyi (Fizik, Kimya…), diğer sınavlarda sınavın dersleri. */
+export const subjectOptionsFor = (track: ExamTrack): readonly string[] => (track === "YKS" ? SUBJECT_OPTIONS : trackSubjects(track));
 
 export const STUDY_DAYS = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"] as const;
 
@@ -127,7 +112,7 @@ export type OnboardingDraft = {
   targetScoreType: TargetScoreType | "";
   currentTytNet: string;
   currentAytNet: string;
-  currentLgsNet: string;
+  currentNet: string;
   mockExamFrequency: MockExamFrequency | "";
   strongSubjects: string[];
   weakSubjects: string[];
@@ -135,8 +120,8 @@ export type OnboardingDraft = {
   targetUniversity: string;
   targetDepartment: string;
   targetRanking: string;
-  targetHighSchool: string;
-  targetLgsScore: string;
+  targetGoal: string;
+  targetScore: string;
   mainGoal: string;
   shortTermGoal: string;
   longTermGoal: string;
@@ -162,7 +147,7 @@ export const emptyOnboardingDraft = (): OnboardingDraft => ({
   targetScoreType: "",
   currentTytNet: "",
   currentAytNet: "",
-  currentLgsNet: "",
+  currentNet: "",
   mockExamFrequency: "",
   strongSubjects: [],
   weakSubjects: [],
@@ -170,8 +155,8 @@ export const emptyOnboardingDraft = (): OnboardingDraft => ({
   targetUniversity: "",
   targetDepartment: "",
   targetRanking: "",
-  targetHighSchool: "",
-  targetLgsScore: "",
+  targetGoal: "",
+  targetScore: "",
   mainGoal: "",
   shortTermGoal: "",
   longTermGoal: "",
@@ -212,13 +197,14 @@ export function validateOnboardingStep(step: number, draft: OnboardingDraft): Fi
         errors.examYear = `${currentYear} ile ${currentYear + 6} arasında bir yıl gir.`;
       }
     }
-    // Puan türü yalnız YKS'de var; LGS'de tek puan hesaplanır.
-    if (draft.examTrack !== "LGS" && !draft.targetScoreType) errors.targetScoreType = "Hedef puan türünü seç.";
+    // Puan türü (SAY/EA…) yalnız onu soran sınavda (YKS) zorunlu.
+    if (EXAM_TRACK_DEFS[draft.examTrack || "YKS"].asksScoreType && !draft.targetScoreType) errors.targetScoreType = "Hedef puan türünü seç.";
   }
 
-  if (step === 2 && draft.targetLgsScore.trim()) {
-    const score = Number(draft.targetLgsScore.replace(",", "."));
-    if (!Number.isFinite(score) || score < 100 || score > 500) errors.targetLgsScore = "LGS puanı 100 ile 500 arasında olmalı (isteğe bağlı).";
+  const scoreRule = EXAM_TRACK_DEFS[draft.examTrack || "YKS"].targetScore;
+  if (step === 2 && scoreRule && draft.targetScore.trim()) {
+    const score = Number(draft.targetScore.replace(",", "."));
+    if (!Number.isFinite(score) || score < scoreRule.min || score > scoreRule.max) errors.targetScore = `Puan ${scoreRule.min} ile ${scoreRule.max} arasında olmalı (isteğe bağlı).`;
   }
 
   if (step === 1) {

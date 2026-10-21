@@ -1,11 +1,39 @@
 import { describe, expect, it } from "vitest";
 import { CURRICULUM } from "../shared/curriculum";
-import { estimateLgsScore, kindsOf, netFor, optionCountOf, subjectTotalsOf, trackSubjects } from "../shared/exams";
-import { buildLgsTemplateTopicDetails } from "../shared/lgsExamTemplate";
+import { EXAM_KIND_DEFS, EXAM_TRACK_DEFS, EXAM_TRACKS, GRADE_LEVELS, catalogScopeCovers, estimateLgsScore, estimateScore, kindsOf, netFor, optionCountOf, subjectTotalsOf, targetSummary, trackSubjects } from "../shared/exams";
+import { scheduleSubjectsFor } from "../shared/classSchedule";
+import { buildLgsTemplateTopicDetails } from "../shared/curriculumExamTemplate";
 import { parseSimilarQuestion } from "../shared/questionNotebook";
 import { calculateTopicResult } from "../shared/yksData";
 import { nextExamEnd, planPeriodEnd } from "../shared/yksCalendar";
 import { classifyLesson } from "./schedule/scheduleImport";
+
+// Yeni bir sınav (KPSS, DGS…) eklendiğinde bu blok eksik tanımı yakalar.
+describe("her sınav eksiksiz tanımlı", () => {
+  it.each(EXAM_TRACKS)("%s: oturum, sınıf, tarih, ders programı ve müfredat tanımlı", (track) => {
+    const def = EXAM_TRACK_DEFS[track];
+    const kinds = kindsOf(track);
+    expect(kinds.length).toBeGreaterThan(0);
+    expect(def.gradeLevels.length).toBeGreaterThan(0);
+    expect(def.gradeLevels.every((grade) => (GRADE_LEVELS as readonly string[]).includes(grade))).toBe(true);
+    expect(def.promptContext.length).toBeGreaterThan(40);
+    expect(scheduleSubjectsFor(track).length).toBeGreaterThan(0);
+    expect(nextExamEnd(new Date("2026-10-21T12:00:00Z"), null, track).endsAt.getTime()).toBeGreaterThan(Date.parse("2026-10-21T12:00:00Z"));
+    for (const kind of kinds) {
+      const kindDef = EXAM_KIND_DEFS[kind];
+      expect(kindDef.subjects.length).toBeGreaterThan(0);
+      expect(kindDef.wrongsPerCorrect).toBeGreaterThan(0);
+      if (kindDef.formRows === "curriculum") expect(CURRICULUM.some((topic) => topic.exam === kind)).toBe(true);
+      if (kindDef.scoreEstimate) expect(estimateScore(kind, subjectTotalsOf(kind))).toBe(kindDef.scoreEstimate.max);
+    }
+    // Hedef: üniversite alanları ya da tek serbest hedef; puan kuralı tutarlı.
+    if (def.targetScore) expect(def.targetScore.min).toBeLessThan(def.targetScore.max);
+    // Bu sınavın oturumu kendi geniş katalog etiketiyle kapsanır, başka sınavınkiyle değil.
+    for (const other of EXAM_TRACKS.filter((candidate) => candidate !== track)) {
+      for (const scope of EXAM_TRACK_DEFS[other].catalogBroadScopes) for (const kind of kinds) expect(catalogScopeCovers(scope, kind)).toBe(false);
+    }
+  });
+});
 
 describe("sınav tanımları", () => {
   it("YKS iki oturum (TYT, AYT), LGS tek oturum", () => {
@@ -29,6 +57,13 @@ describe("sınav tanımları", () => {
   it("şık sayısı: YKS 5, LGS 4", () => {
     expect(optionCountOf("YKS")).toBe(5);
     expect(optionCountOf("LGS")).toBe(4);
+  });
+});
+
+describe("hedef özeti", () => {
+  it("YKS: üniversite · bölüm; LGS: hedef lise ve puan", () => {
+    expect(targetSummary("YKS", { targetUniversity: "ODTÜ", targetDepartment: "Fizik", examYear: 2027, targetRanking: "5.000" })).toMatchObject({ goal: "ODTÜ · Fizik", score: null, details: ["İlk 5.000", "YKS 2027"] });
+    expect(targetSummary("LGS", { targetGoal: "Fen Lisesi", targetScore: "450", examYear: 2027 })).toMatchObject({ goal: "Fen Lisesi", score: "450 puan", details: ["Hedef 450 puan", "LGS 2027"] });
   });
 });
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { CATALOG_EXAM_SCOPES } from "@shared/exams";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
@@ -18,7 +19,7 @@ const bookTypeLabels: Record<string, string> = {
   other: "Diğer",
 };
 const bookTypeOptions = Object.keys(bookTypeLabels);
-const examScopeOptions = ["TYT", "AYT", "TYT_AYT", "YKS", "LGS", "GENEL"];
+const examScopeOptions = CATALOG_EXAM_SCOPES;
 
 type FormState = {
   bookId: number | null;

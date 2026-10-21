@@ -1,6 +1,6 @@
 import type { FeatureKey } from "./entitlements";
 import { calculatePlanAdherence, type AdherenceSession } from "./planAdherence";
-import type { ExamKind } from "./exams";
+import { EXAM_KINDS, EXAM_TRACK_LABELS, EXAM_TRACKS, type ExamKind } from "./exams";
 
 // Kurum Paneli: roller, davet kodu ve öğrenci özeti kuralları. Saf fonksiyonlar (sunucu ve test).
 
@@ -19,8 +19,10 @@ export const ORG_KINDS = ["dershane", "okul", "etut", "kocluk", "diger"] as cons
 export type OrgKind = (typeof ORG_KINDS)[number];
 export const ORG_KIND_LABELS: Record<OrgKind, string> = { dershane: "Dershane / kurs merkezi", okul: "Okul", etut: "Etüt merkezi", kocluk: "Koçluk merkezi", diger: "Diğer" };
 export const CLASS_GRADES = ["7", "8", "9", "10", "11", "12", "Mezun"] as const;
-export const CLASS_TRACKS = ["SAY", "EA", "SÖZ", "DİL", "TYT", "LGS"] as const;
-export const CLASS_TRACK_LABELS: Record<(typeof CLASS_TRACKS)[number], string> = { SAY: "Sayısal", EA: "Eşit Ağırlık", "SÖZ": "Sözel", "DİL": "Dil", TYT: "TYT (ortak)", LGS: "LGS" };
+// Sınıf alanı: YKS'nin puan türleri + diğer her sınavın adı (yeni sınav kendiliğinden eklenir).
+const YKS_CLASS_TRACKS = ["SAY", "EA", "SÖZ", "DİL", "TYT"] as const;
+export const CLASS_TRACKS = [...YKS_CLASS_TRACKS, ...EXAM_TRACKS.filter((track) => track !== "YKS")] as const;
+export const CLASS_TRACK_LABELS: Record<string, string> = { SAY: "Sayısal", EA: "Eşit Ağırlık", "SÖZ": "Sözel", "DİL": "Dil", TYT: "TYT (ortak)", ...EXAM_TRACK_LABELS };
 export const TEACHER_SUBJECTS = ["Türkçe", "Edebiyat", "Matematik", "Geometri", "Fizik", "Kimya", "Biyoloji", "Tarih", "Coğrafya", "Felsefe", "Din Kültürü", "İngilizce", "Rehberlik"] as const;
 /** Ayarlar → Roller: her rolün panelde neyi görüp yapabildiği (bilgilendirme; yetki kararı sunucuda). */
 export const ROLE_PERMISSIONS: Array<{ role: Exclude<OrgRole, "student">; can: string[] }> = [
@@ -155,11 +157,12 @@ export const RISK_RULES = { inactiveDays: 7, lowAdherence: 40, netDrop: 5 } as c
 export type RiskKey = "inactive" | "low_adherence" | "net_drop";
 export const RISK_LABELS: Record<RiskKey, string> = { inactive: "7 gündür etkinlik yok", low_adherence: "Plan uyumu düşük", net_drop: "Net düşüşü" };
 
+export type LastExam = { net: number; delta: number | null; date: Date };
 export type StudentSummary = {
-  lastTyt: { net: number; delta: number | null; date: Date } | null;
-  lastAyt: { net: number; delta: number | null; date: Date } | null;
-  /** LGS öğrencisinin son denemesi (YKS öğrencisinde hep null). */
-  lastLgs: { net: number; delta: number | null; date: Date } | null;
+  lastTyt: LastExam | null;
+  lastAyt: LastExam | null;
+  /** Her sınav türünün (TYT, AYT, LGS, ileride KPSS…) son denemesi; denemesi olmayan tür yok. */
+  lastByKind: Partial<Record<ExamKind, LastExam>>;
   weekMinutes: number;
   adherence: number | null;
   plannedThisWeek: number;
@@ -177,9 +180,10 @@ function latestOf(exams: StudentSignals["exams"], kind: ExamKind) {
 }
 
 export function summarizeStudent(signals: StudentSignals, now = new Date()): StudentSummary {
-  const lastTyt = latestOf(signals.exams, "TYT");
-  const lastAyt = latestOf(signals.exams, "AYT");
-  const lastLgs = latestOf(signals.exams, "LGS");
+  const lastByKind: Partial<Record<ExamKind, LastExam>> = {};
+  for (const kind of EXAM_KINDS) { const last = latestOf(signals.exams, kind); if (last) lastByKind[kind] = last; }
+  const lastTyt = lastByKind.TYT ?? null;
+  const lastAyt = lastByKind.AYT ?? null;
   const weekMinutes = signals.logs.filter((log) => now.getTime() - log.studyDate.getTime() <= 7 * DAY).reduce((sum, log) => sum + log.minutes, 0);
   // Uyum yalnızca bugüne kadar planlanmış oturumlarla hesaplanır (gelecek günler henüz yapılamaz).
   const due = signals.weekSessions.filter((session) => new Date(session.sessionDate).getTime() <= now.getTime());
@@ -191,6 +195,6 @@ export function summarizeStudent(signals: StudentSignals, now = new Date()): Stu
   const risks: RiskKey[] = [];
   if (!lastActivityAt || now.getTime() - lastActivityAt.getTime() > RISK_RULES.inactiveDays * DAY) risks.push("inactive");
   if (adherence !== null && adherence < RISK_RULES.lowAdherence) risks.push("low_adherence");
-  if ([lastTyt, lastAyt, lastLgs].some((exam) => exam?.delta !== null && exam?.delta !== undefined && exam.delta <= -RISK_RULES.netDrop)) risks.push("net_drop");
-  return { lastTyt, lastAyt, lastLgs, weekMinutes, adherence, plannedThisWeek: due.length, weakTopicCount: signals.weakTopicCount, lastActivityAt, risks };
+  if (Object.values(lastByKind).some((exam) => exam.delta !== null && exam.delta <= -RISK_RULES.netDrop)) risks.push("net_drop");
+  return { lastTyt, lastAyt, lastByKind, weekMinutes, adherence, plannedThisWeek: due.length, weakTopicCount: signals.weakTopicCount, lastActivityAt, risks };
 }

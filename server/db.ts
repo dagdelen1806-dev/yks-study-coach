@@ -137,7 +137,7 @@ export type StudentProfileView = {
   targetScoreType: TargetScoreType | null;
   currentTytNet: string | null;
   currentAytNet: string | null;
-  currentLgsNet: string | null;
+  currentNet: string | null;
   mockExamFrequency: string | null;
   strongSubjects: string[];
   weakSubjects: string[];
@@ -145,8 +145,8 @@ export type StudentProfileView = {
   targetUniversity: string | null;
   targetDepartment: string | null;
   targetRanking: string | null;
-  targetHighSchool: string | null;
-  targetLgsScore: string | null;
+  targetGoal: string | null;
+  targetScore: string | null;
   mainGoal: string | null;
   shortTermGoal: string | null;
   longTermGoal: string | null;
@@ -173,7 +173,7 @@ export type StudentProfilePatch = Partial<{
   targetScoreType: TargetScoreType | null;
   currentTytNet: string | null;
   currentAytNet: string | null;
-  currentLgsNet: string | null;
+  currentNet: string | null;
   mockExamFrequency: string | null;
   strongSubjects: string[];
   weakSubjects: string[];
@@ -181,8 +181,8 @@ export type StudentProfilePatch = Partial<{
   targetUniversity: string | null;
   targetDepartment: string | null;
   targetRanking: string | null;
-  targetHighSchool: string | null;
-  targetLgsScore: string | null;
+  targetGoal: string | null;
+  targetScore: string | null;
   mainGoal: string | null;
   shortTermGoal: string | null;
   longTermGoal: string | null;
@@ -219,7 +219,7 @@ const defaultStudentProfileView: StudentProfileView = {
   targetScoreType: null,
   currentTytNet: null,
   currentAytNet: null,
-  currentLgsNet: null,
+  currentNet: null,
   mockExamFrequency: null,
   strongSubjects: [],
   weakSubjects: [],
@@ -227,8 +227,8 @@ const defaultStudentProfileView: StudentProfileView = {
   targetUniversity: null,
   targetDepartment: null,
   targetRanking: null,
-  targetHighSchool: null,
-  targetLgsScore: null,
+  targetGoal: null,
+  targetScore: null,
   mainGoal: null,
   shortTermGoal: null,
   longTermGoal: null,
@@ -256,7 +256,7 @@ const toStudentProfileView = (row: typeof studentProfiles.$inferSelect): Student
   targetScoreType: row.targetScoreType,
   currentTytNet: row.currentTytNet,
   currentAytNet: row.currentAytNet,
-  currentLgsNet: row.currentLgsNet,
+  currentNet: row.currentNet,
   mockExamFrequency: row.mockExamFrequency,
   strongSubjects: parseJsonArray(row.strongSubjectsJson),
   weakSubjects: parseJsonArray(row.weakSubjectsJson),
@@ -264,8 +264,8 @@ const toStudentProfileView = (row: typeof studentProfiles.$inferSelect): Student
   targetUniversity: row.targetUniversity,
   targetDepartment: row.targetDepartment,
   targetRanking: row.targetRanking,
-  targetHighSchool: row.targetHighSchool,
-  targetLgsScore: row.targetLgsScore,
+  targetGoal: row.targetGoal,
+  targetScore: row.targetScore,
   mainGoal: row.mainGoal,
   shortTermGoal: row.shortTermGoal,
   longTermGoal: row.longTermGoal,
