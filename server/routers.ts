@@ -22,6 +22,7 @@ import { classScheduleRouter } from "./routers/classSchedule";
 import { pushRouter } from "./routers/push";
 import { readingRouter } from "./routers/reading";
 import { orgRouter } from "./routers/org";
+import { parentRouter } from "./routers/parent";
 import { recordReadingPages } from "./reading/readingDb";
 import { getPlanScheduleContext } from "./schedule/classScheduleDb";
 import { normalizeAiPlan } from "./studyPlan/normalizeAiPlan";
@@ -449,6 +450,7 @@ export const appRouter = router({
   push: pushRouter,
   reading: readingRouter,
   org: orgRouter,
+  parent: parentRouter,
   catalog: resourceCatalogRouter,
   onboarding: onboardingRouter,
   subscription: subscriptionRouter,

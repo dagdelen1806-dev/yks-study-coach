@@ -9,6 +9,8 @@ import { MailNotConfiguredError, sendMail, type OutgoingMail } from "../_core/ma
 import { getDb } from "../db";
 import { getReviewSummary } from "../notes/questionsDb";
 import { runTeacherDigest, setStaffDigestEnabledByMemberId } from "./teacherDigest";
+import { runParentDigest } from "./parentDigest";
+import { disableParentDigestByLinkId } from "../parent/parentDb";
 import { readUnsubscribeToken, unsubscribeUrlFor } from "./unsubscribeToken";
 
 /**
@@ -45,7 +47,7 @@ export async function setWeeklyDigestEnabled(userId: number, enabled: boolean) {
   return enabled;
 }
 
-async function collectDigest(userId: number, start: Date, end: Date) {
+export async function collectDigest(userId: number, start: Date, end: Date) {
   const db = (await getDb())!;
   const [sessions, logs, weakTopics, review] = await Promise.all([
     db.select({ sessionDate: studyPlanSessions.sessionDate, status: studyPlanSessions.status, plannedMinutes: studyPlanSessions.plannedMinutes }).from(studyPlanSessions).where(and(eq(studyPlanSessions.userId, userId), gte(studyPlanSessions.sessionDate, start), lt(studyPlanSessions.sessionDate, end))),
@@ -119,7 +121,9 @@ export function registerWeeklyDigestRoutes(app: Express) {
       const students = await runWeeklyDigest({ appUrl });
       // Öğretmen özetleri aynı günlük kotadan: öğrencilere giden sayı düşülür.
       const staff = await runTeacherDigest({ appUrl, maxPerRun: Math.max(0, WEEKLY_DIGEST_MAX_PER_RUN - students.sent - students.failed) });
-      const result = { students, staff };
+      // Veli özetleri de aynı günlük kotadan, en son.
+      const parents = await runParentDigest({ appUrl, maxPerRun: Math.max(0, WEEKLY_DIGEST_MAX_PER_RUN - students.sent - students.failed - staff.sent - staff.failed) });
+      const result = { students, staff, parents };
       console.info("[WeeklyDigest]", JSON.stringify(result));
       res.json({ ok: true, result });
     } catch (error) {
@@ -143,10 +147,13 @@ export function registerWeeklyDigestRoutes(app: Express) {
     res.setHeader("Cache-Control", "no-store");
     if (!target) { res.status(400).send(page("Bağlantı geçersiz", `<h1 style="font-size:20px;margin:0;">Bağlantı geçersiz</h1>`)); return; }
     if (target.kind === "staff") await setStaffDigestEnabledByMemberId(target.id, false);
+    else if (target.kind === "parent") await disableParentDigestByLinkId(target.id);
     else await setWeeklyDigestEnabled(target.id, false);
     const where = target.kind === "staff"
       ? "Kurum Paneli'nde sol alttaki <strong>Haftalık sınıf özeti</strong> seçeneğiyle"
-      : "uygulamada profil menüsündeki <strong>Haftalık özet e-postası</strong> seçeneğiyle";
+      : target.kind === "parent"
+        ? "veli sayfasındaki <strong>Haftalık özet e-postası</strong> seçeneğiyle"
+        : "uygulamada profil menüsündeki <strong>Haftalık özet e-postası</strong> seçeneğiyle";
     res.send(page("Abonelikten çıktın", `<h1 style="font-size:20px;margin:0 0 8px;">Tamam, artık göndermeyeceğiz</h1><p style="font-size:14px;color:#5d6670;line-height:1.6;">Fikrini değiştirirsen ${where} yeniden açabilirsin.</p><a href="${appBaseUrl(req)}${target.kind === "staff" ? "/kurum" : ""}" style="${button}">Pusula'yı aç</a>`));
   });
 }

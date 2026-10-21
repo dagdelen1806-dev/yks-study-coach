@@ -669,6 +669,29 @@ export const planAdherenceReports = pgTable("plan_adherence_reports", {
 // already used for `user_mock_exams.subjectsJson` / `topicNetsJson` etc.
 // ---------------------------------------------------------------------------
 
+// Veli erişimi (bkz. shared/parent.ts): öğrenci kod üretir (invited) → veli kodu girer ve rıza
+// metnini onaylar (pending) → öğrenci onaylar (active) ya da iki taraftan biri kapatır (revoked).
+export const parentLinks = pgTable("parent_links", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  studentUserId: integer("studentUserId").notNull(),
+  parentUserId: integer("parentUserId"),
+  // Kodun kendisi saklanmaz; yalnızca sha256 özeti (öğrenciye bir kez gösterilir).
+  codeHash: varchar("codeHash", { length: 64 }).notNull().unique(),
+  status: text("status", { enum: ["invited", "pending", "active", "revoked"] }).default("invited").notNull(),
+  expiresAt: timestamp("expiresAt", { withTimezone: true }).notNull(),
+  parentConsentAt: timestamp("parentConsentAt", { withTimezone: true }),
+  parentConsentVersion: integer("parentConsentVersion"),
+  studentApprovedAt: timestamp("studentApprovedAt", { withTimezone: true }),
+  revokedAt: timestamp("revokedAt", { withTimezone: true }),
+  // Velinin haftalık özet e-postası (bağlantı başına; varsayılan açık).
+  weeklyDigestOptOut: integer("weeklyDigestOptOut").default(0).notNull(),
+  weeklyDigestLastSentAt: timestamp("weeklyDigestLastSentAt", { withTimezone: true }),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  studentIdx: index("parent_links_student_idx").on(table.studentUserId),
+  parentIdx: index("parent_links_parent_idx").on(table.parentUserId),
+}));
+
 export const studentProfiles = pgTable("student_profiles", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   userId: integer("userId").notNull().unique(),

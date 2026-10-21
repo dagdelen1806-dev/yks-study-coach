@@ -3,7 +3,7 @@ import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { bookInventory, bookStudyLogs, bookTopicMappings, coachAlerts, InsertUser, planAdherenceReports, sourceSwitches, studentProfiles, studyPlanSessions, studyPlans, topicProgress, topicStudyLogs, userMockExams, userResourceBooks, users, yksTopics } from "../drizzle/schema";
 import type { AvatarStyle, CoachingStyle, GradeLevel, TargetScoreType } from "../shared/onboarding";
-import type { ExamTrack, ExamKind } from "../shared/exams";
+import { defaultKindOf, type ExamTrack, type ExamKind } from "../shared/exams";
 import { calculatePlanAdherence, dedupeAlerts, type AdherenceSession } from "../shared/planAdherence";
 import { rescheduleOverdueSessions, buildSessionCompletion } from "../shared/calendarLogic";
 import { normalizeIsbn } from "../shared/bookIdentity";
@@ -545,7 +545,11 @@ export async function saveStudyPlan(userId: number, input: { title: string; week
 // haritasıyla eşleşir) yeni satır oluşturulurken kullanılacak varsayılan
 // sınav türü. `findOrCreateTopic` önce subject+topic ile mevcut kaydı aradığı
 // için bu değer yalnızca hiç görülmemiş bir konu/ders çiftinde devreye girer.
-const FALLBACK_EXAM: ExamType = "TYT";
+// LGS öğrencisinde LGS: aynı ad iki sınavda olabilir ("Cümlenin Ögeleri"), findOrCreateTopic
+// önce bu sınavın kaydını seçer — LGS öğrencisinin oturumu TYT konusuna yazılmasın.
+async function fallbackExamFor(userId: number): Promise<ExamType> {
+  return defaultKindOf((await getStudentProfile(userId)).examTrack);
+}
 
 /**
  * Tamamlanan oturumun konu çalışma kaydı. Tamamlama verisi `actualMinutes` / `actualQuestions`
@@ -596,7 +600,7 @@ export async function completeStudySession(userId: number, input: { sessionId: n
   // "Defter Tekrarı" görevi farklı konulardan soruları kapsar: konu haritasına
   // "Defterim" adında sahte bir konu yazılmasın diye atlanır.
   if (actualQuestions > 0 && existing[0].kind !== NOTEBOOK_REVIEW_TASK_KIND) {
-    await upsertTopicProgress(userId, { exam: FALLBACK_EXAM, subject: plan.topicLog.subject, topic: plan.topicLog.topic, accuracy: (correct / actualQuestions) * 100, questionCount: actualQuestions, studyDate: completedAt });
+    await upsertTopicProgress(userId, { exam: await fallbackExamFor(userId), subject: plan.topicLog.subject, topic: plan.topicLog.topic, accuracy: (correct / actualQuestions) * 100, questionCount: actualQuestions, studyDate: completedAt });
   }
   return getStudyCalendar(userId);
 }
@@ -635,7 +639,7 @@ export async function addTopicStudyLog(userId: number, input: Omit<typeof topicS
   // olmayan) bir konu için de aynı şekilde konu durumunu günceller.
   const questionCount = input.questions ?? 0;
   if (questionCount > 0) {
-    await upsertTopicProgress(userId, { exam: FALLBACK_EXAM, subject: input.subject, topic: input.topic, accuracy: ((input.correct ?? 0) / questionCount) * 100, questionCount, studyDate: input.studyDate });
+    await upsertTopicProgress(userId, { exam: await fallbackExamFor(userId), subject: input.subject, topic: input.topic, accuracy: ((input.correct ?? 0) / questionCount) * 100, questionCount, studyDate: input.studyDate });
   }
   return { id: Number(result[0].id), ...input, userId, createdAt: new Date() };
 }

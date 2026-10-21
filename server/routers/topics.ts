@@ -1,11 +1,16 @@
 import { z } from "zod";
 import { publicProcedure, protectedProcedure, router } from "../_core/trpc";
-import { getTopicCatalog, getUserTopicProgress, markTopicForReview, upsertTopicProgress } from "../db";
-import { EXAM_KINDS } from "@shared/exams";
+import { getStudentProfile, getTopicCatalog, getUserTopicProgress, markTopicForReview, upsertTopicProgress } from "../db";
+import { EXAM_KINDS, kindsOf } from "@shared/exams";
 
 export const topicsRouter = router({
   catalog: publicProcedure.query(() => getTopicCatalog()),
-  progress: protectedProcedure.query(({ ctx }) => getUserTopicProgress(ctx.user.id)),
+  // Yalnızca öğrencinin sınavının konuları (sınav değiştiren öğrencinin eski verisi silinmez, gizlenir).
+  progress: protectedProcedure.query(async ({ ctx }) => {
+    const [progress, profile] = await Promise.all([getUserTopicProgress(ctx.user.id), getStudentProfile(ctx.user.id)]);
+    const kinds = kindsOf(profile.examTrack);
+    return progress.filter((topic) => kinds.includes(topic.exam));
+  }),
   logResult: protectedProcedure
     .input(
       z.object({

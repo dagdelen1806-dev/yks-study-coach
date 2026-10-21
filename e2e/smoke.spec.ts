@@ -133,6 +133,75 @@ test("tanıtım sayfası paylaşım önizlemesi ve arama motoru dosyaları sunul
   expect(await (await request.get("/sitemap.xml")).text()).toContain("<urlset");
 });
 
+// LGS öğrencisi (scripts/seed-test-org.ts): 8. sınıf, anketi bitmiş, verisi yok. Veli hesabı bağlantısız.
+const LGS_STUDENT = "lgs1@test.local";
+const PARENT = "veli1@test.local";
+
+test("LGS öğrencisi LGS dersleriyle deneme ekler; tahmini puan görünür, TYT/AYT görünmez", async ({ page }) => {
+  await signIn(page, LGS_STUDENT);
+  await page.goto("/");
+  await expect(page.getByText("Kişisel LGS koçun").first()).toBeVisible();
+  await nav(page, "Denemeler").click();
+  await expect(page.getByLabel("Sınav türü")).toHaveCount(0);
+  await page.locator("main").getByRole("button", { name: "Deneme ekle" }).first().click();
+  const title = `E2E LGS Deneme ${Date.now()}`;
+  await page.getByPlaceholder("Örn. Dershane LGS · 04").fill(title);
+  await expect(page.locator(".modal-card select option")).toHaveText(["LGS"]);
+  await page.getByLabel("Türkçe neti").fill("16");
+  await page.getByLabel("Matematik neti").fill("12");
+  await page.getByLabel("Fen Bilimleri neti").fill("15");
+  await page.getByLabel("İngilizce neti").fill("9");
+  await expect(page.getByText("3 yanlış 1 doğruyu götürür")).toBeVisible();
+  await page.getByRole("button", { name: "Kaydet ve çalışma planına aktar" }).click();
+  await expect(page.getByText(title).first()).toBeVisible();
+  const scoreCard = page.locator("main").getByText("Tahmini LGS puanı").first();
+  await expect(scoreCard).toBeVisible();
+  await expect(page.locator("main")).not.toContainText("Son TYT neti");
+});
+
+test("veli kodla bağlanır, öğrenci onaylayınca veli özeti görür ama notları görmez", async ({ page, browser }) => {
+  await signIn(page, LGS_STUDENT);
+  await page.goto("/");
+  await page.locator(".profile-button").click();
+  await page.getByRole("menuitem", { name: "Veli erişimi" }).click();
+  const dialog = page.getByRole("dialog", { name: "Veli erişimi" });
+  await dialog.getByRole("button", { name: "Veli kodu üret" }).click();
+  const code = (await dialog.getByTestId("parent-code").innerText()).trim();
+  expect(code).toMatch(/^[A-Z0-9]{4}-[A-Z0-9]{4}$/);
+
+  const parentContext = await browser.newContext();
+  const parent = await parentContext.newPage();
+  parent.on("pageerror", (error) => pageErrors.push(error.message));
+  await signIn(parent, PARENT);
+  await parent.goto(`/veli?kod=${code}`);
+  await expect(parent.getByLabel("Veli kodu")).toHaveValue(code);
+  await expect(parent.getByRole("button", { name: "Bağlan" })).toBeDisabled();
+  await parent.getByRole("checkbox").first().check();
+  await parent.getByRole("button", { name: "Bağlan" }).click();
+  await expect(parent.getByText(/isteğini henüz onaylamadı/)).toBeVisible();
+
+  await page.reload();
+  await page.locator(".profile-button").click();
+  await page.getByRole("menuitem", { name: "Veli erişimi" }).click();
+  await page.getByRole("dialog", { name: "Veli erişimi" }).getByRole("button", { name: "Onayla" }).click();
+  await expect(page.getByText("Velin artık özetini görebilir.")).toBeVisible();
+
+  await parent.reload();
+  await expect(parent.getByRole("heading", { name: "Mert" })).toBeVisible();
+  await expect(parent.getByText("Tahmini LGS puanı")).toBeVisible();
+  await expect(parent.getByText("Hedef: Fen Lisesi · 450 puan")).toBeVisible();
+  await expect(parent.locator("body")).not.toContainText("Soru defteri ");
+
+  // Öğrenci erişimi kaldırınca veli artık göremez.
+  page.once("dialog", (confirm) => void confirm.accept());
+  await page.getByRole("dialog", { name: "Veli erişimi" }).getByRole("button", { name: "Erişimi kaldır" }).click();
+  await expect(page.getByText("Veli erişimi kaldırıldı.")).toBeVisible();
+  await parent.reload();
+  await expect(parent.getByRole("heading", { name: "Mert" })).toHaveCount(0);
+  await expect(parent.getByLabel("Veli kodu")).toBeVisible();
+  await parentContext.close();
+});
+
 test("çıkış yapınca önceki öğrencinin verisi ekranda kalmaz", async ({ page }) => {
   // ogrenci2 = "Kerem": çıkıştan sonra adı hiçbir yerde kalmamalı.
   await signIn(page, "ogrenci2@test.local");

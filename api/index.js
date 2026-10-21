@@ -147,7 +147,7 @@ var users = pgTable("users", {
 var yksTopics = pgTable("yks_topics", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   slug: varchar("slug", { length: 120 }).notNull().unique(),
-  exam: text("exam", { enum: ["TYT", "AYT"] }).notNull(),
+  exam: text("exam", { enum: ["TYT", "AYT", "LGS"] }).notNull(),
   subject: varchar("subject", { length: 80 }).notNull(),
   topic: varchar("topic", { length: 180 }).notNull(),
   unit: varchar("unit", { length: 120 }).notNull(),
@@ -167,7 +167,7 @@ var mockExams = pgTable("mock_exams", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   userId: integer("userId").notNull(),
   title: varchar("title", { length: 180 }).notNull(),
-  exam: text("exam", { enum: ["TYT", "AYT"] }).default("TYT").notNull(),
+  exam: text("exam", { enum: ["TYT", "AYT", "LGS"] }).default("TYT").notNull(),
   examDate: timestamp("examDate", { withTimezone: true }).notNull(),
   turkceNet: integer("turkceNet").default(0).notNull(),
   matematikNet: integer("matematikNet").default(0).notNull(),
@@ -180,7 +180,7 @@ var userMockExams = pgTable("user_mock_exams", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   userId: integer("userId").notNull(),
   title: varchar("title", { length: 180 }).notNull(),
-  exam: text("exam", { enum: ["TYT", "AYT"] }).notNull(),
+  exam: text("exam", { enum: ["TYT", "AYT", "LGS"] }).notNull(),
   examDate: timestamp("examDate", { withTimezone: true }).notNull(),
   net: decimal("net", { precision: 6, scale: 2 }).notNull(),
   delta: decimal("delta", { precision: 6, scale: 2 }).default("0").notNull(),
@@ -216,7 +216,7 @@ var userResourceBooks = pgTable("user_resource_books", {
   title: varchar("title", { length: 180 }).notNull(),
   publisher: varchar("publisher", { length: 120 }).notNull(),
   subject: varchar("subject", { length: 80 }).notNull(),
-  exam: text("exam", { enum: ["TYT", "AYT"] }).notNull(),
+  exam: text("exam", { enum: ["TYT", "AYT", "LGS"] }).notNull(),
   level: text("level", { enum: ["Kolay", "Orta", "Zor"] }).notNull(),
   format: varchar("format", { length: 120 }).notNull(),
   reason: text("reason").notNull(),
@@ -687,6 +687,26 @@ var planAdherenceReports = pgTable("plan_adherence_reports", {
   snapshotJson: text("snapshotJson").notNull(),
   createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
 });
+var parentLinks = pgTable("parent_links", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  studentUserId: integer("studentUserId").notNull(),
+  parentUserId: integer("parentUserId"),
+  // Kodun kendisi saklanmaz; yalnızca sha256 özeti (öğrenciye bir kez gösterilir).
+  codeHash: varchar("codeHash", { length: 64 }).notNull().unique(),
+  status: text("status", { enum: ["invited", "pending", "active", "revoked"] }).default("invited").notNull(),
+  expiresAt: timestamp("expiresAt", { withTimezone: true }).notNull(),
+  parentConsentAt: timestamp("parentConsentAt", { withTimezone: true }),
+  parentConsentVersion: integer("parentConsentVersion"),
+  studentApprovedAt: timestamp("studentApprovedAt", { withTimezone: true }),
+  revokedAt: timestamp("revokedAt", { withTimezone: true }),
+  // Velinin haftalık özet e-postası (bağlantı başına; varsayılan açık).
+  weeklyDigestOptOut: integer("weeklyDigestOptOut").default(0).notNull(),
+  weeklyDigestLastSentAt: timestamp("weeklyDigestLastSentAt", { withTimezone: true }),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
+}, (table) => ({
+  studentIdx: index("parent_links_student_idx").on(table.studentUserId),
+  parentIdx: index("parent_links_parent_idx").on(table.parentUserId)
+}));
 var studentProfiles = pgTable("student_profiles", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   userId: integer("userId").notNull().unique(),
@@ -697,13 +717,16 @@ var studentProfiles = pgTable("student_profiles", {
   preferredName: varchar("preferredName", { length: 120 }),
   // Arayüz avatarı (öğrencinin seçimi; boşsa nötr tasarım). Bkz. shared/onboarding.ts AVATAR_STYLES.
   avatarStyle: text("avatarStyle", { enum: ["girl", "boy"] }),
-  gradeLevel: text("gradeLevel", { enum: ["9", "10", "11", "12", "mezun"] }),
+  // Hazırlandığı sınav (bkz. shared/exams.ts): YKS (TYT+AYT) ya da LGS (8. sınıf).
+  examTrack: text("examTrack", { enum: ["YKS", "LGS"] }).default("YKS").notNull(),
+  gradeLevel: text("gradeLevel", { enum: ["7", "8", "9", "10", "11", "12", "mezun"] }),
   examYear: integer("examYear"),
   targetScoreType: text("targetScoreType", { enum: ["SAY", "EA", "SOZ", "DIL", "TYT", "belirsiz"] }),
   // 2) Akademik durum — free text: "yaklaşık net aralığı" veya "Bilmiyorum" gibi
   // metinsel değerlere izin vermek için sayısal değil varchar.
   currentTytNet: varchar("currentTytNet", { length: 40 }),
   currentAytNet: varchar("currentAytNet", { length: 40 }),
+  currentLgsNet: varchar("currentLgsNet", { length: 40 }),
   mockExamFrequency: varchar("mockExamFrequency", { length: 60 }),
   strongSubjectsJson: text("strongSubjectsJson"),
   weakSubjectsJson: text("weakSubjectsJson"),
@@ -712,6 +735,9 @@ var studentProfiles = pgTable("student_profiles", {
   targetUniversity: varchar("targetUniversity", { length: 180 }),
   targetDepartment: varchar("targetDepartment", { length: 180 }),
   targetRanking: varchar("targetRanking", { length: 60 }),
+  // LGS hedefi: lise (ör. "Fen Lisesi", okul adı) ve 500 üzerinden puan.
+  targetHighSchool: varchar("targetHighSchool", { length: 180 }),
+  targetLgsScore: varchar("targetLgsScore", { length: 20 }),
   mainGoal: text("mainGoal"),
   shortTermGoal: text("shortTermGoal"),
   longTermGoal: text("longTermGoal"),
@@ -778,7 +804,7 @@ var catalogBooks = pgTable("catalog_books", {
     "reference",
     "other"
   ] }).default("other").notNull(),
-  examScope: text("examScope", { enum: ["TYT", "AYT", "TYT_AYT", "YKS", "GENEL"] }).default("GENEL").notNull(),
+  examScope: text("examScope", { enum: ["TYT", "AYT", "TYT_AYT", "YKS", "LGS", "GENEL"] }).default("GENEL").notNull(),
   // Free-text subject label kept consistent with `yks_topics.subject` /
   // `resources.subject` conventions (e.g. "Matematik", "Türkçe") — no parallel
   // subject table is introduced. Null means multi-subject/general product.
@@ -1038,6 +1064,73 @@ var appErrors = pgTable("app_errors", {
 import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
+
+// shared/exams.ts
+var EXAM_TRACKS = ["YKS", "LGS"];
+var EXAM_KINDS = ["TYT", "AYT", "LGS"];
+var EXAM_KIND_DEFS = {
+  TYT: {
+    kind: "TYT",
+    track: "YKS",
+    label: "TYT",
+    optionCount: 5,
+    wrongsPerCorrect: 4,
+    subjects: [
+      { name: "T\xFCrk\xE7e", questions: 40, weight: 1 },
+      { name: "Matematik", questions: 40, weight: 1 },
+      { name: "Fen", questions: 20, weight: 1 },
+      { name: "Sosyal", questions: 20, weight: 1 }
+    ]
+  },
+  AYT: {
+    kind: "AYT",
+    track: "YKS",
+    label: "AYT",
+    optionCount: 5,
+    wrongsPerCorrect: 4,
+    subjects: [
+      { name: "T\xFCrk\xE7e", questions: 40, weight: 1 },
+      { name: "Matematik", questions: 40, weight: 1 },
+      { name: "Fen", questions: 40, weight: 1 },
+      { name: "Sosyal", questions: 46, weight: 1 }
+    ]
+  },
+  // MEB LGS: sözel oturum 50 soru / 75 dk, sayısal oturum 40 soru / 80 dk.
+  LGS: {
+    kind: "LGS",
+    track: "LGS",
+    label: "LGS",
+    optionCount: 4,
+    wrongsPerCorrect: 3,
+    subjects: [
+      { name: "T\xFCrk\xE7e", questions: 20, weight: 4, session: "S\xF6zel" },
+      { name: "\u0130nk\u0131lap Tarihi", questions: 10, weight: 1, session: "S\xF6zel" },
+      { name: "Din K\xFClt\xFCr\xFC", questions: 10, weight: 1, session: "S\xF6zel" },
+      { name: "\u0130ngilizce", questions: 10, weight: 1, session: "S\xF6zel" },
+      { name: "Matematik", questions: 20, weight: 4, session: "Say\u0131sal" },
+      { name: "Fen Bilimleri", questions: 20, weight: 4, session: "Say\u0131sal" }
+    ]
+  }
+};
+var kindsOf = (track) => EXAM_KINDS.filter((kind) => EXAM_KIND_DEFS[kind].track === track);
+var defaultKindOf = (track) => kindsOf(track)[0];
+function estimateLgsScore(nets) {
+  const subjects = EXAM_KIND_DEFS.LGS.subjects;
+  const max = subjects.reduce((sum, subject2) => sum + subject2.questions * subject2.weight, 0);
+  const weighted = subjects.reduce((sum, subject2) => {
+    const net = Math.min(subject2.questions, Math.max(0, Number(nets[subject2.name]) || 0));
+    return sum + net * subject2.weight;
+  }, 0);
+  return Math.round((100 + 400 * weighted / max) * 100) / 100;
+}
+var examStudentPhrase = (track) => track === "LGS" ? "LGS'ye haz\u0131rlanan bir ortaokul \xF6\u011Frencisinin" : "Bir YKS \xF6\u011Frencisinin";
+var optionCountOf = (track) => EXAM_KIND_DEFS[defaultKindOf(track)].optionCount;
+function examPromptContext(track) {
+  if (track === "LGS") {
+    return "\xD6\u011Frenci LGS'ye (MEB Liselere Ge\xE7i\u015F Sistemi, 8. s\u0131n\u0131f) haz\u0131rlan\u0131yor; 13-14 ya\u015F\u0131nda. Dersler: T\xFCrk\xE7e, Matematik, Fen Bilimleri, T.C. \u0130nk\u0131lap Tarihi ve Atat\xFCrk\xE7\xFCl\xFCk, Din K\xFClt\xFCr\xFC ve Ahlak Bilgisi, \u0130ngilizce. Sorular 4 \u015F\u0131kl\u0131 (A-D), 3 yanl\u0131\u015F 1 do\u011Fruyu g\xF6t\xFCr\xFCr; MEB \xF6rnek soru tarz\u0131, beceri temelli. K\u0131sa ve a\xE7\u0131k c\xFCmleler kur, sakin ve cesaretlendirici ol, s\u0131nav kayg\u0131s\u0131n\u0131 art\u0131racak dil kullanma.";
+  }
+  return "\xD6\u011Frenci YKS'ye (\xD6SYM; TYT ve AYT oturumlar\u0131) haz\u0131rlan\u0131yor. Sorular 5 \u015F\u0131kl\u0131 (A-E), 4 yanl\u0131\u015F 1 do\u011Fruyu g\xF6t\xFCr\xFCr; \xD6SYM tarz\u0131.";
+}
 
 // shared/planAdherence.ts
 var cap = (value) => Math.max(0, Math.min(100, Math.round(value)));
@@ -1401,6 +1494,99 @@ var AYT = {
     "Felsefe Grubu": ["Mant\u0131k", "Psikoloji", "Sosyoloji"]
   }
 };
+var LGS = {
+  T\u00FCrk\u00E7e: {
+    "S\xF6zc\xFCk ve C\xFCmle Anlam\u0131": [
+      { topic: "S\xF6zc\xFCkte Anlam", aliases: ["s\xF6zc\xFCk anlam\u0131", "deyimler ve atas\xF6zleri", "deyim ve atas\xF6zleri"] },
+      { topic: "C\xFCmlede Anlam", aliases: ["c\xFCmle anlam\u0131", "c\xFCmle yorumu", "neden sonu\xE7 ama\xE7 sonu\xE7 ko\u015Ful"] },
+      { topic: "S\xF6z Sanatlar\u0131", aliases: ["s\xF6z sanat\u0131", "benzetme", "ki\u015File\u015Ftirme", "abartma"] }
+    ],
+    Paragraf: [
+      { topic: "Paragrafta Konu ve Ana D\xFC\u015F\xFCnce", aliases: ["paragrafta konu", "ana d\xFC\u015F\xFCnce", "ana fikir"] },
+      { topic: "Paragrafta Yard\u0131mc\u0131 D\xFC\u015F\xFCnce", aliases: ["yard\u0131mc\u0131 d\xFC\u015F\xFCnce", "yard\u0131mc\u0131 fikir"] },
+      { topic: "Paragraf\u0131n Yap\u0131s\u0131", aliases: ["paragrafta yap\u0131", "ak\u0131\u015F\u0131 bozan c\xFCmle", "paragraf olu\u015Fturma"] },
+      { topic: "Metin T\xFCrleri ve Anlat\u0131m Bi\xE7imleri", aliases: ["metin t\xFCrleri", "anlat\u0131m bi\xE7imleri", "d\xFC\u015F\xFCnceyi geli\u015Ftirme yollar\u0131"] },
+      { topic: "G\xF6rsel ve Grafik Okuma", aliases: ["g\xF6rsel okuma", "grafik yorumlama", "tablo okuma"] },
+      { topic: "S\xF6zel Mant\u0131k", aliases: ["s\xF6zel mant\u0131k sorular\u0131", "mant\u0131k muhakeme"] }
+    ],
+    "Dil Bilgisi": [
+      { topic: "Fiilimsiler", aliases: ["eylemsiler", "isim fiil", "s\u0131fat fiil", "zarf fiil"] },
+      { topic: "C\xFCmlenin \xD6geleri", aliases: ["c\xFCmle \xF6geleri", "\xF6\u011Feler"] },
+      { topic: "Fiilde \xC7at\u0131", aliases: ["fiillerde \xE7at\u0131", "eylemde \xE7at\u0131"] },
+      { topic: "C\xFCmle T\xFCrleri", aliases: ["c\xFCmle \xE7e\u015Fitleri", "anlam\u0131na g\xF6re c\xFCmleler", "yap\u0131s\u0131na g\xF6re c\xFCmleler"] },
+      { topic: "Yaz\u0131m Kurallar\u0131", aliases: ["imla kurallar\u0131"] },
+      { topic: "Noktalama \u0130\u015Faretleri", aliases: ["noktalama"] },
+      { topic: "Anlat\u0131m Bozukluklar\u0131", aliases: ["anlat\u0131m bozuklu\u011Fu"] }
+    ]
+  },
+  Matematik: {
+    "Say\u0131lar ve \u0130\u015Flemler": [
+      { topic: "\xC7arpanlar ve Katlar", aliases: ["ebob ekok", "asal \xE7arpanlar", "aralar\u0131nda asal"] },
+      { topic: "\xDCsl\xFC \u0130fadeler", aliases: ["\xFCsl\xFC say\u0131lar", "bilimsel g\xF6sterim"] },
+      { topic: "Karek\xF6kl\xFC \u0130fadeler", aliases: ["karek\xF6k", "k\xF6kl\xFC ifadeler", "k\xF6kl\xFC say\u0131lar"] }
+    ],
+    "Veri ve Olas\u0131l\u0131k": [
+      { topic: "Veri Analizi", aliases: ["grafikler", "\xE7izgi grafi\u011Fi", "s\xFCtun grafi\u011Fi"] },
+      { topic: "Basit Olaylar\u0131n Olma Olas\u0131l\u0131\u011F\u0131", aliases: ["olas\u0131l\u0131k"] }
+    ],
+    "Cebir": [
+      { topic: "Cebirsel \u0130fadeler ve \xD6zde\u015Flikler", aliases: ["\xF6zde\u015Flikler", "\xE7arpanlara ay\u0131rma", "cebirsel ifadeler"] },
+      { topic: "Do\u011Frusal Denklemler", aliases: ["denklemler", "e\u011Fim", "do\u011Fru grafi\u011Fi"] },
+      { topic: "E\u015Fitsizlikler", aliases: ["do\u011Frusal e\u015Fitsizlikler"] }
+    ],
+    "Geometri ve \xD6l\xE7me": [
+      { topic: "\xDC\xE7genler", aliases: ["pisagor ba\u011F\u0131nt\u0131s\u0131", "\xFC\xE7gen e\u015Fitsizli\u011Fi", "kenarortay a\xE7\u0131ortay y\xFCkseklik"] },
+      { topic: "E\u015Flik ve Benzerlik", aliases: ["benzerlik", "e\u015Flik"] },
+      { topic: "D\xF6n\xFC\u015F\xFCm Geometrisi", aliases: ["\xF6teleme", "yans\u0131ma", "\xF6teleme ve yans\u0131ma"] },
+      { topic: "Geometrik Cisimler", aliases: ["prizmalar", "silindir", "piramit", "koni"] }
+    ]
+  },
+  "Fen Bilimleri": {
+    "Fen Bilimleri": [
+      { topic: "Mevsimler ve \u0130klim", aliases: ["mevsimlerin olu\u015Fumu", "iklim ve hava hareketleri"] },
+      { topic: "DNA ve Genetik Kod", aliases: ["dna", "kal\u0131t\u0131m", "mutasyon ve modifikasyon", "adaptasyon", "biyoteknoloji"] },
+      { topic: "Bas\u0131n\xE7", aliases: ["kat\u0131 bas\u0131nc\u0131", "s\u0131v\u0131 bas\u0131nc\u0131", "gaz bas\u0131nc\u0131"] },
+      { topic: "Madde ve End\xFCstri", aliases: ["periyodik sistem", "kimyasal tepkimeler", "asitler ve bazlar", "fiziksel ve kimyasal de\u011Fi\u015Fimler"] },
+      { topic: "Basit Makineler", aliases: ["kald\u0131ra\xE7", "makara", "e\u011Fik d\xFCzlem"] },
+      { topic: "Enerji D\xF6n\xFC\u015F\xFCmleri ve \xC7evre Bilimi", aliases: ["besin zinciri", "fotosentez", "solunum", "madde d\xF6ng\xFCleri"] },
+      { topic: "Elektrik Y\xFCkleri ve Elektrik Enerjisi", aliases: ["elektriklenme", "elektrik enerjisi"] }
+    ]
+  },
+  "\u0130nk\u0131lap Tarihi": {
+    "T.C. \u0130nk\u0131lap Tarihi ve Atat\xFCrk\xE7\xFCl\xFCk": [
+      { topic: "Bir Kahraman Do\u011Fuyor", aliases: ["avrupa'daki geli\u015Fmeler", "mustafa kemal'in \xE7ocuklu\u011Fu"] },
+      { topic: "Mill\xEE Uyan\u0131\u015F: Ba\u011F\u0131ms\u0131zl\u0131k Yolunda At\u0131lan Ad\u0131mlar", aliases: ["milli uyan\u0131\u015F", "birinci d\xFCnya sava\u015F\u0131", "mondros", "kongreler"] },
+      { topic: "Mill\xEE Bir Destan: Ya \u0130stiklal Ya \xD6l\xFCm!", aliases: ["milli bir destan", "kurtulu\u015F sava\u015F\u0131", "milli m\xFCcadele", "cepheler"] },
+      { topic: "Atat\xFCrk\xE7\xFCl\xFCk ve \xC7a\u011Fda\u015Fla\u015Fan T\xFCrkiye", aliases: ["atat\xFCrk ilkeleri", "ink\u0131laplar", "\xE7a\u011Fda\u015Fla\u015Fan t\xFCrkiye"] },
+      { topic: "Demokratikle\u015Fme \xC7abalar\u0131", aliases: ["\xE7ok partili hayat", "demokratikle\u015Fme"] },
+      { topic: "Atat\xFCrk D\xF6nemi T\xFCrk D\u0131\u015F Politikas\u0131", aliases: ["d\u0131\u015F politika"] },
+      { topic: "Atat\xFCrk'\xFCn \xD6l\xFCm\xFC ve Sonras\u0131", aliases: ["atat\xFCrk'\xFCn \xF6l\xFCm\xFC", "ikinci d\xFCnya sava\u015F\u0131"] }
+    ]
+  },
+  "Din K\xFClt\xFCr\xFC": {
+    "Din K\xFClt\xFCr\xFC ve Ahlak Bilgisi": [
+      { topic: "Kader \u0130nanc\u0131", aliases: ["kader ve kaza"] },
+      { topic: "Zek\xE2t ve Sadaka", aliases: ["zekat", "sadaka", "infak"] },
+      { topic: "Din ve Hayat", aliases: ["din ve aile", "din ve \xE7evre"] },
+      { topic: "Hz. Muhammed'in \xD6rnekli\u011Fi", aliases: ["peygamberimizin \xF6rnekli\u011Fi"] },
+      { topic: "Kur'an-\u0131 Kerim ve \xD6zellikleri", aliases: ["kuran'\u0131n ana konular\u0131"] }
+    ]
+  },
+  \u0130ngilizce: {
+    "English": [
+      "Friendship",
+      "Teen Life",
+      "In the Kitchen",
+      "On the Phone",
+      "The Internet",
+      "Adventures",
+      "Tourism",
+      "Chores",
+      "Science",
+      "Natural Forces"
+    ]
+  }
+};
 var slugPart = (value) => value.replace(/İ/g, "i").replace(/I/g, "\u0131").toLowerCase().replace(/[çğıöşüâîû]/g, (char) => ({ \u00E7: "c", \u011F: "g", \u0131: "i", \u00F6: "o", \u015F: "s", \u00FC: "u", \u00E2: "a", \u00EE: "i", \u00FB: "u" })[char] ?? char).replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 function flatten(exam, tree) {
   return Object.entries(tree).flatMap(
@@ -1419,7 +1605,7 @@ function flatten(exam, tree) {
     )
   );
 }
-var CURRICULUM = [...flatten("TYT", TYT), ...flatten("AYT", AYT)];
+var CURRICULUM = [...flatten("TYT", TYT), ...flatten("AYT", AYT), ...flatten("LGS", LGS)];
 var isCurriculumOnlySlug = (slug) => slug.startsWith("cur-");
 
 // shared/topicStatus.ts
@@ -1469,7 +1655,12 @@ var subjectPalette = {
   Sosyal: "#b8741a",
   Fizik: "#b0476e",
   Kimya: "#4a8f9c",
-  Biyoloji: "#5e8a2e"
+  Biyoloji: "#5e8a2e",
+  // LGS dersleri
+  "Fen Bilimleri": "#2e8b6e",
+  "\u0130nk\u0131lap Tarihi": "#b8741a",
+  "Din K\xFClt\xFCr\xFC": "#8a6a3a",
+  \u0130ngilizce: "#3a7ab8"
 };
 
 // shared/dates.ts
@@ -1627,7 +1818,7 @@ function parseAiSolution(raw) {
   return { method: clip(input.method, 400), steps, answer: clip(input.answer, 400), check: clip(input.check, 600), hint: clip(input.hint, 400), ...typeof input.verified === "boolean" ? { verified: input.verified } : {} };
 }
 var OPTION_LETTERS = ["A", "B", "C", "D", "E"];
-function parseSimilarQuestion(raw) {
+function parseSimilarQuestion(raw, optionCount = 5) {
   let value = raw;
   if (typeof value === "string") {
     try {
@@ -1639,9 +1830,9 @@ function parseSimilarQuestion(raw) {
   if (!value || typeof value !== "object") return null;
   const input = value;
   const question = clip(input.question, 3e3);
-  const options = (Array.isArray(input.options) ? input.options : []).slice(0, 5).map((option) => clip(option, 400).replace(/^[A-Ea-e][).:-]\s*/, ""));
+  const options = (Array.isArray(input.options) ? input.options : []).slice(0, optionCount).map((option) => clip(option, 400).replace(/^[A-Ea-e][).:-]\s*/, ""));
   const answer = clip(input.answer, 5).toUpperCase().charAt(0);
-  if (!question || options.length !== 5 || options.some((option) => !option) || !OPTION_LETTERS.includes(answer)) return null;
+  if (!question || options.length !== optionCount || options.some((option) => !option) || !OPTION_LETTERS.slice(0, optionCount).includes(answer)) return null;
   const steps = (Array.isArray(input.steps) ? input.steps : []).map((step) => step && typeof step === "object" ? { work: clip(step.work, 600), why: clip(step.why, 600) } : null).filter((step) => Boolean(step && (step.work || step.why))).slice(0, 10);
   return { question, options, answer, steps, hint: clip(input.hint, 400) };
 }
@@ -1738,11 +1929,13 @@ var defaultStudentProfileView = {
   onboardingStep: 0,
   preferredName: null,
   avatarStyle: null,
+  examTrack: "YKS",
   gradeLevel: null,
   examYear: null,
   targetScoreType: null,
   currentTytNet: null,
   currentAytNet: null,
+  currentLgsNet: null,
   mockExamFrequency: null,
   strongSubjects: [],
   weakSubjects: [],
@@ -1750,6 +1943,8 @@ var defaultStudentProfileView = {
   targetUniversity: null,
   targetDepartment: null,
   targetRanking: null,
+  targetHighSchool: null,
+  targetLgsScore: null,
   mainGoal: null,
   shortTermGoal: null,
   longTermGoal: null,
@@ -1770,11 +1965,13 @@ var toStudentProfileView = (row) => ({
   onboardingStep: row.onboardingStep,
   preferredName: row.preferredName,
   avatarStyle: row.avatarStyle,
+  examTrack: row.examTrack,
   gradeLevel: row.gradeLevel,
   examYear: row.examYear,
   targetScoreType: row.targetScoreType,
   currentTytNet: row.currentTytNet,
   currentAytNet: row.currentAytNet,
+  currentLgsNet: row.currentLgsNet,
   mockExamFrequency: row.mockExamFrequency,
   strongSubjects: parseJsonArray(row.strongSubjectsJson),
   weakSubjects: parseJsonArray(row.weakSubjectsJson),
@@ -1782,6 +1979,8 @@ var toStudentProfileView = (row) => ({
   targetUniversity: row.targetUniversity,
   targetDepartment: row.targetDepartment,
   targetRanking: row.targetRanking,
+  targetHighSchool: row.targetHighSchool,
+  targetLgsScore: row.targetLgsScore,
   mainGoal: row.mainGoal,
   shortTermGoal: row.shortTermGoal,
   longTermGoal: row.longTermGoal,
@@ -1994,7 +2193,9 @@ async function saveStudyPlan(userId, input) {
   if (input.sessions.length) await db.insert(studyPlanSessions).values(input.sessions.map((session) => ({ ...session, userId, planId, targetPages: session.targetPages ?? null, targetTests: session.targetTests ?? null })));
   return getStudyCalendar(userId);
 }
-var FALLBACK_EXAM = "TYT";
+async function fallbackExamFor(userId) {
+  return defaultKindOf((await getStudentProfile(userId)).examTrack);
+}
 function topicLogRow(userId, log) {
   return { userId, sessionId: log.sessionId, subject: log.subject, topic: log.topic, studyDate: log.studyDate, minutes: log.actualMinutes, questions: log.actualQuestions, correct: log.correct, wrong: log.wrong, blank: log.blank, note: log.note ?? null };
 }
@@ -2028,7 +2229,7 @@ async function completeStudySession(userId, input) {
     });
   }
   if (actualQuestions > 0 && existing[0].kind !== NOTEBOOK_REVIEW_TASK_KIND) {
-    await upsertTopicProgress(userId, { exam: FALLBACK_EXAM, subject: plan.topicLog.subject, topic: plan.topicLog.topic, accuracy: correct / actualQuestions * 100, questionCount: actualQuestions, studyDate: completedAt });
+    await upsertTopicProgress(userId, { exam: await fallbackExamFor(userId), subject: plan.topicLog.subject, topic: plan.topicLog.topic, accuracy: correct / actualQuestions * 100, questionCount: actualQuestions, studyDate: completedAt });
   }
   return getStudyCalendar(userId);
 }
@@ -2073,7 +2274,7 @@ async function addTopicStudyLog(userId, input) {
   const result = await db.insert(topicStudyLogs).values({ ...input, userId }).returning({ id: topicStudyLogs.id });
   const questionCount = input.questions ?? 0;
   if (questionCount > 0) {
-    await upsertTopicProgress(userId, { exam: FALLBACK_EXAM, subject: input.subject, topic: input.topic, accuracy: (input.correct ?? 0) / questionCount * 100, questionCount, studyDate: input.studyDate });
+    await upsertTopicProgress(userId, { exam: await fallbackExamFor(userId), subject: input.subject, topic: input.topic, accuracy: (input.correct ?? 0) / questionCount * 100, questionCount, studyDate: input.studyDate });
   }
   return { id: Number(result[0].id), ...input, userId, createdAt: /* @__PURE__ */ new Date() };
 }
@@ -2735,7 +2936,7 @@ var notesConfig = {
     /** "whisper": sağlayıcının /audio/transcriptions uç noktası. İstemci, sunucu kullanılamazsa tarayıcının kendi dikte özelliğine düşebilir. */
     provider: "whisper",
     language: "tr",
-    prompt: "T\xFCrk\xE7e bir YKS \xF6\u011Frencisinin ders notu. Noktalama i\u015Faretlerini do\u011Fru kullan.",
+    prompt: "T\xFCrk\xE7e bir \xF6\u011Frencinin ders notu. Noktalama i\u015Faretlerini do\u011Fru kullan.",
     maxAudioSeconds: 600
   },
   ai: {
@@ -2798,14 +2999,14 @@ var databaseAttachmentStorage = {
     const result = await db.insert(noteAttachments).values({ userId, kind: input.kind, mimeType: input.mimeType, byteSize: input.data.byteLength, data: input.data, durationSec: input.durationSec ?? null }).returning({ id: noteAttachments.id });
     return { id: Number(result[0].id) };
   },
-  async get(userId, id4) {
+  async get(userId, id5) {
     const db = await requireDb();
-    const [row] = await db.select({ mimeType: noteAttachments.mimeType, data: noteAttachments.data, kind: noteAttachments.kind, noteId: noteAttachments.noteId }).from(noteAttachments).where(and2(eq4(noteAttachments.id, id4), eq4(noteAttachments.userId, userId))).limit(1);
+    const [row] = await db.select({ mimeType: noteAttachments.mimeType, data: noteAttachments.data, kind: noteAttachments.kind, noteId: noteAttachments.noteId }).from(noteAttachments).where(and2(eq4(noteAttachments.id, id5), eq4(noteAttachments.userId, userId))).limit(1);
     return row ?? null;
   },
-  async setOcrText(userId, id4, text3) {
+  async setOcrText(userId, id5, text3) {
     const db = await requireDb();
-    await db.update(noteAttachments).set({ ocrText: text3 }).where(and2(eq4(noteAttachments.id, id4), eq4(noteAttachments.userId, userId)));
+    await db.update(noteAttachments).set({ ocrText: text3 }).where(and2(eq4(noteAttachments.id, id5), eq4(noteAttachments.userId, userId)));
   },
   async syncNoteLinks(userId, noteId, referencedIds) {
     const db = await requireDb();
@@ -2833,8 +3034,8 @@ var getAttachmentStorage = () => databaseAttachmentStorage;
 // server/notes/attachmentRoutes.ts
 function registerNoteAttachmentRoutes(app2) {
   app2.get("/api/notes/attachments/:id", async (req, res) => {
-    const id4 = Number(req.params.id);
-    if (!Number.isInteger(id4) || id4 <= 0) {
+    const id5 = Number(req.params.id);
+    if (!Number.isInteger(id5) || id5 <= 0) {
       res.status(400).end();
       return;
     }
@@ -2846,7 +3047,7 @@ function registerNoteAttachmentRoutes(app2) {
       return;
     }
     try {
-      const attachment = await getAttachmentStorage().get(userId, id4);
+      const attachment = await getAttachmentStorage().get(userId, id5);
       if (!attachment) {
         res.status(404).end();
         return;
@@ -2865,7 +3066,7 @@ function registerNoteAttachmentRoutes(app2) {
 }
 
 // server/digest/weeklyDigest.ts
-import { and as and8, asc as asc2, desc as desc6, eq as eq10, gte as gte6, isNotNull as isNotNull4, isNull as isNull7, lt as lt7, or as or3 } from "drizzle-orm";
+import { and as and10, asc as asc2, desc as desc8, eq as eq12, gte as gte8, isNotNull as isNotNull5, isNull as isNull8, lt as lt8, or as or4 } from "drizzle-orm";
 
 // shared/weeklyDigest.ts
 var DAY_MS2 = 24 * 60 * 60 * 1e3;
@@ -3357,9 +3558,9 @@ async function saveNote(userId, input) {
   return { id: saved.id, clientId: input.clientId, version: saved.version, title: saved.title, updatedAt: saved.updatedAt };
 }
 async function describeLinks(db, userId, rows) {
-  const topicIds = Array.from(new Set(rows.map((row) => row.topicId).filter((id4) => id4 !== null)));
-  const bookIds = Array.from(new Set(rows.map((row) => row.bookId).filter((id4) => Boolean(id4))));
-  const numeric = bookIds.filter((id4) => /^\d+$/.test(id4)).map(Number);
+  const topicIds = Array.from(new Set(rows.map((row) => row.topicId).filter((id5) => id5 !== null)));
+  const bookIds = Array.from(new Set(rows.map((row) => row.bookId).filter((id5) => Boolean(id5))));
+  const numeric = bookIds.filter((id5) => /^\d+$/.test(id5)).map(Number);
   const [topics, custom, catalog] = await Promise.all([
     topicIds.length ? db.select({ id: yksTopics.id, topic: yksTopics.topic, unit: yksTopics.unit }).from(yksTopics).where(inArray3(yksTopics.id, topicIds)) : Promise.resolve([]),
     bookIds.length ? db.select({ bookId: userResourceBooks.bookId, title: userResourceBooks.title }).from(userResourceBooks).where(and4(eq6(userResourceBooks.userId, userId), inArray3(userResourceBooks.bookId, bookIds))) : Promise.resolve([]),
@@ -3376,12 +3577,12 @@ var parseStats = (value) => {
     return computeNoteStats({ type: "doc", content: [] });
   }
 };
-async function getNote(userId, id4) {
+async function getNote(userId, id5) {
   const db = await requireDb2();
-  const [row] = await db.select().from(notes).where(and4(eq6(notes.id, id4), eq6(notes.userId, userId))).limit(1);
+  const [row] = await db.select().from(notes).where(and4(eq6(notes.id, id5), eq6(notes.userId, userId))).limit(1);
   if (!row) return null;
   const [tags, links] = await Promise.all([
-    db.select({ tag: noteTags.tag }).from(noteTags).where(and4(eq6(noteTags.userId, userId), eq6(noteTags.noteId, id4))),
+    db.select({ tag: noteTags.tag }).from(noteTags).where(and4(eq6(noteTags.userId, userId), eq6(noteTags.noteId, id5))),
     describeLinks(db, userId, [row])
   ]);
   return {
@@ -3439,8 +3640,8 @@ async function listNotes(userId, filters) {
   }
   if (filters.q?.trim()) conditions.push(await keywordCondition(db, userId, filters.q));
   if (filters.cursor) {
-    const [time2, id4] = filters.cursor.split("_").map(Number);
-    if (Number.isFinite(time2) && Number.isFinite(id4)) conditions.push(or(lt3(notes.noteDate, new Date(time2)), and4(eq6(notes.noteDate, new Date(time2)), lt3(notes.id, id4))));
+    const [time2, id5] = filters.cursor.split("_").map(Number);
+    if (Number.isFinite(time2) && Number.isFinite(id5)) conditions.push(or(lt3(notes.noteDate, new Date(time2)), and4(eq6(notes.noteDate, new Date(time2)), lt3(notes.id, id5))));
   }
   const rows = await db.select({
     id: notes.id,
@@ -3488,7 +3689,7 @@ var endOfToday = () => {
   date.setHours(23, 59, 59, 999);
   return date;
 };
-async function updateNoteFlags(userId, id4, flags) {
+async function updateNoteFlags(userId, id5, flags) {
   const db = await requireDb2();
   const set = {
     ...flags.isFavorite !== void 0 ? { isFavorite: flags.isFavorite ? 1 : 0 } : {},
@@ -3496,23 +3697,23 @@ async function updateNoteFlags(userId, id4, flags) {
     ...flags.reviewAt !== void 0 ? { reviewAt: flags.reviewAt } : {},
     ...flags.archived !== void 0 ? { status: flags.archived ? "archived" : "active" } : {}
   };
-  const [row] = await db.select({ id: notes.id }).from(notes).where(and4(eq6(notes.id, id4), eq6(notes.userId, userId))).limit(1);
+  const [row] = await db.select({ id: notes.id }).from(notes).where(and4(eq6(notes.id, id5), eq6(notes.userId, userId))).limit(1);
   if (!row) throw new NoteError("Not bulunamad\u0131.");
   if (Object.keys(set).length === 0) return;
-  await db.update(notes).set(set).where(and4(eq6(notes.id, id4), eq6(notes.userId, userId)));
+  await db.update(notes).set(set).where(and4(eq6(notes.id, id5), eq6(notes.userId, userId)));
 }
-async function deleteNote(userId, id4) {
+async function deleteNote(userId, id5) {
   const db = await requireDb2();
-  const [row] = await db.select({ id: notes.id }).from(notes).where(and4(eq6(notes.id, id4), eq6(notes.userId, userId))).limit(1);
+  const [row] = await db.select({ id: notes.id }).from(notes).where(and4(eq6(notes.id, id5), eq6(notes.userId, userId))).limit(1);
   if (!row) throw new NoteError("Not bulunamad\u0131.");
-  await getAttachmentStorage().deleteForNote(userId, id4);
-  const [question] = await db.select({ id: notebookQuestions.id }).from(notebookQuestions).where(and4(eq6(notebookQuestions.userId, userId), eq6(notebookQuestions.noteId, id4))).limit(1);
+  await getAttachmentStorage().deleteForNote(userId, id5);
+  const [question] = await db.select({ id: notebookQuestions.id }).from(notebookQuestions).where(and4(eq6(notebookQuestions.userId, userId), eq6(notebookQuestions.noteId, id5))).limit(1);
   if (question) {
     await db.delete(questionAttempts).where(and4(eq6(questionAttempts.userId, userId), eq6(questionAttempts.questionId, question.id)));
     await db.delete(notebookQuestions).where(eq6(notebookQuestions.id, question.id));
   }
-  await db.delete(noteTags).where(and4(eq6(noteTags.userId, userId), eq6(noteTags.noteId, id4)));
-  await db.delete(notes).where(and4(eq6(notes.id, id4), eq6(notes.userId, userId)));
+  await db.delete(noteTags).where(and4(eq6(noteTags.userId, userId), eq6(noteTags.noteId, id5)));
+  await db.delete(notes).where(and4(eq6(notes.id, id5), eq6(notes.userId, userId)));
 }
 async function getNoteCalendar(userId, from, to) {
   const db = await requireDb2();
@@ -3570,9 +3771,9 @@ var endOfToday2 = () => {
   return date;
 };
 var clean = (value, max) => value?.trim() ? value.trim().slice(0, max) : null;
-async function assertAttachment(userId, id4, kind) {
-  if (!id4) return;
-  const attachment = await getAttachmentStorage().get(userId, id4);
+async function assertAttachment(userId, id5, kind) {
+  if (!id5) return;
+  const attachment = await getAttachmentStorage().get(userId, id5);
   if (!attachment || attachment.kind !== kind) throw new NoteError(kind === "image" ? "Foto\u011Fraf bulunamad\u0131." : "Ses kayd\u0131 bulunamad\u0131.");
 }
 async function resolveTopic(db, topicId) {
@@ -3633,9 +3834,9 @@ async function createQuestion(userId, input) {
   if (!row) throw new NoteError("Soru kaydedilemedi.");
   return await getQuestion(userId, row.id);
 }
-async function updateQuestion(userId, id4, patch) {
+async function updateQuestion(userId, id5, patch) {
   const db = await requireDb3();
-  const [row] = await db.select().from(notebookQuestions).where(and5(eq7(notebookQuestions.id, id4), eq7(notebookQuestions.userId, userId))).limit(1);
+  const [row] = await db.select().from(notebookQuestions).where(and5(eq7(notebookQuestions.id, id5), eq7(notebookQuestions.userId, userId))).limit(1);
   if (!row) throw new NoteError("Soru bulunamad\u0131.");
   const [note] = await db.select({ clientId: notes.clientId, content: notes.content, noteDate: notes.noteDate, bookId: notes.bookId, studySessionId: notes.studySessionId, isFavorite: notes.isFavorite, isPinned: notes.isPinned }).from(notes).where(and5(eq7(notes.id, row.noteId), eq7(notes.userId, userId))).limit(1);
   if (!note) throw new NoteError("Soru bulunamad\u0131.");
@@ -3669,8 +3870,8 @@ async function updateQuestion(userId, id4, patch) {
     isFavorite: note.isFavorite === 1,
     isPinned: note.isPinned === 1
   });
-  await db.update(notebookQuestions).set(next).where(eq7(notebookQuestions.id, id4));
-  return await getQuestion(userId, id4);
+  await db.update(notebookQuestions).set(next).where(eq7(notebookQuestions.id, id5));
+  return await getQuestion(userId, id5);
 }
 var questionColumns = {
   id: notebookQuestions.id,
@@ -3699,23 +3900,23 @@ var questionColumns = {
   createdAt: notebookQuestions.createdAt
 };
 var shape = (row) => ({ ...row, errorType: row.errorType, aiSolution: row.aiSolution ? parseAiSolution(row.aiSolution) : null });
-async function getQuestion(userId, id4) {
+async function getQuestion(userId, id5) {
   const db = await requireDb3();
-  const [row] = await db.select(questionColumns).from(notebookQuestions).leftJoin(yksTopics, eq7(yksTopics.id, notebookQuestions.topicId)).where(and5(eq7(notebookQuestions.id, id4), eq7(notebookQuestions.userId, userId))).limit(1);
+  const [row] = await db.select(questionColumns).from(notebookQuestions).leftJoin(yksTopics, eq7(yksTopics.id, notebookQuestions.topicId)).where(and5(eq7(notebookQuestions.id, id5), eq7(notebookQuestions.userId, userId))).limit(1);
   if (!row) return null;
-  const attempts = await db.select({ result: questionAttempts.result, sawSolution: questionAttempts.sawSolution, hintLevel: questionAttempts.hintLevel, attemptedAt: questionAttempts.attemptedAt }).from(questionAttempts).where(and5(eq7(questionAttempts.userId, userId), eq7(questionAttempts.questionId, id4))).orderBy(desc3(questionAttempts.attemptedAt), desc3(questionAttempts.id)).limit(20);
+  const attempts = await db.select({ result: questionAttempts.result, sawSolution: questionAttempts.sawSolution, hintLevel: questionAttempts.hintLevel, attemptedAt: questionAttempts.attemptedAt }).from(questionAttempts).where(and5(eq7(questionAttempts.userId, userId), eq7(questionAttempts.questionId, id5))).orderBy(desc3(questionAttempts.attemptedAt), desc3(questionAttempts.id)).limit(20);
   return { ...shape(row), attempts: attempts.map((attempt) => ({ ...attempt, sawSolution: attempt.sawSolution === 1 })) };
 }
-async function getSolveContext(userId, id4) {
+async function getSolveContext(userId, id5) {
   const db = await requireDb3();
-  const [row] = await db.select({ questionImageId: notebookQuestions.questionImageId, stuckPoint: notebookQuestions.stuckPoint, subject: notebookQuestions.subject, topic: yksTopics.topic, exam: yksTopics.exam, content: notes.content, aiSolution: notebookQuestions.aiSolution, aiSolutionModel: notebookQuestions.aiSolutionModel, difficulty: notebookQuestions.difficulty, lastResult: notebookQuestions.lastResult }).from(notebookQuestions).innerJoin(notes, eq7(notes.id, notebookQuestions.noteId)).leftJoin(yksTopics, eq7(yksTopics.id, notebookQuestions.topicId)).where(and5(eq7(notebookQuestions.id, id4), eq7(notebookQuestions.userId, userId))).limit(1);
+  const [row] = await db.select({ questionImageId: notebookQuestions.questionImageId, stuckPoint: notebookQuestions.stuckPoint, subject: notebookQuestions.subject, topic: yksTopics.topic, exam: yksTopics.exam, content: notes.content, aiSolution: notebookQuestions.aiSolution, aiSolutionModel: notebookQuestions.aiSolutionModel, difficulty: notebookQuestions.difficulty, lastResult: notebookQuestions.lastResult }).from(notebookQuestions).innerJoin(notes, eq7(notes.id, notebookQuestions.noteId)).leftJoin(yksTopics, eq7(yksTopics.id, notebookQuestions.topicId)).where(and5(eq7(notebookQuestions.id, id5), eq7(notebookQuestions.userId, userId))).limit(1);
   if (!row) throw new NoteError("Soru bulunamad\u0131.");
   return { questionImageId: row.questionImageId, ocrText: ocrTextOf(row.content, row.questionImageId), stuckPoint: row.stuckPoint, subject: row.subject, topic: row.topic, aiSolution: parseAiSolution(row.aiSolution), aiSolutionModel: row.aiSolutionModel, exam: row.exam, difficulty: row.difficulty, lastResult: row.lastResult };
 }
-async function saveAiSolution(userId, id4, solution, aiSolutionModel = null) {
+async function saveAiSolution(userId, id5, solution, aiSolutionModel = null) {
   const db = await requireDb3();
   const aiSolutionAt = /* @__PURE__ */ new Date();
-  await db.update(notebookQuestions).set({ aiSolution: JSON.stringify(solution), aiSolutionAt, aiSolutionModel }).where(and5(eq7(notebookQuestions.id, id4), eq7(notebookQuestions.userId, userId)));
+  await db.update(notebookQuestions).set({ aiSolution: JSON.stringify(solution), aiSolutionAt, aiSolutionModel }).where(and5(eq7(notebookQuestions.id, id5), eq7(notebookQuestions.userId, userId)));
   return { aiSolution: solution, aiSolutionAt, aiSolutionModel };
 }
 async function getQuestionIdByNote(userId, noteId) {
@@ -3737,21 +3938,21 @@ async function listQuestions(userId, filters) {
   const page2 = rows.slice(0, limit).map(shape);
   return { items: page2, nextCursor: !filters.due && rows.length > limit ? page2[page2.length - 1]?.id ?? null : null };
 }
-async function deleteQuestion(userId, id4) {
+async function deleteQuestion(userId, id5) {
   const db = await requireDb3();
-  const [row] = await db.select({ noteId: notebookQuestions.noteId }).from(notebookQuestions).where(and5(eq7(notebookQuestions.id, id4), eq7(notebookQuestions.userId, userId))).limit(1);
+  const [row] = await db.select({ noteId: notebookQuestions.noteId }).from(notebookQuestions).where(and5(eq7(notebookQuestions.id, id5), eq7(notebookQuestions.userId, userId))).limit(1);
   if (!row) throw new NoteError("Soru bulunamad\u0131.");
   await deleteNote(userId, row.noteId);
 }
-async function recordAttempt(userId, id4, input) {
+async function recordAttempt(userId, id5, input) {
   const db = await requireDb3();
-  const [row] = await db.select({ reviewStage: notebookQuestions.reviewStage }).from(notebookQuestions).where(and5(eq7(notebookQuestions.id, id4), eq7(notebookQuestions.userId, userId))).limit(1);
+  const [row] = await db.select({ reviewStage: notebookQuestions.reviewStage }).from(notebookQuestions).where(and5(eq7(notebookQuestions.id, id5), eq7(notebookQuestions.userId, userId))).limit(1);
   if (!row) throw new NoteError("Soru bulunamad\u0131.");
   const now = /* @__PURE__ */ new Date();
   const hintLevel = Math.min(Math.max(Math.round(input.hintLevel ?? 0), 0), HINT_LEVELS.solution);
   const next = scheduleAfterAttempt(row, input.result, input.sawSolution, now, hintLevel);
-  await db.insert(questionAttempts).values({ userId, questionId: id4, result: input.result, sawSolution: input.sawSolution ? 1 : 0, hintLevel, seconds: input.seconds ? Math.min(Math.round(input.seconds), 7200) : null, stageBefore: row.reviewStage, attemptedAt: now });
-  await db.update(notebookQuestions).set({ ...next, attemptCount: sql4`${notebookQuestions.attemptCount} + 1`, lastResult: input.result, lastAttemptAt: now }).where(eq7(notebookQuestions.id, id4));
+  await db.insert(questionAttempts).values({ userId, questionId: id5, result: input.result, sawSolution: input.sawSolution ? 1 : 0, hintLevel, seconds: input.seconds ? Math.min(Math.round(input.seconds), 7200) : null, stageBefore: row.reviewStage, attemptedAt: now });
+  await db.update(notebookQuestions).set({ ...next, attemptCount: sql4`${notebookQuestions.attemptCount} + 1`, lastResult: input.result, lastAttemptAt: now }).where(eq7(notebookQuestions.id, id5));
   return next;
 }
 var questionSubject = (subject2) => subject2 === void 0 ? [] : [subject2 === null ? isNull4(notebookQuestions.subject) : eq7(notebookQuestions.subject, subject2)];
@@ -3859,8 +4060,8 @@ var STAFF_ROLES = ["owner", "admin", "coordinator", "teacher"];
 var INVITABLE_ROLES = ["admin", "coordinator", "teacher", "student"];
 var ROLE_RANK = { student: 0, teacher: 1, coordinator: 2, admin: 3, owner: 4 };
 var ORG_KINDS = ["dershane", "okul", "etut", "kocluk", "diger"];
-var CLASS_GRADES = ["9", "10", "11", "12", "Mezun"];
-var CLASS_TRACKS = ["SAY", "EA", "S\xD6Z", "D\u0130L", "TYT"];
+var CLASS_GRADES = ["7", "8", "9", "10", "11", "12", "Mezun"];
+var CLASS_TRACKS = ["SAY", "EA", "S\xD6Z", "D\u0130L", "TYT", "LGS"];
 var isStaffRole = (role) => role !== "student";
 var hasRole = (role, minimum) => ROLE_RANK[role] >= ROLE_RANK[minimum];
 var seesAllStudents = (role) => hasRole(role, "coordinator");
@@ -3936,6 +4137,7 @@ function latestOf(exams, kind) {
 function summarizeStudent(signals, now = /* @__PURE__ */ new Date()) {
   const lastTyt = latestOf(signals.exams, "TYT");
   const lastAyt = latestOf(signals.exams, "AYT");
+  const lastLgs = latestOf(signals.exams, "LGS");
   const weekMinutes = signals.logs.filter((log) => now.getTime() - log.studyDate.getTime() <= 7 * DAY).reduce((sum, log) => sum + log.minutes, 0);
   const due = signals.weekSessions.filter((session) => new Date(session.sessionDate).getTime() <= now.getTime());
   const adherence = due.length ? calculatePlanAdherence(due).overallScore : null;
@@ -3945,8 +4147,8 @@ function summarizeStudent(signals, now = /* @__PURE__ */ new Date()) {
   const risks = [];
   if (!lastActivityAt || now.getTime() - lastActivityAt.getTime() > RISK_RULES.inactiveDays * DAY) risks.push("inactive");
   if (adherence !== null && adherence < RISK_RULES.lowAdherence) risks.push("low_adherence");
-  if ([lastTyt, lastAyt].some((exam) => exam?.delta !== null && exam?.delta !== void 0 && exam.delta <= -RISK_RULES.netDrop)) risks.push("net_drop");
-  return { lastTyt, lastAyt, weekMinutes, adherence, plannedThisWeek: due.length, weakTopicCount: signals.weakTopicCount, lastActivityAt, risks };
+  if ([lastTyt, lastAyt, lastLgs].some((exam) => exam?.delta !== null && exam?.delta !== void 0 && exam.delta <= -RISK_RULES.netDrop)) risks.push("net_drop");
+  return { lastTyt, lastAyt, lastLgs, weekMinutes, adherence, plannedThisWeek: due.length, weakTopicCount: signals.weakTopicCount, lastActivityAt, risks };
 }
 
 // shared/teacherDigest.ts
@@ -4106,9 +4308,9 @@ async function listInvitations(orgId) {
   const db = await requireDb4();
   return db.select({ id: organizationInvitations.id, role: organizationInvitations.role, note: organizationInvitations.note, subject: organizationInvitations.subject, expiresAt: organizationInvitations.expiresAt, maxUses: organizationInvitations.maxUses, usedCount: organizationInvitations.usedCount, revokedAt: organizationInvitations.revokedAt, createdAt: organizationInvitations.createdAt }).from(organizationInvitations).where(eq8(organizationInvitations.orgId, orgId)).orderBy(desc4(organizationInvitations.createdAt)).limit(100);
 }
-async function revokeInvitation(orgId, id4) {
+async function revokeInvitation(orgId, id5) {
   const db = await requireDb4();
-  const result = await db.update(organizationInvitations).set({ revokedAt: /* @__PURE__ */ new Date() }).where(and6(eq8(organizationInvitations.orgId, orgId), eq8(organizationInvitations.id, id4), isNull5(organizationInvitations.revokedAt))).returning();
+  const result = await db.update(organizationInvitations).set({ revokedAt: /* @__PURE__ */ new Date() }).where(and6(eq8(organizationInvitations.orgId, orgId), eq8(organizationInvitations.id, id5), isNull5(organizationInvitations.revokedAt))).returning();
   return result.length > 0;
 }
 async function findInvitationByHash(codeHash) {
@@ -4155,7 +4357,7 @@ async function setClassStudents(orgId, classId, studentUserIds) {
   const db = await requireDb4();
   const [row] = await db.select({ id: organizationClasses.id }).from(organizationClasses).where(and6(eq8(organizationClasses.orgId, orgId), eq8(organizationClasses.id, classId))).limit(1);
   if (!row) return false;
-  const valid = studentUserIds.length ? (await listMembers(orgId, { role: "student" })).map((member) => member.userId).filter((id4) => studentUserIds.includes(id4)) : [];
+  const valid = studentUserIds.length ? (await listMembers(orgId, { role: "student" })).map((member) => member.userId).filter((id5) => studentUserIds.includes(id5)) : [];
   await db.delete(classStudents).where(eq8(classStudents.classId, classId));
   if (valid.length) await db.insert(classStudents).values(valid.map((studentUserId) => ({ classId, studentUserId })));
   return true;
@@ -4166,7 +4368,7 @@ async function listAssignments(orgId) {
 }
 async function setTeacherStudents(orgId, teacherUserId, studentUserIds) {
   const db = await requireDb4();
-  const valid = studentUserIds.length ? (await listMembers(orgId, { role: "student" })).map((member) => member.userId).filter((id4) => studentUserIds.includes(id4)) : [];
+  const valid = studentUserIds.length ? (await listMembers(orgId, { role: "student" })).map((member) => member.userId).filter((id5) => studentUserIds.includes(id5)) : [];
   await db.update(teacherAssignments).set({ active: 0 }).where(and6(eq8(teacherAssignments.orgId, orgId), eq8(teacherAssignments.teacherUserId, teacherUserId)));
   for (const studentUserId of valid) {
     await db.insert(teacherAssignments).values({ orgId, teacherUserId, studentUserId, active: 1 }).onConflictDoUpdate({ target: [teacherAssignments.orgId, teacherAssignments.teacherUserId, teacherAssignments.studentUserId], set: { active: 1 } });
@@ -4182,14 +4384,14 @@ async function createNote(input) {
   const result = await db.insert(counselingNotes).values(input).returning({ id: counselingNotes.id });
   return Number(result[0].id);
 }
-async function getNote2(orgId, id4) {
+async function getNote2(orgId, id5) {
   const db = await requireDb4();
-  const [row] = await db.select({ id: counselingNotes.id, studentUserId: counselingNotes.studentUserId, authorUserId: counselingNotes.authorUserId }).from(counselingNotes).where(and6(eq8(counselingNotes.orgId, orgId), eq8(counselingNotes.id, id4))).limit(1);
+  const [row] = await db.select({ id: counselingNotes.id, studentUserId: counselingNotes.studentUserId, authorUserId: counselingNotes.authorUserId }).from(counselingNotes).where(and6(eq8(counselingNotes.orgId, orgId), eq8(counselingNotes.id, id5))).limit(1);
   return row ?? null;
 }
-async function deleteNote2(orgId, id4) {
+async function deleteNote2(orgId, id5) {
   const db = await requireDb4();
-  await db.delete(counselingNotes).where(and6(eq8(counselingNotes.orgId, orgId), eq8(counselingNotes.id, id4)));
+  await db.delete(counselingNotes).where(and6(eq8(counselingNotes.orgId, orgId), eq8(counselingNotes.id, id5)));
 }
 async function listStudentFeedback(studentUserId) {
   const db = await requireDb4();
@@ -4204,7 +4406,7 @@ async function listAudit(orgId) {
   return db.select({ id: organizationAuditLogs.id, action: organizationAuditLogs.action, targetType: organizationAuditLogs.targetType, targetId: organizationAuditLogs.targetId, metadataJson: organizationAuditLogs.metadataJson, actorName: users.name, createdAt: organizationAuditLogs.createdAt }).from(organizationAuditLogs).innerJoin(users, eq8(users.id, organizationAuditLogs.actorUserId)).where(eq8(organizationAuditLogs.orgId, orgId)).orderBy(desc4(organizationAuditLogs.createdAt)).limit(200);
 }
 async function loadStudentSignals(studentUserIds, weekStart, weekEnd, logsSince) {
-  const signals = new Map(studentUserIds.map((id4) => [id4, { exams: [], logs: [], weekSessions: [], weakTopicCount: 0, lastSignedIn: null }]));
+  const signals = new Map(studentUserIds.map((id5) => [id5, { exams: [], logs: [], weekSessions: [], weakTopicCount: 0, lastSignedIn: null }]));
   if (!studentUserIds.length) return signals;
   const db = await requireDb4();
   const [exams, logs, sessions, weak, signins] = await Promise.all([
@@ -4340,16 +4542,16 @@ async function resolveUpgradeRequest(requestId, status, resolvedBy) {
 import { SignJWT as SignJWT3, jwtVerify as jwtVerify3 } from "jose";
 var AUDIENCE = "weekly-digest-unsubscribe";
 var secretKey3 = () => new TextEncoder().encode(ENV.cookieSecret);
-async function createUnsubscribeToken(kind, id4) {
-  return new SignJWT3({ k: kind }).setProtectedHeader({ alg: "HS256" }).setSubject(String(id4)).setAudience(AUDIENCE).setIssuedAt().sign(secretKey3());
+async function createUnsubscribeToken(kind, id5) {
+  return new SignJWT3({ k: kind }).setProtectedHeader({ alg: "HS256" }).setSubject(String(id5)).setAudience(AUDIENCE).setIssuedAt().sign(secretKey3());
 }
-var unsubscribeUrlFor = async (appUrl, kind, id4) => `${appUrl}/api/email/weekly-digest/unsubscribe?token=${encodeURIComponent(await createUnsubscribeToken(kind, id4))}`;
+var unsubscribeUrlFor = async (appUrl, kind, id5) => `${appUrl}/api/email/weekly-digest/unsubscribe?token=${encodeURIComponent(await createUnsubscribeToken(kind, id5))}`;
 async function readUnsubscribeToken(token) {
   try {
     const { payload } = await jwtVerify3(token, secretKey3(), { audience: AUDIENCE, algorithms: ["HS256"] });
-    const id4 = Number(payload.sub);
-    if (!Number.isInteger(id4) || id4 <= 0) return null;
-    return { kind: payload.k === "staff" ? "staff" : "student", id: id4 };
+    const id5 = Number(payload.sub);
+    if (!Number.isInteger(id5) || id5 <= 0) return null;
+    return { kind: payload.k === "staff" ? "staff" : payload.k === "parent" ? "parent" : "student", id: id5 };
   } catch {
     return null;
   }
@@ -4435,31 +4637,271 @@ async function runTeacherDigest(options) {
   return result;
 }
 
-// server/digest/weeklyDigest.ts
+// server/digest/parentDigest.ts
+import { and as and8, desc as desc6, eq as eq10, gte as gte6, isNotNull as isNotNull4, isNull as isNull7, lt as lt7, or as or3 } from "drizzle-orm";
+
+// server/_core/emails/parentEmails.ts
+var escapeHtml4 = (value) => value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+var shell = (subject2, preheader, body, footer) => `<!doctype html>
+<html lang="tr">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml4(subject2)}</title></head>
+<body style="margin:0;padding:0;background:#f3f6f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#18202a;">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0;">${escapeHtml4(preheader)}</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f6f5;">
+  <tr><td align="center" style="padding:32px 16px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border:1px solid #e6ebe9;border-radius:20px;">
+      <tr><td style="padding:28px 28px 8px 28px;font-size:15px;font-weight:700;color:#18202a;">Pusula \xB7 Veli eri\u015Fimi</td></tr>
+      <tr><td style="padding:8px 28px 28px 28px;">${body}</td></tr>
+    </table>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;">
+      <tr><td align="center" style="padding:20px 8px 0 8px;font-size:11px;line-height:1.6;color:#7c858e;">${footer}</td></tr>
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>`;
+var button = (href, label) => `<a href="${escapeHtml4(href)}" style="display:inline-block;background:#17625f;color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;padding:12px 22px;border-radius:12px;">${escapeHtml4(label)}</a>`;
+function buildParentInviteEmail({ to, studentName, code, joinUrl, expiresAt }) {
+  const subject2 = `${studentName} seni Pusula'da veli olarak ekledi`;
+  const until = expiresAt.toLocaleDateString("tr-TR", { day: "numeric", month: "long", timeZone: "Europe/Istanbul" });
+  const text3 = [
+    "Merhaba,",
+    "",
+    `${studentName}, s\u0131nav haz\u0131rl\u0131\u011F\u0131n\u0131 Pusula'da takip ediyor ve seni veli olarak eklemek istiyor. Ba\u011Fland\u0131\u011F\u0131nda \xE7al\u0131\u015Fma s\xFCresini, plan\u0131n\u0131, deneme sonu\xE7lar\u0131n\u0131 ve zay\u0131f konular\u0131n\u0131 g\xF6rebilirsin; notlar\u0131n\u0131 ve soru defterini g\xF6remezsin.`,
+    "",
+    `Ba\u011Flanmak i\xE7in: ${joinUrl}`,
+    `Veli kodu: ${code} (${until} tarihine kadar ge\xE7erli)`,
+    "",
+    "Pusula hesab\u0131n yoksa ba\u011Flant\u0131dan \xFCcretsiz hesap a\xE7abilirsin. Kodu girdikten sonra \xF6\u011Frencinin de onaylamas\u0131 gerekir.",
+    "",
+    "Bu daveti beklemiyorsan bu e-postay\u0131 g\xF6rmezden gelebilirsin."
+  ].join("\n");
+  const body = `<p style="margin:0 0 14px 0;font-size:15px;line-height:1.6;">Merhaba,</p>
+<p style="margin:0 0 14px 0;font-size:14px;line-height:1.6;color:#3f4753;"><strong>${escapeHtml4(studentName)}</strong>, s\u0131nav haz\u0131rl\u0131\u011F\u0131n\u0131 Pusula'da takip ediyor ve seni veli olarak eklemek istiyor. Ba\u011Fland\u0131\u011F\u0131nda \xE7al\u0131\u015Fma s\xFCresini, plan\u0131n\u0131, deneme sonu\xE7lar\u0131n\u0131 ve zay\u0131f konular\u0131n\u0131 g\xF6rebilirsin; notlar\u0131n\u0131 ve soru defterini g\xF6remezsin.</p>
+<p style="margin:0 0 18px 0;">${button(joinUrl, "Veli olarak ba\u011Flan")}</p>
+<p style="margin:0 0 6px 0;font-size:13px;color:#5d6670;">Veli kodu: <strong style="font-size:16px;color:#18202a;letter-spacing:1px;">${escapeHtml4(code)}</strong> \xB7 ${escapeHtml4(until)} tarihine kadar ge\xE7erli</p>
+<p style="margin:12px 0 0 0;font-size:12px;line-height:1.6;color:#7c858e;">Pusula hesab\u0131n yoksa ba\u011Flant\u0131dan \xFCcretsiz hesap a\xE7abilirsin. Kodu girdikten sonra \xF6\u011Frencinin de onaylamas\u0131 gerekir. Bu daveti beklemiyorsan bu e-postay\u0131 g\xF6rmezden gelebilirsin.</p>`;
+  return { to, subject: subject2, text: text3, html: shell(subject2, `${studentName} seni veli olarak eklemek istiyor.`, body, "Pusula \xB7 Ki\u015Fisel \xE7al\u0131\u015Fma ko\xE7u") };
+}
+function buildParentDigestEmail({ to, studentName, digest, start, end, appUrl, unsubscribeUrl, lastExam }) {
+  const range = rangeLabel(start, end);
+  const subject2 = `${studentName} \xB7 haftal\u0131k \xF6zet \xB7 ${range}`;
+  const stats = [
+    ["Tamamlanan oturum", digest.plannedSessions ? `${digest.completedSessions} / ${digest.plannedSessions}` : String(digest.completedSessions)],
+    ["\xC7al\u0131\u015Fma s\xFCresi", formatMinutes(digest.minutes)],
+    ["\xC7\xF6z\xFClen soru", digest.accuracy !== null ? `${digest.questions} \xB7 %${digest.accuracy} do\u011Fru` : String(digest.questions)],
+    ["\xC7al\u0131\u015Ft\u0131\u011F\u0131 g\xFCn", `${digest.activeDays} / 7`]
+  ];
+  const examLine = lastExam ? `Son deneme: ${lastExam.title} (${lastExam.exam}) \xB7 ${lastExam.net.toFixed(2)} net${lastExam.estimatedScore !== null ? ` \xB7 tahmini ~${lastExam.estimatedScore.toFixed(0)} puan (resm\xEE de\u011Fil)` : ""}` : null;
+  const text3 = [
+    "Merhaba,",
+    "",
+    `${studentName} i\xE7in ${range} haftas\u0131n\u0131n \xF6zeti:`,
+    "",
+    ...stats.map(([label, value]) => `\u2022 ${label}: ${value}`),
+    ...digest.topSubject ? [`\u2022 En \xE7ok \xE7al\u0131\u015Ft\u0131\u011F\u0131 ders: ${digest.topSubject.subject} (${formatMinutes(digest.topSubject.minutes)})`] : [],
+    ...examLine ? [`\u2022 ${examLine}`] : [],
+    ...digest.weakTopics.length ? ["", "G\xFC\xE7lendirmesi gereken konular:", ...digest.weakTopics.map((topic) => `\u2022 ${topic.topic} (${topic.subject}) \xB7 %${topic.progress}`)] : [],
+    "",
+    `Ayr\u0131nt\u0131lar i\xE7in Pusula'y\u0131 a\xE7: ${appUrl}/veli`,
+    "",
+    `Bu \xF6zeti her pazar al\u0131yorsun. Almak istemiyorsan: ${unsubscribeUrl}`
+  ].join("\n");
+  const statCell = ([label, value]) => `<td width="50%" valign="top" style="background:#f3f6f5;border-radius:12px;padding:12px 14px;"><div style="font-size:12px;color:#5d6670;">${escapeHtml4(label)}</div><div style="margin-top:4px;font-size:17px;font-weight:700;color:#18202a;">${escapeHtml4(value)}</div></td>`;
+  const weakRows = digest.weakTopics.map((topic) => `<tr><td style="padding:8px 0;border-top:1px solid #e6ebe9;font-size:14px;">${escapeHtml4(topic.topic)} <span style="color:#5d6670;">\xB7 ${escapeHtml4(topic.subject)}</span></td><td align="right" style="padding:8px 0;border-top:1px solid #e6ebe9;font-size:14px;font-weight:700;color:#bf3a2b;">%${topic.progress}</td></tr>`).join("");
+  const body = `<p style="margin:0 0 6px 0;font-size:15px;line-height:1.6;">Merhaba,</p>
+<p style="margin:0 0 16px 0;font-size:14px;line-height:1.6;color:#3f4753;"><strong>${escapeHtml4(studentName)}</strong> i\xE7in ${escapeHtml4(range)} haftas\u0131n\u0131n \xF6zeti:</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="8" style="margin:0 -8px;"><tr>${statCell(stats[0])}${statCell(stats[1])}</tr><tr>${statCell(stats[2])}${statCell(stats[3])}</tr></table>
+${digest.topSubject ? `<p style="margin:14px 0 0 0;font-size:14px;color:#3f4753;">En \xE7ok \xE7al\u0131\u015Ft\u0131\u011F\u0131 ders: <strong>${escapeHtml4(digest.topSubject.subject)}</strong> (${escapeHtml4(formatMinutes(digest.topSubject.minutes))})</p>` : ""}
+${examLine ? `<p style="margin:8px 0 0 0;font-size:14px;color:#3f4753;">${escapeHtml4(examLine)}</p>` : ""}
+${weakRows ? `<p style="margin:18px 0 4px 0;font-size:14px;font-weight:700;">G\xFC\xE7lendirmesi gereken konular</p><table role="presentation" width="100%" cellpadding="0" cellspacing="0">${weakRows}</table>` : ""}
+<p style="margin:22px 0 0 0;">${button(`${appUrl}/veli`, "Ayr\u0131nt\u0131lar\u0131 g\xF6r")}</p>`;
+  const footer = `Pusula \xB7 Veli eri\u015Fimi<br>Bu \xF6zeti her pazar al\u0131yorsun. <a href="${escapeHtml4(unsubscribeUrl)}" style="color:#7c858e;">Almak istemiyorum</a>`;
+  return { to, subject: subject2, text: text3, html: shell(subject2, `${studentName} bu hafta ${formatMinutes(digest.minutes)} \xE7al\u0131\u015Ft\u0131.`, body, footer) };
+}
+
+// server/digest/parentDigest.ts
 var DAY_MS4 = 24 * 60 * 60 * 1e3;
-var ACTIVE_WITHIN_MS = 30 * DAY_MS4;
 var RESEND_AFTER_MS2 = 6 * DAY_MS4;
+var TIME_BUDGET_MS2 = 6e4;
+async function runParentDigest(options) {
+  const db = await getDb();
+  if (!db || options.maxPerRun <= 0) return { candidates: 0, sent: 0, failed: 0, stoppedEarly: false };
+  const now = options.now ?? /* @__PURE__ */ new Date();
+  const { start } = weeklyDigestWindow(now);
+  const startedAt = Date.now();
+  const rows = await db.select({ linkId: parentLinks.id, studentUserId: parentLinks.studentUserId, email: users.email }).from(parentLinks).innerJoin(users, eq10(users.id, parentLinks.parentUserId)).where(and8(
+    eq10(parentLinks.status, "active"),
+    eq10(parentLinks.weeklyDigestOptOut, 0),
+    or3(isNull7(parentLinks.weeklyDigestLastSentAt), lt7(parentLinks.weeklyDigestLastSentAt, new Date(now.getTime() - RESEND_AFTER_MS2))),
+    isNotNull4(users.email),
+    isNotNull4(users.emailVerifiedAt),
+    eq10(users.approvalStatus, "approved"),
+    eq10(users.accountStatus, "active")
+  )).limit(options.maxPerRun);
+  const result = { candidates: rows.length, sent: 0, failed: 0, stoppedEarly: false, ...options.dryRun ? { previews: [] } : {} };
+  for (const row of rows) {
+    if (Date.now() - startedAt > TIME_BUDGET_MS2) {
+      result.stoppedEarly = true;
+      break;
+    }
+    try {
+      const [student] = await db.select({ name: users.name, preferredName: studentProfiles.preferredName }).from(users).leftJoin(studentProfiles, eq10(studentProfiles.userId, users.id)).where(eq10(users.id, row.studentUserId)).limit(1);
+      const studentName = student?.preferredName || student?.name?.split(" ")[0] || "\xD6\u011Frenci";
+      const digest = await collectDigest(row.studentUserId, start, now);
+      const [exam] = await db.select({ title: userMockExams.title, exam: userMockExams.exam, net: userMockExams.net, subjectsJson: userMockExams.subjectsJson }).from(userMockExams).where(and8(eq10(userMockExams.userId, row.studentUserId), gte6(userMockExams.examDate, new Date(now.getTime() - 30 * DAY_MS4)))).orderBy(desc6(userMockExams.examDate)).limit(1);
+      const lastExam = exam ? { title: exam.title, exam: exam.exam, net: Number(exam.net), estimatedScore: exam.exam === "LGS" ? estimateLgsScore(safeJson(exam.subjectsJson)) : null } : null;
+      const unsubscribeUrl = await unsubscribeUrlFor(options.appUrl, "parent", row.linkId);
+      const mail = buildParentDigestEmail({ to: row.email, studentName, digest, start, end: now, appUrl: options.appUrl, unsubscribeUrl, lastExam });
+      if (options.dryRun) {
+        result.previews.push(mail);
+        continue;
+      }
+      await sendMail(mail);
+      await db.update(parentLinks).set({ weeklyDigestLastSentAt: now }).where(eq10(parentLinks.id, row.linkId));
+      result.sent++;
+    } catch (error) {
+      if (error instanceof MailNotConfiguredError) throw error;
+      result.failed++;
+      console.error(`[ParentDigest] link ${row.linkId} failed:`, error instanceof Error ? error.message : error);
+    }
+  }
+  return result;
+}
+function safeJson(value) {
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+// server/parent/parentDb.ts
+import { and as and9, desc as desc7, eq as eq11, gte as gte7, inArray as inArray6, ne as ne3 } from "drizzle-orm";
+
+// shared/parent.ts
+var MAX_PARENTS_PER_STUDENT = 3;
+var PARENT_INVITE_DAYS = 7;
+function parentInviteProblem(link, now = /* @__PURE__ */ new Date()) {
+  if (!link) return "Bu kod ge\xE7erli de\u011Fil. \xD6\u011Frencinin verdi\u011Fi kodu kontrol eder misin?";
+  if (link.status === "revoked") return "Bu kod iptal edilmi\u015F. \xD6\u011Frenciden yeni bir kod isteyebilirsin.";
+  if (link.status !== "invited" || link.parentUserId !== null) return "Bu kod daha \xF6nce kullan\u0131lm\u0131\u015F. \xD6\u011Frenciden yeni bir kod isteyebilirsin.";
+  if (new Date(link.expiresAt).getTime() <= now.getTime()) return "Bu kodun s\xFCresi dolmu\u015F. \xD6\u011Frenciden yeni bir kod isteyebilirsin.";
+  return null;
+}
+var PARENT_CONSENT_VERSION = 1;
+var PARENT_CONSENT_TEXT = `VEL\u0130 ER\u0130\u015E\u0130M\u0130 A\xC7IK RIZA METN\u0130 (TASLAK)
+
+Bu kodu girerek, kodu bana veren \xF6\u011Frencinin velisi ya da yasal temsilcisi oldu\u011Fumu beyan ederim.
+
+\xD6\u011Frenci iste\u011Fimi onaylad\u0131\u011F\u0131nda Pusula uygulamas\u0131nda \u015Fu bilgileri salt okunur olarak g\xF6rebilece\u011Fimi biliyorum: s\u0131nav\u0131 ve hedefi, s\u0131n\u0131f\u0131, \xE7al\u0131\u015Fma s\xFCresi, takvimdeki plan\u0131 ve plan uyumu, deneme sonu\xE7lar\u0131 ve konu ilerlemesi. \xD6\u011Frencinin notlar\u0131n\u0131, soru defterini, foto\u011Fraflar\u0131n\u0131, ses kay\u0131tlar\u0131n\u0131 ve ileti\u015Fim bilgilerini g\xF6remem.
+
+Bu bilgilerin yaln\u0131zca \xF6\u011Frencinin e\u011Fitimini desteklemek amac\u0131yla kullan\u0131laca\u011F\u0131n\u0131, \xFC\xE7\xFCnc\xFC ki\u015Filerle payla\u015F\u0131lmayaca\u011F\u0131n\u0131 ve \xF6\u011Frencinin ya da benim bu eri\u015Fimi istedi\u011Fimiz an sonland\u0131rabilece\u011Fimizi kabul ediyorum. Haftal\u0131k \xF6zet e-postas\u0131n\u0131 istedi\u011Fim an kapatabilirim.
+
+6698 say\u0131l\u0131 Ki\u015Fisel Verilerin Korunmas\u0131 Kanunu kapsam\u0131ndaki haklar\u0131m (bilgi talep etme, d\xFCzeltme, silme vb.) i\xE7in Pusula ile ileti\u015Fime ge\xE7ebilirim.`;
+
+// server/parent/parentDb.ts
+var ParentLinkError = class extends Error {
+};
+var DAY_MS5 = 24 * 60 * 60 * 1e3;
+var MAX_INVITES_PER_DAY = 5;
+async function requireDb5() {
+  const db = await getDb();
+  if (!db) throw new Error("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
+  return db;
+}
+var displayNameOf = (row) => row.preferredName || row.name?.split(" ")[0] || "\xD6\u011Frenci";
+async function createParentInvite(studentUserId, codeHash, now = /* @__PURE__ */ new Date()) {
+  const db = await requireDb5();
+  const open = await db.select({ id: parentLinks.id, status: parentLinks.status }).from(parentLinks).where(and9(eq11(parentLinks.studentUserId, studentUserId), inArray6(parentLinks.status, ["pending", "active"])));
+  if (open.length >= MAX_PARENTS_PER_STUDENT) throw new ParentLinkError(`En fazla ${MAX_PARENTS_PER_STUDENT} veli ba\u011Flanabilir. Yeni kod i\xE7in \xF6nce bir veli eri\u015Fimini kald\u0131r.`);
+  const recent = await db.select({ id: parentLinks.id }).from(parentLinks).where(and9(eq11(parentLinks.studentUserId, studentUserId), gte7(parentLinks.createdAt, new Date(now.getTime() - DAY_MS5))));
+  if (recent.length >= MAX_INVITES_PER_DAY) throw new ParentLinkError("Bug\xFCn yeterince kod \xFCrettin; yar\u0131n yeniden deneyebilirsin.");
+  await db.update(parentLinks).set({ status: "revoked", revokedAt: now }).where(and9(eq11(parentLinks.studentUserId, studentUserId), eq11(parentLinks.status, "invited")));
+  const expiresAt = new Date(now.getTime() + PARENT_INVITE_DAYS * DAY_MS5);
+  const [row] = await db.insert(parentLinks).values({ studentUserId, codeHash, status: "invited", expiresAt }).returning({ id: parentLinks.id });
+  return { id: row.id, expiresAt };
+}
+async function redeemParentInvite(parentUserId, codeHash, now = /* @__PURE__ */ new Date()) {
+  const db = await requireDb5();
+  const [link] = await db.select().from(parentLinks).where(eq11(parentLinks.codeHash, codeHash)).limit(1);
+  const problem = parentInviteProblem(link, now);
+  if (problem) throw new ParentLinkError(problem);
+  if (link.studentUserId === parentUserId) throw new ParentLinkError("Kendi kodunu veli olarak kullanamazs\u0131n; kodu velinle payla\u015F.");
+  const [existing] = await db.select({ id: parentLinks.id }).from(parentLinks).where(and9(eq11(parentLinks.studentUserId, link.studentUserId), eq11(parentLinks.parentUserId, parentUserId), inArray6(parentLinks.status, ["pending", "active"]))).limit(1);
+  if (existing) throw new ParentLinkError("Bu \xF6\u011Frenciye zaten ba\u011Fl\u0131s\u0131n ya da iste\u011Fin onay bekliyor.");
+  const updated = await db.update(parentLinks).set({ parentUserId, status: "pending", parentConsentAt: now, parentConsentVersion: PARENT_CONSENT_VERSION }).where(and9(eq11(parentLinks.id, link.id), eq11(parentLinks.status, "invited"))).returning({ id: parentLinks.id });
+  if (!updated.length) throw new ParentLinkError("Bu kod daha \xF6nce kullan\u0131lm\u0131\u015F. \xD6\u011Frenciden yeni bir kod isteyebilirsin.");
+  return { linkId: link.id, studentUserId: link.studentUserId };
+}
+async function decideParentRequest(studentUserId, linkId, approve, now = /* @__PURE__ */ new Date()) {
+  const db = await requireDb5();
+  const updated = await db.update(parentLinks).set(approve ? { status: "active", studentApprovedAt: now } : { status: "revoked", revokedAt: now }).where(and9(eq11(parentLinks.id, linkId), eq11(parentLinks.studentUserId, studentUserId), eq11(parentLinks.status, "pending"))).returning({ id: parentLinks.id });
+  if (!updated.length) throw new ParentLinkError("Bu istek bulunamad\u0131 ya da zaten yan\u0131tland\u0131.");
+}
+async function revokeParentLink(actor, linkId, now = /* @__PURE__ */ new Date()) {
+  const db = await requireDb5();
+  const owner = actor.side === "student" ? eq11(parentLinks.studentUserId, actor.userId) : eq11(parentLinks.parentUserId, actor.userId);
+  const updated = await db.update(parentLinks).set({ status: "revoked", revokedAt: now }).where(and9(eq11(parentLinks.id, linkId), owner, ne3(parentLinks.status, "revoked"))).returning({ id: parentLinks.id });
+  if (!updated.length) throw new ParentLinkError("Bu ba\u011Flant\u0131 bulunamad\u0131.");
+}
+async function listLinksForStudent(studentUserId, now = /* @__PURE__ */ new Date()) {
+  const db = await requireDb5();
+  const rows = await db.select({ id: parentLinks.id, status: parentLinks.status, expiresAt: parentLinks.expiresAt, createdAt: parentLinks.createdAt, parentConsentAt: parentLinks.parentConsentAt, studentApprovedAt: parentLinks.studentApprovedAt, parentName: users.name, parentEmail: users.email }).from(parentLinks).leftJoin(users, eq11(users.id, parentLinks.parentUserId)).where(and9(eq11(parentLinks.studentUserId, studentUserId), ne3(parentLinks.status, "revoked"))).orderBy(desc7(parentLinks.createdAt));
+  return rows.filter((row) => row.status !== "invited" || row.expiresAt.getTime() > now.getTime()).map((row) => ({ ...row, parentName: row.parentName ?? null, parentEmail: row.parentEmail ?? null }));
+}
+async function listLinksForParent(parentUserId) {
+  const db = await requireDb5();
+  const rows = await db.select({ id: parentLinks.id, studentUserId: parentLinks.studentUserId, status: parentLinks.status, weeklyDigestOptOut: parentLinks.weeklyDigestOptOut, name: users.name, preferredName: studentProfiles.preferredName }).from(parentLinks).innerJoin(users, eq11(users.id, parentLinks.studentUserId)).leftJoin(studentProfiles, eq11(studentProfiles.userId, parentLinks.studentUserId)).where(and9(eq11(parentLinks.parentUserId, parentUserId), inArray6(parentLinks.status, ["pending", "active"]))).orderBy(desc7(parentLinks.createdAt));
+  return rows.map((row) => ({ id: row.id, studentUserId: row.studentUserId, status: row.status, weeklyDigest: row.weeklyDigestOptOut === 0, studentName: displayNameOf({ preferredName: row.preferredName ?? null, name: row.name }) }));
+}
+async function findActiveLink(parentUserId, studentUserId) {
+  const db = await requireDb5();
+  const [row] = await db.select({ id: parentLinks.id, status: parentLinks.status }).from(parentLinks).where(and9(eq11(parentLinks.parentUserId, parentUserId), eq11(parentLinks.studentUserId, studentUserId), eq11(parentLinks.status, "active"))).limit(1);
+  return row ?? null;
+}
+async function studentDisplayName(studentUserId) {
+  const db = await requireDb5();
+  const [row] = await db.select({ name: users.name, preferredName: studentProfiles.preferredName }).from(users).leftJoin(studentProfiles, eq11(studentProfiles.userId, users.id)).where(eq11(users.id, studentUserId)).limit(1);
+  return row ? displayNameOf({ preferredName: row.preferredName ?? null, name: row.name }) : "\xD6\u011Frenci";
+}
+async function setParentDigestEnabled(parentUserId, linkId, enabled) {
+  const db = await requireDb5();
+  const updated = await db.update(parentLinks).set({ weeklyDigestOptOut: enabled ? 0 : 1 }).where(and9(eq11(parentLinks.id, linkId), eq11(parentLinks.parentUserId, parentUserId))).returning({ id: parentLinks.id });
+  if (!updated.length) throw new ParentLinkError("Bu ba\u011Flant\u0131 bulunamad\u0131.");
+  return enabled;
+}
+async function disableParentDigestByLinkId(linkId) {
+  const db = await requireDb5();
+  await db.update(parentLinks).set({ weeklyDigestOptOut: 1 }).where(eq11(parentLinks.id, linkId));
+}
+
+// server/digest/weeklyDigest.ts
+var DAY_MS6 = 24 * 60 * 60 * 1e3;
+var ACTIVE_WITHIN_MS = 30 * DAY_MS6;
+var RESEND_AFTER_MS3 = 6 * DAY_MS6;
 var DEFAULT_MAX_PER_RUN = Number(process.env.WEEKLY_DIGEST_MAX_PER_RUN) || 90;
-var TIME_BUDGET_MS2 = 24e4;
+var TIME_BUDGET_MS3 = 24e4;
 var WEEKLY_DIGEST_MAX_PER_RUN = DEFAULT_MAX_PER_RUN;
 async function getWeeklyDigestEnabled(userId) {
   const db = await getDb();
   if (!db) return true;
-  const [row] = await db.select({ optOut: studentProfiles.weeklyDigestOptOut }).from(studentProfiles).where(eq10(studentProfiles.userId, userId)).limit(1);
+  const [row] = await db.select({ optOut: studentProfiles.weeklyDigestOptOut }).from(studentProfiles).where(eq12(studentProfiles.userId, userId)).limit(1);
   return !row || row.optOut === 0;
 }
 async function setWeeklyDigestEnabled(userId, enabled) {
   const db = await getDb();
   if (!db) return enabled;
-  await db.update(studentProfiles).set({ weeklyDigestOptOut: enabled ? 0 : 1 }).where(eq10(studentProfiles.userId, userId));
+  await db.update(studentProfiles).set({ weeklyDigestOptOut: enabled ? 0 : 1 }).where(eq12(studentProfiles.userId, userId));
   return enabled;
 }
 async function collectDigest(userId, start, end) {
   const db = await getDb();
   const [sessions, logs, weakTopics, review] = await Promise.all([
-    db.select({ sessionDate: studyPlanSessions.sessionDate, status: studyPlanSessions.status, plannedMinutes: studyPlanSessions.plannedMinutes }).from(studyPlanSessions).where(and8(eq10(studyPlanSessions.userId, userId), gte6(studyPlanSessions.sessionDate, start), lt7(studyPlanSessions.sessionDate, end))),
-    db.select({ studyDate: topicStudyLogs.studyDate, subject: topicStudyLogs.subject, minutes: topicStudyLogs.minutes, questions: topicStudyLogs.questions, correct: topicStudyLogs.correct }).from(topicStudyLogs).where(and8(eq10(topicStudyLogs.userId, userId), gte6(topicStudyLogs.studyDate, start), lt7(topicStudyLogs.studyDate, end))),
-    db.select({ subject: yksTopics.subject, topic: yksTopics.topic, progress: topicProgress.progress }).from(topicProgress).innerJoin(yksTopics, eq10(yksTopics.id, topicProgress.topicId)).where(and8(eq10(topicProgress.userId, userId), eq10(topicProgress.status, "weak"))).orderBy(asc2(topicProgress.progress)).limit(3),
+    db.select({ sessionDate: studyPlanSessions.sessionDate, status: studyPlanSessions.status, plannedMinutes: studyPlanSessions.plannedMinutes }).from(studyPlanSessions).where(and10(eq12(studyPlanSessions.userId, userId), gte8(studyPlanSessions.sessionDate, start), lt8(studyPlanSessions.sessionDate, end))),
+    db.select({ studyDate: topicStudyLogs.studyDate, subject: topicStudyLogs.subject, minutes: topicStudyLogs.minutes, questions: topicStudyLogs.questions, correct: topicStudyLogs.correct }).from(topicStudyLogs).where(and10(eq12(topicStudyLogs.userId, userId), gte8(topicStudyLogs.studyDate, start), lt8(topicStudyLogs.studyDate, end))),
+    db.select({ subject: yksTopics.subject, topic: yksTopics.topic, progress: topicProgress.progress }).from(topicProgress).innerJoin(yksTopics, eq12(yksTopics.id, topicProgress.topicId)).where(and10(eq12(topicProgress.userId, userId), eq12(topicProgress.status, "weak"))).orderBy(asc2(topicProgress.progress)).limit(3),
     getReviewSummary(userId).catch(() => ({ due: 0 }))
   ]);
   return buildWeeklyDigest({ sessions, logs, weakTopics, dueReviews: review.due, start, end });
@@ -4470,20 +4912,20 @@ async function runWeeklyDigest(options) {
   const now = options.now ?? /* @__PURE__ */ new Date();
   const { start } = weeklyDigestWindow(now);
   const startedAt = Date.now();
-  const recipients = await db.select({ id: users.id, email: users.email, name: users.name, preferredName: studentProfiles.preferredName }).from(users).innerJoin(studentProfiles, eq10(studentProfiles.userId, users.id)).where(and8(
-    isNotNull4(users.email),
-    isNotNull4(users.emailVerifiedAt),
-    eq10(users.approvalStatus, "approved"),
-    eq10(users.accountStatus, "active"),
-    gte6(users.lastSignedIn, new Date(now.getTime() - ACTIVE_WITHIN_MS)),
-    eq10(studentProfiles.onboardingCompleted, 1),
-    eq10(studentProfiles.weeklyDigestOptOut, 0),
-    or3(isNull7(studentProfiles.weeklyDigestLastSentAt), lt7(studentProfiles.weeklyDigestLastSentAt, new Date(now.getTime() - RESEND_AFTER_MS2)))
-  )).orderBy(desc6(users.lastSignedIn)).limit(options.maxPerRun ?? DEFAULT_MAX_PER_RUN);
+  const recipients = await db.select({ id: users.id, email: users.email, name: users.name, preferredName: studentProfiles.preferredName }).from(users).innerJoin(studentProfiles, eq12(studentProfiles.userId, users.id)).where(and10(
+    isNotNull5(users.email),
+    isNotNull5(users.emailVerifiedAt),
+    eq12(users.approvalStatus, "approved"),
+    eq12(users.accountStatus, "active"),
+    gte8(users.lastSignedIn, new Date(now.getTime() - ACTIVE_WITHIN_MS)),
+    eq12(studentProfiles.onboardingCompleted, 1),
+    eq12(studentProfiles.weeklyDigestOptOut, 0),
+    or4(isNull8(studentProfiles.weeklyDigestLastSentAt), lt8(studentProfiles.weeklyDigestLastSentAt, new Date(now.getTime() - RESEND_AFTER_MS3)))
+  )).orderBy(desc8(users.lastSignedIn)).limit(options.maxPerRun ?? DEFAULT_MAX_PER_RUN);
   const targets = options.onlyUserIds ? recipients.filter((user) => options.onlyUserIds.includes(user.id)) : recipients;
   const result = { candidates: targets.length, sent: 0, failed: 0, stoppedEarly: false, ...options.dryRun ? { previews: [] } : {} };
   for (const user of targets) {
-    if (Date.now() - startedAt > TIME_BUDGET_MS2) {
+    if (Date.now() - startedAt > TIME_BUDGET_MS3) {
       result.stoppedEarly = true;
       break;
     }
@@ -4496,7 +4938,7 @@ async function runWeeklyDigest(options) {
         continue;
       }
       await sendMail(mail);
-      await db.update(studentProfiles).set({ weeklyDigestLastSentAt: now }).where(eq10(studentProfiles.userId, user.id));
+      await db.update(studentProfiles).set({ weeklyDigestLastSentAt: now }).where(eq12(studentProfiles.userId, user.id));
       result.sent++;
     } catch (error) {
       if (error instanceof MailNotConfiguredError) throw error;
@@ -4509,7 +4951,7 @@ async function runWeeklyDigest(options) {
 var page = (title, body) => `<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>${title}</title></head>
 <body style="margin:0;background:#f3f6f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#18202a;">
 <div style="max-width:440px;margin:64px auto;padding:0 16px;"><div style="background:#fff;border:1px solid #e6ebe9;border-radius:20px;padding:28px 24px;text-align:center;">${body}</div></div></body></html>`;
-var button = "display:inline-block;margin-top:18px;background:#17625f;color:#fff;border:0;text-decoration:none;font-size:15px;font-weight:700;padding:12px 24px;border-radius:12px;cursor:pointer;";
+var button2 = "display:inline-block;margin-top:18px;background:#17625f;color:#fff;border:0;text-decoration:none;font-size:15px;font-weight:700;padding:12px 24px;border-radius:12px;cursor:pointer;";
 function registerWeeklyDigestRoutes(app2) {
   app2.get("/api/cron/weekly-digest", async (req, res) => {
     const secret = process.env.CRON_SECRET;
@@ -4525,7 +4967,8 @@ function registerWeeklyDigestRoutes(app2) {
       const appUrl = appBaseUrl(req);
       const students = await runWeeklyDigest({ appUrl });
       const staff = await runTeacherDigest({ appUrl, maxPerRun: Math.max(0, WEEKLY_DIGEST_MAX_PER_RUN - students.sent - students.failed) });
-      const result = { students, staff };
+      const parents = await runParentDigest({ appUrl, maxPerRun: Math.max(0, WEEKLY_DIGEST_MAX_PER_RUN - students.sent - students.failed - staff.sent - staff.failed) });
+      const result = { students, staff, parents };
       console.info("[WeeklyDigest]", JSON.stringify(result));
       res.json({ ok: true, result });
     } catch (error) {
@@ -4537,10 +4980,10 @@ function registerWeeklyDigestRoutes(app2) {
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("Referrer-Policy", "no-referrer");
     if (!await readUnsubscribeToken(token)) {
-      res.status(400).send(page("Ba\u011Flant\u0131 ge\xE7ersiz", `<h1 style="font-size:20px;margin:0 0 8px;">Ba\u011Flant\u0131 ge\xE7ersiz</h1><p style="font-size:14px;color:#5d6670;line-height:1.6;">Haftal\u0131k \xF6zet ayar\u0131n\u0131 uygulamada profil men\xFCs\xFCnden de\u011Fi\u015Ftirebilirsin.</p><a href="${appBaseUrl(req)}" style="${button}">Pusula'y\u0131 a\xE7</a>`));
+      res.status(400).send(page("Ba\u011Flant\u0131 ge\xE7ersiz", `<h1 style="font-size:20px;margin:0 0 8px;">Ba\u011Flant\u0131 ge\xE7ersiz</h1><p style="font-size:14px;color:#5d6670;line-height:1.6;">Haftal\u0131k \xF6zet ayar\u0131n\u0131 uygulamada profil men\xFCs\xFCnden de\u011Fi\u015Ftirebilirsin.</p><a href="${appBaseUrl(req)}" style="${button2}">Pusula'y\u0131 a\xE7</a>`));
       return;
     }
-    res.send(page("Haftal\u0131k \xF6zet", `<h1 style="font-size:20px;margin:0 0 8px;">Haftal\u0131k \xF6zet e-postalar\u0131</h1><p style="font-size:14px;color:#5d6670;line-height:1.6;">Her pazar gelen \xF6zeti art\u0131k almak istemiyor musun?</p><form method="post"><input type="hidden" name="token" value="${token.replace(/"/g, "&quot;")}"><button type="submit" style="${button}">Evet, almak istemiyorum</button></form>`));
+    res.send(page("Haftal\u0131k \xF6zet", `<h1 style="font-size:20px;margin:0 0 8px;">Haftal\u0131k \xF6zet e-postalar\u0131</h1><p style="font-size:14px;color:#5d6670;line-height:1.6;">Her pazar gelen \xF6zeti art\u0131k almak istemiyor musun?</p><form method="post"><input type="hidden" name="token" value="${token.replace(/"/g, "&quot;")}"><button type="submit" style="${button2}">Evet, almak istemiyorum</button></form>`));
   });
   app2.post("/api/email/weekly-digest/unsubscribe", async (req, res) => {
     const token = typeof req.body?.token === "string" ? req.body.token : typeof req.query.token === "string" ? req.query.token : "";
@@ -4551,15 +4994,16 @@ function registerWeeklyDigestRoutes(app2) {
       return;
     }
     if (target.kind === "staff") await setStaffDigestEnabledByMemberId(target.id, false);
+    else if (target.kind === "parent") await disableParentDigestByLinkId(target.id);
     else await setWeeklyDigestEnabled(target.id, false);
-    const where = target.kind === "staff" ? "Kurum Paneli'nde sol alttaki <strong>Haftal\u0131k s\u0131n\u0131f \xF6zeti</strong> se\xE7ene\u011Fiyle" : "uygulamada profil men\xFCs\xFCndeki <strong>Haftal\u0131k \xF6zet e-postas\u0131</strong> se\xE7ene\u011Fiyle";
-    res.send(page("Abonelikten \xE7\u0131kt\u0131n", `<h1 style="font-size:20px;margin:0 0 8px;">Tamam, art\u0131k g\xF6ndermeyece\u011Fiz</h1><p style="font-size:14px;color:#5d6670;line-height:1.6;">Fikrini de\u011Fi\u015Ftirirsen ${where} yeniden a\xE7abilirsin.</p><a href="${appBaseUrl(req)}${target.kind === "staff" ? "/kurum" : ""}" style="${button}">Pusula'y\u0131 a\xE7</a>`));
+    const where = target.kind === "staff" ? "Kurum Paneli'nde sol alttaki <strong>Haftal\u0131k s\u0131n\u0131f \xF6zeti</strong> se\xE7ene\u011Fiyle" : target.kind === "parent" ? "veli sayfas\u0131ndaki <strong>Haftal\u0131k \xF6zet e-postas\u0131</strong> se\xE7ene\u011Fiyle" : "uygulamada profil men\xFCs\xFCndeki <strong>Haftal\u0131k \xF6zet e-postas\u0131</strong> se\xE7ene\u011Fiyle";
+    res.send(page("Abonelikten \xE7\u0131kt\u0131n", `<h1 style="font-size:20px;margin:0 0 8px;">Tamam, art\u0131k g\xF6ndermeyece\u011Fiz</h1><p style="font-size:14px;color:#5d6670;line-height:1.6;">Fikrini de\u011Fi\u015Ftirirsen ${where} yeniden a\xE7abilirsin.</p><a href="${appBaseUrl(req)}${target.kind === "staff" ? "/kurum" : ""}" style="${button2}">Pusula'y\u0131 a\xE7</a>`));
   });
 }
 
 // server/errors/errorLog.ts
 import { createHash as createHash2 } from "node:crypto";
-import { and as and9, desc as desc7, eq as eq11, isNotNull as isNotNull5, isNull as isNull8, sql as sql6 } from "drizzle-orm";
+import { and as and11, desc as desc9, eq as eq13, isNotNull as isNotNull6, isNull as isNull9, sql as sql6 } from "drizzle-orm";
 import { z } from "zod";
 
 // shared/errorLog.ts
@@ -4604,12 +5048,12 @@ async function recordAppError(input) {
 async function listAppErrors(status, limit = 200) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(appErrors).where(status === "open" ? isNull8(appErrors.resolvedAt) : isNotNull5(appErrors.resolvedAt)).orderBy(desc7(appErrors.lastSeenAt)).limit(limit);
+  return db.select().from(appErrors).where(status === "open" ? isNull9(appErrors.resolvedAt) : isNotNull6(appErrors.resolvedAt)).orderBy(desc9(appErrors.lastSeenAt)).limit(limit);
 }
-async function resolveAppError(id4) {
+async function resolveAppError(id5) {
   const db = await getDb();
   if (!db) return;
-  await db.update(appErrors).set({ resolvedAt: /* @__PURE__ */ new Date() }).where(and9(eq11(appErrors.id, id4), isNull8(appErrors.resolvedAt)));
+  await db.update(appErrors).set({ resolvedAt: /* @__PURE__ */ new Date() }).where(and11(eq13(appErrors.id, id5), isNull9(appErrors.resolvedAt)));
 }
 var clientReport = z.object({
   message: z.string().min(1).max(2e3),
@@ -4652,7 +5096,7 @@ function errorLogMiddleware(error, req, res, next) {
 }
 
 // server/push/sessionReminders.ts
-import { and as and11, eq as eq13, gte as gte7, isNull as isNull9, lte as lte4 } from "drizzle-orm";
+import { and as and13, eq as eq15, gte as gte9, isNull as isNull10, lte as lte4 } from "drizzle-orm";
 
 // shared/sessionReminder.ts
 var REMINDER_MIN_LEAD_MS = 2 * 60 * 1e3;
@@ -4670,7 +5114,7 @@ function buildReminderMessage(session, now) {
 }
 
 // server/push/push.ts
-import { and as and10, eq as eq12, inArray as inArray6 } from "drizzle-orm";
+import { and as and12, eq as eq14, inArray as inArray7 } from "drizzle-orm";
 import webpush from "web-push";
 var publicKey = process.env.VAPID_PUBLIC_KEY ?? "";
 var privateKey = process.env.VAPID_PRIVATE_KEY ?? "";
@@ -4693,12 +5137,12 @@ async function saveSubscription(userId, subscription, userAgent) {
 async function removeSubscription(userId, endpoint) {
   const db = await getDb();
   if (!db) return;
-  await db.delete(pushSubscriptions).where(and10(eq12(pushSubscriptions.userId, userId), eq12(pushSubscriptions.endpoint, endpoint)));
+  await db.delete(pushSubscriptions).where(and12(eq14(pushSubscriptions.userId, userId), eq14(pushSubscriptions.endpoint, endpoint)));
 }
 async function hasSubscription(userId, endpoint) {
   const db = await getDb();
   if (!db) return false;
-  const rows = await db.select({ id: pushSubscriptions.id }).from(pushSubscriptions).where(and10(eq12(pushSubscriptions.userId, userId), eq12(pushSubscriptions.endpoint, endpoint))).limit(1);
+  const rows = await db.select({ id: pushSubscriptions.id }).from(pushSubscriptions).where(and12(eq14(pushSubscriptions.userId, userId), eq14(pushSubscriptions.endpoint, endpoint))).limit(1);
   return rows.length > 0;
 }
 async function sendToUser(userId, payload) {
@@ -4706,7 +5150,7 @@ async function sendToUser(userId, payload) {
   const db = await getDb();
   if (!db || !pushConfigured()) return result;
   ensureVapid();
-  const subscriptions2 = await db.select().from(pushSubscriptions).where(eq12(pushSubscriptions.userId, userId));
+  const subscriptions2 = await db.select().from(pushSubscriptions).where(eq14(pushSubscriptions.userId, userId));
   const gone = [];
   const delivered = [];
   await Promise.all(subscriptions2.map(async (row) => {
@@ -4722,8 +5166,8 @@ async function sendToUser(userId, payload) {
       }
     }
   }));
-  if (gone.length) await db.delete(pushSubscriptions).where(inArray6(pushSubscriptions.id, gone));
-  if (delivered.length) await db.update(pushSubscriptions).set({ lastSentAt: /* @__PURE__ */ new Date() }).where(inArray6(pushSubscriptions.id, delivered));
+  if (gone.length) await db.delete(pushSubscriptions).where(inArray7(pushSubscriptions.id, gone));
+  if (delivered.length) await db.update(pushSubscriptions).set({ lastSentAt: /* @__PURE__ */ new Date() }).where(inArray7(pushSubscriptions.id, delivered));
   result.delivered = delivered.length;
   result.removed = gone.length;
   return result;
@@ -4734,15 +5178,15 @@ async function runSessionReminders(now = /* @__PURE__ */ new Date()) {
   const result = { due: 0, sent: 0, delivered: 0, removed: 0, failed: 0 };
   const db = await getDb();
   if (!db || !pushConfigured()) return result;
-  const sessions = await db.selectDistinct({ id: studyPlanSessions.id, userId: studyPlanSessions.userId, sessionDate: studyPlanSessions.sessionDate, subject: studyPlanSessions.subject, topic: studyPlanSessions.topic, kind: studyPlanSessions.kind, plannedMinutes: studyPlanSessions.plannedMinutes }).from(studyPlanSessions).innerJoin(pushSubscriptions, eq13(pushSubscriptions.userId, studyPlanSessions.userId)).where(and11(
-    eq13(studyPlanSessions.status, "planned"),
-    isNull9(studyPlanSessions.reminderSentAt),
-    gte7(studyPlanSessions.sessionDate, new Date(now.getTime() + REMINDER_MIN_LEAD_MS)),
+  const sessions = await db.selectDistinct({ id: studyPlanSessions.id, userId: studyPlanSessions.userId, sessionDate: studyPlanSessions.sessionDate, subject: studyPlanSessions.subject, topic: studyPlanSessions.topic, kind: studyPlanSessions.kind, plannedMinutes: studyPlanSessions.plannedMinutes }).from(studyPlanSessions).innerJoin(pushSubscriptions, eq15(pushSubscriptions.userId, studyPlanSessions.userId)).where(and13(
+    eq15(studyPlanSessions.status, "planned"),
+    isNull10(studyPlanSessions.reminderSentAt),
+    gte9(studyPlanSessions.sessionDate, new Date(now.getTime() + REMINDER_MIN_LEAD_MS)),
     lte4(studyPlanSessions.sessionDate, new Date(now.getTime() + REMINDER_MAX_LEAD_MS))
   )).limit(500);
   result.due = sessions.length;
   for (const session of sessions) {
-    const [claim] = await db.update(studyPlanSessions).set({ reminderSentAt: now }).where(and11(eq13(studyPlanSessions.id, session.id), isNull9(studyPlanSessions.reminderSentAt))).returning({ id: studyPlanSessions.id });
+    const [claim] = await db.update(studyPlanSessions).set({ reminderSentAt: now }).where(and13(eq15(studyPlanSessions.id, session.id), isNull10(studyPlanSessions.reminderSentAt))).returning({ id: studyPlanSessions.id });
     if (!claim) continue;
     const outcome = await sendToUser(session.userId, buildReminderMessage(session, now));
     result.sent++;
@@ -4978,31 +5422,36 @@ var YKS_EXAMS = [
   { year: 2026, firstDay: "2026-06-20", lastDay: "2026-06-21" },
   { year: 2027, firstDay: "2027-06-19", lastDay: "2027-06-20" }
 ];
-var DAY_MS5 = 24 * 60 * 60 * 1e3;
+var LGS_EXAMS = [
+  { year: 2026, firstDay: "2026-06-13", lastDay: "2026-06-13" }
+];
+var EXAMS_BY_TRACK = { YKS: YKS_EXAMS, LGS: LGS_EXAMS };
+var DAY_MS7 = 24 * 60 * 60 * 1e3;
 var endOfIstanbulDay = (isoDate2) => /* @__PURE__ */ new Date(`${isoDate2}T23:59:59.999+03:00`);
-function yksEndOf(year) {
-  const known = YKS_EXAMS.find((exam) => exam.year === year);
+function examEndOf(year, track = "YKS") {
+  const exams = EXAMS_BY_TRACK[track];
+  const known = exams.find((exam) => exam.year === year);
   if (known) return { year, endsAt: endOfIstanbulDay(known.lastDay), estimated: false };
-  const last = YKS_EXAMS[YKS_EXAMS.length - 1];
+  const last = exams[exams.length - 1];
   return { year, endsAt: endOfIstanbulDay(`${year}${last.lastDay.slice(4)}`), estimated: true };
 }
-function nextYksEnd(now, examYear) {
+function nextExamEnd(now, examYear, track = "YKS") {
   if (examYear) {
-    const chosen = yksEndOf(examYear);
+    const chosen = examEndOf(examYear, track);
     if (chosen.endsAt.getTime() > now.getTime()) return chosen;
   }
-  let year = Math.min(...YKS_EXAMS.map((exam) => exam.year));
-  let end = yksEndOf(year);
-  while (end.endsAt.getTime() <= now.getTime()) end = yksEndOf(++year);
+  let year = Math.min(...EXAMS_BY_TRACK[track].map((exam) => exam.year));
+  let end = examEndOf(year, track);
+  while (end.endsAt.getTime() <= now.getTime()) end = examEndOf(++year, track);
   return end;
 }
-function planPeriodEnd(billingPeriod, now, examYear) {
-  return billingPeriod === "yearly" ? nextYksEnd(now, examYear).endsAt : new Date(now.getTime() + 30 * DAY_MS5);
+function planPeriodEnd(billingPeriod, now, examYear, track = "YKS") {
+  return billingPeriod === "yearly" ? nextExamEnd(now, examYear, track).endsAt : new Date(now.getTime() + 30 * DAY_MS7);
 }
 var YKS_TERM_DISCOUNT = 0.2;
 function yksTermPrice(input) {
-  const yks = nextYksEnd(input.now, input.examYear);
-  const months = Math.max(1, Math.ceil((yks.endsAt.getTime() - input.now.getTime()) / (30 * DAY_MS5)));
+  const yks = nextExamEnd(input.now, input.examYear, input.track ?? "YKS");
+  const months = Math.max(1, Math.ceil((yks.endsAt.getTime() - input.now.getTime()) / (30 * DAY_MS7)));
   const monthlyTotal = input.monthlyPrice * months;
   const discountedLira = monthlyTotal * (1 - YKS_TERM_DISCOUNT) / 100;
   let price = (Math.round((discountedLira + 1) / 100) * 100 - 1) * 100;
@@ -5011,28 +5460,34 @@ function yksTermPrice(input) {
 }
 
 // server/subscriptions/subscriptionDb.ts
-import { and as and12, desc as desc8, eq as eq14, gte as gte8, sql as sql7 } from "drizzle-orm";
+import { and as and14, desc as desc10, eq as eq16, gte as gte10, sql as sql7 } from "drizzle-orm";
 async function listActivePlans() {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(subscriptionPlans).where(eq14(subscriptionPlans.isActive, 1));
+  return db.select().from(subscriptionPlans).where(eq16(subscriptionPlans.isActive, 1));
 }
 async function getStudentExamYear(userId) {
   const db = await getDb();
   if (!db) return null;
-  const [row] = await db.select({ examYear: studentProfiles.examYear }).from(studentProfiles).where(eq14(studentProfiles.userId, userId)).limit(1);
+  const [row] = await db.select({ examYear: studentProfiles.examYear }).from(studentProfiles).where(eq16(studentProfiles.userId, userId)).limit(1);
   return row?.examYear ?? null;
+}
+async function getStudentExamTrack(userId) {
+  const db = await getDb();
+  if (!db) return "YKS";
+  const [row] = await db.select({ examTrack: studentProfiles.examTrack }).from(studentProfiles).where(eq16(studentProfiles.userId, userId)).limit(1);
+  return row?.examTrack ?? "YKS";
 }
 async function getPlanByCode(code) {
   const db = await getDb();
   if (!db) return void 0;
-  const rows = await db.select().from(subscriptionPlans).where(eq14(subscriptionPlans.code, code)).limit(1);
+  const rows = await db.select().from(subscriptionPlans).where(eq16(subscriptionPlans.code, code)).limit(1);
   return rows[0];
 }
-async function getPlanById(id4) {
+async function getPlanById(id5) {
   const db = await getDb();
   if (!db) return void 0;
-  const rows = await db.select().from(subscriptionPlans).where(eq14(subscriptionPlans.id, id4)).limit(1);
+  const rows = await db.select().from(subscriptionPlans).where(eq16(subscriptionPlans.id, id5)).limit(1);
   return rows[0];
 }
 async function upsertPlan(input) {
@@ -5040,7 +5495,7 @@ async function upsertPlan(input) {
   if (!db) return;
   const existing = await getPlanByCode(input.code);
   if (existing) {
-    await db.update(subscriptionPlans).set({ name: input.name, description: input.description ?? null, tier: input.tier, billingPeriod: input.billingPeriod, price: input.price, currency: input.currency ?? "TRY", trialDays: input.trialDays ?? 0, storeProductId: input.storeProductId ?? null, provider: input.provider ?? null }).where(eq14(subscriptionPlans.id, existing.id));
+    await db.update(subscriptionPlans).set({ name: input.name, description: input.description ?? null, tier: input.tier, billingPeriod: input.billingPeriod, price: input.price, currency: input.currency ?? "TRY", trialDays: input.trialDays ?? 0, storeProductId: input.storeProductId ?? null, provider: input.provider ?? null }).where(eq16(subscriptionPlans.id, existing.id));
     return;
   }
   await db.insert(subscriptionPlans).values({ code: input.code, name: input.name, description: input.description ?? null, tier: input.tier, billingPeriod: input.billingPeriod, price: input.price, currency: input.currency ?? "TRY", trialDays: input.trialDays ?? 0, storeProductId: input.storeProductId ?? null, provider: input.provider ?? null });
@@ -5048,7 +5503,7 @@ async function upsertPlan(input) {
 async function getSubscriptionByUserId(userId) {
   const db = await getDb();
   if (!db) return void 0;
-  const rows = await db.select().from(subscriptions).where(eq14(subscriptions.userId, userId)).limit(1);
+  const rows = await db.select().from(subscriptions).where(eq16(subscriptions.userId, userId)).limit(1);
   return rows[0];
 }
 async function ensureFreeSubscription(userId) {
@@ -5079,12 +5534,12 @@ async function listAllSubscriptionsForAdmin() {
     isManualOverride: subscriptions.isManualOverride,
     provider: subscriptions.provider,
     updatedAt: subscriptions.updatedAt
-  }).from(subscriptions).innerJoin(users, eq14(users.id, subscriptions.userId)).innerJoin(subscriptionPlans, eq14(subscriptionPlans.id, subscriptions.planId)).orderBy(desc8(subscriptions.updatedAt));
+  }).from(subscriptions).innerJoin(users, eq16(users.id, subscriptions.userId)).innerJoin(subscriptionPlans, eq16(subscriptionPlans.id, subscriptions.planId)).orderBy(desc10(subscriptions.updatedAt));
 }
 async function updateSubscription(userId, patch) {
   const db = await getDb();
   if (!db) throw new Error("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok");
-  await db.update(subscriptions).set(patch).where(eq14(subscriptions.userId, userId));
+  await db.update(subscriptions).set(patch).where(eq16(subscriptions.userId, userId));
   const updated = await getSubscriptionByUserId(userId);
   if (!updated) throw new Error("Abonelik bulunamad\u0131");
   return updated;
@@ -5098,22 +5553,22 @@ async function createPayment(input) {
 async function updatePaymentStatus(paymentId, patch) {
   const db = await getDb();
   if (!db) return;
-  await db.update(payments).set(patch).where(eq14(payments.id, paymentId));
+  await db.update(payments).set(patch).where(eq16(payments.id, paymentId));
 }
 async function listPaymentsForUser(userId) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(payments).where(eq14(payments.userId, userId)).orderBy(desc8(payments.createdAt));
+  return db.select().from(payments).where(eq16(payments.userId, userId)).orderBy(desc10(payments.createdAt));
 }
 async function listAllPaymentsForAdmin(limit = 100) {
   const db = await getDb();
   if (!db) return [];
-  return db.select({ id: payments.id, userId: payments.userId, userName: users.name, userEmail: users.email, amount: payments.amount, currency: payments.currency, provider: payments.provider, status: payments.status, paymentType: payments.paymentType, providerPaymentId: payments.providerPaymentId, createdAt: payments.createdAt, paidAt: payments.paidAt }).from(payments).innerJoin(users, eq14(users.id, payments.userId)).orderBy(desc8(payments.createdAt)).limit(Math.min(500, Math.max(1, limit)));
+  return db.select({ id: payments.id, userId: payments.userId, userName: users.name, userEmail: users.email, amount: payments.amount, currency: payments.currency, provider: payments.provider, status: payments.status, paymentType: payments.paymentType, providerPaymentId: payments.providerPaymentId, createdAt: payments.createdAt, paidAt: payments.paidAt }).from(payments).innerJoin(users, eq16(users.id, payments.userId)).orderBy(desc10(payments.createdAt)).limit(Math.min(500, Math.max(1, limit)));
 }
 async function isDuplicateEvent(provider, eventId) {
   const db = await getDb();
   if (!db) return false;
-  const rows = await db.select({ id: paymentEvents.id, status: paymentEvents.status }).from(paymentEvents).where(and12(eq14(paymentEvents.provider, provider), eq14(paymentEvents.eventId, eventId))).limit(1);
+  const rows = await db.select({ id: paymentEvents.id, status: paymentEvents.status }).from(paymentEvents).where(and14(eq16(paymentEvents.provider, provider), eq16(paymentEvents.eventId, eventId))).limit(1);
   return rows.length > 0 && rows[0].status === "processed";
 }
 async function recordEventReceived(input) {
@@ -5123,14 +5578,14 @@ async function recordEventReceived(input) {
     const result = await db.insert(paymentEvents).values(input).returning({ id: paymentEvents.id });
     return Number(result[0].id);
   } catch {
-    const rows = await db.select({ id: paymentEvents.id }).from(paymentEvents).where(and12(eq14(paymentEvents.provider, input.provider), eq14(paymentEvents.eventId, input.eventId))).limit(1);
+    const rows = await db.select({ id: paymentEvents.id }).from(paymentEvents).where(and14(eq16(paymentEvents.provider, input.provider), eq16(paymentEvents.eventId, input.eventId))).limit(1);
     return rows[0]?.id ?? null;
   }
 }
-async function markEventProcessed(id4, status, errorMessage) {
+async function markEventProcessed(id5, status, errorMessage) {
   const db = await getDb();
   if (!db) return;
-  await db.update(paymentEvents).set({ status, processedAt: /* @__PURE__ */ new Date(), errorMessage: errorMessage ?? null }).where(eq14(paymentEvents.id, id4));
+  await db.update(paymentEvents).set({ status, processedAt: /* @__PURE__ */ new Date(), errorMessage: errorMessage ?? null }).where(eq16(paymentEvents.id, id5));
 }
 async function writeAuditLog(input) {
   const db = await getDb();
@@ -5148,12 +5603,12 @@ async function writeAuditLog(input) {
 async function listAuditLogsForUser(userId) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(subscriptionAuditLogs).where(eq14(subscriptionAuditLogs.userId, userId)).orderBy(desc8(subscriptionAuditLogs.createdAt));
+  return db.select().from(subscriptionAuditLogs).where(eq16(subscriptionAuditLogs.userId, userId)).orderBy(desc10(subscriptionAuditLogs.createdAt));
 }
 async function listAllAuditLogs(limit = 100) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(subscriptionAuditLogs).orderBy(desc8(subscriptionAuditLogs.createdAt)).limit(Math.min(500, Math.max(1, limit)));
+  return db.select().from(subscriptionAuditLogs).orderBy(desc10(subscriptionAuditLogs.createdAt)).limit(Math.min(500, Math.max(1, limit)));
 }
 async function recordFeatureUsage(userId, featureKey) {
   const db = await getDb();
@@ -5164,32 +5619,32 @@ async function countFeatureUsage(userId, featureKey, windowDays) {
   const db = await getDb();
   if (!db) return 0;
   const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1e3);
-  const rows = await db.select({ id: featureUsageLogs.id }).from(featureUsageLogs).where(and12(eq14(featureUsageLogs.userId, userId), eq14(featureUsageLogs.featureKey, featureKey), gte8(featureUsageLogs.usedAt, since)));
+  const rows = await db.select({ id: featureUsageLogs.id }).from(featureUsageLogs).where(and14(eq16(featureUsageLogs.userId, userId), eq16(featureUsageLogs.featureKey, featureKey), gte10(featureUsageLogs.usedAt, since)));
   return rows.length;
 }
 async function resetFeatureUsage(userId, featureKey, windowDays, adminId) {
   const db = await getDb();
   if (!db) return;
   const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1e3);
-  await db.delete(featureUsageLogs).where(and12(eq14(featureUsageLogs.userId, userId), eq14(featureUsageLogs.featureKey, featureKey), gte8(featureUsageLogs.usedAt, since)));
+  await db.delete(featureUsageLogs).where(and14(eq16(featureUsageLogs.userId, userId), eq16(featureUsageLogs.featureKey, featureKey), gte10(featureUsageLogs.usedAt, since)));
   await writeAuditLog({ userId, adminId, action: "usage_reset", newState: { featureKey, windowDays } });
 }
 async function listPendingUsers() {
   const db = await getDb();
   if (!db) return [];
-  const rows = await db.select().from(users).where(eq14(users.approvalStatus, "pending")).orderBy(desc8(users.createdAt));
+  const rows = await db.select().from(users).where(eq16(users.approvalStatus, "pending")).orderBy(desc10(users.createdAt));
   return rows.map(({ passwordHash: _passwordHash, ...safeUser }) => ({ ...safeUser, phone: phoneFromOpenId(safeUser.openId) }));
 }
 async function approveUser(userId, adminId) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ approvalStatus: "approved", approvedAt: /* @__PURE__ */ new Date(), approvedBy: adminId, rejectedAt: null, rejectionReason: null }).where(eq14(users.id, userId));
+  await db.update(users).set({ approvalStatus: "approved", approvedAt: /* @__PURE__ */ new Date(), approvedBy: adminId, rejectedAt: null, rejectionReason: null }).where(eq16(users.id, userId));
   await writeAuditLog({ userId, adminId, action: "user_approved", newState: { approvalStatus: "approved" } });
 }
 async function rejectUser(userId, adminId, reason) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ approvalStatus: "rejected", rejectedAt: /* @__PURE__ */ new Date(), rejectionReason: reason ?? null }).where(eq14(users.id, userId));
+  await db.update(users).set({ approvalStatus: "rejected", rejectedAt: /* @__PURE__ */ new Date(), rejectionReason: reason ?? null }).where(eq16(users.id, userId));
   await writeAuditLog({ userId, adminId, action: "user_rejected", newState: { approvalStatus: "rejected" }, reason });
 }
 
@@ -5251,10 +5706,10 @@ async function applyCanonicalEvent(eventType, payload) {
       throw new Error(`Bilinmeyen event tipi: ${eventType}`);
   }
 }
-async function chargeAmountFor(plan, now, examYear) {
+async function chargeAmountFor(plan, now, examYear, track) {
   if (plan.billingPeriod !== "yearly") return plan.price;
   const monthly = await getPlanByCode(plan.code.replace(/_YEARLY$/, "_MONTHLY"));
-  return monthly ? yksTermPrice({ monthlyPrice: monthly.price, now, examYear }).price : plan.price;
+  return monthly ? yksTermPrice({ monthlyPrice: monthly.price, now, examYear, track }).price : plan.price;
 }
 async function handleCheckoutCompleted(payload) {
   if (!payload.planCode) throw new Error("payload.planCode eksik");
@@ -5263,7 +5718,8 @@ async function handleCheckoutCompleted(payload) {
   const existing = await ensureFreeSubscription(payload.userId);
   const now = /* @__PURE__ */ new Date();
   const examYear = await getStudentExamYear(payload.userId);
-  const periodEnd = payload.periodDays ? new Date(now.getTime() + payload.periodDays * 24 * 60 * 60 * 1e3) : planPeriodEnd(plan.billingPeriod, now, examYear);
+  const track = await getStudentExamTrack(payload.userId);
+  const periodEnd = payload.periodDays ? new Date(now.getTime() + payload.periodDays * 24 * 60 * 60 * 1e3) : planPeriodEnd(plan.billingPeriod, now, examYear, track);
   const eligibleForTrial = plan.trialDays > 0 && !existing?.trialStartedAt;
   const nextStatus = eligibleForTrial ? "trialing" : "active";
   const trialEndsAt = eligibleForTrial ? new Date(now.getTime() + plan.trialDays * 24 * 60 * 60 * 1e3) : existing?.trialEndsAt ?? null;
@@ -5273,7 +5729,7 @@ async function handleCheckoutCompleted(payload) {
     subscriptionId: existing?.id ?? null,
     provider: "web",
     providerPaymentId: payload.providerPaymentId ?? null,
-    amount: payload.amount ?? await chargeAmountFor(plan, now, examYear),
+    amount: payload.amount ?? await chargeAmountFor(plan, now, examYear, track),
     currency: payload.currency ?? plan.currency,
     status: eligibleForTrial ? "authorized" : "paid",
     paymentType: eligibleForTrial ? "trial_start" : "initial",
@@ -5303,8 +5759,9 @@ async function handleSubscriptionRenewed(payload) {
   assertValidSubscriptionTransition(existing.status, "active");
   const now = /* @__PURE__ */ new Date();
   const examYear = await getStudentExamYear(payload.userId);
-  const periodEnd = payload.periodDays ? new Date(now.getTime() + payload.periodDays * 24 * 60 * 60 * 1e3) : planPeriodEnd(plan?.billingPeriod ?? "monthly", now, examYear);
-  const paymentId = await createPayment({ userId: payload.userId, subscriptionId: existing.id, provider: "web", providerPaymentId: payload.providerPaymentId ?? null, amount: payload.amount ?? (plan ? await chargeAmountFor(plan, now, examYear) : 0), currency: payload.currency ?? plan?.currency ?? "TRY", status: "paid", paymentType: "renewal", paidAt: now });
+  const track = await getStudentExamTrack(payload.userId);
+  const periodEnd = payload.periodDays ? new Date(now.getTime() + payload.periodDays * 24 * 60 * 60 * 1e3) : planPeriodEnd(plan?.billingPeriod ?? "monthly", now, examYear, track);
+  const paymentId = await createPayment({ userId: payload.userId, subscriptionId: existing.id, provider: "web", providerPaymentId: payload.providerPaymentId ?? null, amount: payload.amount ?? (plan ? await chargeAmountFor(plan, now, examYear, track) : 0), currency: payload.currency ?? plan?.currency ?? "TRY", status: "paid", paymentType: "renewal", paidAt: now });
   await updateSubscription(payload.userId, { status: "active", currentPeriodStart: now, currentPeriodEnd: periodEnd, latestPaymentId: paymentId });
   await writeAuditLog({ userId: payload.userId, action: "subscription_renewed", oldState: { status: existing.status }, newState: { status: "active" }, metadata: { paymentId } });
 }
@@ -5374,7 +5831,7 @@ function registerWebhookRoutes(app2) {
 }
 
 // server/routers.ts
-import { TRPCError as TRPCError13 } from "@trpc/server";
+import { TRPCError as TRPCError14 } from "@trpc/server";
 
 // server/_core/systemRouter.ts
 import { z as z2 } from "zod";
@@ -5518,13 +5975,13 @@ async function getUsageSummaryForUser(userId) {
 }
 
 // server/org/orgCredits.ts
-import { and as and13, desc as desc9, eq as eq15, gte as gte9, sql as sql8 } from "drizzle-orm";
+import { and as and15, desc as desc11, eq as eq17, gte as gte11, sql as sql8 } from "drizzle-orm";
 async function sumCredits(orgId, since, userId) {
   const db = await getDb();
   if (!db) return 0;
-  const conditions = [eq15(organizationCreditUsage.orgId, orgId), gte9(organizationCreditUsage.usedAt, since)];
-  if (userId) conditions.push(eq15(organizationCreditUsage.userId, userId));
-  const [row] = await db.select({ total: sql8`COALESCE(SUM(${organizationCreditUsage.credits}), 0)`.mapWith(Number) }).from(organizationCreditUsage).where(and13(...conditions));
+  const conditions = [eq17(organizationCreditUsage.orgId, orgId), gte11(organizationCreditUsage.usedAt, since)];
+  if (userId) conditions.push(eq17(organizationCreditUsage.userId, userId));
+  const [row] = await db.select({ total: sql8`COALESCE(SUM(${organizationCreditUsage.credits}), 0)`.mapWith(Number) }).from(organizationCreditUsage).where(and15(...conditions));
   return Number(row?.total ?? 0);
 }
 async function findOrgCreditSource(userId, feature, now = /* @__PURE__ */ new Date()) {
@@ -5532,7 +5989,7 @@ async function findOrgCreditSource(userId, feature, now = /* @__PURE__ */ new Da
   if (!cost) return null;
   const db = await getDb();
   if (!db) return null;
-  const [org] = await db.select({ orgId: organizations.id, monthly: organizations.aiCreditsMonthly, cap: organizations.perStudentCreditCap, membershipStartsAt: organizations.membershipStartsAt, membershipEndsAt: organizations.membershipEndsAt }).from(organizationMembers).innerJoin(organizations, eq15(organizations.id, organizationMembers.orgId)).where(and13(eq15(organizationMembers.userId, userId), eq15(organizationMembers.role, "student"), eq15(organizationMembers.status, "active"), eq15(organizations.status, "active"))).limit(1);
+  const [org] = await db.select({ orgId: organizations.id, monthly: organizations.aiCreditsMonthly, cap: organizations.perStudentCreditCap, membershipStartsAt: organizations.membershipStartsAt, membershipEndsAt: organizations.membershipEndsAt }).from(organizationMembers).innerJoin(organizations, eq17(organizations.id, organizationMembers.orgId)).where(and15(eq17(organizationMembers.userId, userId), eq17(organizationMembers.role, "student"), eq17(organizationMembers.status, "active"), eq17(organizations.status, "active"))).limit(1);
   if (!org || org.monthly <= 0 || membershipState(org, now) !== "active") return null;
   const since = creditPeriodStart(now);
   const [usedByOrg, usedByStudent] = await Promise.all([sumCredits(org.orgId, since), org.cap === null ? Promise.resolve(0) : sumCredits(org.orgId, since, userId)]);
@@ -5547,12 +6004,12 @@ async function orgCreditReport(orgId, now = /* @__PURE__ */ new Date()) {
   const db = await getDb();
   if (!db) return { periodStart: creditPeriodStart(now), used: 0, byFeature: [], byStudent: [] };
   const since = creditPeriodStart(now);
-  const scope = and13(eq15(organizationCreditUsage.orgId, orgId), gte9(organizationCreditUsage.usedAt, since));
+  const scope = and15(eq17(organizationCreditUsage.orgId, orgId), gte11(organizationCreditUsage.usedAt, since));
   const total = sql8`SUM(${organizationCreditUsage.credits})`.mapWith(Number);
   const count4 = sql8`COUNT(*)::int`;
   const [byFeature, byStudent] = await Promise.all([
     db.select({ featureKey: organizationCreditUsage.featureKey, credits: total, uses: count4 }).from(organizationCreditUsage).where(scope).groupBy(organizationCreditUsage.featureKey),
-    db.select({ userId: organizationCreditUsage.userId, name: users.name, preferredName: studentProfiles.preferredName, credits: total, uses: count4 }).from(organizationCreditUsage).innerJoin(users, eq15(users.id, organizationCreditUsage.userId)).leftJoin(studentProfiles, eq15(studentProfiles.userId, organizationCreditUsage.userId)).where(scope).groupBy(organizationCreditUsage.userId, users.name, studentProfiles.preferredName).orderBy(desc9(total)).limit(20)
+    db.select({ userId: organizationCreditUsage.userId, name: users.name, preferredName: studentProfiles.preferredName, credits: total, uses: count4 }).from(organizationCreditUsage).innerJoin(users, eq17(users.id, organizationCreditUsage.userId)).leftJoin(studentProfiles, eq17(studentProfiles.userId, organizationCreditUsage.userId)).where(scope).groupBy(organizationCreditUsage.userId, users.name, studentProfiles.preferredName).orderBy(desc11(total)).limit(20)
   ]);
   return {
     periodStart: since,
@@ -6029,16 +6486,21 @@ function validateDataUrl(dataUrl, declaredMimeType) {
 }
 
 // server/routers.ts
-import { z as z25 } from "zod";
+import { z as z26 } from "zod";
 
 // server/routers/topics.ts
 import { z as z3 } from "zod";
 var topicsRouter = router({
   catalog: publicProcedure.query(() => getTopicCatalog()),
-  progress: protectedProcedure.query(({ ctx }) => getUserTopicProgress(ctx.user.id)),
+  // Yalnızca öğrencinin sınavının konuları (sınav değiştiren öğrencinin eski verisi silinmez, gizlenir).
+  progress: protectedProcedure.query(async ({ ctx }) => {
+    const [progress, profile] = await Promise.all([getUserTopicProgress(ctx.user.id), getStudentProfile(ctx.user.id)]);
+    const kinds = kindsOf(profile.examTrack);
+    return progress.filter((topic) => kinds.includes(topic.exam));
+  }),
   logResult: protectedProcedure.input(
     z3.object({
-      exam: z3.enum(["TYT", "AYT"]),
+      exam: z3.enum(EXAM_KINDS),
       subject: z3.string().min(1).max(80),
       topic: z3.string().min(1).max(180),
       accuracy: z3.number().min(0).max(100),
@@ -6047,7 +6509,7 @@ var topicsRouter = router({
     })
   ).mutation(({ ctx, input }) => upsertTopicProgress(ctx.user.id, { ...input, studyDate: new Date(input.studyDate) })),
   // Odak oturumu süresi dolmadan bırakıldı: konu tekrar gerektiren konulara eklenir.
-  markForReview: protectedProcedure.input(z3.object({ exam: z3.enum(["TYT", "AYT"]), subject: z3.string().min(1).max(80), topic: z3.string().min(1).max(180), sessionId: z3.number().int().positive().optional() })).mutation(({ ctx, input }) => markTopicForReview(ctx.user.id, input))
+  markForReview: protectedProcedure.input(z3.object({ exam: z3.enum(EXAM_KINDS), subject: z3.string().min(1).max(80), topic: z3.string().min(1).max(180), sessionId: z3.number().int().positive().optional() })).mutation(({ ctx, input }) => markTopicForReview(ctx.user.id, input))
 });
 
 // server/routers/bookContent.ts
@@ -6055,7 +6517,7 @@ import { TRPCError as TRPCError2 } from "@trpc/server";
 import { z as z4 } from "zod";
 
 // server/bookContent/bookContentDb.ts
-import { and as and14, eq as eq16, inArray as inArray7, isNull as isNull10 } from "drizzle-orm";
+import { and as and16, eq as eq18, inArray as inArray8, isNull as isNull11 } from "drizzle-orm";
 
 // shared/examTopicLinks.ts
 var examTopicKey = (value) => value.replace(/İ/g, "i").replace(/I/g, "\u0131").toLowerCase().replace(/[çğıöşüâîû]/g, (char) => ({ \u00E7: "c", \u011F: "g", \u0131: "i", \u00F6: "o", \u015F: "s", \u00FC: "u", \u00E2: "a", \u00EE: "i", \u00FB: "u" })[char] ?? char).replace(/[^a-z0-9]+/g, " ").trim();
@@ -6242,11 +6704,11 @@ var CURRICULUM_SLUGS = new Set(CURRICULUM.map((def) => def.slug));
 function resolveToCurriculumTopicIds(row, topics) {
   const idBySlug = new Map(topics.map((topic) => [topic.slug, topic.id]));
   if (CURRICULUM_SLUGS.has(row.slug)) {
-    const id4 = idBySlug.get(row.slug);
-    return id4 === void 0 ? [] : [id4];
+    const id5 = idBySlug.get(row.slug);
+    return id5 === void 0 ? [] : [id5];
   }
   const linked = EXAM_TOPIC_LINKS.get(examTopicKey(row.topic));
-  if (linked) return Array.from(new Set(linked.map((def) => idBySlug.get(def.slug)).filter((id4) => id4 !== void 0)));
+  if (linked) return Array.from(new Set(linked.map((def) => idBySlug.get(def.slug)).filter((id5) => id5 !== void 0)));
   const curriculumTopics = topics.filter((topic) => CURRICULUM_SLUGS.has(topic.slug));
   const subjects = curriculumSubjectsFor(row.subject, row.category);
   const parts = [row.topic, ...row.topic.split(/[,()]/).map((part) => part.trim()).filter((part) => part.length >= 4)];
@@ -6260,49 +6722,53 @@ function resolveToCurriculumTopicIds(row, topics) {
   }
   return Array.from(ids);
 }
-var DAY_MS6 = 864e5;
+var DAY_MS8 = 864e5;
 function deriveCurriculumWeakTopics(rows, topics) {
   const topicById = new Map(topics.map((topic) => [topic.id, topic]));
   const signals = /* @__PURE__ */ new Map();
   for (const row of rows) {
     if (row.insufficientData) continue;
     const at = row.lastReviewedAt ? new Date(row.lastReviewedAt).getTime() : 0;
-    for (const id4 of resolveToCurriculumTopicIds(row, topics)) signals.set(id4, [...signals.get(id4) ?? [], { accuracy: row.progress, at }]);
+    for (const id5 of resolveToCurriculumTopicIds(row, topics)) signals.set(id5, [...signals.get(id5) ?? [], { accuracy: row.progress, at }]);
   }
   const weak = [];
-  for (const [id4, list] of Array.from(signals)) {
-    const latestDay = Math.floor(Math.max(...list.map((signal) => signal.at)) / DAY_MS6);
-    const latest = list.filter((signal) => Math.floor(signal.at / DAY_MS6) === latestDay);
+  for (const [id5, list] of Array.from(signals)) {
+    const latestDay = Math.floor(Math.max(...list.map((signal) => signal.at)) / DAY_MS8);
+    const latest = list.filter((signal) => Math.floor(signal.at / DAY_MS8) === latestDay);
     const accuracy = Math.round(latest.reduce((sum, signal) => sum + signal.accuracy, 0) / latest.length);
-    const topic = topicById.get(id4);
+    const topic = topicById.get(id5);
     if (!topic || accuracy >= bookContentConfig.allocation.reviewMaxAccuracy) continue;
-    weak.push({ topicId: id4, topic: topic.topic, subject: topic.subject, exam: topic.exam, accuracy });
+    weak.push({ topicId: id5, topic: topic.topic, subject: topic.subject, exam: topic.exam, accuracy });
   }
   return weak;
 }
 
 // server/bookContent/bookContentDb.ts
-async function requireDb5() {
+async function requireDb6() {
   const db = await getDb();
   if (!db) throw new Error("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
   return db;
 }
-async function getMatchableTopics() {
+async function getMatchableTopics(track = "YKS") {
   const catalog = await getTopicCatalog();
   const aliasesBySlug = new Map(CURRICULUM.map((def) => [def.slug, def.aliases]));
-  return catalog.map((row) => ({ id: row.id, slug: row.slug, exam: row.exam, subject: row.subject, unit: row.unit, topic: row.topic, aliases: aliasesBySlug.get(row.slug) ?? [] }));
+  const kinds = kindsOf(track);
+  return catalog.filter((row) => kinds.includes(row.exam)).map((row) => ({ id: row.id, slug: row.slug, exam: row.exam, subject: row.subject, unit: row.unit, topic: row.topic, aliases: aliasesBySlug.get(row.slug) ?? [] }));
+}
+async function getMatchableTopicsFor(userId) {
+  return getMatchableTopics((await getStudentProfile(userId)).examTrack);
 }
 async function userOwnsBook(userId, bookId) {
-  const db = await requireDb5();
-  const [row] = await db.select({ id: bookInventory.id }).from(bookInventory).where(and14(eq16(bookInventory.userId, userId), eq16(bookInventory.bookId, bookId), isNull10(bookInventory.removedAt))).limit(1);
+  const db = await requireDb6();
+  const [row] = await db.select({ id: bookInventory.id }).from(bookInventory).where(and16(eq18(bookInventory.userId, userId), eq18(bookInventory.bookId, bookId), isNull11(bookInventory.removedAt))).limit(1);
   return Boolean(row);
 }
 async function replaceBookContents(userId, bookId, subject2, items, source) {
-  const db = await requireDb5();
-  const topicIds = Array.from(new Set(items.map((item) => item.topicId).filter((id4) => id4 !== null)));
-  const validTopics = topicIds.length ? await db.select().from(yksTopics).where(inArray7(yksTopics.id, topicIds)) : [];
+  const db = await requireDb6();
+  const topicIds = Array.from(new Set(items.map((item) => item.topicId).filter((id5) => id5 !== null)));
+  const validTopics = topicIds.length ? await db.select().from(yksTopics).where(inArray8(yksTopics.id, topicIds)) : [];
   const topicById = new Map(validTopics.map((row) => [row.id, row]));
-  const unknown = topicIds.filter((id4) => !topicById.has(id4));
+  const unknown = topicIds.filter((id5) => !topicById.has(id5));
   if (unknown.length) throw new Error("Ge\xE7ersiz m\xFCfredat konusu se\xE7ildi. Sayfay\u0131 yenileyip tekrar dener misin?");
   const mixed = (type) => type === "review" || type === "simulation";
   const rows = items.map((item, index2) => ({
@@ -6324,7 +6790,7 @@ async function replaceBookContents(userId, bookId, subject2, items, source) {
     source
   }));
   await db.transaction(async (tx) => {
-    await tx.delete(userBookContents).where(and14(eq16(userBookContents.userId, userId), eq16(userBookContents.bookId, bookId)));
+    await tx.delete(userBookContents).where(and16(eq18(userBookContents.userId, userId), eq18(userBookContents.bookId, bookId)));
     if (rows.length) await tx.insert(userBookContents).values(rows);
   });
   for (const topicId of topicIds) {
@@ -6346,21 +6812,21 @@ async function replaceBookContents(userId, bookId, subject2, items, source) {
   return getBookContents(userId, bookId);
 }
 async function getBookContents(userId, bookId) {
-  const db = await requireDb5();
-  const rows = await db.select().from(userBookContents).where(and14(eq16(userBookContents.userId, userId), eq16(userBookContents.bookId, bookId))).orderBy(userBookContents.sortOrder);
-  const topicIds = Array.from(new Set(rows.map((row) => row.topicId).filter((id4) => id4 !== null)));
-  const topics = topicIds.length ? await db.select({ id: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject, unit: yksTopics.unit }).from(yksTopics).where(inArray7(yksTopics.id, topicIds)) : [];
+  const db = await requireDb6();
+  const rows = await db.select().from(userBookContents).where(and16(eq18(userBookContents.userId, userId), eq18(userBookContents.bookId, bookId))).orderBy(userBookContents.sortOrder);
+  const topicIds = Array.from(new Set(rows.map((row) => row.topicId).filter((id5) => id5 !== null)));
+  const topics = topicIds.length ? await db.select({ id: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject, unit: yksTopics.unit }).from(yksTopics).where(inArray8(yksTopics.id, topicIds)) : [];
   const topicById = new Map(topics.map((row) => [row.id, row]));
   return rows.map((row) => ({ ...row, mappingConfidence: Number(row.mappingConfidence), topic: row.topicId !== null ? topicById.get(row.topicId) ?? null : null }));
 }
 async function getBookContentSummaries(userId) {
-  const db = await requireDb5();
-  const activeBooks = (await db.select({ bookId: bookInventory.bookId }).from(bookInventory).where(and14(eq16(bookInventory.userId, userId), isNull10(bookInventory.removedAt)))).map((row) => row.bookId);
+  const db = await requireDb6();
+  const activeBooks = (await db.select({ bookId: bookInventory.bookId }).from(bookInventory).where(and16(eq18(bookInventory.userId, userId), isNull11(bookInventory.removedAt)))).map((row) => row.bookId);
   if (activeBooks.length === 0) return [];
   const [contentRows, logs, customBooks] = await Promise.all([
-    db.select({ bookId: userBookContents.bookId, topicId: userBookContents.topicId, unitNumber: userBookContents.unitNumber, unitTitle: userBookContents.unitTitle, pageStart: userBookContents.pageStart }).from(userBookContents).where(and14(eq16(userBookContents.userId, userId), inArray7(userBookContents.bookId, activeBooks))).orderBy(userBookContents.sortOrder),
-    db.select({ bookId: bookStudyLogs.bookId, pageStart: bookStudyLogs.pageStart, pageEnd: bookStudyLogs.pageEnd, questions: bookStudyLogs.questions, correct: bookStudyLogs.correct }).from(bookStudyLogs).where(and14(eq16(bookStudyLogs.userId, userId), inArray7(bookStudyLogs.bookId, activeBooks))),
-    db.select({ bookId: userResourceBooks.bookId, pageCount: userResourceBooks.pageCount }).from(userResourceBooks).where(and14(eq16(userResourceBooks.userId, userId), inArray7(userResourceBooks.bookId, activeBooks)))
+    db.select({ bookId: userBookContents.bookId, topicId: userBookContents.topicId, unitNumber: userBookContents.unitNumber, unitTitle: userBookContents.unitTitle, pageStart: userBookContents.pageStart }).from(userBookContents).where(and16(eq18(userBookContents.userId, userId), inArray8(userBookContents.bookId, activeBooks))).orderBy(userBookContents.sortOrder),
+    db.select({ bookId: bookStudyLogs.bookId, pageStart: bookStudyLogs.pageStart, pageEnd: bookStudyLogs.pageEnd, questions: bookStudyLogs.questions, correct: bookStudyLogs.correct }).from(bookStudyLogs).where(and16(eq18(bookStudyLogs.userId, userId), inArray8(bookStudyLogs.bookId, activeBooks))),
+    db.select({ bookId: userResourceBooks.bookId, pageCount: userResourceBooks.pageCount }).from(userResourceBooks).where(and16(eq18(userResourceBooks.userId, userId), inArray8(userResourceBooks.bookId, activeBooks)))
   ]);
   const pageCountByBook = new Map(customBooks.map((row) => [row.bookId, row.pageCount]));
   return activeBooks.map((bookId) => {
@@ -6368,7 +6834,7 @@ async function getBookContentSummaries(userId) {
     return {
       bookId,
       entries: contents.length,
-      topicIds: Array.from(new Set(contents.map((row) => row.topicId).filter((id4) => id4 !== null))),
+      topicIds: Array.from(new Set(contents.map((row) => row.topicId).filter((id5) => id5 !== null))),
       completion: computeBookCompletion({ contents, logs: logs.filter((log) => log.bookId === bookId), pageCount: pageCountByBook.get(bookId) ?? null })
     };
   });
@@ -6380,16 +6846,16 @@ var parseRange = (value) => {
   return { pageStart: start, pageEnd: Number(match[2] ?? match[1]) };
 };
 async function getWeakTopicBookRecommendations(userId) {
-  const db = await requireDb5();
-  const [progress, topics] = await Promise.all([getUserTopicProgress(userId), getMatchableTopics()]);
+  const db = await requireDb6();
+  const [progress, topics] = await Promise.all([getUserTopicProgress(userId), getMatchableTopicsFor(userId)]);
   const weakTopics = deriveCurriculumWeakTopics(progress, topics);
   if (weakTopics.length === 0) return [];
-  const activeBooks = (await db.select({ bookId: bookInventory.bookId }).from(bookInventory).where(and14(eq16(bookInventory.userId, userId), isNull10(bookInventory.removedAt)))).map((row) => row.bookId);
+  const activeBooks = (await db.select({ bookId: bookInventory.bookId }).from(bookInventory).where(and16(eq18(bookInventory.userId, userId), isNull11(bookInventory.removedAt)))).map((row) => row.bookId);
   if (activeBooks.length === 0) return [];
   const [contentRows, logs, planned] = await Promise.all([
-    db.select().from(userBookContents).where(and14(eq16(userBookContents.userId, userId), eq16(userBookContents.mappingStatus, "confirmed"), inArray7(userBookContents.bookId, activeBooks), inArray7(userBookContents.topicId, weakTopics.map((topic) => topic.topicId)))),
-    db.select({ bookId: bookStudyLogs.bookId, pageStart: bookStudyLogs.pageStart, pageEnd: bookStudyLogs.pageEnd }).from(bookStudyLogs).where(and14(eq16(bookStudyLogs.userId, userId), inArray7(bookStudyLogs.bookId, activeBooks))),
-    db.select({ bookId: studyPlanSessions.sourceBookId, targetPages: studyPlanSessions.targetPages }).from(studyPlanSessions).where(and14(eq16(studyPlanSessions.userId, userId), eq16(studyPlanSessions.status, "planned"), inArray7(studyPlanSessions.sourceBookId, activeBooks)))
+    db.select().from(userBookContents).where(and16(eq18(userBookContents.userId, userId), eq18(userBookContents.mappingStatus, "confirmed"), inArray8(userBookContents.bookId, activeBooks), inArray8(userBookContents.topicId, weakTopics.map((topic) => topic.topicId)))),
+    db.select({ bookId: bookStudyLogs.bookId, pageStart: bookStudyLogs.pageStart, pageEnd: bookStudyLogs.pageEnd }).from(bookStudyLogs).where(and16(eq18(bookStudyLogs.userId, userId), inArray8(bookStudyLogs.bookId, activeBooks))),
+    db.select({ bookId: studyPlanSessions.sourceBookId, targetPages: studyPlanSessions.targetPages }).from(studyPlanSessions).where(and16(eq18(studyPlanSessions.userId, userId), eq18(studyPlanSessions.status, "planned"), inArray8(studyPlanSessions.sourceBookId, activeBooks)))
   ]);
   const donePages = {};
   for (const log of logs) if (log.pageStart !== null) (donePages[log.bookId] ??= []).push({ pageStart: log.pageStart, pageEnd: log.pageEnd ?? log.pageStart });
@@ -6402,12 +6868,12 @@ async function getWeakTopicBookRecommendations(userId) {
   return buildBookRecommendations({ weakTopics, contents, donePages, scheduledPages });
 }
 async function getAutoSchedule(userId) {
-  const db = await requireDb5();
-  const [row] = await db.select({ value: studentProfiles.autoScheduleBookTasks }).from(studentProfiles).where(eq16(studentProfiles.userId, userId)).limit(1);
+  const db = await requireDb6();
+  const [row] = await db.select({ value: studentProfiles.autoScheduleBookTasks }).from(studentProfiles).where(eq18(studentProfiles.userId, userId)).limit(1);
   return row?.value === 1;
 }
 async function setAutoSchedule(userId, enabled) {
-  const db = await requireDb5();
+  const db = await requireDb6();
   await db.insert(studentProfiles).values({ userId, autoScheduleBookTasks: enabled ? 1 : 0 }).onConflictDoUpdate({ target: studentProfiles.userId, set: { autoScheduleBookTasks: enabled ? 1 : 0 } });
   return enabled;
 }
@@ -6427,16 +6893,16 @@ async function runAutoSchedule(userId, bookTitles, maxTasks = 3) {
   return { added };
 }
 async function resolveBookTitle(db, userId, bookId, fallback) {
-  const [custom] = await db.select({ title: userResourceBooks.title }).from(userResourceBooks).where(and14(eq16(userResourceBooks.userId, userId), eq16(userResourceBooks.bookId, bookId))).limit(1);
+  const [custom] = await db.select({ title: userResourceBooks.title }).from(userResourceBooks).where(and16(eq18(userResourceBooks.userId, userId), eq18(userResourceBooks.bookId, bookId))).limit(1);
   if (custom) return custom.title;
   if (/^\d+$/.test(bookId)) {
-    const [catalogBook] = await db.select({ name: catalogBooks.name }).from(catalogBooks).where(eq16(catalogBooks.id, Number(bookId))).limit(1);
+    const [catalogBook] = await db.select({ name: catalogBooks.name }).from(catalogBooks).where(eq18(catalogBooks.id, Number(bookId))).limit(1);
     if (catalogBook) return catalogBook.name;
   }
   return fallback.slice(0, 120) || "Kitap";
 }
 async function addRecommendationToPlan(userId, input) {
-  const db = await requireDb5();
+  const db = await requireDb6();
   if (!await userOwnsBook(userId, input.bookId)) throw new Error("Bu kitap k\xFCt\xFCphanende bulunmuyor.");
   const recommendation = (await getWeakTopicBookRecommendations(userId)).find((rec) => rec.topicId === input.topicId && rec.bookId === input.bookId);
   if (!recommendation) throw new Error("Bu \xF6neri art\u0131k ge\xE7erli de\u011Fil (testler \xE7\xF6z\xFClm\xFC\u015F ya da zaten planlanm\u0131\u015F olabilir).");
@@ -6471,7 +6937,7 @@ async function suggestTopicsWithAi(titles, candidates, invoke = invokeLLM) {
   try {
     const response = await invoke({
       messages: [
-        { role: "system", content: "Bir YKS kitab\u0131n\u0131n i\xE7indekiler ba\u015Fl\u0131klar\u0131n\u0131, verilen m\xFCfredat konu listesindeki EN UYGUN konuyla e\u015Fle\u015Ftiriyorsun. Yaln\u0131zca listedeki id'lerden birini se\xE7; hi\xE7biri ger\xE7ekten uymuyorsa candidateTopicId null ver. Yeni konu \xF6nerme. confidence 0-1 aras\u0131, emin de\u011Filsen d\xFC\u015F\xFCk ver. reason tek k\u0131sa T\xFCrk\xE7e c\xFCmle." },
+        { role: "system", content: "Bir s\u0131nav haz\u0131rl\u0131k (YKS ya da LGS) kitab\u0131n\u0131n i\xE7indekiler ba\u015Fl\u0131klar\u0131n\u0131, verilen m\xFCfredat konu listesindeki EN UYGUN konuyla e\u015Fle\u015Ftiriyorsun. Yaln\u0131zca listedeki id'lerden birini se\xE7; hi\xE7biri ger\xE7ekten uymuyorsa candidateTopicId null ver. Yeni konu \xF6nerme. confidence 0-1 aras\u0131, emin de\u011Filsen d\xFC\u015F\xFCk ver. reason tek k\u0131sa T\xFCrk\xE7e c\xFCmle." },
         { role: "user", content: JSON.stringify({ topics: pool.map((topic) => ({ id: topic.id, subject: topic.subject, unit: topic.unit, topic: topic.topic })), titles: titles.map((title) => ({ key: title.key, title: title.text, unit: title.unitTitle })) }) }
       ],
       response_format: {
@@ -6637,7 +7103,7 @@ var tocItemSchema = {
   additionalProperties: false
 };
 var SYSTEM_PROMPT = [
-  "Sen bir T\xFCrk\xE7e YKS kaynak kitab\u0131n\u0131n \u0130\xC7\u0130NDEK\u0130LER (konu listesi) sayfas\u0131n\u0131 sat\u0131r sat\u0131r okuyan bir OCR asistan\u0131s\u0131n.",
+  "Sen bir T\xFCrk\xE7e s\u0131nav haz\u0131rl\u0131k (YKS ya da LGS) kaynak kitab\u0131n\u0131n \u0130\xC7\u0130NDEK\u0130LER (konu listesi) sayfas\u0131n\u0131 sat\u0131r sat\u0131r okuyan bir OCR asistan\u0131s\u0131n.",
   "G\xF6rseldeki her sat\u0131r\u0131 yukar\u0131dan a\u015Fa\u011F\u0131ya, sayfadaki s\u0131ras\u0131yla d\xF6nd\xFCr. Yorum yapma, \xF6zetleme, eksik sat\u0131r\u0131 tahminle doldurma.",
   "type: numaral\u0131 \xFCnite ba\u015Fl\u0131\u011F\u0131 (\xF6r. '1. \xDCN\u0130TE') i\xE7in 'unit' (unitNumber dolu); \xFCnite ad\u0131 ayr\u0131 sat\u0131rdaysa veya numaras\u0131z grup ba\u015Fl\u0131\u011F\u0131ysa (\xF6r. 'S\u0130M\xDCLASYON DENEMELER\u0130') 'section'; sayfa numaras\u0131 olan her sat\u0131r i\xE7in 'entry'.",
   "entry sat\u0131rlar\u0131nda: label = sat\u0131r ba\u015F\u0131ndaki etiket ('Test 1', '\xD6SYM Tipi', 'Sarmal Test \u2013 2', 'Sim\xFClasyon 3', '\xD6SYM Tipi - E\u011Fitim Kontrol Testi - 1'); title = etiketten sonraki konu ad\u0131 (yoksa bo\u015F string); pageText = sat\u0131r\u0131n sa\u011F\u0131ndaki sayfa numaras\u0131n\u0131 G\xD6RD\xDC\u011E\xDCN G\u0130B\u0130 yaz (\xF6r. '12'; '1' ile 'I' ay\u0131rt edilemiyorsa g\xF6rd\xFC\u011F\xFCn\xFC yaz, d\xFCzeltme yapma), yoksa null.",
@@ -6700,7 +7166,7 @@ async function extractPlainTextFromImage(imageDataUrl) {
 
 // server/bookContent/ocrCache.ts
 import { createHash as createHash3 } from "node:crypto";
-import { and as and15, eq as eq17, lt as lt8 } from "drizzle-orm";
+import { and as and17, eq as eq19, lt as lt9 } from "drizzle-orm";
 var OCR_PIPELINE_VERSION = "toc-2.0";
 var CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1e3;
 var disabledReason = null;
@@ -6715,7 +7181,7 @@ async function readOcrCache(userId, hash) {
   try {
     const db = await getDb();
     if (!db) return null;
-    const [row] = await db.select({ resultJson: ocrPageCache.resultJson, createdAt: ocrPageCache.createdAt }).from(ocrPageCache).where(and15(eq17(ocrPageCache.userId, userId), eq17(ocrPageCache.imageHash, hash), eq17(ocrPageCache.pipelineVersion, OCR_PIPELINE_VERSION))).limit(1);
+    const [row] = await db.select({ resultJson: ocrPageCache.resultJson, createdAt: ocrPageCache.createdAt }).from(ocrPageCache).where(and17(eq19(ocrPageCache.userId, userId), eq19(ocrPageCache.imageHash, hash), eq19(ocrPageCache.pipelineVersion, OCR_PIPELINE_VERSION))).limit(1);
     if (!row || Date.now() - new Date(row.createdAt).getTime() > CACHE_TTL_MS) return null;
     return JSON.parse(row.resultJson);
   } catch (error) {
@@ -6730,7 +7196,7 @@ async function writeOcrCache(userId, hash, result) {
     if (!db) return;
     const resultJson = JSON.stringify(result);
     await db.insert(ocrPageCache).values({ userId, imageHash: hash, pipelineVersion: OCR_PIPELINE_VERSION, resultJson }).onConflictDoUpdate({ target: [ocrPageCache.userId, ocrPageCache.imageHash, ocrPageCache.pipelineVersion], set: { resultJson, createdAt: /* @__PURE__ */ new Date() } });
-    await db.delete(ocrPageCache).where(and15(eq17(ocrPageCache.userId, userId), lt8(ocrPageCache.createdAt, new Date(Date.now() - CACHE_TTL_MS))));
+    await db.delete(ocrPageCache).where(and17(eq19(ocrPageCache.userId, userId), lt9(ocrPageCache.createdAt, new Date(Date.now() - CACHE_TTL_MS))));
   } catch (error) {
     disable(error);
   }
@@ -7909,14 +8375,14 @@ async function readTocImage(dataUrl, options) {
 
 // server/routers/bookContent.ts
 var bookIdInput = z4.string().min(1).max(120);
-var examInput = z4.enum(["TYT", "AYT"]).nullable().optional();
+var examInput = z4.enum(EXAM_KINDS).nullable().optional();
 var imageInput = z4.object({
   dataUrl: z4.string().min(20).max(Math.ceil(bookContentConfig.ocr.maxImageBytes * 1.4)),
   mimeType: z4.enum(["image/png", "image/jpeg", "image/webp"])
 });
 var contentTypeInput = z4.enum(["topic_test", "osym_type", "review", "simulation", "topic"]);
-async function matchEntries(entries, subject2) {
-  const topics = await getMatchableTopics();
+async function matchEntries(userId, entries, subject2) {
+  const topics = await getMatchableTopicsFor(userId);
   const topicById = new Map(topics.map((topic) => [topic.id, topic]));
   const describe = (match, reason) => {
     const topic = topicById.get(match.topicId);
@@ -8011,7 +8477,7 @@ var bookContentRouter = router({
     const { pages: cleanPages, removed } = filterTocNoise(tocReports.map(({ report }) => report.page), input.book ?? {});
     const { entries, warnings } = parseTableOfContents(cleanPages);
     if (entries.length === 0) throw new TRPCError2({ code: "UNPROCESSABLE_CONTENT", message: "Foto\u011Fraflarda i\xE7indekiler sat\u0131r\u0131 bulunamad\u0131. \u0130\xE7indekiler sayfas\u0131n\u0131n tamam\u0131 g\xF6r\xFCnecek \u015Fekilde tekrar \xE7eker misin?" });
-    const matched = await matchEntries(entries, input.subject || null);
+    const matched = await matchEntries(ctx.user.id, entries, input.subject || null);
     const confidence = summarizeConfidence(matched, tocReports.map(({ report }) => report));
     const withReview = matched.map((entry) => {
       const mapping = entry.matchText ? entry.suggestion?.confidence ?? 0 : 1;
@@ -8041,10 +8507,10 @@ var bookContentRouter = router({
     };
   }),
   // Elle eşleştirme listesi (öğrenci "Değiştir" dediğinde).
-  topicOptions: protectedProcedure.input(z4.object({ subject: z4.string().max(80).nullable().optional() }).optional()).query(async ({ input }) => {
-    const topics = await getMatchableTopics();
+  topicOptions: protectedProcedure.input(z4.object({ subject: z4.string().max(80).nullable().optional() }).optional()).query(async ({ ctx, input }) => {
+    const topics = await getMatchableTopicsFor(ctx.user.id);
     const subject2 = input?.subject?.trim();
-    return topics.filter((topic) => !subject2 || topic.subject === subject2).map(({ id: id4, exam, subject: topicSubject, unit, topic }) => ({ id: id4, exam, subject: topicSubject, unit, topic })).sort((a, b) => a.exam.localeCompare(b.exam) || a.subject.localeCompare(b.subject, "tr") || a.unit.localeCompare(b.unit, "tr") || a.topic.localeCompare(b.topic, "tr"));
+    return topics.filter((topic) => !subject2 || topic.subject === subject2).map(({ id: id5, exam, subject: topicSubject, unit, topic }) => ({ id: id5, exam, subject: topicSubject, unit, topic })).sort((a, b) => a.exam.localeCompare(b.exam) || a.subject.localeCompare(b.subject, "tr") || a.unit.localeCompare(b.unit, "tr") || a.topic.localeCompare(b.topic, "tr"));
   }),
   // Öğrencinin onayladığı içerik (OCR'dan ya da tamamen elle).
   save: protectedProcedure.input(z4.object({
@@ -8102,17 +8568,17 @@ import { z as z5 } from "zod";
 var INSTRUCTIONS = {
   summarize: "Notu 3-6 maddelik k\u0131sa bir \xF6zete \xE7evir.",
   keypoints: "Nottaki s\u0131nav i\xE7in \xF6nemli bilgileri madde madde \xE7\u0131kar (en fazla 8).",
-  questions: "Nottaki bilgiyi yoklayan 3-6 k\u0131sa YKS tarz\u0131 soru yaz (cevaps\u0131z, yaln\u0131z soru).",
+  questions: "Nottaki bilgiyi yoklayan 3-6 k\u0131sa, \xF6\u011Frencinin s\u0131nav\u0131 tarz\u0131nda soru yaz (cevaps\u0131z, yaln\u0131z soru).",
   flashcards: "Nottan 3-8 flashcard \xFCret: front = k\u0131sa soru, back = k\u0131sa net cevap.",
-  simplify: "Notu bir lise \xF6\u011Frencisinin hemen anlayaca\u011F\u0131 sade c\xFCmlelerle, madde madde yeniden anlat.",
+  simplify: "Notu \xF6\u011Frencinin hemen anlayaca\u011F\u0131 sade c\xFCmlelerle, madde madde yeniden anlat.",
   review: "Nottan \xF6\u011Frencinin tekrar etmesi gereken kavram/konular\u0131 madde madde \xE7\u0131kar (en fazla 6)."
 };
-async function runNoteAi(action, plainText, invoke = invokeLLM) {
+async function runNoteAi(action, plainText, invoke = invokeLLM, track = "YKS") {
   const input = plainText.trim().slice(0, notesConfig.ai.maxInputChars);
   if (!input) throw new Error("Bu notta i\u015Flenecek yaz\u0131 yok.");
   const response = await invoke({
     messages: [
-      { role: "system", content: `Sen bir YKS \xF6\u011Frencisinin kendi ders notunu i\u015Fleyen yard\u0131mc\u0131 bir asistans\u0131n. Yaln\u0131zca nottaki bilgiye dayan, not d\u0131\u015F\u0131 bilgi uydurma; T\xFCrk\xE7e yaz. ${INSTRUCTIONS[action]} Her maddeyi 'front' alan\u0131na yaz; yaln\u0131zca flashcard'larda 'back' doldur, di\u011Ferlerinde bo\u015F string b\u0131rak.` },
+      { role: "system", content: `Sen ${examStudentPhrase(track).replace(/^Bir /, "bir ")} kendi ders notunu i\u015Fleyen yard\u0131mc\u0131 bir asistans\u0131n. ${examPromptContext(track)} Yaln\u0131zca nottaki bilgiye dayan, not d\u0131\u015F\u0131 bilgi uydurma; T\xFCrk\xE7e yaz. ${INSTRUCTIONS[action]} Her maddeyi 'front' alan\u0131na yaz; yaln\u0131zca flashcard'larda 'back' doldur, di\u011Ferlerinde bo\u015F string b\u0131rak.` },
       { role: "user", content: input }
     ],
     response_format: {
@@ -8345,7 +8811,7 @@ var notesRouter = router({
     const note = await getNote(userId, input.id);
     if (!note) throw new NoteError("Not bulunamad\u0131.");
     try {
-      const items = await runNoteAi(input.action, note.plainText);
+      const items = await runNoteAi(input.action, note.plainText, void 0, (await getStudentProfile(userId)).examTrack);
       return { items, nodes: aiResultToNodes(input.action, items) };
     } catch (error) {
       console.warn("[Notes] AI failed:", error instanceof Error ? error.message : error);
@@ -8364,7 +8830,7 @@ async function suggestQuestionDetails(input, invoke = invokeLLM) {
   const topicList = input.topics.map((topic2) => `${topic2.id}|${topic2.subject}|${topic2.unit}|${topic2.topic}`).join("\n");
   const errorList = ERROR_TYPE_KEYS.map((key) => `${key} = ${ERROR_TYPES[key].label}`).join("; ");
   const system = [
-    "Bir YKS \xF6\u011Frencisinin \xE7\xF6zemedi\u011Fi soruyu s\u0131n\u0131fland\u0131ran yard\u0131mc\u0131s\u0131n. T\xFCrk\xE7e \xE7al\u0131\u015F.",
+    `${examStudentPhrase(input.track ?? "YKS")} \xE7\xF6zemedi\u011Fi soruyu s\u0131n\u0131fland\u0131ran yard\u0131mc\u0131s\u0131n. T\xFCrk\xE7e \xE7al\u0131\u015F.`,
     "1) G\xF6rselde soru varsa metnini oldu\u011Fu gibi \xE7\u0131kar (matemati\u011Fi d\xFCz yaz\u0131yla, \xF6r. x^2). G\xF6rsel yoksa ocrText bo\u015F string.",
     "2) Sorunun konusunu YALNIZCA a\u015Fa\u011F\u0131daki listeden se\xE7 ve topicId olarak o sat\u0131r\u0131n numaras\u0131n\u0131 yaz. Emin de\u011Filsen topicId = 0.",
     `3) Zorluk: ${DIFFICULTY_KEYS.join(", ")} (emin de\u011Filsen medium).`,
@@ -8448,7 +8914,8 @@ async function solveQuestion(input, invoke = invokeLLM, options = {}) {
   const questionText = input.ocrText?.trim();
   if (!input.imageDataUrl && !questionText) throw new Error("\xC7\xF6z\xFClecek soru yok: kartta soru foto\u011Fraf\u0131 olmal\u0131.");
   const system = [
-    "Bir YKS \xF6\u011Frencisinin \xE7\xF6zemedi\u011Fi soruyu sab\u0131rl\u0131 bir \xF6\u011Fretmen gibi ADIM ADIM T\xFCrk\xE7e \xE7\xF6z\xFCyorsun. Ama\xE7 cevab\u0131 de\u011Fil y\xF6ntemi \xF6\u011Fretmek.",
+    `${examStudentPhrase(input.track ?? "YKS")} \xE7\xF6zemedi\u011Fi soruyu sab\u0131rl\u0131 bir \xF6\u011Fretmen gibi ADIM ADIM T\xFCrk\xE7e \xE7\xF6z\xFCyorsun. Ama\xE7 cevab\u0131 de\u011Fil y\xF6ntemi \xF6\u011Fretmek.`,
+    examPromptContext(input.track ?? "YKS"),
     `Ders: ${input.subject ?? "belirtilmemi\u015F"}${input.topic ? ` \xB7 Konu: ${input.topic}` : ""}. ${subjectGuidance(input.subject)}`,
     "Kurallar:",
     "- method: bu soru tipinde kullan\u0131lacak y\xF6ntemi tek c\xFCmleyle s\xF6yle.",
@@ -8532,15 +8999,20 @@ async function solveWithRouting(input, tier, invoke = invokeLLM, pickModel = mod
 async function generateSimilarQuestion(input, invoke = invokeLLM, options = {}) {
   const questionText = input.ocrText?.trim();
   if (!input.imageDataUrl && !questionText) throw new Error("Benzer soru i\xE7in kartta soru foto\u011Fraf\u0131 olmal\u0131.");
+  const track = input.track ?? "YKS";
+  const optionCount = optionCountOf(track);
+  const letters = OPTION_LETTERS.slice(0, optionCount);
+  const style = track === "LGS" ? "LGS (MEB) \xFCslubunda, beceri temelli" : "YKS (\xD6SYM) \xFCslubunda";
   const system = [
-    "Bir YKS \xF6\u011Frencisinin \xE7\xF6zemedi\u011Fi soruya BENZER yeni bir al\u0131\u015Ft\u0131rma sorusu yaz\u0131yorsun (T\xFCrk\xE7e).",
+    `${examStudentPhrase(track)} \xE7\xF6zemedi\u011Fi soruya BENZER yeni bir al\u0131\u015Ft\u0131rma sorusu yaz\u0131yorsun (T\xFCrk\xE7e).`,
+    examPromptContext(track),
     `Ders: ${input.subject ?? "belirtilmemi\u015F"}${input.topic ? ` \xB7 Konu: ${input.topic}` : ""}.`,
     "Kurallar:",
     "- Ayn\u0131 kazan\u0131m\u0131 ve ayn\u0131 \xE7\xF6z\xFCm y\xF6ntemini \xF6l\xE7s\xFCn; say\u0131lar, isimler ve ba\u011Flam FARKLI olsun. Orijinal soruyu kopyalama.",
-    "- Zorluk orijinale yak\u0131n olsun; YKS (\xD6SYM) \xFCslubunda, tek do\u011Fru cevapl\u0131, 5 \u015F\u0131kl\u0131 (A\u2013E).",
+    `- Zorluk orijinale yak\u0131n olsun; ${style}, tek do\u011Fru cevapl\u0131, ${optionCount} \u015F\u0131kl\u0131 (${letters[0]}\u2013${letters[optionCount - 1]}).`,
     "- question: soru metni (matemati\u011Fi d\xFCz yaz\u0131yla, \xF6r. x^2, \u221A, \u03C0). \u015Eekil gerekiyorsa \u015Fekli kelimelerle eksiksiz tarif et.",
-    "- options: tam 5 \u015F\u0131k, harfsiz (yaln\u0131zca \u015F\u0131k i\xE7eri\u011Fi). \xC7eldiriciler tipik \xF6\u011Frenci hatalar\u0131ndan gelsin.",
-    "- answer: do\u011Fru \u015F\u0131kk\u0131n harfi (A, B, C, D ya da E). Cevab\u0131 yazmadan \xF6nce soruyu kendin \xE7\xF6z\xFCp do\u011Frula.",
+    `- options: tam ${optionCount} \u015F\u0131k, harfsiz (yaln\u0131zca \u015F\u0131k i\xE7eri\u011Fi). \xC7eldiriciler tipik \xF6\u011Frenci hatalar\u0131ndan gelsin.`,
+    `- answer: do\u011Fru \u015F\u0131kk\u0131n harfi (${letters.join(", ")}). Cevab\u0131 yazmadan \xF6nce soruyu kendin \xE7\xF6z\xFCp do\u011Frula.`,
     `- steps: 2\u20136 ad\u0131m \xE7\xF6z\xFCm; work = i\u015Flem, why = neden. ${subjectGuidance(input.subject)}`,
     "- hint: cevab\u0131 ele vermeyen tek c\xFCmle ipucu."
   ].join("\n");
@@ -8567,7 +9039,7 @@ ${input.solution.steps.map((step, index2) => `${index2 + 1}) ${step.work}`).join
           properties: {
             question: { type: "string" },
             options: { type: "array", items: { type: "string" } },
-            answer: { type: "string", enum: ["A", "B", "C", "D", "E"] },
+            answer: { type: "string", enum: letters },
             steps: { type: "array", items: { type: "object", properties: { work: { type: "string" }, why: { type: "string" } }, required: ["work", "why"], additionalProperties: false } },
             hint: { type: "string" }
           },
@@ -8580,7 +9052,7 @@ ${input.solution.steps.map((step, index2) => `${index2 + 1}) ${step.work}`).join
   const raw = response.choices[0]?.message?.content;
   const jsonText = typeof raw === "string" ? raw : raw?.map((part) => part.type === "text" ? part.text : "").join("");
   if (!jsonText) throw new Error("AI yan\u0131t\u0131 bo\u015F d\xF6nd\xFC.");
-  const similar = parseSimilarQuestion(jsonText.replace(/```json|```/g, "").trim());
+  const similar = parseSimilarQuestion(jsonText.replace(/```json|```/g, "").trim(), optionCount);
   if (!similar) throw new Error("Benzer soru okunamad\u0131.");
   return similar;
 }
@@ -8603,7 +9075,8 @@ async function loadQuestionForAi(userId, questionId) {
     if (attachment?.kind === "image") imageDataUrl = `data:${attachment.mimeType};base64,${attachment.data.toString("base64")}`;
   }
   if (!imageDataUrl && !context.ocrText?.trim()) throw new NoteError("Bu kartta soru foto\u011Fraf\u0131 yok.");
-  return { context, imageDataUrl };
+  const { examTrack: track } = await getStudentProfile(userId);
+  return { context, imageDataUrl, track };
 }
 var subjectScope = z6.string().max(80).nullable().optional();
 var optionalId2 = id.nullable().optional();
@@ -8655,11 +9128,11 @@ var questionsRouter = router({
   // İstemci kayıtlı çözümü `get` ile zaten alır; bu uç yalnızca ilk çözüm ya da "Yeniden çöz" için çağrılır.
   // Model kademesi kartın zorluk/ders/sınav sinyallerinden seçilir; `escalate` = öğrenci "daha güçlü modelle çöz" dedi.
   solve: metredFeatureProcedure("NOTE_AI").input(z6.object({ id, escalate: z6.boolean().optional() })).mutation(({ ctx, input }) => userFacing2(async () => {
-    const { context, imageDataUrl } = await loadQuestionForAi(ctx.user.id, input.id);
+    const { context, imageDataUrl, track } = await loadQuestionForAi(ctx.user.id, input.id);
     const tier = chooseSolveTier({ difficulty: context.difficulty, subject: context.subject, exam: context.exam, lastResult: context.lastResult, escalate: input.escalate });
     let routed;
     try {
-      routed = await solveWithRouting({ imageDataUrl, ocrText: context.ocrText, stuckPoint: context.stuckPoint, subject: context.subject, topic: context.topic }, tier);
+      routed = await solveWithRouting({ imageDataUrl, ocrText: context.ocrText, stuckPoint: context.stuckPoint, subject: context.subject, topic: context.topic, track }, tier);
     } catch (error) {
       console.warn("[Questions] solve failed:", error instanceof Error ? error.message : error);
       throw new NoteError(llmUnavailableMessage(error) ?? "\xC7\xF6z\xFCm \u015Fu an haz\u0131rlanamad\u0131. Biraz sonra tekrar dene.");
@@ -8668,12 +9141,12 @@ var questionsRouter = router({
     const tag = `${routed.tier}:${routed.model ?? "default"}${routed.escalated ? "\u2191" : ""}`.slice(0, 100);
     return saveAiSolution(ctx.user.id, input.id, routed.solution, tag);
   })),
-  // 🔁 Benzer soru: aynı yöntemi ölçen yeni 5 şıklı alıştırma; kaydedilmez, her üretim AI not hakkından sayılır.
+  // 🔁 Benzer soru: aynı yöntemi ölçen yeni alıştırma (YKS 5, LGS 4 şıklı); kaydedilmez, her üretim AI not hakkından sayılır.
   similar: metredFeatureProcedure("NOTE_AI").input(z6.object({ id })).mutation(({ ctx, input }) => userFacing2(async () => {
-    const { context, imageDataUrl } = await loadQuestionForAi(ctx.user.id, input.id);
+    const { context, imageDataUrl, track } = await loadQuestionForAi(ctx.user.id, input.id);
     try {
       const tier = atLeastMedium(tierOfTag(context.aiSolutionModel) ?? chooseSolveTier({ difficulty: context.difficulty, subject: context.subject, exam: context.exam, lastResult: context.lastResult }));
-      return await generateSimilarQuestion({ imageDataUrl, ocrText: context.ocrText, stuckPoint: context.stuckPoint, subject: context.subject, topic: context.topic, solution: context.aiSolution }, void 0, { model: modelForTier(tier) });
+      return await generateSimilarQuestion({ imageDataUrl, ocrText: context.ocrText, stuckPoint: context.stuckPoint, subject: context.subject, topic: context.topic, solution: context.aiSolution, track }, void 0, { model: modelForTier(tier) });
     } catch (error) {
       console.warn("[Questions] similar failed:", error instanceof Error ? error.message : error);
       throw new NoteError(llmUnavailableMessage(error) ?? "Benzer soru \u015Fu an haz\u0131rlanamad\u0131. Biraz sonra tekrar dene.");
@@ -8687,9 +9160,10 @@ var questionsRouter = router({
       if (!attachment || attachment.kind !== "image") throw new NoteError("Foto\u011Fraf bulunamad\u0131.");
       imageDataUrl = `data:${attachment.mimeType};base64,${attachment.data.toString("base64")}`;
     }
-    const topics = (await getMatchableTopics()).map((topic) => ({ id: topic.id, subject: topic.subject, unit: topic.unit, topic: topic.topic }));
+    const { examTrack: track } = await getStudentProfile(ctx.user.id);
+    const topics = (await getMatchableTopics(track)).map((topic) => ({ id: topic.id, subject: topic.subject, unit: topic.unit, topic: topic.topic }));
     try {
-      const suggestion = await suggestQuestionDetails({ imageDataUrl, stuckPoint: input.stuckPoint ?? null, topics });
+      const suggestion = await suggestQuestionDetails({ imageDataUrl, stuckPoint: input.stuckPoint ?? null, topics, track });
       if (input.attachmentId && suggestion.ocrText) await getAttachmentStorage().setOcrText(ctx.user.id, input.attachmentId, suggestion.ocrText);
       return suggestion;
     } catch (error) {
@@ -8704,12 +9178,15 @@ import { TRPCError as TRPCError5 } from "@trpc/server";
 import { z as z7 } from "zod";
 
 // server/schedule/classScheduleDb.ts
-import { asc as asc3, eq as eq18 } from "drizzle-orm";
+import { asc as asc3, eq as eq20 } from "drizzle-orm";
 
 // shared/classSchedule.ts
 var SCHEDULE_SOURCES = ["school", "course", "tutor", "other"];
 var DAY_LABELS = ["Pazartesi", "Sal\u0131", "\xC7ar\u015Famba", "Per\u015Fembe", "Cuma", "Cumartesi", "Pazar"];
 var YKS_SUBJECTS = ["T\xFCrk\xE7e", "Matematik", "Geometri", "Fizik", "Kimya", "Biyoloji", "Edebiyat", "Tarih", "Co\u011Frafya", "Felsefe"];
+var LGS_SUBJECTS = ["T\xFCrk\xE7e", "Matematik", "Fen Bilimleri", "\u0130nk\u0131lap Tarihi", "Din K\xFClt\xFCr\xFC", "\u0130ngilizce"];
+var SCHEDULE_SUBJECTS = [...YKS_SUBJECTS, ...LGS_SUBJECTS.filter((subject2) => !YKS_SUBJECTS.includes(subject2))];
+var scheduleSubjectsFor = (track) => track === "LGS" ? LGS_SUBJECTS : YKS_SUBJECTS;
 var AFTER_CLASS_BUFFER_MINUTES = 30;
 var PLAN_DAY_END = "23:30";
 var MAX_SCHEDULE_BLOCKS = 120;
@@ -8807,14 +9284,14 @@ function parsePeriods(raw) {
 async function getClassSchedule(userId) {
   const db = await getDb();
   if (!db) return { periods: DEFAULT_SCHOOL_PERIODS, blocks: [] };
-  const [profile] = await db.select({ schoolPeriodsJson: studentProfiles.schoolPeriodsJson }).from(studentProfiles).where(eq18(studentProfiles.userId, userId)).limit(1);
-  const rows = await db.select({ source: classScheduleBlocks.source, dayOfWeek: classScheduleBlocks.dayOfWeek, startTime: classScheduleBlocks.startTime, endTime: classScheduleBlocks.endTime, subject: classScheduleBlocks.subject, label: classScheduleBlocks.label }).from(classScheduleBlocks).where(eq18(classScheduleBlocks.userId, userId)).orderBy(asc3(classScheduleBlocks.dayOfWeek), asc3(classScheduleBlocks.startTime));
+  const [profile] = await db.select({ schoolPeriodsJson: studentProfiles.schoolPeriodsJson }).from(studentProfiles).where(eq20(studentProfiles.userId, userId)).limit(1);
+  const rows = await db.select({ source: classScheduleBlocks.source, dayOfWeek: classScheduleBlocks.dayOfWeek, startTime: classScheduleBlocks.startTime, endTime: classScheduleBlocks.endTime, subject: classScheduleBlocks.subject, label: classScheduleBlocks.label }).from(classScheduleBlocks).where(eq20(classScheduleBlocks.userId, userId)).orderBy(asc3(classScheduleBlocks.dayOfWeek), asc3(classScheduleBlocks.startTime));
   return { periods: parsePeriods(profile?.schoolPeriodsJson), blocks: rows };
 }
 async function getPlanScheduleContext(userId, startDate) {
   const db = await getDb();
   if (!db) return null;
-  const [profile] = await db.select({ start: studentProfiles.preferredStudyStartTime }).from(studentProfiles).where(eq18(studentProfiles.userId, userId)).limit(1);
+  const [profile] = await db.select({ start: studentProfiles.preferredStudyStartTime }).from(studentProfiles).where(eq20(studentProfiles.userId, userId)).limit(1);
   const { blocks } = await getClassSchedule(userId);
   return describeWeekForPlan(blocks, startDate, profile?.start && isValidTime(profile.start) ? profile.start : "16:00");
 }
@@ -8826,7 +9303,7 @@ async function saveClassSchedule(userId, schedule) {
   const blocks = schedule.blocks.map((block) => ({ ...block, label: block.label.trim() || block.subject || "Ders" }));
   const periodsJson = JSON.stringify(schedule.periods);
   await db.transaction(async (tx) => {
-    await tx.delete(classScheduleBlocks).where(eq18(classScheduleBlocks.userId, userId));
+    await tx.delete(classScheduleBlocks).where(eq20(classScheduleBlocks.userId, userId));
     if (blocks.length) await tx.insert(classScheduleBlocks).values(blocks.map((block) => ({ ...block, userId })));
     await tx.insert(studentProfiles).values({ userId, schoolPeriodsJson: periodsJson }).onConflictDoUpdate({ target: studentProfiles.userId, set: { schoolPeriodsJson: periodsJson } });
   });
@@ -8834,9 +9311,18 @@ async function saveClassSchedule(userId, schedule) {
 }
 
 // server/schedule/scheduleImport.ts
-function classifyLesson(name) {
+function classifyLesson(name, track = "YKS") {
   const value = name.toLocaleUpperCase("tr-TR");
-  const rules = [
+  const rules = track === "LGS" ? [
+    // 8. sınıf: din kültürü ve İngilizce LGS dersidir; seçmeli/uygulama dersleri plana girmez.
+    [/SE[ÇC]MEL[İI]|REHBERL[İI]K|BEDEN|SPOR|G[ÖO]RSEL SANAT|M[ÜU]Z[İI]K|TEKNOLOJ[İI]|B[İI]L[İI][ŞS][İI]M|PEYGAMBER|KUR.?AN|PROJE/, null],
+    [/D[İI]N K[ÜU]LT[ÜU]R|AHLAK/, "Din K\xFClt\xFCr\xFC"],
+    [/YABANCI D[İI]L|[İI]NG[İI]L[İI]ZCE/, "\u0130ngilizce"],
+    [/[İI]NKILAP|TAR[İI]H/, "\u0130nk\u0131lap Tarihi"],
+    [/FEN/, "Fen Bilimleri"],
+    [/MATEMAT[İI]K/, "Matematik"],
+    [/T[ÜU]RK[ÇC]E/, "T\xFCrk\xE7e"]
+  ] : [
     [/D[İI]N K[ÜU]LT[ÜU]R|AHLAK|YABANCI D[İI]L|[İI]NG[İI]L[İI]ZCE|ALMANCA|FRANSIZCA|REHBERL[İI]K|BEDEN|SPOR|G[ÖO]RSEL SANAT|M[ÜU]Z[İI]K|SA[ĞG]LIK B[İI]LG|TRAF[İI]K|PEYGAMBER|KUR.?AN|H[İI]TABET|PROJE/, null],
     [/GEOMETR[İI]/, "Geometri"],
     [/MATEMAT[İI]K/, "Matematik"],
@@ -8867,7 +9353,8 @@ var normalizeTime = (value) => {
   const time2 = `${match[1].padStart(2, "0")}:${match[2]}`;
   return isValidTime(time2) ? time2 : null;
 };
-function parseScheduleImport(raw) {
+function parseScheduleImport(raw, track = "YKS") {
+  const examSubjects = scheduleSubjectsFor(track);
   const value = raw && typeof raw === "object" ? raw : {};
   const periods = (Array.isArray(value.periods) ? value.periods : []).flatMap((item) => {
     const period = item;
@@ -8895,8 +9382,8 @@ function parseScheduleImport(raw) {
       continue;
     }
     seen.add(key);
-    const byName = classifyLesson(name || code);
-    const fromModel = YKS_SUBJECTS.includes(lesson.subject) ? lesson.subject : null;
+    const byName = classifyLesson(name || code, track);
+    const fromModel = examSubjects.includes(lesson.subject) ? lesson.subject : null;
     const subject2 = byName.known ? byName.subject : fromModel;
     blocks.push({ source: "school", dayOfWeek: day, startTime: period.start, endTime: period.end, subject: subject2, label: subject2 && !/SE[ÇC]MEL[İI]|HTDE/i.test(name) ? subject2 : lessonLabel(name, code, subject2) });
   }
@@ -8911,16 +9398,17 @@ var SCHEMA = {
   required: ["periods", "lessons"],
   additionalProperties: false
 };
-async function readScheduleFromImage(dataUrl, invoke = invokeLLM) {
+async function readScheduleFromImage(dataUrl, invoke = invokeLLM, track = "YKS") {
+  const examSubjects = scheduleSubjectsFor(track);
   const response = await invoke({
     messages: [
       {
         role: "system",
-        content: `Sen T\xFCrk lise/dershane haftal\u0131k ders program\u0131 okuyucususun. Yaln\u0131zca g\xF6rselde g\xF6r\xFCleni \xE7\u0131kar, uydurma.
+        content: `Sen T\xFCrk ${track === "LGS" ? "ortaokul" : "lise"}/dershane haftal\u0131k ders program\u0131 okuyucususun. Yaln\u0131zca g\xF6rselde g\xF6r\xFCleni \xE7\u0131kar, uydurma.
 - periods: ders saatleri s\u0131ras\u0131yla (1. ders, 2. ders...), ba\u015Flang\u0131\xE7/biti\u015F "SS:dd".
 - lessons: dolu her h\xFCcre i\xE7in bir kay\u0131t. day: 1=Pazartesi \u2026 7=Pazar. period: ders saatinin s\u0131ra numaras\u0131 (1'den ba\u015Flar).
 - code: h\xFCcredeki k\u0131saltma (\xF6r. F\u0130ZF4). name: dersin tam ad\u0131 \u2014 program\u0131n alt\u0131ndaki ders listesinden (Ders \u2192 Dersin Ad\u0131) bul; liste yoksa k\u0131saltmadan anla.
-- subject: dersin YKS kar\u015F\u0131l\u0131\u011F\u0131, yaln\u0131zca \u015Fu listeden biri: ${YKS_SUBJECTS.join(", ")}. YKS'de olmayan dersler (din k\xFClt\xFCr\xFC, yabanc\u0131 dil, rehberlik, beden e\u011Fitimi, sanat, m\xFCzik, se\xE7meli ahlak vb.) i\xE7in "YKS d\u0131\u015F\u0131" yaz.
+- subject: dersin ${track} kar\u015F\u0131l\u0131\u011F\u0131, yaln\u0131zca \u015Fu listeden biri: ${examSubjects.join(", ")}. ${track === "LGS" ? `LGS'de olmayan dersler (rehberlik, beden e\u011Fitimi, g\xF6rsel sanatlar, m\xFCzik, teknoloji ve tasar\u0131m, bili\u015Fim, se\xE7meli dersler vb.) i\xE7in "LGS d\u0131\u015F\u0131" yaz.` : `YKS'de olmayan dersler (din k\xFClt\xFCr\xFC, yabanc\u0131 dil, rehberlik, beden e\u011Fitimi, sanat, m\xFCzik, se\xE7meli ahlak vb.) i\xE7in "YKS d\u0131\u015F\u0131" yaz.`}
 \xD6\u011Fretmen adlar\u0131n\u0131 yazma.`
       },
       { role: "user", content: [{ type: "text", text: "Bu haftal\u0131k ders program\u0131n\u0131 oku." }, { type: "image_url", image_url: { url: dataUrl, detail: "high" } }] }
@@ -8929,7 +9417,7 @@ async function readScheduleFromImage(dataUrl, invoke = invokeLLM) {
   });
   const content = response.choices[0]?.message?.content;
   const text3 = typeof content === "string" ? content : content?.map((part) => part.type === "text" ? part.text : "").join("") ?? "";
-  const result = parseScheduleImport(JSON.parse(text3.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "") || "{}"));
+  const result = parseScheduleImport(JSON.parse(text3.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "") || "{}"), track);
   if (!result.periods.length || !result.blocks.length) throw new Error("Programdan ders saati ya da ders okunamad\u0131.");
   return result;
 }
@@ -8945,7 +9433,7 @@ var classScheduleRouter = router({
       dayOfWeek: z7.number().int().min(1).max(7),
       startTime: time,
       endTime: time,
-      subject: z7.enum(YKS_SUBJECTS).nullable(),
+      subject: z7.enum(SCHEDULE_SUBJECTS).nullable(),
       label: z7.string().max(80)
     })).max(MAX_SCHEDULE_BLOCKS)
   })).mutation(async ({ ctx, input }) => {
@@ -8958,9 +9446,10 @@ var classScheduleRouter = router({
   }),
   // 📷 Fotoğraftan aktar: program okunur ama KAYDEDİLMEZ; düzenleyiciye dolar, öğrenci kontrol edip kaydeder.
   // Kota: fotoğraf okuma (NOTE_OCR); yalnızca başarılı okumada sayılır.
-  importPhoto: metredFeatureProcedure("NOTE_OCR").input(z7.object({ dataUrl: z7.string().max(12e6).regex(/^data:image\/(jpeg|png|webp);base64,/, "Foto\u011Fraf JPEG, PNG ya da WEBP olmal\u0131.") })).mutation(async ({ input }) => {
+  importPhoto: metredFeatureProcedure("NOTE_OCR").input(z7.object({ dataUrl: z7.string().max(12e6).regex(/^data:image\/(jpeg|png|webp);base64,/, "Foto\u011Fraf JPEG, PNG ya da WEBP olmal\u0131.") })).mutation(async ({ ctx, input }) => {
     try {
-      return await readScheduleFromImage(input.dataUrl);
+      const examTrack = ctx.user ? (await getStudentProfile(ctx.user.id)).examTrack : "YKS";
+      return await readScheduleFromImage(input.dataUrl, void 0, examTrack);
     } catch (error) {
       console.warn("[Class Schedule] Photo import failed:", error);
       throw new TRPCError5({ code: "BAD_REQUEST", message: llmUnavailableMessage(error) ?? "Program\u0131 foto\u011Fraftan okuyamad\u0131m. Tablonun tamam\u0131 g\xF6r\xFCnecek \u015Fekilde, d\xFCz ve net bir foto\u011Frafla tekrar dener misin? \u0130stersen tabloya elle de girebilirsin." });
@@ -9001,7 +9490,7 @@ import { TRPCError as TRPCError7 } from "@trpc/server";
 import { z as z9 } from "zod";
 
 // server/reading/readingDb.ts
-import { and as and16, count, desc as desc10, eq as eq19 } from "drizzle-orm";
+import { and as and18, count, desc as desc12, eq as eq21 } from "drizzle-orm";
 
 // shared/reading.ts
 var MAX_READING_BOOKS = 50;
@@ -9020,19 +9509,19 @@ var columns = { id: readingBooks.id, title: readingBooks.title, author: readingB
 async function listReadingBooks(userId) {
   const db = await getDb();
   if (!db) return [];
-  const rows = await db.select(columns).from(readingBooks).where(eq19(readingBooks.userId, userId)).orderBy(desc10(readingBooks.updatedAt));
+  const rows = await db.select(columns).from(readingBooks).where(eq21(readingBooks.userId, userId)).orderBy(desc12(readingBooks.updatedAt));
   return [...rows.filter((row) => row.status === "reading"), ...rows.filter((row) => row.status === "finished")];
 }
 async function addReadingBook(userId, input) {
   const db = await getDb();
   if (!db) throw new ReadingError("Veritaban\u0131na ula\u015F\u0131lamad\u0131.");
-  const [{ total }] = await db.select({ total: count() }).from(readingBooks).where(eq19(readingBooks.userId, userId));
+  const [{ total }] = await db.select({ total: count() }).from(readingBooks).where(eq21(readingBooks.userId, userId));
   if (total >= MAX_READING_BOOKS) throw new ReadingError(`En fazla ${MAX_READING_BOOKS} okuma kitab\u0131 eklenebilir.`);
   const result = await db.insert(readingBooks).values({ userId, title: input.title.trim(), author: input.author?.trim() || null, totalPages: input.totalPages || null }).returning({ id: readingBooks.id });
-  const [row] = await db.select(columns).from(readingBooks).where(and16(eq19(readingBooks.id, Number(result[0].id)), eq19(readingBooks.userId, userId))).limit(1);
+  const [row] = await db.select(columns).from(readingBooks).where(and18(eq21(readingBooks.id, Number(result[0].id)), eq21(readingBooks.userId, userId))).limit(1);
   return row;
 }
-async function updateReadingBook(userId, id4, patch) {
+async function updateReadingBook(userId, id5, patch) {
   const db = await getDb();
   if (!db) throw new ReadingError("Veritaban\u0131na ula\u015F\u0131lamad\u0131.");
   const values = {};
@@ -9041,23 +9530,23 @@ async function updateReadingBook(userId, id4, patch) {
     values.status = patch.status;
     values.finishedAt = patch.status === "finished" ? /* @__PURE__ */ new Date() : null;
   }
-  if (Object.keys(values).length) await db.update(readingBooks).set(values).where(and16(eq19(readingBooks.id, id4), eq19(readingBooks.userId, userId)));
-  const [row] = await db.select(columns).from(readingBooks).where(and16(eq19(readingBooks.id, id4), eq19(readingBooks.userId, userId))).limit(1);
+  if (Object.keys(values).length) await db.update(readingBooks).set(values).where(and18(eq21(readingBooks.id, id5), eq21(readingBooks.userId, userId)));
+  const [row] = await db.select(columns).from(readingBooks).where(and18(eq21(readingBooks.id, id5), eq21(readingBooks.userId, userId))).limit(1);
   if (!row) throw new ReadingError("Kitap bulunamad\u0131.");
   return row;
 }
-async function removeReadingBook(userId, id4) {
+async function removeReadingBook(userId, id5) {
   const db = await getDb();
   if (!db) return;
-  await db.delete(readingBooks).where(and16(eq19(readingBooks.id, id4), eq19(readingBooks.userId, userId)));
+  await db.delete(readingBooks).where(and18(eq21(readingBooks.id, id5), eq21(readingBooks.userId, userId)));
 }
-async function recordReadingPages(userId, id4, pages2) {
+async function recordReadingPages(userId, id5, pages2) {
   const db = await getDb();
   if (!db) return null;
-  const [book] = await db.select(columns).from(readingBooks).where(and16(eq19(readingBooks.id, id4), eq19(readingBooks.userId, userId))).limit(1);
+  const [book] = await db.select(columns).from(readingBooks).where(and18(eq21(readingBooks.id, id5), eq21(readingBooks.userId, userId))).limit(1);
   if (!book) return null;
   const next = applyReadingProgress(book, pages2);
-  await db.update(readingBooks).set({ pagesRead: next.pagesRead, status: next.status, ...next.justFinished ? { finishedAt: /* @__PURE__ */ new Date() } : {} }).where(and16(eq19(readingBooks.id, id4), eq19(readingBooks.userId, userId)));
+  await db.update(readingBooks).set({ pagesRead: next.pagesRead, status: next.status, ...next.justFinished ? { finishedAt: /* @__PURE__ */ new Date() } : {} }).where(and18(eq21(readingBooks.id, id5), eq21(readingBooks.userId, userId)));
   return { ...book, pagesRead: next.pagesRead, status: next.status, justFinished: next.justFinished };
 }
 
@@ -9218,6 +9707,7 @@ var orgRouter = router({
         activeThisWeek: students.filter((student) => student.summary.weekMinutes > 0).length,
         averageAdherence: average(adherence),
         averageLastTyt: average(students.map((student) => student.summary.lastTyt?.net).filter((value) => typeof value === "number")),
+        averageLastLgs: average(students.map((student) => student.summary.lastLgs?.net).filter((value) => typeof value === "number")),
         atRisk: students.filter((student) => student.summary.risks.length).length,
         weekMinutes: students.reduce((sum, student) => sum + student.summary.weekMinutes, 0)
       },
@@ -9260,7 +9750,7 @@ var orgRouter = router({
     return {
       student: { userId: input.studentUserId, name: member.name, joinedAt: member.joinedAt, consentAt: member.consentAt },
       // Profilden yalnızca koçluk için gerekenler (iletişim/kimlik bilgisi yok).
-      profile: { gradeLevel: profile.gradeLevel, examYear: profile.examYear, targetScoreType: profile.targetScoreType, targetUniversity: profile.targetUniversity, targetDepartment: profile.targetDepartment, dailyStudyDuration: profile.dailyStudyDuration, avatarStyle: profile.avatarStyle },
+      profile: { examTrack: profile.examTrack, gradeLevel: profile.gradeLevel, examYear: profile.examYear, targetScoreType: profile.targetScoreType, targetUniversity: profile.targetUniversity, targetDepartment: profile.targetDepartment, targetHighSchool: profile.targetHighSchool, targetLgsScore: profile.targetLgsScore, dailyStudyDuration: profile.dailyStudyDuration, avatarStyle: profile.avatarStyle },
       summary: summarizeStudent(signals.get(input.studentUserId)),
       exams,
       topics: topics.filter((topic) => !topic.insufficientData),
@@ -9529,6 +10019,83 @@ var adminOrgsRouter = router({
   })
 });
 
+// server/routers/parent.ts
+import { TRPCError as TRPCError10 } from "@trpc/server";
+import { createHash as createHash5, randomInt as randomInt2 } from "node:crypto";
+import { z as z12 } from "zod";
+var DAY_MS9 = 24 * 60 * 60 * 1e3;
+var id4 = z12.number().int().positive();
+var hashCode2 = (code) => createHash5("sha256").update(`parent:${normalizeInviteCode(code)}`).digest("hex");
+var userFacing5 = async (work) => {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof ParentLinkError) throw new TRPCError10({ code: "BAD_REQUEST", message: error.message });
+    throw error;
+  }
+};
+function currentWeek2(now = /* @__PURE__ */ new Date()) {
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - (start.getDay() + 6) % 7);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 7);
+  return { start, end };
+}
+var parentRouter = router({
+  consentText: protectedProcedure.query(() => ({ version: PARENT_CONSENT_VERSION, text: PARENT_CONSENT_TEXT })),
+  // --- Öğrenci tarafı ---------------------------------------------------------
+  myParents: protectedProcedure.query(({ ctx }) => listLinksForStudent(ctx.user.id)),
+  createInvite: protectedProcedure.input(z12.object({ parentEmail: z12.string().trim().email("Ge\xE7erli bir e-posta adresi yaz.").max(320).optional().or(z12.literal("")) }).optional()).mutation(({ ctx, input }) => userFacing5(async () => {
+    const code = generateInviteCode((max) => randomInt2(max));
+    const { expiresAt } = await createParentInvite(ctx.user.id, hashCode2(code));
+    const joinUrl = `${appBaseUrl(ctx.req)}/veli?kod=${encodeURIComponent(code)}`;
+    let emailed = false;
+    if (input?.parentEmail) {
+      const studentName = await studentDisplayName(ctx.user.id);
+      try {
+        await sendMail(buildParentInviteEmail({ to: input.parentEmail, studentName, code, joinUrl, expiresAt }));
+        emailed = true;
+      } catch (error) {
+        console.warn("[Parent] invite email failed:", error instanceof Error ? error.message : error);
+      }
+    }
+    return { code, expiresAt, joinUrl, emailed };
+  })),
+  decide: protectedProcedure.input(z12.object({ linkId: id4, approve: z12.boolean() })).mutation(({ ctx, input }) => userFacing5(() => decideParentRequest(ctx.user.id, input.linkId, input.approve))),
+  removeParent: protectedProcedure.input(z12.object({ linkId: id4 })).mutation(({ ctx, input }) => userFacing5(() => revokeParentLink({ userId: ctx.user.id, side: "student" }, input.linkId))),
+  // --- Veli tarafı ------------------------------------------------------------
+  myStudents: protectedProcedure.query(({ ctx }) => listLinksForParent(ctx.user.id)),
+  redeem: protectedProcedure.input(z12.object({ code: z12.string().trim().min(4).max(20), consent: z12.literal(true, { message: "Devam etmek i\xE7in r\u0131za metnini onaylamal\u0131s\u0131n." }) })).mutation(({ ctx, input }) => userFacing5(() => redeemParentInvite(ctx.user.id, hashCode2(input.code)))),
+  unlink: protectedProcedure.input(z12.object({ linkId: id4 })).mutation(({ ctx, input }) => userFacing5(() => revokeParentLink({ userId: ctx.user.id, side: "parent" }, input.linkId))),
+  setDigest: protectedProcedure.input(z12.object({ linkId: id4, enabled: z12.boolean() })).mutation(({ ctx, input }) => userFacing5(async () => ({ enabled: await setParentDigestEnabled(ctx.user.id, input.linkId, input.enabled) }))),
+  /** Velinin gördüğü öğrenci özeti: salt okunur; not, soru defteri, öğretmen notu, iletişim bilgisi yok. */
+  student: protectedProcedure.input(z12.object({ studentUserId: id4 })).query(async ({ ctx, input }) => {
+    if (!await findActiveLink(ctx.user.id, input.studentUserId)) throw new TRPCError10({ code: "FORBIDDEN", message: "Bu \xF6\u011Frencinin bilgilerini g\xF6rme iznin yok." });
+    const since = new Date(Date.now() - 42 * DAY_MS9);
+    const { start, end } = currentWeek2();
+    const [name, profile, exams, topics, calendar, signals] = await Promise.all([
+      studentDisplayName(input.studentUserId),
+      getStudentProfile(input.studentUserId),
+      getUserMockExams(input.studentUserId),
+      getUserTopicProgress(input.studentUserId),
+      getStudentCalendarReadOnly(input.studentUserId, since),
+      loadStudentSignals([input.studentUserId], start, end, new Date(Date.now() - 30 * DAY_MS9))
+    ]);
+    const latestLgs = exams.filter((exam) => exam.exam === "LGS").sort((a, b) => b.date.localeCompare(a.date))[0];
+    return {
+      name,
+      profile: { examTrack: profile.examTrack, gradeLevel: profile.gradeLevel, examYear: profile.examYear, targetScoreType: profile.targetScoreType, targetUniversity: profile.targetUniversity, targetDepartment: profile.targetDepartment, targetHighSchool: profile.targetHighSchool, targetLgsScore: profile.targetLgsScore, dailyStudyDuration: profile.dailyStudyDuration },
+      summary: summarizeStudent(signals.get(input.studentUserId)),
+      estimatedLgsScore: latestLgs ? estimateLgsScore(latestLgs.subjects) : null,
+      exams: exams.map((exam) => ({ id: exam.id, title: exam.title, date: exam.date, exam: exam.exam, net: exam.net, subjects: exam.subjects })),
+      weakTopics: topics.filter((topic) => !topic.insufficientData && topic.status === "Zay\u0131f").sort((a, b) => a.progress - b.progress).slice(0, 10).map((topic) => ({ slug: topic.slug, subject: topic.subject, topic: topic.topic, progress: topic.progress })),
+      sessions: calendar.sessions.map((session) => ({ id: session.id, sessionDate: session.sessionDate, subject: session.subject, topic: session.topic, kind: session.kind, plannedMinutes: session.plannedMinutes, status: session.status, abandonedAt: session.abandonedAt })),
+      logs: calendar.logs.map((log) => ({ studyDate: log.studyDate, minutes: log.minutes }))
+    };
+  })
+});
+
 // server/studyPlan/normalizeAiPlan.ts
 var KINDS = ["\xD6\u011Frenme", "Soru", "Tekrar", "Deneme analizi"];
 var isObj = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -9604,11 +10171,11 @@ function normalizeAiPlan(raw, fallback) {
 }
 
 // server/routers/resourceCatalog.ts
-import { TRPCError as TRPCError11 } from "@trpc/server";
-import { z as z13 } from "zod";
+import { TRPCError as TRPCError12 } from "@trpc/server";
+import { z as z14 } from "zod";
 
 // server/resourceCatalog/catalogQueries.ts
-import { and as and17, asc as asc4, desc as desc11, eq as eq20, inArray as inArray8, isNull as isNull11, ilike as ilike2, sql as sql9 } from "drizzle-orm";
+import { and as and19, asc as asc4, desc as desc13, eq as eq22, inArray as inArray9, isNull as isNull12, ilike as ilike2, sql as sql9 } from "drizzle-orm";
 var DEFAULT_PAGE_SIZE = 24;
 var MAX_PAGE_SIZE = 60;
 async function listCatalogBooks(filters, page2) {
@@ -9616,26 +10183,26 @@ async function listCatalogBooks(filters, page2) {
   if (!db) return { items: [], total: 0 };
   const pageSize = Math.max(1, Math.min(page2.pageSize || DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE));
   const offset = Math.max(0, (page2.page - 1) * pageSize);
-  const conditions = [eq20(catalogBooks.active, 1)];
-  if (filters.exam) conditions.push(eq20(catalogBooks.examScope, filters.exam));
-  if (filters.subject) conditions.push(eq20(catalogBooks.subject, filters.subject));
-  if (filters.publisherId) conditions.push(eq20(catalogBooks.publisherId, filters.publisherId));
-  if (filters.bookType) conditions.push(eq20(catalogBooks.bookType, filters.bookType));
-  if (filters.difficulty) conditions.push(eq20(catalogBooks.difficultyLabel, filters.difficulty));
+  const conditions = [eq22(catalogBooks.active, 1)];
+  if (filters.exam) conditions.push(eq22(catalogBooks.examScope, filters.exam));
+  if (filters.subject) conditions.push(eq22(catalogBooks.subject, filters.subject));
+  if (filters.publisherId) conditions.push(eq22(catalogBooks.publisherId, filters.publisherId));
+  if (filters.bookType) conditions.push(eq22(catalogBooks.bookType, filters.bookType));
+  if (filters.difficulty) conditions.push(eq22(catalogBooks.difficultyLabel, filters.difficulty));
   if (filters.search) conditions.push(ilike2(catalogBooks.name, `%${filters.search}%`));
   let bookIdsForTopic = null;
   if (filters.topic) {
-    const topicRows = await db.select({ bookId: bookCurriculumTopics.bookId }).from(bookCurriculumTopics).innerJoin(yksTopics, eq20(bookCurriculumTopics.topicId, yksTopics.id)).where(eq20(yksTopics.topic, filters.topic));
+    const topicRows = await db.select({ bookId: bookCurriculumTopics.bookId }).from(bookCurriculumTopics).innerJoin(yksTopics, eq22(bookCurriculumTopics.topicId, yksTopics.id)).where(eq22(yksTopics.topic, filters.topic));
     bookIdsForTopic = topicRows.map((r) => r.bookId);
     if (bookIdsForTopic.length === 0) return { items: [], total: 0 };
-    conditions.push(inArray8(catalogBooks.id, bookIdsForTopic));
+    conditions.push(inArray9(catalogBooks.id, bookIdsForTopic));
   }
-  const where = and17(...conditions);
+  const where = and19(...conditions);
   const [{ count: count4 }] = await db.select({ count: sql9`count(*)::int` }).from(catalogBooks).where(where);
-  let rows = await db.select().from(catalogBooks).where(where).orderBy(desc11(catalogBooks.createdAt)).limit(pageSize).offset(offset);
+  let rows = await db.select().from(catalogBooks).where(where).orderBy(desc13(catalogBooks.createdAt)).limit(pageSize).offset(offset);
   if (filters.minPrice !== void 0 || filters.maxPrice !== void 0) {
     const ids = rows.map((r) => r.id);
-    const offerRows2 = ids.length ? await db.select().from(bookOffers).where(inArray8(bookOffers.bookId, ids)) : [];
+    const offerRows2 = ids.length ? await db.select().from(bookOffers).where(inArray9(bookOffers.bookId, ids)) : [];
     const bestPriceByBook = /* @__PURE__ */ new Map();
     for (const offer of offerRows2) {
       if (offer.price === null) continue;
@@ -9651,11 +10218,11 @@ async function listCatalogBooks(filters, page2) {
       return true;
     });
   }
-  const publisherIds = Array.from(new Set(rows.map((r) => r.publisherId).filter((id4) => id4 !== null)));
-  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray8(publishers.id, publisherIds)) : [];
+  const publisherIds = Array.from(new Set(rows.map((r) => r.publisherId).filter((id5) => id5 !== null)));
+  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray9(publishers.id, publisherIds)) : [];
   const publisherNameById = new Map(publisherRows.map((p) => [p.id, p.name]));
   const bookIds = rows.map((r) => r.id);
-  const offerRows = bookIds.length ? await db.select().from(bookOffers).where(inArray8(bookOffers.bookId, bookIds)) : [];
+  const offerRows = bookIds.length ? await db.select().from(bookOffers).where(inArray9(bookOffers.bookId, bookIds)) : [];
   const offerByBook = /* @__PURE__ */ new Map();
   for (const offer of offerRows) {
     if (!offerByBook.has(offer.bookId)) offerByBook.set(offer.bookId, { price: offer.price !== null ? Number(offer.price) : null, productUrl: offer.productUrl });
@@ -9683,16 +10250,16 @@ async function listCatalogBooksForAdmin(filters, page2) {
   const pageSize = Math.max(1, Math.min(page2.pageSize || DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE));
   const offset = Math.max(0, (page2.page - 1) * pageSize);
   const conditions = [];
-  if (filters.active !== void 0) conditions.push(eq20(catalogBooks.active, filters.active ? 1 : 0));
-  if (filters.subject) conditions.push(eq20(catalogBooks.subject, filters.subject));
+  if (filters.active !== void 0) conditions.push(eq22(catalogBooks.active, filters.active ? 1 : 0));
+  if (filters.subject) conditions.push(eq22(catalogBooks.subject, filters.subject));
   if (filters.search) conditions.push(ilike2(catalogBooks.name, `%${filters.search}%`));
-  const where = conditions.length ? and17(...conditions) : void 0;
+  const where = conditions.length ? and19(...conditions) : void 0;
   const countQuery = db.select({ count: sql9`count(*)::int` }).from(catalogBooks);
   const [{ count: count4 }] = await (where ? countQuery.where(where) : countQuery);
-  const rowsQuery = db.select().from(catalogBooks).orderBy(desc11(catalogBooks.createdAt)).limit(pageSize).offset(offset);
+  const rowsQuery = db.select().from(catalogBooks).orderBy(desc13(catalogBooks.createdAt)).limit(pageSize).offset(offset);
   const rows = await (where ? rowsQuery.where(where) : rowsQuery);
-  const publisherIds = Array.from(new Set(rows.map((r) => r.publisherId).filter((id4) => id4 !== null)));
-  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray8(publishers.id, publisherIds)) : [];
+  const publisherIds = Array.from(new Set(rows.map((r) => r.publisherId).filter((id5) => id5 !== null)));
+  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray9(publishers.id, publisherIds)) : [];
   const publisherNameById = new Map(publisherRows.map((p) => [p.id, p.name]));
   const items = rows.map((row) => ({
     id: row.id,
@@ -9713,13 +10280,13 @@ async function listCatalogBooksForAdmin(filters, page2) {
 async function getCatalogBookBySlug(slug) {
   const db = await getDb();
   if (!db) return null;
-  const rows = await db.select().from(catalogBooks).where(eq20(catalogBooks.slug, slug)).limit(1);
+  const rows = await db.select().from(catalogBooks).where(eq22(catalogBooks.slug, slug)).limit(1);
   const book = rows[0];
   if (!book) return null;
   const [publisherRow, offerRows, topicRows] = await Promise.all([
-    book.publisherId ? db.select().from(publishers).where(eq20(publishers.id, book.publisherId)).limit(1) : Promise.resolve([]),
-    db.select().from(bookOffers).where(eq20(bookOffers.bookId, book.id)),
-    db.select({ topic: yksTopics.topic, subject: yksTopics.subject, confidence: bookCurriculumTopics.confidence, isVerified: bookCurriculumTopics.isVerified }).from(bookCurriculumTopics).innerJoin(yksTopics, eq20(bookCurriculumTopics.topicId, yksTopics.id)).where(eq20(bookCurriculumTopics.bookId, book.id))
+    book.publisherId ? db.select().from(publishers).where(eq22(publishers.id, book.publisherId)).limit(1) : Promise.resolve([]),
+    db.select().from(bookOffers).where(eq22(bookOffers.bookId, book.id)),
+    db.select({ topic: yksTopics.topic, subject: yksTopics.subject, confidence: bookCurriculumTopics.confidence, isVerified: bookCurriculumTopics.isVerified }).from(bookCurriculumTopics).innerJoin(yksTopics, eq22(bookCurriculumTopics.topicId, yksTopics.id)).where(eq22(bookCurriculumTopics.bookId, book.id))
   ]);
   return {
     id: book.id,
@@ -9739,16 +10306,16 @@ async function getCatalogBookBySlug(slug) {
 async function listPublishersForFilter() {
   const db = await getDb();
   if (!db) return [];
-  return db.select({ id: publishers.id, name: publishers.name }).from(publishers).where(eq20(publishers.isActive, 1)).orderBy(asc4(publishers.name));
+  return db.select({ id: publishers.id, name: publishers.name }).from(publishers).where(eq22(publishers.isActive, 1)).orderBy(asc4(publishers.name));
 }
 async function listCatalogBooksForRecommendation(subject2) {
   const db = await getDb();
   if (!db) return [];
-  const conditions = [eq20(catalogBooks.active, 1)];
-  if (subject2) conditions.push(eq20(catalogBooks.subject, subject2));
-  const rows = await db.select().from(catalogBooks).where(and17(...conditions));
+  const conditions = [eq22(catalogBooks.active, 1)];
+  if (subject2) conditions.push(eq22(catalogBooks.subject, subject2));
+  const rows = await db.select().from(catalogBooks).where(and19(...conditions));
   const bookIds = rows.map((r) => r.id);
-  const topicRows = bookIds.length ? await db.select({ bookId: bookCurriculumTopics.bookId, topic: yksTopics.topic }).from(bookCurriculumTopics).innerJoin(yksTopics, eq20(bookCurriculumTopics.topicId, yksTopics.id)).where(inArray8(bookCurriculumTopics.bookId, bookIds)) : [];
+  const topicRows = bookIds.length ? await db.select({ bookId: bookCurriculumTopics.bookId, topic: yksTopics.topic }).from(bookCurriculumTopics).innerJoin(yksTopics, eq22(bookCurriculumTopics.topicId, yksTopics.id)).where(inArray9(bookCurriculumTopics.bookId, bookIds)) : [];
   const topicsByBook = /* @__PURE__ */ new Map();
   for (const row of topicRows) {
     const list = topicsByBook.get(row.bookId) ?? [];
@@ -9771,15 +10338,15 @@ async function listCatalogBooksForRecommendation(subject2) {
 async function listMyLibraryCatalogBooks(userId) {
   const db = await getDb();
   if (!db) return [];
-  const inventoryRows = await db.select().from(bookInventory).where(and17(eq20(bookInventory.userId, userId), isNull11(bookInventory.removedAt)));
-  const numericIds = Array.from(new Set(inventoryRows.map((row) => row.bookId).filter((id4) => /^\d+$/.test(id4)).map(Number)));
+  const inventoryRows = await db.select().from(bookInventory).where(and19(eq22(bookInventory.userId, userId), isNull12(bookInventory.removedAt)));
+  const numericIds = Array.from(new Set(inventoryRows.map((row) => row.bookId).filter((id5) => /^\d+$/.test(id5)).map(Number)));
   if (numericIds.length === 0) return [];
   const [books, topicRows] = await Promise.all([
-    db.select().from(catalogBooks).where(inArray8(catalogBooks.id, numericIds)),
-    db.select({ bookId: bookCurriculumTopics.bookId, topicId: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject, isVerified: bookCurriculumTopics.isVerified, confidence: bookCurriculumTopics.confidence }).from(bookCurriculumTopics).innerJoin(yksTopics, eq20(bookCurriculumTopics.topicId, yksTopics.id)).where(inArray8(bookCurriculumTopics.bookId, numericIds))
+    db.select().from(catalogBooks).where(inArray9(catalogBooks.id, numericIds)),
+    db.select({ bookId: bookCurriculumTopics.bookId, topicId: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject, isVerified: bookCurriculumTopics.isVerified, confidence: bookCurriculumTopics.confidence }).from(bookCurriculumTopics).innerJoin(yksTopics, eq22(bookCurriculumTopics.topicId, yksTopics.id)).where(inArray9(bookCurriculumTopics.bookId, numericIds))
   ]);
-  const publisherIds = Array.from(new Set(books.map((b) => b.publisherId).filter((id4) => id4 !== null)));
-  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray8(publishers.id, publisherIds)) : [];
+  const publisherIds = Array.from(new Set(books.map((b) => b.publisherId).filter((id5) => id5 !== null)));
+  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray9(publishers.id, publisherIds)) : [];
   const publisherNameById = new Map(publisherRows.map((p) => [p.id, p.name]));
   const topicsByBook = /* @__PURE__ */ new Map();
   for (const row of topicRows) {
@@ -9877,7 +10444,7 @@ var bookTypeFitByStatus = (status, bookType) => {
   if (status === "Orta") return PRACTICE_TYPES2.includes(bookType) ? 1 : LEARNING_TYPES.includes(bookType) ? 0.6 : 0.4;
   return EXAM_STAGE_TYPES.includes(bookType) ? 1 : PRACTICE_TYPES2.includes(bookType) ? 0.8 : 0.3;
 };
-var examScopeCovers = (examScope, exam) => examScope === "TYT_AYT" || examScope === "YKS" || examScope === "GENEL" || examScope === exam;
+var examScopeCovers = (examScope, exam) => exam === "LGS" ? examScope === "LGS" : examScope === "TYT_AYT" || examScope === "YKS" || examScope === "GENEL" || examScope === exam;
 var idealDifficultyScore = (accuracy) => Math.max(0, Math.min(100, accuracy + 15));
 var labelFor = (bookDifficulty, status) => {
   const idealRank = DIFFICULTY_FIT_BY_STATUS[status].indexOf(Math.max(...DIFFICULTY_FIT_BY_STATUS[status]));
@@ -9933,11 +10500,11 @@ function recommendForStudent(topics, books, options = {}, config = resourceCatal
 }
 
 // server/routers/resourceCatalogAdmin.ts
-import { TRPCError as TRPCError10 } from "@trpc/server";
-import { z as z12 } from "zod";
+import { TRPCError as TRPCError11 } from "@trpc/server";
+import { z as z13 } from "zod";
 
 // server/resourceCatalog/catalogDb.ts
-import { and as and18, eq as eq21, inArray as inArray9 } from "drizzle-orm";
+import { and as and20, eq as eq23, inArray as inArray10 } from "drizzle-orm";
 var toCatalogBookRow = (row) => ({
   id: row.id,
   isbn: row.isbn,
@@ -9961,26 +10528,26 @@ var catalogDb = {
   async findPublisherByNormalizedName(normalizedName) {
     const db = await getDb();
     if (!db) return null;
-    const rows = await db.select().from(publishers).where(eq21(publishers.normalizedName, normalizedName)).limit(1);
+    const rows = await db.select().from(publishers).where(eq23(publishers.normalizedName, normalizedName)).limit(1);
     return rows[0] ? { id: rows[0].id, name: rows[0].name, slug: rows[0].slug, normalizedName: rows[0].normalizedName } : null;
   },
   async createPublisher(input) {
     const db = await getDb();
     if (!db) throw new Error("Database not available");
     const result = await db.insert(publishers).values(input).returning({ id: publishers.id });
-    const id4 = Number(result[0].id);
-    return { id: id4, ...input };
+    const id5 = Number(result[0].id);
+    return { id: id5, ...input };
   },
   async findExternalSource(source, sourceProductId) {
     const db = await getDb();
     if (!db) return null;
-    const rows = await db.select().from(externalBookSources).where(and18(eq21(externalBookSources.source, source), eq21(externalBookSources.sourceProductId, sourceProductId))).limit(1);
+    const rows = await db.select().from(externalBookSources).where(and20(eq23(externalBookSources.source, source), eq23(externalBookSources.sourceProductId, sourceProductId))).limit(1);
     return rows[0] ? { id: rows[0].id, source: rows[0].source, sourceProductId: rows[0].sourceProductId, matchedBookId: rows[0].matchedBookId, syncStatus: rows[0].syncStatus } : null;
   },
   async upsertExternalSource(row) {
     const db = await getDb();
     if (!db) throw new Error("Database not available");
-    const existing = await db.select().from(externalBookSources).where(and18(eq21(externalBookSources.source, row.source), eq21(externalBookSources.sourceProductId, row.sourceProductId))).limit(1);
+    const existing = await db.select().from(externalBookSources).where(and20(eq23(externalBookSources.source, row.source), eq23(externalBookSources.sourceProductId, row.sourceProductId))).limit(1);
     const values = {
       source: row.source,
       sourceProductId: row.sourceProductId,
@@ -9996,34 +10563,34 @@ var catalogDb = {
       rawMetadata: row.rawMetadata ? JSON.stringify(row.rawMetadata) : null
     };
     if (existing[0]) {
-      await db.update(externalBookSources).set(values).where(eq21(externalBookSources.id, existing[0].id));
+      await db.update(externalBookSources).set(values).where(eq23(externalBookSources.id, existing[0].id));
       return { id: existing[0].id, source: row.source, sourceProductId: row.sourceProductId, matchedBookId: existing[0].matchedBookId, syncStatus: existing[0].syncStatus };
     }
     const result = await db.insert(externalBookSources).values(values).returning({ id: externalBookSources.id });
-    const id4 = Number(result[0].id);
-    return { id: id4, source: row.source, sourceProductId: row.sourceProductId, matchedBookId: null, syncStatus: "pending" };
+    const id5 = Number(result[0].id);
+    return { id: id5, source: row.source, sourceProductId: row.sourceProductId, matchedBookId: null, syncStatus: "pending" };
   },
-  async markExternalSourceOutcome(id4, patch) {
+  async markExternalSourceOutcome(id5, patch) {
     const db = await getDb();
     if (!db) return;
-    await db.update(externalBookSources).set({ matchedBookId: patch.matchedBookId, syncStatus: patch.syncStatus, lastSyncedAt: /* @__PURE__ */ new Date(), errorMessage: patch.errorMessage ?? null }).where(eq21(externalBookSources.id, id4));
+    await db.update(externalBookSources).set({ matchedBookId: patch.matchedBookId, syncStatus: patch.syncStatus, lastSyncedAt: /* @__PURE__ */ new Date(), errorMessage: patch.errorMessage ?? null }).where(eq23(externalBookSources.id, id5));
   },
   async findCatalogBookByIsbn(isbn) {
     const db = await getDb();
     if (!db) return null;
-    const rows = await db.select().from(catalogBooks).where(eq21(catalogBooks.isbn, isbn)).limit(1);
+    const rows = await db.select().from(catalogBooks).where(eq23(catalogBooks.isbn, isbn)).limit(1);
     return rows[0] ? toCatalogBookRow(rows[0]) : null;
   },
   async listCatalogBooksByPublisher(publisherId) {
     const db = await getDb();
     if (!db) return [];
-    const rows = await db.select().from(catalogBooks).where(eq21(catalogBooks.publisherId, publisherId));
+    const rows = await db.select().from(catalogBooks).where(eq23(catalogBooks.publisherId, publisherId));
     return rows.map((row) => ({ id: row.id, isbn: row.isbn, publisherId: row.publisherId, name: row.name, editionYear: row.editionYear }));
   },
-  async getCatalogBookById(id4) {
+  async getCatalogBookById(id5) {
     const db = await getDb();
     if (!db) return null;
-    const rows = await db.select().from(catalogBooks).where(eq21(catalogBooks.id, id4)).limit(1);
+    const rows = await db.select().from(catalogBooks).where(eq23(catalogBooks.id, id5)).limit(1);
     return rows[0] ? toCatalogBookRow(rows[0]) : null;
   },
   async createCatalogBook(input) {
@@ -10042,12 +10609,12 @@ var catalogDb = {
       subject: input.subject,
       metadata: input.metadata ? JSON.stringify(input.metadata) : null
     }).returning({ id: catalogBooks.id });
-    const id4 = Number(result[0].id);
-    const row = await this.getCatalogBookById(id4);
+    const id5 = Number(result[0].id);
+    const row = await this.getCatalogBookById(id5);
     if (!row) throw new Error("Failed to read back created catalog book");
     return row;
   },
-  async updateCatalogBook(id4, patch) {
+  async updateCatalogBook(id5, patch) {
     const db = await getDb();
     if (!db) throw new Error("Database not available");
     const values = {};
@@ -10062,13 +10629,13 @@ var catalogDb = {
     if (patch.subject !== void 0) values.subject = patch.subject;
     if (patch.metadata !== void 0) values.metadata = patch.metadata ? JSON.stringify(patch.metadata) : null;
     if (Object.keys(values).length > 0) {
-      await db.update(catalogBooks).set(values).where(eq21(catalogBooks.id, id4));
+      await db.update(catalogBooks).set(values).where(eq23(catalogBooks.id, id5));
     }
-    const row = await this.getCatalogBookById(id4);
-    if (!row) throw new Error(`Catalog book ${id4} not found after update`);
+    const row = await this.getCatalogBookById(id5);
+    if (!row) throw new Error(`Catalog book ${id5} not found after update`);
     return row;
   },
-  async updateCatalogBookDifficulty(id4, patch) {
+  async updateCatalogBookDifficulty(id5, patch) {
     const db = await getDb();
     if (!db) return;
     await db.update(catalogBooks).set({
@@ -10078,15 +10645,15 @@ var catalogDb = {
       classificationMethod: patch.classificationMethod,
       needsReview: patch.needsReview ? 1 : 0,
       classifiedAt: patch.classifiedAt
-    }).where(eq21(catalogBooks.id, id4));
+    }).where(eq23(catalogBooks.id, id5));
   },
   async upsertBookOffer(input) {
     const db = await getDb();
     if (!db) return;
-    const existing = await db.select().from(bookOffers).where(and18(eq21(bookOffers.bookId, input.bookId), eq21(bookOffers.source, input.source))).limit(1);
+    const existing = await db.select().from(bookOffers).where(and20(eq23(bookOffers.bookId, input.bookId), eq23(bookOffers.source, input.source))).limit(1);
     const values = { price: input.price !== null ? String(input.price) : null, currency: input.currency, productUrl: input.productUrl, lastSyncedAt: /* @__PURE__ */ new Date() };
     if (existing[0]) {
-      await db.update(bookOffers).set(values).where(eq21(bookOffers.id, existing[0].id));
+      await db.update(bookOffers).set(values).where(eq23(bookOffers.id, existing[0].id));
     } else {
       await db.insert(bookOffers).values({ bookId: input.bookId, source: input.source, ...values });
     }
@@ -10100,10 +10667,10 @@ var catalogDb = {
   async upsertBookCurriculumMapping(input) {
     const db = await getDb();
     if (!db) return;
-    const existing = await db.select().from(bookCurriculumTopics).where(and18(eq21(bookCurriculumTopics.bookId, input.bookId), eq21(bookCurriculumTopics.topicId, input.topicId))).limit(1);
+    const existing = await db.select().from(bookCurriculumTopics).where(and20(eq23(bookCurriculumTopics.bookId, input.bookId), eq23(bookCurriculumTopics.topicId, input.topicId))).limit(1);
     if (existing[0]) {
       if (existing[0].isVerified === 1) return;
-      await db.update(bookCurriculumTopics).set({ confidence: String(input.confidence), mappingMethod: "rule" }).where(eq21(bookCurriculumTopics.id, existing[0].id));
+      await db.update(bookCurriculumTopics).set({ confidence: String(input.confidence), mappingMethod: "rule" }).where(eq23(bookCurriculumTopics.id, existing[0].id));
     } else {
       await db.insert(bookCurriculumTopics).values({ bookId: input.bookId, topicId: input.topicId, confidence: String(input.confidence), mappingMethod: "rule" });
     }
@@ -10114,8 +10681,8 @@ var catalogDb = {
     const result = await db.insert(resourceCatalogSyncLogs).values({ source: input.source, startedAt: input.startedAt, dryRun: input.dryRun ? 1 : 0, triggeredBy: input.triggeredBy }).returning({ id: resourceCatalogSyncLogs.id });
     return { id: Number(result[0].id) };
   },
-  async finishSyncLog(id4, patch) {
-    if (id4 < 0) return;
+  async finishSyncLog(id5, patch) {
+    if (id5 < 0) return;
     const db = await getDb();
     if (!db) return;
     await db.update(resourceCatalogSyncLogs).set({
@@ -10128,7 +10695,7 @@ var catalogDb = {
       needsReview: patch.needsReview,
       statsJson: patch.statsJson,
       errorLog: patch.errorLog
-    }).where(eq21(resourceCatalogSyncLogs.id, id4));
+    }).where(eq23(resourceCatalogSyncLogs.id, id5));
   }
 };
 async function listResourceCatalogSyncLogs(limit = 20) {
@@ -10139,27 +10706,27 @@ async function listResourceCatalogSyncLogs(limit = 20) {
 async function listNeedsReviewBooks() {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(catalogBooks).where(eq21(catalogBooks.needsReview, 1));
+  return db.select().from(catalogBooks).where(eq23(catalogBooks.needsReview, 1));
 }
 async function setManualDifficulty(bookId, input) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(catalogBooks).set({ difficultyLabel: input.label, difficultyScore: input.score, difficultyConfidence: "1", classificationMethod: "manual", manualOverride: 1, needsReview: 0, classifiedAt: /* @__PURE__ */ new Date() }).where(eq21(catalogBooks.id, bookId));
+  await db.update(catalogBooks).set({ difficultyLabel: input.label, difficultyScore: input.score, difficultyConfidence: "1", classificationMethod: "manual", manualOverride: 1, needsReview: 0, classifiedAt: /* @__PURE__ */ new Date() }).where(eq23(catalogBooks.id, bookId));
 }
 async function approveCatalogBookClassification(bookId) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(catalogBooks).set({ needsReview: 0 }).where(eq21(catalogBooks.id, bookId));
+  await db.update(catalogBooks).set({ needsReview: 0 }).where(eq23(catalogBooks.id, bookId));
 }
 async function markCatalogBookNeedsReview(bookId, needsReview) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(catalogBooks).set({ needsReview: needsReview ? 1 : 0 }).where(eq21(catalogBooks.id, bookId));
+  await db.update(catalogBooks).set({ needsReview: needsReview ? 1 : 0 }).where(eq23(catalogBooks.id, bookId));
 }
 async function setCatalogBookActive(bookId, active) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(catalogBooks).set({ active: active ? 1 : 0 }).where(eq21(catalogBooks.id, bookId));
+  await db.update(catalogBooks).set({ active: active ? 1 : 0 }).where(eq23(catalogBooks.id, bookId));
 }
 async function resolveOrCreatePublisherByName(rawName) {
   const trimmed = rawName.trim();
@@ -10237,26 +10804,26 @@ function slugForBook(name, publisherName) {
 }
 
 // server/routers/resourceCatalogAdmin.ts
-var bookTypeEnum = z12.enum(["question_bank", "topic_explanation", "topic_explanation_question_bank", "mock_exam", "fasikul", "past_questions", "camp", "test_book", "reference", "other"]);
-var examScopeEnum = z12.enum(["TYT", "AYT", "TYT_AYT", "YKS", "GENEL"]);
-var catalogBookInput = z12.object({
-  name: z12.string().trim().min(1).max(300),
-  publisherName: z12.string().trim().max(120).optional(),
-  isbn: z12.string().trim().max(32).optional(),
-  editionYear: z12.number().int().min(1990).max(2100).optional(),
-  description: z12.string().trim().max(2e3).optional(),
-  imageUrl: z12.string().trim().max(500).optional(),
+var bookTypeEnum = z13.enum(["question_bank", "topic_explanation", "topic_explanation_question_bank", "mock_exam", "fasikul", "past_questions", "camp", "test_book", "reference", "other"]);
+var examScopeEnum = z13.enum(["TYT", "AYT", "TYT_AYT", "YKS", "LGS", "GENEL"]);
+var catalogBookInput = z13.object({
+  name: z13.string().trim().min(1).max(300),
+  publisherName: z13.string().trim().max(120).optional(),
+  isbn: z13.string().trim().max(32).optional(),
+  editionYear: z13.number().int().min(1990).max(2100).optional(),
+  description: z13.string().trim().max(2e3).optional(),
+  imageUrl: z13.string().trim().max(500).optional(),
   bookType: bookTypeEnum,
   examScope: examScopeEnum,
-  subject: z12.string().trim().max(80).optional()
+  subject: z13.string().trim().max(80).optional()
 });
 var resourceCatalogAdminRouter = router({
   needsReview: adminProcedure.query(() => listNeedsReviewBooks()),
-  syncLogs: adminProcedure.input(z12.object({ limit: z12.number().int().min(1).max(100).default(20) }).optional()).query(({ input }) => listResourceCatalogSyncLogs(input?.limit ?? 20)),
-  approve: adminProcedure.input(z12.object({ bookId: z12.number().int() })).mutation(({ input }) => approveCatalogBookClassification(input.bookId)),
-  setDifficulty: adminProcedure.input(z12.object({ bookId: z12.number().int(), label: z12.enum(["easy", "medium", "hard"]), score: z12.number().int().min(0).max(100) })).mutation(({ input }) => setManualDifficulty(input.bookId, { label: input.label, score: input.score })),
-  markNeedsReview: adminProcedure.input(z12.object({ bookId: z12.number().int(), needsReview: z12.boolean() })).mutation(({ input }) => markCatalogBookNeedsReview(input.bookId, input.needsReview)),
-  list: adminProcedure.input(z12.object({ page: z12.number().int().min(1).default(1), pageSize: z12.number().int().min(1).max(100).default(30), search: z12.string().max(120).optional(), subject: z12.string().max(80).optional(), active: z12.boolean().optional() })).query(async ({ input }) => {
+  syncLogs: adminProcedure.input(z13.object({ limit: z13.number().int().min(1).max(100).default(20) }).optional()).query(({ input }) => listResourceCatalogSyncLogs(input?.limit ?? 20)),
+  approve: adminProcedure.input(z13.object({ bookId: z13.number().int() })).mutation(({ input }) => approveCatalogBookClassification(input.bookId)),
+  setDifficulty: adminProcedure.input(z13.object({ bookId: z13.number().int(), label: z13.enum(["easy", "medium", "hard"]), score: z13.number().int().min(0).max(100) })).mutation(({ input }) => setManualDifficulty(input.bookId, { label: input.label, score: input.score })),
+  markNeedsReview: adminProcedure.input(z13.object({ bookId: z13.number().int(), needsReview: z13.boolean() })).mutation(({ input }) => markCatalogBookNeedsReview(input.bookId, input.needsReview)),
+  list: adminProcedure.input(z13.object({ page: z13.number().int().min(1).default(1), pageSize: z13.number().int().min(1).max(100).default(30), search: z13.string().max(120).optional(), subject: z13.string().max(80).optional(), active: z13.boolean().optional() })).query(async ({ input }) => {
     const { page: page2, pageSize, ...filters } = input;
     const { items, total } = await listCatalogBooksForAdmin(filters, { page: page2, pageSize });
     return { items, total, page: page2, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
@@ -10295,22 +10862,22 @@ var resourceCatalogAdminRouter = router({
           metadata: { source: "admin_manual" }
         });
       } catch {
-        throw new TRPCError10({ code: "CONFLICT", message: "Bu isim ve yay\u0131nevi ile bir kaynak zaten kay\u0131tl\u0131 olabilir. Farkl\u0131 bir isim dener misin?" });
+        throw new TRPCError11({ code: "CONFLICT", message: "Bu isim ve yay\u0131nevi ile bir kaynak zaten kay\u0131tl\u0131 olabilir. Farkl\u0131 bir isim dener misin?" });
       }
     }
   }),
   update: adminProcedure.input(
-    z12.object({
-      bookId: z12.number().int(),
-      name: z12.string().trim().min(1).max(300).optional(),
-      publisherName: z12.string().trim().max(120).optional(),
-      isbn: z12.string().trim().max(32).optional(),
-      editionYear: z12.number().int().min(1990).max(2100).optional(),
-      description: z12.string().trim().max(2e3).optional(),
-      imageUrl: z12.string().trim().max(500).optional(),
+    z13.object({
+      bookId: z13.number().int(),
+      name: z13.string().trim().min(1).max(300).optional(),
+      publisherName: z13.string().trim().max(120).optional(),
+      isbn: z13.string().trim().max(32).optional(),
+      editionYear: z13.number().int().min(1990).max(2100).optional(),
+      description: z13.string().trim().max(2e3).optional(),
+      imageUrl: z13.string().trim().max(500).optional(),
       bookType: bookTypeEnum.optional(),
       examScope: examScopeEnum.optional(),
-      subject: z12.string().trim().max(80).optional()
+      subject: z13.string().trim().max(80).optional()
     })
   ).mutation(async ({ input }) => {
     const { bookId, publisherName, ...rest } = input;
@@ -10320,25 +10887,25 @@ var resourceCatalogAdminRouter = router({
       ...publisherId !== void 0 ? { publisherId } : {}
     });
   }),
-  setActive: adminProcedure.input(z12.object({ bookId: z12.number().int(), active: z12.boolean() })).mutation(({ input }) => setCatalogBookActive(input.bookId, input.active))
+  setActive: adminProcedure.input(z13.object({ bookId: z13.number().int(), active: z13.boolean() })).mutation(({ input }) => setCatalogBookActive(input.bookId, input.active))
 });
 
 // server/routers/resourceCatalog.ts
-var bookTypeEnum2 = z13.enum(["question_bank", "topic_explanation", "topic_explanation_question_bank", "mock_exam", "fasikul", "past_questions", "camp", "test_book", "reference", "other"]);
-var examScopeEnum2 = z13.enum(["TYT", "AYT", "TYT_AYT", "YKS", "GENEL"]);
-var difficultyEnum = z13.enum(["easy", "medium", "hard"]);
-var listInput = z13.object({
-  page: z13.number().int().min(1).default(1),
-  pageSize: z13.number().int().min(1).max(60).default(24),
+var bookTypeEnum2 = z14.enum(["question_bank", "topic_explanation", "topic_explanation_question_bank", "mock_exam", "fasikul", "past_questions", "camp", "test_book", "reference", "other"]);
+var examScopeEnum2 = z14.enum(["TYT", "AYT", "TYT_AYT", "YKS", "LGS", "GENEL"]);
+var difficultyEnum = z14.enum(["easy", "medium", "hard"]);
+var listInput = z14.object({
+  page: z14.number().int().min(1).default(1),
+  pageSize: z14.number().int().min(1).max(60).default(24),
   exam: examScopeEnum2.optional(),
-  subject: z13.string().max(80).optional(),
-  publisherId: z13.number().int().optional(),
+  subject: z14.string().max(80).optional(),
+  publisherId: z14.number().int().optional(),
   bookType: bookTypeEnum2.optional(),
   difficulty: difficultyEnum.optional(),
-  minPrice: z13.number().min(0).optional(),
-  maxPrice: z13.number().min(0).optional(),
-  search: z13.string().max(120).optional(),
-  topic: z13.string().max(180).optional()
+  minPrice: z14.number().min(0).optional(),
+  maxPrice: z14.number().min(0).optional(),
+  search: z14.string().max(120).optional(),
+  topic: z14.string().max(180).optional()
 });
 var resourceCatalogRouter = router({
   list: publicProcedure.input(listInput).query(async ({ input }) => {
@@ -10346,15 +10913,15 @@ var resourceCatalogRouter = router({
     const { items, total } = await listCatalogBooks(filters, { page: page2, pageSize });
     return { items, total, page: page2, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
   }),
-  get: publicProcedure.input(z13.object({ slug: z13.string().min(1).max(320) })).query(async ({ input }) => {
+  get: publicProcedure.input(z14.object({ slug: z14.string().min(1).max(320) })).query(async ({ input }) => {
     const book = await getCatalogBookBySlug(input.slug);
-    if (!book) throw new TRPCError11({ code: "NOT_FOUND", message: "Kaynak bulunamad\u0131" });
+    if (!book) throw new TRPCError12({ code: "NOT_FOUND", message: "Kaynak bulunamad\u0131" });
     return book;
   }),
   publishers: publicProcedure.query(() => listPublishersForFilter()),
   /** "Seviyene Uygun Kaynaklar" — deterministic, explainable per-topic
    * recommendations built from the student's own topic progress (spec §21/§34). */
-  recommendations: protectedProcedure.input(z13.object({ subject: z13.string().max(80).optional(), limit: z13.number().int().min(1).max(30).default(12) })).query(async ({ ctx, input }) => {
+  recommendations: protectedProcedure.input(z14.object({ subject: z14.string().max(80).optional(), limit: z14.number().int().min(1).max(30).default(12) })).query(async ({ ctx, input }) => {
     const progress = await getUserTopicProgress(ctx.user.id);
     const allTopics = progress.map((p) => ({ subject: p.subject, topic: p.topic, exam: p.exam, accuracy: p.progress, status: p.status }));
     const topics = input.subject ? allTopics.filter((t2) => t2.subject === input.subject) : allTopics;
@@ -10371,12 +10938,13 @@ var resourceCatalogRouter = router({
 });
 
 // server/routers/onboarding.ts
-import { TRPCError as TRPCError12 } from "@trpc/server";
-import { z as z14 } from "zod";
+import { TRPCError as TRPCError13 } from "@trpc/server";
+import { z as z15 } from "zod";
 
 // shared/onboarding.ts
 var AVATAR_STYLES = ["girl", "boy"];
-var GRADE_LEVELS = ["9", "10", "11", "12", "mezun"];
+var GRADE_LEVELS = ["7", "8", "9", "10", "11", "12", "mezun"];
+var gradeLevelsFor = (track) => track === "LGS" ? ["7", "8"] : ["9", "10", "11", "12", "mezun"];
 var TARGET_SCORE_TYPES = ["SAY", "EA", "SOZ", "DIL", "TYT", "belirsiz"];
 var MOCK_EXAM_FREQUENCIES = ["haftada_birkac", "haftada_bir", "ayda_birkac", "nadiren", "henuz_cozmedim"];
 var STUDY_DAYS = ["Pazartesi", "Sal\u0131", "\xC7ar\u015Famba", "Per\u015Fembe", "Cuma", "Cumartesi", "Pazar"];
@@ -10396,11 +10964,13 @@ var TOTAL_ONBOARDING_STEPS = ONBOARDING_STEP_META.length;
 var emptyOnboardingDraft = () => ({
   preferredName: "",
   avatarStyle: "",
+  examTrack: "",
   gradeLevel: "",
   examYear: "",
   targetScoreType: "",
   currentTytNet: "",
   currentAytNet: "",
+  currentLgsNet: "",
   mockExamFrequency: "",
   strongSubjects: [],
   weakSubjects: [],
@@ -10408,6 +10978,8 @@ var emptyOnboardingDraft = () => ({
   targetUniversity: "",
   targetDepartment: "",
   targetRanking: "",
+  targetHighSchool: "",
+  targetLgsScore: "",
   mainGoal: "",
   shortTermGoal: "",
   longTermGoal: "",
@@ -10427,7 +10999,9 @@ function validateOnboardingStep(step, draft) {
   const errors = {};
   if (step === 0) {
     if (!draft.preferredName.trim()) errors.preferredName = "Sana nas\u0131l hitap edelim, yazar m\u0131s\u0131n?";
+    if (!draft.examTrack) errors.examTrack = "Hangi s\u0131nava haz\u0131rland\u0131\u011F\u0131n\u0131 se\xE7.";
     if (!draft.gradeLevel) errors.gradeLevel = "S\u0131n\u0131f d\xFCzeyini se\xE7.";
+    else if (draft.examTrack && !gradeLevelsFor(draft.examTrack).includes(draft.gradeLevel)) errors.gradeLevel = "Bu s\u0131nav i\xE7in s\u0131n\u0131f d\xFCzeyini yeniden se\xE7.";
     if (!draft.examYear.trim()) errors.examYear = "Hedef s\u0131nav y\u0131l\u0131n\u0131 gir.";
     else {
       const year = Number(draft.examYear);
@@ -10435,7 +11009,11 @@ function validateOnboardingStep(step, draft) {
         errors.examYear = `${currentYear} ile ${currentYear + 6} aras\u0131nda bir y\u0131l gir.`;
       }
     }
-    if (!draft.targetScoreType) errors.targetScoreType = "Hedef puan t\xFCr\xFCn\xFC se\xE7.";
+    if (draft.examTrack !== "LGS" && !draft.targetScoreType) errors.targetScoreType = "Hedef puan t\xFCr\xFCn\xFC se\xE7.";
+  }
+  if (step === 2 && draft.targetLgsScore.trim()) {
+    const score = Number(draft.targetLgsScore.replace(",", "."));
+    if (!Number.isFinite(score) || score < 100 || score > 500) errors.targetLgsScore = "LGS puan\u0131 100 ile 500 aras\u0131nda olmal\u0131 (iste\u011Fe ba\u011Fl\u0131).";
   }
   if (step === 1) {
   }
@@ -10458,50 +11036,56 @@ function validateOnboardingStep(step, draft) {
 }
 
 // server/routers/onboarding.ts
-var enumOrBlank = (values) => z14.union([z14.enum(values), z14.literal("")]);
-var draftSchema = z14.object({
-  preferredName: z14.string().trim().max(120).optional(),
+var enumOrBlank = (values) => z15.union([z15.enum(values), z15.literal("")]);
+var draftSchema = z15.object({
+  preferredName: z15.string().trim().max(120).optional(),
   avatarStyle: enumOrBlank(AVATAR_STYLES).optional(),
+  examTrack: enumOrBlank(EXAM_TRACKS).optional(),
   gradeLevel: enumOrBlank(GRADE_LEVELS).optional(),
-  examYear: z14.string().max(4).optional(),
+  examYear: z15.string().max(4).optional(),
   targetScoreType: enumOrBlank(TARGET_SCORE_TYPES).optional(),
-  currentTytNet: z14.string().trim().max(40).optional(),
-  currentAytNet: z14.string().trim().max(40).optional(),
+  currentTytNet: z15.string().trim().max(40).optional(),
+  currentAytNet: z15.string().trim().max(40).optional(),
+  currentLgsNet: z15.string().trim().max(40).optional(),
   mockExamFrequency: enumOrBlank(MOCK_EXAM_FREQUENCIES).optional(),
-  strongSubjects: z14.array(z14.string().max(40)).max(15).optional(),
-  weakSubjects: z14.array(z14.string().max(40)).max(15).optional(),
+  strongSubjects: z15.array(z15.string().max(40)).max(15).optional(),
+  weakSubjects: z15.array(z15.string().max(40)).max(15).optional(),
   hasPriorStudyPlan: enumOrBlank(["yes", "no"]).optional(),
-  targetUniversity: z14.string().trim().max(180).optional(),
-  targetDepartment: z14.string().trim().max(180).optional(),
-  targetRanking: z14.string().trim().max(60).optional(),
-  mainGoal: z14.string().trim().max(500).optional(),
-  shortTermGoal: z14.string().trim().max(500).optional(),
-  longTermGoal: z14.string().trim().max(500).optional(),
-  dailyStudyDuration: z14.string().max(6).optional(),
-  preferredStudyStartTime: z14.string().max(5).optional(),
-  availableStudyDays: z14.array(z14.enum(STUDY_DAYS)).max(7).optional(),
-  preferredStudyTimes: z14.array(z14.enum(STUDY_TIMES)).max(4).optional(),
-  preferredStudyMethods: z14.array(z14.enum(STUDY_METHODS)).max(5).optional(),
-  studyObstacles: z14.string().trim().max(500).optional(),
-  coachingExpectations: z14.array(z14.enum(COACHING_EXPECTATIONS)).max(7).optional(),
+  targetUniversity: z15.string().trim().max(180).optional(),
+  targetDepartment: z15.string().trim().max(180).optional(),
+  targetRanking: z15.string().trim().max(60).optional(),
+  targetHighSchool: z15.string().trim().max(180).optional(),
+  targetLgsScore: z15.string().trim().max(20).optional(),
+  mainGoal: z15.string().trim().max(500).optional(),
+  shortTermGoal: z15.string().trim().max(500).optional(),
+  longTermGoal: z15.string().trim().max(500).optional(),
+  dailyStudyDuration: z15.string().max(6).optional(),
+  preferredStudyStartTime: z15.string().max(5).optional(),
+  availableStudyDays: z15.array(z15.enum(STUDY_DAYS)).max(7).optional(),
+  preferredStudyTimes: z15.array(z15.enum(STUDY_TIMES)).max(4).optional(),
+  preferredStudyMethods: z15.array(z15.enum(STUDY_METHODS)).max(5).optional(),
+  studyObstacles: z15.string().trim().max(500).optional(),
+  coachingExpectations: z15.array(z15.enum(COACHING_EXPECTATIONS)).max(7).optional(),
   notificationPreference: enumOrBlank(NOTIFICATION_PREFERENCES).optional(),
   coachingStyle: enumOrBlank(COACHING_STYLES).optional(),
-  additionalNotes: z14.string().trim().max(1e3).optional()
+  additionalNotes: z15.string().trim().max(1e3).optional()
 });
-var saveStepInput = z14.object({
-  step: z14.number().int().min(0).max(TOTAL_ONBOARDING_STEPS - 1),
+var saveStepInput = z15.object({
+  step: z15.number().int().min(0).max(TOTAL_ONBOARDING_STEPS - 1),
   data: draftSchema,
-  complete: z14.boolean().optional()
+  complete: z15.boolean().optional()
 });
 function draftToPatch(data) {
   const patch = {};
   if (data.preferredName !== void 0) patch.preferredName = data.preferredName || null;
   if (data.avatarStyle !== void 0) patch.avatarStyle = data.avatarStyle || null;
+  if (data.examTrack) patch.examTrack = data.examTrack;
   if (data.gradeLevel !== void 0) patch.gradeLevel = data.gradeLevel || null;
   if (data.examYear !== void 0) patch.examYear = data.examYear ? Number(data.examYear) : null;
   if (data.targetScoreType !== void 0) patch.targetScoreType = data.targetScoreType || null;
   if (data.currentTytNet !== void 0) patch.currentTytNet = data.currentTytNet || null;
   if (data.currentAytNet !== void 0) patch.currentAytNet = data.currentAytNet || null;
+  if (data.currentLgsNet !== void 0) patch.currentLgsNet = data.currentLgsNet || null;
   if (data.mockExamFrequency !== void 0) patch.mockExamFrequency = data.mockExamFrequency || null;
   if (data.strongSubjects !== void 0) patch.strongSubjects = data.strongSubjects;
   if (data.weakSubjects !== void 0) patch.weakSubjects = data.weakSubjects;
@@ -10509,6 +11093,8 @@ function draftToPatch(data) {
   if (data.targetUniversity !== void 0) patch.targetUniversity = data.targetUniversity || null;
   if (data.targetDepartment !== void 0) patch.targetDepartment = data.targetDepartment || null;
   if (data.targetRanking !== void 0) patch.targetRanking = data.targetRanking || null;
+  if (data.targetHighSchool !== void 0) patch.targetHighSchool = data.targetHighSchool || null;
+  if (data.targetLgsScore !== void 0) patch.targetLgsScore = data.targetLgsScore || null;
   if (data.mainGoal !== void 0) patch.mainGoal = data.mainGoal || null;
   if (data.shortTermGoal !== void 0) patch.shortTermGoal = data.shortTermGoal || null;
   if (data.longTermGoal !== void 0) patch.longTermGoal = data.longTermGoal || null;
@@ -10527,10 +11113,10 @@ function draftToPatch(data) {
 var onboardingRouter = router({
   get: protectedProcedure.query(({ ctx }) => getStudentProfile(ctx.user.id)),
   saveStep: protectedProcedure.input(saveStepInput).mutation(async ({ ctx, input }) => {
-    const draftForValidation = { ...emptyOnboardingDraft(), ...input.data };
+    const draftForValidation = { ...emptyOnboardingDraft(), examTrack: "YKS", ...input.data };
     const errors = validateOnboardingStep(input.step, draftForValidation);
     if (Object.keys(errors).length > 0) {
-      throw new TRPCError12({ code: "BAD_REQUEST", message: Object.values(errors)[0] });
+      throw new TRPCError13({ code: "BAD_REQUEST", message: Object.values(errors)[0] });
     }
     await upsertStudentProfileStep(ctx.user.id, input.step, draftToPatch(input.data));
     if (input.complete) await completeOnboarding(ctx.user.id);
@@ -10538,20 +11124,20 @@ var onboardingRouter = router({
   }),
   complete: protectedProcedure.mutation(({ ctx }) => completeOnboarding(ctx.user.id)),
   // Genel Bakış'taki tek tıkla avatar seçimi (null = nötr tasarım).
-  setAvatar: protectedProcedure.input(z14.object({ avatarStyle: z14.enum(AVATAR_STYLES).nullable() })).mutation(({ ctx, input }) => setStudentAvatarStyle(ctx.user.id, input.avatarStyle)),
+  setAvatar: protectedProcedure.input(z15.object({ avatarStyle: z15.enum(AVATAR_STYLES).nullable() })).mutation(({ ctx, input }) => setStudentAvatarStyle(ctx.user.id, input.avatarStyle)),
   // Pazar akşamı giden haftalık ilerleme e-postası (profil menüsündeki seçenek).
   weeklyDigest: protectedProcedure.query(async ({ ctx }) => ({ enabled: await getWeeklyDigestEnabled(ctx.user.id) })),
-  setWeeklyDigest: protectedProcedure.input(z14.object({ enabled: z14.boolean() })).mutation(async ({ ctx, input }) => ({ enabled: await setWeeklyDigestEnabled(ctx.user.id, input.enabled) }))
+  setWeeklyDigest: protectedProcedure.input(z15.object({ enabled: z15.boolean() })).mutation(async ({ ctx, input }) => ({ enabled: await setWeeklyDigestEnabled(ctx.user.id, input.enabled) }))
 });
 
 // server/routers/subscription.ts
-import { z as z15 } from "zod";
+import { z as z16 } from "zod";
 var subscriptionRouter = router({
   getPlans: publicProcedure.query(() => listActivePlans()),
   // Client'ın useEntitlement() hook'unun okuduğu tek snapshot (spec §8).
   getCurrent: protectedProcedure.query(({ ctx }) => getEntitlements(ctx.user.id)),
   getEntitlements: protectedProcedure.query(({ ctx }) => getEntitlements(ctx.user.id)),
-  cancel: protectedProcedure.input(z15.object({ immediate: z15.boolean().optional() })).mutation(async ({ ctx, input }) => {
+  cancel: protectedProcedure.input(z16.object({ immediate: z16.boolean().optional() })).mutation(async ({ ctx, input }) => {
     const current = await getCurrentSubscription(ctx.user.id);
     const nextStatus = input.immediate ? "canceled" : current.status;
     if (input.immediate) assertValidSubscriptionTransition(current.status, "canceled");
@@ -10567,7 +11153,7 @@ var subscriptionRouter = router({
     await writeAuditLog({ userId: ctx.user.id, action: "user_resumed", oldState: { status: current.status }, newState: { status: "active" } });
     return getEntitlements(ctx.user.id);
   }),
-  restore: protectedProcedure.input(z15.object({ providerToken: z15.string().min(1) })).mutation(async ({ ctx, input }) => {
+  restore: protectedProcedure.input(z16.object({ providerToken: z16.string().min(1) })).mutation(async ({ ctx, input }) => {
     const provider = paymentProviderFactory();
     const result = await provider.restorePurchase({ userId: ctx.user.id, providerToken: input.providerToken });
     if (!result.valid) throw new Error(result.reason ?? "Sat\u0131n alma do\u011Frulanamad\u0131");
@@ -10577,9 +11163,9 @@ var subscriptionRouter = router({
 });
 
 // server/routers/payment.ts
-import { z as z16 } from "zod";
+import { z as z17 } from "zod";
 var paymentRouter = router({
-  createCheckout: protectedProcedure.input(z16.object({ planCode: z16.string().min(1), successUrl: z16.string().url(), cancelUrl: z16.string().url() })).mutation(async ({ ctx, input }) => {
+  createCheckout: protectedProcedure.input(z17.object({ planCode: z17.string().min(1), successUrl: z17.string().url(), cancelUrl: z17.string().url() })).mutation(async ({ ctx, input }) => {
     const plan = await getPlanByCode(input.planCode);
     if (!plan || !plan.isActive) throw new Error("Ge\xE7ersiz veya pasif plan.");
     const provider = paymentProviderFactory();
@@ -10597,7 +11183,7 @@ var paymentRouter = router({
    * `PAYMENT_PROVIDER` gerçek bir sağlayıcıya çevrildiğinde bu uç nokta
    * otomatik olarak devre dışı kalır.
    */
-  completeMockCheckout: protectedProcedure.input(z16.object({ planCode: z16.string().min(1) })).mutation(async ({ ctx, input }) => {
+  completeMockCheckout: protectedProcedure.input(z17.object({ planCode: z17.string().min(1) })).mutation(async ({ ctx, input }) => {
     if (ENV.paymentProvider !== "mock") {
       throw new Error("Bu u\xE7 nokta yaln\u0131zca PAYMENT_PROVIDER=mock iken kullan\u0131labilir.");
     }
@@ -10616,7 +11202,7 @@ var paymentRouter = router({
 });
 
 // server/admin/analyticsService.ts
-import { and as and19, count as count2, eq as eq22, gte as gte12, isNotNull as isNotNull6, lt as lt9, sql as sql10 } from "drizzle-orm";
+import { and as and21, count as count2, eq as eq24, gte as gte14, isNotNull as isNotNull7, lt as lt10, sql as sql10 } from "drizzle-orm";
 async function getAdminDashboardKpis() {
   const db = await getDb();
   const empty = {
@@ -10647,15 +11233,15 @@ async function getAdminDashboardKpis() {
   const [approvalCounts, accountStatusCounts, planStatusCounts, activeTodayRow, activeWeekRow, inactive7Row, inactive30Row, totalRow, trialStartedRow, stillTrialingRow, convertedRow] = await Promise.all([
     db.select({ approvalStatus: users.approvalStatus, total: count2() }).from(users).groupBy(users.approvalStatus),
     db.select({ accountStatus: users.accountStatus, total: count2() }).from(users).groupBy(users.accountStatus),
-    db.select({ tier: subscriptionPlans.tier, billingPeriod: subscriptionPlans.billingPeriod, status: subscriptions.status, total: count2() }).from(subscriptions).innerJoin(subscriptionPlans, eq22(subscriptionPlans.id, subscriptions.planId)).groupBy(subscriptionPlans.tier, subscriptionPlans.billingPeriod, subscriptions.status),
-    db.select({ total: count2() }).from(users).where(gte12(users.lastSignedIn, todayStart)),
-    db.select({ total: count2() }).from(users).where(gte12(users.lastSignedIn, weekAgo)),
-    db.select({ total: count2() }).from(users).where(lt9(users.lastSignedIn, weekAgo)),
-    db.select({ total: count2() }).from(users).where(lt9(users.lastSignedIn, monthAgo)),
+    db.select({ tier: subscriptionPlans.tier, billingPeriod: subscriptionPlans.billingPeriod, status: subscriptions.status, total: count2() }).from(subscriptions).innerJoin(subscriptionPlans, eq24(subscriptionPlans.id, subscriptions.planId)).groupBy(subscriptionPlans.tier, subscriptionPlans.billingPeriod, subscriptions.status),
+    db.select({ total: count2() }).from(users).where(gte14(users.lastSignedIn, todayStart)),
+    db.select({ total: count2() }).from(users).where(gte14(users.lastSignedIn, weekAgo)),
+    db.select({ total: count2() }).from(users).where(lt10(users.lastSignedIn, weekAgo)),
+    db.select({ total: count2() }).from(users).where(lt10(users.lastSignedIn, monthAgo)),
     db.select({ total: count2() }).from(users),
-    db.select({ total: count2() }).from(subscriptions).where(isNotNull6(subscriptions.trialStartedAt)),
-    db.select({ total: count2() }).from(subscriptions).where(eq22(subscriptions.status, "trialing")),
-    db.select({ total: count2() }).from(subscriptions).where(and19(isNotNull6(subscriptions.trialStartedAt), sql10`${subscriptions.status} in ('active','past_due','grace_period')`))
+    db.select({ total: count2() }).from(subscriptions).where(isNotNull7(subscriptions.trialStartedAt)),
+    db.select({ total: count2() }).from(subscriptions).where(eq24(subscriptions.status, "trialing")),
+    db.select({ total: count2() }).from(subscriptions).where(and21(isNotNull7(subscriptions.trialStartedAt), sql10`${subscriptions.status} in ('active','past_due','grace_period')`))
   ]);
   const kpis = { ...empty, totalUsers: totalRow[0]?.total ?? 0, activeToday: activeTodayRow[0]?.total ?? 0, activeThisWeek: activeWeekRow[0]?.total ?? 0, inactive7Plus: inactive7Row[0]?.total ?? 0, inactive30Plus: inactive30Row[0]?.total ?? 0 };
   for (const row of approvalCounts) {
@@ -10690,34 +11276,34 @@ var adminAnalyticsRouter = router({
 });
 
 // server/routers/admin/audit.ts
-import { z as z17 } from "zod";
+import { z as z18 } from "zod";
 var adminAuditRouter = router({
-  list: adminProcedure.input(z17.object({ userId: z17.number().int().optional(), limit: z17.number().int().min(1).max(500).default(100) })).query(({ input }) => input.userId ? listAuditLogsForUser(input.userId) : listAllAuditLogs(input.limit))
+  list: adminProcedure.input(z18.object({ userId: z18.number().int().optional(), limit: z18.number().int().min(1).max(500).default(100) })).query(({ input }) => input.userId ? listAuditLogsForUser(input.userId) : listAllAuditLogs(input.limit))
 });
 
 // server/routers/admin/errors.ts
-import { z as z18 } from "zod";
+import { z as z19 } from "zod";
 var adminErrorsRouter = router({
-  list: adminProcedure.input(z18.object({ status: z18.enum(["open", "resolved"]).default("open") })).query(({ input }) => listAppErrors(input.status)),
-  resolve: adminProcedure.input(z18.object({ id: z18.number().int().positive() })).mutation(({ input }) => resolveAppError(input.id))
+  list: adminProcedure.input(z19.object({ status: z19.enum(["open", "resolved"]).default("open") })).query(({ input }) => listAppErrors(input.status)),
+  resolve: adminProcedure.input(z19.object({ id: z19.number().int().positive() })).mutation(({ input }) => resolveAppError(input.id))
 });
 
 // server/routers/admin/payments.ts
-import { z as z19 } from "zod";
+import { z as z20 } from "zod";
 var maskId = (value) => !value ? value : value.length <= 8 ? `${value.slice(0, 2)}\u2022\u2022\u2022\u2022` : `${value.slice(0, 4)}\u2022\u2022\u2022\u2022${value.slice(-4)}`;
 var adminPaymentsRouter = router({
   // Kart numarası/CVV gibi bir alan şemada zaten hiç yok (spec §27/§37 — "ASLA saklanmamalı"); providerPaymentId yine de maskelenir.
-  list: adminProcedure.input(z19.object({ limit: z19.number().int().min(1).max(500).default(100) })).query(async ({ input }) => {
+  list: adminProcedure.input(z20.object({ limit: z20.number().int().min(1).max(500).default(100) })).query(async ({ input }) => {
     const rows = await listAllPaymentsForAdmin(input.limit);
     return rows.map((row) => ({ ...row, providerPaymentId: maskId(row.providerPaymentId) }));
   })
 });
 
 // server/routers/admin/subscriptions.ts
-import { z as z20 } from "zod";
+import { z as z21 } from "zod";
 var adminSubscriptionsRouter = router({
   list: adminProcedure.query(() => listAllSubscriptionsForAdmin()),
-  get: adminProcedure.input(z20.object({ userId: z20.number().int() })).query(async ({ input }) => {
+  get: adminProcedure.input(z21.object({ userId: z21.number().int() })).query(async ({ input }) => {
     const [subscription, payments2, auditLogs] = await Promise.all([getSubscriptionByUserId(input.userId), listPaymentsForUser(input.userId), listAuditLogsForUser(input.userId)]);
     return { subscription, payments: payments2, auditLogs };
   }),
@@ -10732,7 +11318,7 @@ var adminSubscriptionsRouter = router({
    * schema'yı yeniden tasarlama, duplicate logic oluşturma" ile tutarlı;
    * bkz. docs/admin/ADMIN-COMMAND-CENTER.md "Known limitations".)
    */
-  grant: adminProcedure.input(z20.object({ userId: z20.number().int(), planCode: z20.string().min(1), days: z20.number().int().min(1).max(3650), reason: z20.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
+  grant: adminProcedure.input(z21.object({ userId: z21.number().int(), planCode: z21.string().min(1), days: z21.number().int().min(1).max(3650), reason: z21.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
     const plan = await getPlanByCode(input.planCode);
     if (!plan) throw new Error(`Plan bulunamad\u0131: ${input.planCode}`);
     const existing = await getSubscriptionByUserId(input.userId);
@@ -10743,7 +11329,7 @@ var adminSubscriptionsRouter = router({
     await writeAuditLog({ userId: input.userId, adminId: ctx.user.id, action: "manual_grant", oldState: existing ? { status: existing.status } : null, newState: { status: "active", planCode: plan.code, until: periodEnd.toISOString() }, reason: input.reason });
     return getSubscriptionByUserId(input.userId);
   }),
-  revoke: adminProcedure.input(z20.object({ userId: z20.number().int(), reason: z20.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
+  revoke: adminProcedure.input(z21.object({ userId: z21.number().int(), reason: z21.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
     const existing = await getSubscriptionByUserId(input.userId);
     if (!existing) throw new Error("Abonelik bulunamad\u0131");
     const freePlan = await getPlanByCode("FREE");
@@ -10753,7 +11339,7 @@ var adminSubscriptionsRouter = router({
     await writeAuditLog({ userId: input.userId, adminId: ctx.user.id, action: "manual_revoke", oldState: { status: existing.status }, newState: { status: "canceled", planCode: "FREE" }, reason: input.reason });
     return getSubscriptionByUserId(input.userId);
   }),
-  cancel: adminProcedure.input(z20.object({ userId: z20.number().int(), reason: z20.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
+  cancel: adminProcedure.input(z21.object({ userId: z21.number().int(), reason: z21.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
     const existing = await getSubscriptionByUserId(input.userId);
     if (!existing) throw new Error("Abonelik bulunamad\u0131");
     assertValidSubscriptionTransition(existing.status, "canceled");
@@ -10761,7 +11347,7 @@ var adminSubscriptionsRouter = router({
     await writeAuditLog({ userId: input.userId, adminId: ctx.user.id, action: "admin_canceled", oldState: { status: existing.status }, newState: { status: "canceled" }, reason: input.reason });
     return getSubscriptionByUserId(input.userId);
   }),
-  resume: adminProcedure.input(z20.object({ userId: z20.number().int() })).mutation(async ({ ctx, input }) => {
+  resume: adminProcedure.input(z21.object({ userId: z21.number().int() })).mutation(async ({ ctx, input }) => {
     const existing = await getSubscriptionByUserId(input.userId);
     if (!existing) throw new Error("Abonelik bulunamad\u0131");
     assertValidSubscriptionTransition(existing.status, "active");
@@ -10841,19 +11427,19 @@ var adminSystemRouter = router({
 });
 
 // server/routers/admin/testimonials.ts
-import { z as z21 } from "zod";
+import { z as z22 } from "zod";
 
 // server/testimonials/testimonials.ts
-import { desc as desc12, eq as eq23 } from "drizzle-orm";
+import { desc as desc14, eq as eq25 } from "drizzle-orm";
 async function listPublishedTestimonials(limit = 9) {
   const db = await getDb();
   if (!db) return [];
-  return db.select({ id: testimonials.id, displayName: testimonials.displayName, detail: testimonials.detail, rating: testimonials.rating, body: testimonials.body }).from(testimonials).where(eq23(testimonials.status, "approved")).orderBy(desc12(testimonials.reviewedAt)).limit(limit);
+  return db.select({ id: testimonials.id, displayName: testimonials.displayName, detail: testimonials.detail, rating: testimonials.rating, body: testimonials.body }).from(testimonials).where(eq25(testimonials.status, "approved")).orderBy(desc14(testimonials.reviewedAt)).limit(limit);
 }
 async function getMyTestimonial(userId) {
   const db = await getDb();
   if (!db) return null;
-  const [row] = await db.select().from(testimonials).where(eq23(testimonials.userId, userId)).limit(1);
+  const [row] = await db.select().from(testimonials).where(eq25(testimonials.userId, userId)).limit(1);
   return row ?? null;
 }
 async function saveMyTestimonial(userId, input) {
@@ -10866,43 +11452,43 @@ async function saveMyTestimonial(userId, input) {
 async function deleteMyTestimonial(userId) {
   const db = await getDb();
   if (!db) return;
-  await db.delete(testimonials).where(eq23(testimonials.userId, userId));
+  await db.delete(testimonials).where(eq25(testimonials.userId, userId));
 }
 async function listTestimonialsForAdmin(status) {
   const db = await getDb();
   if (!db) return [];
-  return db.select({ id: testimonials.id, displayName: testimonials.displayName, detail: testimonials.detail, rating: testimonials.rating, body: testimonials.body, status: testimonials.status, updatedAt: testimonials.updatedAt, userId: testimonials.userId, userName: users.name, userEmail: users.email }).from(testimonials).leftJoin(users, eq23(users.id, testimonials.userId)).where(eq23(testimonials.status, status)).orderBy(desc12(testimonials.updatedAt)).limit(200);
+  return db.select({ id: testimonials.id, displayName: testimonials.displayName, detail: testimonials.detail, rating: testimonials.rating, body: testimonials.body, status: testimonials.status, updatedAt: testimonials.updatedAt, userId: testimonials.userId, userName: users.name, userEmail: users.email }).from(testimonials).leftJoin(users, eq25(users.id, testimonials.userId)).where(eq25(testimonials.status, status)).orderBy(desc14(testimonials.updatedAt)).limit(200);
 }
-async function reviewTestimonial(id4, status, reviewerId) {
+async function reviewTestimonial(id5, status, reviewerId) {
   const db = await getDb();
   if (!db) return;
-  await db.update(testimonials).set({ status, reviewedAt: /* @__PURE__ */ new Date(), reviewedBy: reviewerId }).where(eq23(testimonials.id, id4));
+  await db.update(testimonials).set({ status, reviewedAt: /* @__PURE__ */ new Date(), reviewedBy: reviewerId }).where(eq25(testimonials.id, id5));
 }
 
 // server/routers/admin/testimonials.ts
 var adminTestimonialsRouter = router({
-  list: adminProcedure.input(z21.object({ status: z21.enum(["pending", "approved", "rejected"]).default("pending") })).query(({ input }) => listTestimonialsForAdmin(input.status)),
-  review: adminProcedure.input(z21.object({ id: z21.number().int().positive(), status: z21.enum(["approved", "rejected"]) })).mutation(async ({ ctx, input }) => {
+  list: adminProcedure.input(z22.object({ status: z22.enum(["pending", "approved", "rejected"]).default("pending") })).query(({ input }) => listTestimonialsForAdmin(input.status)),
+  review: adminProcedure.input(z22.object({ id: z22.number().int().positive(), status: z22.enum(["approved", "rejected"]) })).mutation(async ({ ctx, input }) => {
     await reviewTestimonial(input.id, input.status, ctx.user.id);
     return { ok: true };
   })
 });
 
 // server/routers/admin/usage.ts
-import { z as z22 } from "zod";
+import { z as z23 } from "zod";
 var adminUsageRouter = router({
-  get: adminProcedure.input(z22.object({ userId: z22.number().int() })).query(({ input }) => getUsageSummaryForUser(input.userId)),
-  reset: adminProcedure.input(z22.object({ userId: z22.number().int(), featureKey: z22.enum(FEATURE_KEYS) })).mutation(({ ctx, input }) => resetFeatureUsage(input.userId, input.featureKey, USAGE_WINDOW_DAYS, ctx.user.id))
+  get: adminProcedure.input(z23.object({ userId: z23.number().int() })).query(({ input }) => getUsageSummaryForUser(input.userId)),
+  reset: adminProcedure.input(z23.object({ userId: z23.number().int(), featureKey: z23.enum(FEATURE_KEYS) })).mutation(({ ctx, input }) => resetFeatureUsage(input.userId, input.featureKey, USAGE_WINDOW_DAYS, ctx.user.id))
 });
 
 // server/routers/admin/users.ts
-import { z as z23 } from "zod";
+import { z as z24 } from "zod";
 
 // server/admin/adminUserDb.ts
-import { and as and21, count as count3, desc as desc13, eq as eq25, gte as gte14, inArray as inArray10, isNull as isNull12, ilike as ilike3, lt as lt10, or as or4, sql as sql11 } from "drizzle-orm";
+import { and as and23, count as count3, desc as desc15, eq as eq27, gte as gte16, inArray as inArray11, isNull as isNull13, ilike as ilike3, lt as lt11, or as or5, sql as sql11 } from "drizzle-orm";
 
 // server/admin/progressService.ts
-import { and as and20, eq as eq24, gte as gte13 } from "drizzle-orm";
+import { and as and22, eq as eq26, gte as gte15 } from "drizzle-orm";
 
 // shared/progressScore.ts
 var PROGRESS_SCORE_CONFIG = {
@@ -10941,14 +11527,14 @@ async function getStudyProgressScore(userId) {
   const db = await getDb();
   const generatedAt = (/* @__PURE__ */ new Date()).toISOString();
   if (!db) return { overallScore: null, insufficientData: true, components: emptyComponents(), generatedAt };
-  const [userRow] = await db.select({ createdAt: users.createdAt }).from(users).where(eq24(users.id, userId)).limit(1);
+  const [userRow] = await db.select({ createdAt: users.createdAt }).from(users).where(eq26(users.id, userId)).limit(1);
   const accountAgeDays = userRow ? Math.max(0, Math.floor((Date.now() - userRow.createdAt.getTime()) / 864e5)) : 0;
   const windowStart = new Date(Date.now() - CONSISTENCY_WINDOW_DAYS * 864e5);
   const [recentLogs, allLogs, topicRows, examRows] = await Promise.all([
-    db.select({ studyDate: topicStudyLogs.studyDate }).from(topicStudyLogs).where(and20(eq24(topicStudyLogs.userId, userId), gte13(topicStudyLogs.studyDate, windowStart))),
-    db.select({ questions: topicStudyLogs.questions, correct: topicStudyLogs.correct }).from(topicStudyLogs).where(eq24(topicStudyLogs.userId, userId)),
-    db.select({ progress: topicProgress.progress }).from(topicProgress).where(eq24(topicProgress.userId, userId)),
-    db.select({ net: userMockExams.net }).from(userMockExams).where(eq24(userMockExams.userId, userId))
+    db.select({ studyDate: topicStudyLogs.studyDate }).from(topicStudyLogs).where(and22(eq26(topicStudyLogs.userId, userId), gte15(topicStudyLogs.studyDate, windowStart))),
+    db.select({ questions: topicStudyLogs.questions, correct: topicStudyLogs.correct }).from(topicStudyLogs).where(eq26(topicStudyLogs.userId, userId)),
+    db.select({ progress: topicProgress.progress }).from(topicProgress).where(eq26(topicProgress.userId, userId)),
+    db.select({ net: userMockExams.net }).from(userMockExams).where(eq26(userMockExams.userId, userId))
   ]);
   const activeDaysInWindow = new Set(recentLogs.map((row) => toLocalDateKey(row.studyDate))).size;
   const totalQuestions = allLogs.reduce((sum, row) => sum + row.questions, 0);
@@ -10998,17 +11584,17 @@ async function listUsersForAdminPaginated(filters) {
   if (filters.search?.trim()) {
     const term = `%${filters.search.trim().replace(/[%_]/g, (char) => `\\${char}`)}%`;
     const digits = filters.search.replace(/\D/g, "").replace(/^0/, "");
-    conditions.push(or4(ilike3(users.name, term), ilike3(users.email, term), ...digits.length >= 4 ? [ilike3(users.openId, `dev_phone_%${digits}%`)] : []));
+    conditions.push(or5(ilike3(users.name, term), ilike3(users.email, term), ...digits.length >= 4 ? [ilike3(users.openId, `dev_phone_%${digits}%`)] : []));
   }
-  if (filters.approvalStatus) conditions.push(eq25(users.approvalStatus, filters.approvalStatus));
-  if (filters.accountStatus) conditions.push(eq25(users.accountStatus, filters.accountStatus));
-  if (filters.planCode) conditions.push(eq25(subscriptionPlans.code, filters.planCode));
-  if (filters.subscriptionStatus) conditions.push(eq25(subscriptions.status, filters.subscriptionStatus));
-  if (filters.activity === "today") conditions.push(gte14(users.lastSignedIn, startOfToday2()));
-  else if (filters.activity === "week") conditions.push(gte14(users.lastSignedIn, daysAgo(7)));
-  else if (filters.activity === "inactive") conditions.push(lt10(users.lastSignedIn, daysAgo(7)));
-  const whereClause = conditions.length ? and21(...conditions) : void 0;
-  const countQuery = db.select({ total: count3() }).from(users).leftJoin(subscriptions, eq25(subscriptions.userId, users.id)).leftJoin(subscriptionPlans, eq25(subscriptionPlans.id, subscriptions.planId));
+  if (filters.approvalStatus) conditions.push(eq27(users.approvalStatus, filters.approvalStatus));
+  if (filters.accountStatus) conditions.push(eq27(users.accountStatus, filters.accountStatus));
+  if (filters.planCode) conditions.push(eq27(subscriptionPlans.code, filters.planCode));
+  if (filters.subscriptionStatus) conditions.push(eq27(subscriptions.status, filters.subscriptionStatus));
+  if (filters.activity === "today") conditions.push(gte16(users.lastSignedIn, startOfToday2()));
+  else if (filters.activity === "week") conditions.push(gte16(users.lastSignedIn, daysAgo(7)));
+  else if (filters.activity === "inactive") conditions.push(lt11(users.lastSignedIn, daysAgo(7)));
+  const whereClause = conditions.length ? and23(...conditions) : void 0;
+  const countQuery = db.select({ total: count3() }).from(users).leftJoin(subscriptions, eq27(subscriptions.userId, users.id)).leftJoin(subscriptionPlans, eq27(subscriptionPlans.id, subscriptions.planId));
   const [{ total }] = await (whereClause ? countQuery.where(whereClause) : countQuery);
   const pageQuery = db.select({
     id: users.id,
@@ -11027,13 +11613,13 @@ async function listUsersForAdminPaginated(filters) {
     subscriptionStatus: subscriptions.status,
     trialEndsAt: subscriptions.trialEndsAt,
     currentPeriodEnd: subscriptions.currentPeriodEnd
-  }).from(users).leftJoin(subscriptions, eq25(subscriptions.userId, users.id)).leftJoin(subscriptionPlans, eq25(subscriptionPlans.id, subscriptions.planId)).orderBy(desc13(users.createdAt)).limit(pageSize).offset((page2 - 1) * pageSize);
+  }).from(users).leftJoin(subscriptions, eq27(subscriptions.userId, users.id)).leftJoin(subscriptionPlans, eq27(subscriptionPlans.id, subscriptions.planId)).orderBy(desc15(users.createdAt)).limit(pageSize).offset((page2 - 1) * pageSize);
   const pageRows = await (whereClause ? pageQuery.where(whereClause) : pageQuery);
   const ids = pageRows.map((row) => row.id);
   const [topicAgg, examAgg, studyAgg] = ids.length ? await Promise.all([
-    db.select({ userId: topicProgress.userId, avgProgress: sql11`avg(${topicProgress.progress})`, topicCount: sql11`count(*)::int` }).from(topicProgress).where(inArray10(topicProgress.userId, ids)).groupBy(topicProgress.userId),
-    db.select({ userId: userMockExams.userId, examCount: sql11`count(*)::int`, latestNet: sql11`max(${userMockExams.net})` }).from(userMockExams).where(inArray10(userMockExams.userId, ids)).groupBy(userMockExams.userId),
-    db.select({ userId: topicStudyLogs.userId, totalMinutes: sql11`sum(${topicStudyLogs.minutes})` }).from(topicStudyLogs).where(inArray10(topicStudyLogs.userId, ids)).groupBy(topicStudyLogs.userId)
+    db.select({ userId: topicProgress.userId, avgProgress: sql11`avg(${topicProgress.progress})`, topicCount: sql11`count(*)::int` }).from(topicProgress).where(inArray11(topicProgress.userId, ids)).groupBy(topicProgress.userId),
+    db.select({ userId: userMockExams.userId, examCount: sql11`count(*)::int`, latestNet: sql11`max(${userMockExams.net})` }).from(userMockExams).where(inArray11(userMockExams.userId, ids)).groupBy(userMockExams.userId),
+    db.select({ userId: topicStudyLogs.userId, totalMinutes: sql11`sum(${topicStudyLogs.minutes})` }).from(topicStudyLogs).where(inArray11(topicStudyLogs.userId, ids)).groupBy(topicStudyLogs.userId)
   ]) : [[], [], []];
   const topicMap = new Map(topicAgg.map((row) => [row.userId, row]));
   const examMap = new Map(examAgg.map((row) => [row.userId, row]));
@@ -11067,19 +11653,19 @@ var daysAgo = (days) => new Date(Date.now() - days * 24 * 60 * 60 * 1e3);
 async function suspendUser(userId, adminId, reason) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ accountStatus: "suspended" }).where(eq25(users.id, userId));
+  await db.update(users).set({ accountStatus: "suspended" }).where(eq27(users.id, userId));
   await writeAuditLog({ userId, adminId, action: "user_suspended", newState: { accountStatus: "suspended" }, reason });
 }
 async function reactivateUser(userId, adminId) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ accountStatus: "active" }).where(eq25(users.id, userId));
+  await db.update(users).set({ accountStatus: "active" }).where(eq27(users.id, userId));
   await writeAuditLog({ userId, adminId, action: "user_reactivated", newState: { accountStatus: "active" } });
 }
 async function verifyUserEmailManually(userId, adminId) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ emailVerifiedAt: /* @__PURE__ */ new Date() }).where(and21(eq25(users.id, userId), isNull12(users.emailVerifiedAt)));
+  await db.update(users).set({ emailVerifiedAt: /* @__PURE__ */ new Date() }).where(and23(eq27(users.id, userId), isNull13(users.emailVerifiedAt)));
   await writeAuditLog({ userId, adminId, action: "email_verified_by_admin", newState: { emailVerified: true } });
 }
 function maskId2(value) {
@@ -11090,19 +11676,19 @@ function maskId2(value) {
 async function getUserDetailForAdmin(userId) {
   const db = await getDb();
   if (!db) return null;
-  const [userRow] = await db.select().from(users).where(eq25(users.id, userId)).limit(1);
+  const [userRow] = await db.select().from(users).where(eq27(users.id, userId)).limit(1);
   if (!userRow) return null;
   const [entitlements, usage, progressScore, payments2, recentExams, topicRows, recentStudyLogs, auditLogs, profile, bookContentRows, notebook] = await Promise.all([
     getEntitlements(userId),
     getUsageSummaryForUser(userId),
     getStudyProgressScore(userId),
     listPaymentsForUser(userId),
-    db.select().from(userMockExams).where(eq25(userMockExams.userId, userId)).orderBy(desc13(userMockExams.examDate)).limit(10),
-    db.select().from(topicProgress).where(eq25(topicProgress.userId, userId)),
-    db.select().from(topicStudyLogs).where(eq25(topicStudyLogs.userId, userId)).orderBy(desc13(topicStudyLogs.studyDate)).limit(20),
+    db.select().from(userMockExams).where(eq27(userMockExams.userId, userId)).orderBy(desc15(userMockExams.examDate)).limit(10),
+    db.select().from(topicProgress).where(eq27(topicProgress.userId, userId)),
+    db.select().from(topicStudyLogs).where(eq27(topicStudyLogs.userId, userId)).orderBy(desc15(topicStudyLogs.studyDate)).limit(20),
     listAuditLogsForUser(userId),
     getStudentProfile(userId),
-    db.select({ bookId: userBookContents.bookId, mappingStatus: userBookContents.mappingStatus, mappingMethod: userBookContents.mappingMethod, mappingConfidence: userBookContents.mappingConfidence, source: userBookContents.source, createdAt: userBookContents.createdAt }).from(userBookContents).where(eq25(userBookContents.userId, userId)),
+    db.select({ bookId: userBookContents.bookId, mappingStatus: userBookContents.mappingStatus, mappingMethod: userBookContents.mappingMethod, mappingConfidence: userBookContents.mappingConfidence, source: userBookContents.source, createdAt: userBookContents.createdAt }).from(userBookContents).where(eq27(userBookContents.userId, userId)),
     // Defter: yalnızca sayılar — öğrencinin not içeriği admin tarafından görülmez.
     getNoteStatsForAdmin(userId)
   ]);
@@ -11117,14 +11703,14 @@ async function getUserDetailForAdmin(userId) {
     return map;
   }, /* @__PURE__ */ new Map()).values());
   const bookIds = bookContents.map((book) => book.bookId);
-  const numericIds = bookIds.filter((id4) => /^\d+$/.test(id4)).map(Number);
+  const numericIds = bookIds.filter((id5) => /^\d+$/.test(id5)).map(Number);
   const [customTitles, catalogTitles] = bookIds.length ? await Promise.all([
-    db.select({ bookId: userResourceBooks.bookId, title: userResourceBooks.title }).from(userResourceBooks).where(and21(eq25(userResourceBooks.userId, userId), inArray10(userResourceBooks.bookId, bookIds))),
-    numericIds.length ? db.select({ id: catalogBooks.id, name: catalogBooks.name }).from(catalogBooks).where(inArray10(catalogBooks.id, numericIds)) : Promise.resolve([])
+    db.select({ bookId: userResourceBooks.bookId, title: userResourceBooks.title }).from(userResourceBooks).where(and23(eq27(userResourceBooks.userId, userId), inArray11(userResourceBooks.bookId, bookIds))),
+    numericIds.length ? db.select({ id: catalogBooks.id, name: catalogBooks.name }).from(catalogBooks).where(inArray11(catalogBooks.id, numericIds)) : Promise.resolve([])
   ]) : [[], []];
   const titleById = new Map([...customTitles.map((row) => [row.bookId, row.title]), ...catalogTitles.map((row) => [String(row.id), row.name])]);
   const bookContentsWithTitles = bookContents.map((book) => ({ ...book, title: titleById.get(book.bookId) ?? null }));
-  const [subscriptionRow] = await db.select().from(subscriptions).where(eq25(subscriptions.userId, userId)).limit(1);
+  const [subscriptionRow] = await db.select().from(subscriptions).where(eq27(subscriptions.userId, userId)).limit(1);
   const plan = subscriptionRow ? await getPlanById(subscriptionRow.planId) : null;
   const { passwordHash: _passwordHash, ...safeUser } = userRow;
   return {
@@ -11147,25 +11733,25 @@ async function getUserDetailForAdmin(userId) {
 // server/routers/admin/users.ts
 var adminUsersRouter = router({
   list: adminProcedure.input(
-    z23.object({
-      search: z23.string().max(120).optional(),
-      approvalStatus: z23.enum(["pending", "approved", "rejected"]).optional(),
-      accountStatus: z23.enum(["active", "suspended", "deleted"]).optional(),
-      planCode: z23.string().max(40).optional(),
-      subscriptionStatus: z23.string().max(40).optional(),
-      activity: z23.enum(["today", "week", "inactive"]).optional(),
-      page: z23.number().int().min(1).default(1),
-      pageSize: z23.number().int().min(1).max(100).default(20)
+    z24.object({
+      search: z24.string().max(120).optional(),
+      approvalStatus: z24.enum(["pending", "approved", "rejected"]).optional(),
+      accountStatus: z24.enum(["active", "suspended", "deleted"]).optional(),
+      planCode: z24.string().max(40).optional(),
+      subscriptionStatus: z24.string().max(40).optional(),
+      activity: z24.enum(["today", "week", "inactive"]).optional(),
+      page: z24.number().int().min(1).default(1),
+      pageSize: z24.number().int().min(1).max(100).default(20)
     })
   ).query(({ input }) => listUsersForAdminPaginated(input)),
-  get: adminProcedure.input(z23.object({ userId: z23.number().int() })).query(({ input }) => getUserDetailForAdmin(input.userId)),
+  get: adminProcedure.input(z24.object({ userId: z24.number().int() })).query(({ input }) => getUserDetailForAdmin(input.userId)),
   listPending: adminProcedure.query(() => listPendingUsers()),
-  approve: adminProcedure.input(z23.object({ userId: z23.number().int() })).mutation(({ ctx, input }) => approveUser(input.userId, ctx.user.id)),
-  reject: adminProcedure.input(z23.object({ userId: z23.number().int(), reason: z23.string().max(300).optional() })).mutation(({ ctx, input }) => rejectUser(input.userId, ctx.user.id, input.reason)),
+  approve: adminProcedure.input(z24.object({ userId: z24.number().int() })).mutation(({ ctx, input }) => approveUser(input.userId, ctx.user.id)),
+  reject: adminProcedure.input(z24.object({ userId: z24.number().int(), reason: z24.string().max(300).optional() })).mutation(({ ctx, input }) => rejectUser(input.userId, ctx.user.id, input.reason)),
   // Hesap yaşam döngüsü — subscription iptaliyle KARIŞTIRILMAZ (spec §5/§23): bir kullanıcı aboneliğini iptal edince hesabı askıya alınmaz.
-  suspend: adminProcedure.input(z23.object({ userId: z23.number().int(), reason: z23.string().max(300).optional() })).mutation(({ ctx, input }) => suspendUser(input.userId, ctx.user.id, input.reason)),
-  reactivate: adminProcedure.input(z23.object({ userId: z23.number().int() })).mutation(({ ctx, input }) => reactivateUser(input.userId, ctx.user.id)),
-  verifyEmail: adminProcedure.input(z23.object({ userId: z23.number().int() })).mutation(({ ctx, input }) => verifyUserEmailManually(input.userId, ctx.user.id))
+  suspend: adminProcedure.input(z24.object({ userId: z24.number().int(), reason: z24.string().max(300).optional() })).mutation(({ ctx, input }) => suspendUser(input.userId, ctx.user.id, input.reason)),
+  reactivate: adminProcedure.input(z24.object({ userId: z24.number().int() })).mutation(({ ctx, input }) => reactivateUser(input.userId, ctx.user.id)),
+  verifyEmail: adminProcedure.input(z24.object({ userId: z24.number().int() })).mutation(({ ctx, input }) => verifyUserEmailManually(input.userId, ctx.user.id))
 });
 
 // server/routers/admin/index.ts
@@ -11183,17 +11769,17 @@ var adminRouter = router({
 });
 
 // server/routers/testimonials.ts
-import { z as z24 } from "zod";
+import { z as z25 } from "zod";
 
 // shared/testimonials.ts
 var TESTIMONIAL_LIMITS = { displayName: 60, detail: 80, bodyMin: 20, body: 600 };
 
 // server/routers/testimonials.ts
-var testimonialInput = z24.object({
-  displayName: z24.string().trim().min(2, "G\xF6r\xFCnecek ad\u0131n\u0131 yaz.").max(TESTIMONIAL_LIMITS.displayName),
-  detail: z24.string().trim().max(TESTIMONIAL_LIMITS.detail).optional(),
-  rating: z24.number().int().min(1).max(5),
-  body: z24.string().trim().min(TESTIMONIAL_LIMITS.bodyMin, `Yorumun en az ${TESTIMONIAL_LIMITS.bodyMin} karakter olmal\u0131.`).max(TESTIMONIAL_LIMITS.body)
+var testimonialInput = z25.object({
+  displayName: z25.string().trim().min(2, "G\xF6r\xFCnecek ad\u0131n\u0131 yaz.").max(TESTIMONIAL_LIMITS.displayName),
+  detail: z25.string().trim().max(TESTIMONIAL_LIMITS.detail).optional(),
+  rating: z25.number().int().min(1).max(5),
+  body: z25.string().trim().min(TESTIMONIAL_LIMITS.bodyMin, `Yorumun en az ${TESTIMONIAL_LIMITS.bodyMin} karakter olmal\u0131.`).max(TESTIMONIAL_LIMITS.body)
 });
 var testimonialsRouter = router({
   published: publicProcedure.query(() => listPublishedTestimonials()),
@@ -11206,73 +11792,73 @@ var testimonialsRouter = router({
 });
 
 // server/routers.ts
-var planInput = z25.object({
-  topics: z25.array(z25.object({
-    topic: z25.string(),
-    subject: z25.string(),
-    exam: z25.enum(["TYT", "AYT"]),
-    progress: z25.number(),
-    status: z25.enum(["Zay\u0131f", "Orta", "\u0130yi"])
+var planInput = z26.object({
+  topics: z26.array(z26.object({
+    topic: z26.string(),
+    subject: z26.string(),
+    exam: z26.enum(EXAM_KINDS),
+    progress: z26.number(),
+    status: z26.enum(["Zay\u0131f", "Orta", "\u0130yi"])
   })).max(50),
-  exams: z25.array(z25.object({
-    title: z25.string(),
-    date: z25.string(),
-    net: z25.number(),
-    subjects: z25.record(z25.string(), z25.number()),
-    topicDetails: z25.array(z25.object({
-      subject: z25.string(),
-      topic: z25.string(),
-      questionCount: z25.number(),
-      correct: z25.number(),
-      wrong: z25.number(),
-      blank: z25.number(),
-      accuracy: z25.number(),
-      net: z25.number()
+  exams: z26.array(z26.object({
+    title: z26.string(),
+    date: z26.string(),
+    net: z26.number(),
+    subjects: z26.record(z26.string(), z26.number()),
+    topicDetails: z26.array(z26.object({
+      subject: z26.string(),
+      topic: z26.string(),
+      questionCount: z26.number(),
+      correct: z26.number(),
+      wrong: z26.number(),
+      blank: z26.number(),
+      accuracy: z26.number(),
+      net: z26.number()
     })).optional()
   })).max(10),
-  books: z25.array(z25.object({
-    id: z25.string(),
-    title: z25.string(),
-    subject: z25.string(),
-    exam: z25.enum(["TYT", "AYT"]),
-    level: z25.enum(["Kolay", "Orta", "Zor"]),
-    pageCount: z25.number().optional(),
-    totalQuestions: z25.number().optional(),
-    accuracy: z25.number().optional(),
-    activeDays: z25.number().optional(),
-    mappings: z25.array(z25.object({ topic: z25.string(), pageStart: z25.number().optional(), pageEnd: z25.number().optional(), testStart: z25.number().optional(), testEnd: z25.number().optional() })).max(50).optional()
+  books: z26.array(z26.object({
+    id: z26.string(),
+    title: z26.string(),
+    subject: z26.string(),
+    exam: z26.enum(EXAM_KINDS),
+    level: z26.enum(["Kolay", "Orta", "Zor"]),
+    pageCount: z26.number().optional(),
+    totalQuestions: z26.number().optional(),
+    accuracy: z26.number().optional(),
+    activeDays: z26.number().optional(),
+    mappings: z26.array(z26.object({ topic: z26.string(), pageStart: z26.number().optional(), pageEnd: z26.number().optional(), testStart: z26.number().optional(), testEnd: z26.number().optional() })).max(50).optional()
   })).max(30).default([]),
-  availableMinutes: z25.number().min(120).max(2400).default(600),
+  availableMinutes: z26.number().min(120).max(2400).default(600),
   // Öğrencinin yerel "bugün"ü (YYYY-MM-DD): plan bugünden başlayan 7 günü kapsar.
-  startDate: z25.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  goal: z25.string().max(120).default("YKS 2027"),
+  startDate: z26.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  goal: z26.string().max(120).default("YKS 2027"),
   // Onboarding'den gelen koçluk bağlamı — tamamen isteğe bağlı, eski
   // istemciler (veya onboarding'i henüz tamamlamamış kullanıcılar) bu alanı
   // hiç göndermeyebilir.
-  studentProfile: z25.object({
+  studentProfile: z26.object({
     // Hedef bilgileri — onboarding'in "Kullanıcı tanımlama" ve "Hedefler"
     // adımlarından. AI planı önceliklendirirken (örn. hedef net/sıralamaya
     // göre tempo) ve dilini kişiselleştirirken kullanır.
-    targetScoreType: z25.string().max(20).optional(),
-    examYear: z25.number().int().optional(),
-    targetUniversity: z25.string().max(180).optional(),
-    targetDepartment: z25.string().max(180).optional(),
-    targetRanking: z25.string().max(60).optional(),
-    dailyStudyDuration: z25.number().int().min(0).max(960).optional(),
-    preferredStudyMethods: z25.array(z25.string().max(40)).max(5).optional(),
-    studyObstacles: z25.string().max(500).optional(),
-    coachingStyle: z25.string().max(40).optional(),
-    mainGoal: z25.string().max(500).optional()
+    targetScoreType: z26.string().max(20).optional(),
+    examYear: z26.number().int().optional(),
+    targetUniversity: z26.string().max(180).optional(),
+    targetDepartment: z26.string().max(180).optional(),
+    targetRanking: z26.string().max(60).optional(),
+    dailyStudyDuration: z26.number().int().min(0).max(960).optional(),
+    preferredStudyMethods: z26.array(z26.string().max(40)).max(5).optional(),
+    studyObstacles: z26.string().max(500).optional(),
+    coachingStyle: z26.string().max(40).optional(),
+    mainGoal: z26.string().max(500).optional()
   }).optional()
 });
-var documentExtractionInput = z25.object({
-  dataUrl: z25.string().min(20).max(12e6),
-  mimeType: z25.enum(["application/pdf", "image/png", "image/jpeg", "image/webp"]),
-  fileName: z25.string().max(180).optional()
+var documentExtractionInput = z26.object({
+  dataUrl: z26.string().min(20).max(12e6),
+  mimeType: z26.enum(["application/pdf", "image/png", "image/jpeg", "image/webp"]),
+  fileName: z26.string().max(180).optional()
 });
-var bookPhotoInput = z25.object({
-  dataUrl: z25.string().min(20).max(12e6),
-  mimeType: z25.enum(["image/png", "image/jpeg", "image/webp"])
+var bookPhotoInput = z26.object({
+  dataUrl: z26.string().min(20).max(12e6),
+  mimeType: z26.enum(["image/png", "image/jpeg", "image/webp"])
 });
 var bookPhotoSchema = {
   type: "object",
@@ -11280,7 +11866,7 @@ var bookPhotoSchema = {
     title: { type: "string" },
     publisher: { type: "string" },
     subject: { type: "string" },
-    exam: { type: "string", enum: ["TYT", "AYT", "GENEL"] },
+    exam: { type: "string", enum: ["TYT", "AYT", "LGS", "GENEL"] },
     authors: { type: "array", items: { type: "string" } },
     isbn: { type: "string" },
     edition: { type: "string" },
@@ -11298,25 +11884,25 @@ var bookPhotoSchema = {
   additionalProperties: false
 };
 var clamp013 = (value) => typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
-var userExamInput = z25.object({
-  title: z25.string().min(1).max(180),
-  exam: z25.enum(["TYT", "AYT"]),
-  date: z25.string().min(8).max(30),
-  net: z25.number().min(-100).max(200),
-  delta: z25.number().min(-200).max(200),
-  subjects: z25.record(z25.string(), z25.number().min(-50).max(100)),
-  timeSpent: z25.record(z25.string(), z25.number().int().min(0).max(1e3)),
-  topicNets: z25.record(z25.string(), z25.number().min(-50).max(100)),
-  topicDetails: z25.array(z25.object({ subject: z25.string(), topic: z25.string(), questionCount: z25.number().int().min(0), correct: z25.number().int().min(0), wrong: z25.number().int().min(0), blank: z25.number().int().min(0), accuracy: z25.number().min(0).max(100), net: z25.number().min(-50).max(100) })).max(300),
-  importedFrom: z25.enum(["manual", "ocr", "pdf", "csv", "xlsx"]),
-  notes: z25.string().max(5e3).optional()
+var userExamInput = z26.object({
+  title: z26.string().min(1).max(180),
+  exam: z26.enum(EXAM_KINDS),
+  date: z26.string().min(8).max(30),
+  net: z26.number().min(-100).max(200),
+  delta: z26.number().min(-200).max(200),
+  subjects: z26.record(z26.string(), z26.number().min(-50).max(100)),
+  timeSpent: z26.record(z26.string(), z26.number().int().min(0).max(1e3)),
+  topicNets: z26.record(z26.string(), z26.number().min(-50).max(100)),
+  topicDetails: z26.array(z26.object({ subject: z26.string(), topic: z26.string(), questionCount: z26.number().int().min(0), correct: z26.number().int().min(0), wrong: z26.number().int().min(0), blank: z26.number().int().min(0), accuracy: z26.number().min(0).max(100), net: z26.number().min(-50).max(100) })).max(300),
+  importedFrom: z26.enum(["manual", "ocr", "pdf", "csv", "xlsx"]),
+  notes: z26.string().max(5e3).optional()
 });
 var documentExtractionSchema = {
   type: "object",
   properties: {
     title: { type: "string" },
     date: { type: "string" },
-    exam: { type: "string", enum: ["TYT", "AYT"] },
+    exam: { type: "string", enum: ["TYT", "AYT", "LGS"] },
     subjects: { type: "object", additionalProperties: { type: "number" } },
     timeSpent: { type: "object", additionalProperties: { type: "number" } },
     topics: {
@@ -11375,17 +11961,17 @@ var appRouter = router({
     }),
     // Profil menüsündeki "Şifre değiştir". Tahmin denemelerine karşı kullanıcı
     // başına 15 dakikada 5 deneme.
-    changePassword: protectedProcedure.input(z25.object({ currentPassword: z25.string().min(1).max(200), newPassword: z25.string().min(1).max(200) })).mutation(async ({ ctx, input }) => {
+    changePassword: protectedProcedure.input(z26.object({ currentPassword: z26.string().min(1).max(200), newPassword: z26.string().min(1).max(200) })).mutation(async ({ ctx, input }) => {
       try {
         checkRateLimit(`change-password:${ctx.user.id}`, 5, 15 * 6e4);
       } catch {
-        throw new TRPCError13({ code: "TOO_MANY_REQUESTS", message: "\xC7ok fazla deneme yapt\u0131n. 15 dakika sonra tekrar dener misin?" });
+        throw new TRPCError14({ code: "TOO_MANY_REQUESTS", message: "\xC7ok fazla deneme yapt\u0131n. 15 dakika sonra tekrar dener misin?" });
       }
       try {
         await changeLocalPassword(ctx.user.id, input.currentPassword, input.newPassword);
         return { success: true };
       } catch (error) {
-        if (error instanceof PasswordChangeError) throw new TRPCError13({ code: "BAD_REQUEST", message: error.message });
+        if (error instanceof PasswordChangeError) throw new TRPCError14({ code: "BAD_REQUEST", message: error.message });
         throw error;
       }
     }),
@@ -11396,7 +11982,7 @@ var appRouter = router({
         return await sendVerificationEmail(ctx.user, ctx.req);
       } catch (error) {
         console.error("[EmailVerification] resend failed:", error instanceof Error ? error.message : error);
-        throw new TRPCError13({ code: "INTERNAL_SERVER_ERROR", message: "Do\u011Frulama maili \u015Fu an g\xF6nderilemedi. Birka\xE7 dakika sonra tekrar dener misin?" });
+        throw new TRPCError14({ code: "INTERNAL_SERVER_ERROR", message: "Do\u011Frulama maili \u015Fu an g\xF6nderilemedi. Birka\xE7 dakika sonra tekrar dener misin?" });
       }
     })
   }),
@@ -11411,12 +11997,12 @@ var appRouter = router({
       ]);
       return { inventory, logs, mappings, switches, customBooks };
     }),
-    addBook: protectedProcedure.input(z25.object({ bookId: z25.string().max(120) })).mutation(({ ctx, input }) => addBookToInventory(ctx.user.id, input.bookId)),
-    removeBook: protectedProcedure.input(z25.object({ bookId: z25.string().max(120) })).mutation(({ ctx, input }) => removeBookFromInventory(ctx.user.id, input.bookId)),
-    addLog: protectedProcedure.input(z25.object({ bookId: z25.string().max(120), topic: z25.string().max(180).optional(), sessionDate: z25.string(), minutes: z25.number().int().min(0).max(1440), questions: z25.number().int().min(0).max(2e3), correct: z25.number().int().min(0).max(2e3), wrong: z25.number().int().min(0).max(2e3), blank: z25.number().int().min(0).max(2e3), pageStart: z25.number().int().min(0).optional(), pageEnd: z25.number().int().min(0).optional(), testStart: z25.number().int().min(0).optional(), testEnd: z25.number().int().min(0).optional() })).mutation(({ ctx, input }) => addBookStudyLog(ctx.user.id, { ...input, sessionDate: new Date(input.sessionDate) })),
-    upsertMapping: protectedProcedure.input(z25.object({ bookId: z25.string().max(120), topic: z25.string().max(180), subject: z25.string().max(80), pageStart: z25.number().int().min(0).optional(), pageEnd: z25.number().int().min(0).optional(), testStart: z25.number().int().min(0).optional(), testEnd: z25.number().int().min(0).optional() })).mutation(({ ctx, input }) => upsertBookTopicMapping(ctx.user.id, input)),
-    addSwitch: protectedProcedure.input(z25.object({ fromBookId: z25.string().max(120).optional(), toBookId: z25.string().max(120), reason: z25.string().max(300) })).mutation(({ ctx, input }) => addSourceSwitch(ctx.user.id, { ...input, switchedAt: /* @__PURE__ */ new Date() })),
-    importBooks: protectedProcedure.input(z25.object({ books: z25.array(z25.object({ id: z25.string().max(120), title: z25.string().min(1).max(180), publisher: z25.string().max(120), subject: z25.string().max(80), exam: z25.enum(["TYT", "AYT"]), level: z25.enum(["Kolay", "Orta", "Zor"]), format: z25.string().max(120), reason: z25.string().max(1e3), sourceUrl: z25.string().max(500).optional(), pageCount: z25.number().int().min(0).optional(), tone: z25.string().max(20), authors: z25.string().max(300).optional(), isbn: z25.string().max(32).optional() })).min(1).max(500) })).mutation(({ ctx, input }) => addUserResourceBooks(ctx.user.id, input.books)),
+    addBook: protectedProcedure.input(z26.object({ bookId: z26.string().max(120) })).mutation(({ ctx, input }) => addBookToInventory(ctx.user.id, input.bookId)),
+    removeBook: protectedProcedure.input(z26.object({ bookId: z26.string().max(120) })).mutation(({ ctx, input }) => removeBookFromInventory(ctx.user.id, input.bookId)),
+    addLog: protectedProcedure.input(z26.object({ bookId: z26.string().max(120), topic: z26.string().max(180).optional(), sessionDate: z26.string(), minutes: z26.number().int().min(0).max(1440), questions: z26.number().int().min(0).max(2e3), correct: z26.number().int().min(0).max(2e3), wrong: z26.number().int().min(0).max(2e3), blank: z26.number().int().min(0).max(2e3), pageStart: z26.number().int().min(0).optional(), pageEnd: z26.number().int().min(0).optional(), testStart: z26.number().int().min(0).optional(), testEnd: z26.number().int().min(0).optional() })).mutation(({ ctx, input }) => addBookStudyLog(ctx.user.id, { ...input, sessionDate: new Date(input.sessionDate) })),
+    upsertMapping: protectedProcedure.input(z26.object({ bookId: z26.string().max(120), topic: z26.string().max(180), subject: z26.string().max(80), pageStart: z26.number().int().min(0).optional(), pageEnd: z26.number().int().min(0).optional(), testStart: z26.number().int().min(0).optional(), testEnd: z26.number().int().min(0).optional() })).mutation(({ ctx, input }) => upsertBookTopicMapping(ctx.user.id, input)),
+    addSwitch: protectedProcedure.input(z26.object({ fromBookId: z26.string().max(120).optional(), toBookId: z26.string().max(120), reason: z26.string().max(300) })).mutation(({ ctx, input }) => addSourceSwitch(ctx.user.id, { ...input, switchedAt: /* @__PURE__ */ new Date() })),
+    importBooks: protectedProcedure.input(z26.object({ books: z26.array(z26.object({ id: z26.string().max(120), title: z26.string().min(1).max(180), publisher: z26.string().max(120), subject: z26.string().max(80), exam: z26.enum(EXAM_KINDS), level: z26.enum(["Kolay", "Orta", "Zor"]), format: z26.string().max(120), reason: z26.string().max(1e3), sourceUrl: z26.string().max(500).optional(), pageCount: z26.number().int().min(0).optional(), tone: z26.string().max(20), authors: z26.string().max(300).optional(), isbn: z26.string().max(32).optional() })).min(1).max(500) })).mutation(({ ctx, input }) => addUserResourceBooks(ctx.user.id, input.books)),
     // Öğrenci elindeki fiziksel kitabın kapak fotoğrafını çeker (telefon
     // kamerası); LLM görselden kitap adı/yayınevi/ders tahmini çıkarır.
     // Sadece TAHMİN döner — hiçbir şeyi otomatik kütüphaneye eklemez, öğrenci
@@ -11428,7 +12014,7 @@ var appRouter = router({
       try {
         const response = await invokeLLMWithTier({
           messages: [
-            { role: "system", content: "Sen bir kitap kapa\u011F\u0131 tan\u0131ma asistan\u0131s\u0131n. T\xFCrk\xE7e bir YKS kaynak kitab\u0131n\u0131n kapak foto\u011Fraf\u0131n\u0131 okuyup kitap ad\u0131n\u0131, yay\u0131nevini, dersini (T\xFCrk\xE7e, Matematik, Fizik, Kimya, Biyoloji, Tarih, Co\u011Frafya, Felsefe, Din K\xFClt\xFCr\xFC, Genel) ve s\u0131nav kapsam\u0131n\u0131 (TYT/AYT/GENEL) tahmin et. Kapakta yaz\u0131yorsa yazar adlar\u0131n\u0131 (authors), ISBN numaras\u0131n\u0131 (isbn, yaln\u0131zca kapakta/arkada ger\xE7ekten g\xF6r\xFCn\xFCyorsa) ve bask\u0131 bilgisini (edition, \xF6r. 'G\xFCncellenmi\u015F Yeni Bask\u0131', '2025-2026') da \xE7\u0131kar. G\xF6rselde net okuyamad\u0131\u011F\u0131n bir alan\u0131 bo\u015F string / bo\u015F dizi b\u0131rak, uydurma. fieldConfidence her alan i\xE7in 0-1 aras\u0131 okuma g\xFCvenin; alan bo\u015Fsa 0. Kitap ad\u0131 kapakta birden \xE7ok sat\u0131ra/puntoya b\xF6l\xFCnm\xFC\u015F olabilir (\xF6r. b\xFCy\xFCk 'Paragraf' + alt\u0131nda 'SORU BANKASI'): bunlar\u0131 tek ba\u015Fl\u0131kta, kelimelerin ilk harfi b\xFCy\xFCk birle\u015Ftir ('Paragraf Soru Bankas\u0131'); 'Video \xE7\xF6z\xFCml\xFC', 'Yeni nesil', '20 deneme ilaveli' gibi slogan/\xF6zellik sat\u0131rlar\u0131n\u0131 ba\u015Fl\u0131\u011Fa katma. Ders kapakta a\xE7\u0131k\xE7a yazm\u0131yorsa kitap ad\u0131ndan \xE7\u0131kar (Paragraf, Dil Bilgisi, S\xF6zc\xFCkte Anlam \u2192 T\xFCrk\xE7e; Problemler, Temel Matematik \u2192 Matematik); o durumda subject g\xFCvenini en fazla 0.7 ver. 'TYT-AYT' ya da 'YKS' yaz\u0131yorsa ve tek bir s\u0131nava ait de\u011Filse exam 'GENEL' olsun. Foto\u011Fraf yan (90\xB0) ya da ters \xE7ekilmi\u015F, kapa\u011F\u0131n bir k\u0131sm\u0131 kadraj d\u0131\u015F\u0131nda kalm\u0131\u015F olabilir: yaz\u0131y\u0131 d\xF6nd\xFCrerek oku ve g\xF6r\xFCnen ba\u015Fl\u0131\u011F\u0131 yine \xE7\u0131kar; kapa\u011F\u0131n k\u0131smen g\xF6r\xFCnmesi onu 'other' yapmaz. Yay\u0131nevi \xE7o\u011Fu zaman yaln\u0131zca logo olarak (\xF6r. k\xF6\u015Fedeki '\xDC\xE7D\xF6rtBe\u015F') g\xF6r\xFCn\xFCr; logodaki ad\u0131 yay\u0131nevi olarak yaz. B\xFCy\xFCk dekoratif yaz\u0131lar ve rakamlar da ba\u015Fl\u0131\u011F\u0131n par\xE7as\u0131d\u0131r ('0'DAN BA\u015ELA' + 'START' + 'Matematik' \u2192 '0'dan Ba\u015Fla Start Matematik'); yazar/hoca ad\u0131 ('\u015Eenol Hoca') authors alan\u0131na gider. imageKind: g\xF6rsel bir kitap KAPA\u011EIYSA 'cover'; kitab\u0131n i\xE7indekiler / konu listesi / kitap bitirme plan\u0131 sayfas\u0131ysa 'table_of_contents'; ba\u015Fka bir \u015Feyse 'other'. `confident` alan\u0131n\u0131 yaln\u0131zca kapaktaki yaz\u0131lar\u0131 ger\xE7ekten net okuyabildiysen true yap." },
+            { role: "system", content: "Sen bir kitap kapa\u011F\u0131 tan\u0131ma asistan\u0131s\u0131n. T\xFCrk\xE7e bir s\u0131nav haz\u0131rl\u0131k (YKS ya da LGS) kaynak kitab\u0131n\u0131n kapak foto\u011Fraf\u0131n\u0131 okuyup kitap ad\u0131n\u0131, yay\u0131nevini, dersini (T\xFCrk\xE7e, Matematik, Fizik, Kimya, Biyoloji, Tarih, Co\u011Frafya, Felsefe, Din K\xFClt\xFCr\xFC, Fen Bilimleri, \u0130nk\u0131lap Tarihi, \u0130ngilizce, Genel) ve s\u0131nav kapsam\u0131n\u0131 (TYT/AYT/LGS/GENEL) tahmin et. Kapakta 'LGS', '8. S\u0131n\u0131f' ya da 'Liselere Ge\xE7i\u015F' yaz\u0131yorsa exam 'LGS' olsun. Kapakta yaz\u0131yorsa yazar adlar\u0131n\u0131 (authors), ISBN numaras\u0131n\u0131 (isbn, yaln\u0131zca kapakta/arkada ger\xE7ekten g\xF6r\xFCn\xFCyorsa) ve bask\u0131 bilgisini (edition, \xF6r. 'G\xFCncellenmi\u015F Yeni Bask\u0131', '2025-2026') da \xE7\u0131kar. G\xF6rselde net okuyamad\u0131\u011F\u0131n bir alan\u0131 bo\u015F string / bo\u015F dizi b\u0131rak, uydurma. fieldConfidence her alan i\xE7in 0-1 aras\u0131 okuma g\xFCvenin; alan bo\u015Fsa 0. Kitap ad\u0131 kapakta birden \xE7ok sat\u0131ra/puntoya b\xF6l\xFCnm\xFC\u015F olabilir (\xF6r. b\xFCy\xFCk 'Paragraf' + alt\u0131nda 'SORU BANKASI'): bunlar\u0131 tek ba\u015Fl\u0131kta, kelimelerin ilk harfi b\xFCy\xFCk birle\u015Ftir ('Paragraf Soru Bankas\u0131'); 'Video \xE7\xF6z\xFCml\xFC', 'Yeni nesil', '20 deneme ilaveli' gibi slogan/\xF6zellik sat\u0131rlar\u0131n\u0131 ba\u015Fl\u0131\u011Fa katma. Ders kapakta a\xE7\u0131k\xE7a yazm\u0131yorsa kitap ad\u0131ndan \xE7\u0131kar (Paragraf, Dil Bilgisi, S\xF6zc\xFCkte Anlam \u2192 T\xFCrk\xE7e; Problemler, Temel Matematik \u2192 Matematik); o durumda subject g\xFCvenini en fazla 0.7 ver. 'TYT-AYT' ya da 'YKS' yaz\u0131yorsa ve tek bir s\u0131nava ait de\u011Filse exam 'GENEL' olsun. Foto\u011Fraf yan (90\xB0) ya da ters \xE7ekilmi\u015F, kapa\u011F\u0131n bir k\u0131sm\u0131 kadraj d\u0131\u015F\u0131nda kalm\u0131\u015F olabilir: yaz\u0131y\u0131 d\xF6nd\xFCrerek oku ve g\xF6r\xFCnen ba\u015Fl\u0131\u011F\u0131 yine \xE7\u0131kar; kapa\u011F\u0131n k\u0131smen g\xF6r\xFCnmesi onu 'other' yapmaz. Yay\u0131nevi \xE7o\u011Fu zaman yaln\u0131zca logo olarak (\xF6r. k\xF6\u015Fedeki '\xDC\xE7D\xF6rtBe\u015F') g\xF6r\xFCn\xFCr; logodaki ad\u0131 yay\u0131nevi olarak yaz. B\xFCy\xFCk dekoratif yaz\u0131lar ve rakamlar da ba\u015Fl\u0131\u011F\u0131n par\xE7as\u0131d\u0131r ('0'DAN BA\u015ELA' + 'START' + 'Matematik' \u2192 '0'dan Ba\u015Fla Start Matematik'); yazar/hoca ad\u0131 ('\u015Eenol Hoca') authors alan\u0131na gider. imageKind: g\xF6rsel bir kitap KAPA\u011EIYSA 'cover'; kitab\u0131n i\xE7indekiler / konu listesi / kitap bitirme plan\u0131 sayfas\u0131ysa 'table_of_contents'; ba\u015Fka bir \u015Feyse 'other'. `confident` alan\u0131n\u0131 yaln\u0131zca kapaktaki yaz\u0131lar\u0131 ger\xE7ekten net okuyabildiysen true yap." },
             { role: "user", content: [{ type: "text", text: "Bu kitap kapa\u011F\u0131n\u0131 oku." }, { type: "image_url", image_url: { url: input.dataUrl, detail: "high" } }] }
           ],
           response_format: { type: "json_schema", json_schema: { name: "yks_book_cover", strict: true, schema: bookPhotoSchema } }
@@ -11458,23 +12044,23 @@ var appRouter = router({
   }),
   exams: router({
     snapshot: protectedProcedure.query(({ ctx }) => getUserMockExams(ctx.user.id)),
-    importMany: protectedProcedure.input(z25.object({ exams: z25.array(userExamInput).min(1).max(200) })).mutation(({ ctx, input }) => addUserMockExams(ctx.user.id, input.exams.map((exam) => ({ ...exam, examDate: new Date(exam.date) }))))
+    importMany: protectedProcedure.input(z26.object({ exams: z26.array(userExamInput).min(1).max(200) })).mutation(({ ctx, input }) => addUserMockExams(ctx.user.id, input.exams.map((exam) => ({ ...exam, examDate: new Date(exam.date) }))))
   }),
   calendar: router({
     snapshot: protectedProcedure.query(({ ctx }) => getStudyCalendar(ctx.user.id)),
-    savePlan: protectedProcedure.input(z25.object({ title: z25.string().max(180), weekStart: z25.string(), weekEnd: z25.string(), summary: z25.string().max(2e3), source: z25.enum(["ai", "manual"]).optional(), replacePrevious: z25.boolean().optional(), sessions: z25.array(z25.object({ sessionDate: z25.string(), title: z25.string().max(180), subject: z25.string().max(80), topic: z25.string().max(180), kind: z25.string().max(40), plannedMinutes: z25.number().int().min(0).max(1440), targetQuestions: z25.number().int().min(0).optional(), targetPages: z25.string().max(80).nullable().optional(), targetTests: z25.string().max(80).nullable().optional() })).max(100) })).mutation(({ ctx, input }) => saveStudyPlan(ctx.user.id, { ...input, weekStart: new Date(input.weekStart), weekEnd: new Date(input.weekEnd), sessions: input.sessions.map((session) => ({ ...session, sessionDate: new Date(session.sessionDate) })) })),
-    completeSession: protectedProcedure.input(z25.object({ sessionId: z25.number().int(), actualMinutes: z25.number().int().min(0).max(1440), actualQuestions: z25.number().int().min(0).max(5e3), correct: z25.number().int().min(0).max(5e3), wrong: z25.number().int().min(0).max(5e3), blank: z25.number().int().min(0).max(5e3), actualPages: z25.number().int().min(0).max(5e3).optional(), note: z25.string().max(1e3).optional() })).mutation(({ ctx, input }) => completeStudySession(ctx.user.id, input)),
-    coachSnapshot: protectedProcedure.input(z25.object({ periodStart: z25.string(), periodEnd: z25.string() })).query(async ({ ctx, input }) => {
+    savePlan: protectedProcedure.input(z26.object({ title: z26.string().max(180), weekStart: z26.string(), weekEnd: z26.string(), summary: z26.string().max(2e3), source: z26.enum(["ai", "manual"]).optional(), replacePrevious: z26.boolean().optional(), sessions: z26.array(z26.object({ sessionDate: z26.string(), title: z26.string().max(180), subject: z26.string().max(80), topic: z26.string().max(180), kind: z26.string().max(40), plannedMinutes: z26.number().int().min(0).max(1440), targetQuestions: z26.number().int().min(0).optional(), targetPages: z26.string().max(80).nullable().optional(), targetTests: z26.string().max(80).nullable().optional() })).max(100) })).mutation(({ ctx, input }) => saveStudyPlan(ctx.user.id, { ...input, weekStart: new Date(input.weekStart), weekEnd: new Date(input.weekEnd), sessions: input.sessions.map((session) => ({ ...session, sessionDate: new Date(session.sessionDate) })) })),
+    completeSession: protectedProcedure.input(z26.object({ sessionId: z26.number().int(), actualMinutes: z26.number().int().min(0).max(1440), actualQuestions: z26.number().int().min(0).max(5e3), correct: z26.number().int().min(0).max(5e3), wrong: z26.number().int().min(0).max(5e3), blank: z26.number().int().min(0).max(5e3), actualPages: z26.number().int().min(0).max(5e3).optional(), note: z26.string().max(1e3).optional() })).mutation(({ ctx, input }) => completeStudySession(ctx.user.id, input)),
+    coachSnapshot: protectedProcedure.input(z26.object({ periodStart: z26.string(), periodEnd: z26.string() })).query(async ({ ctx, input }) => {
       const { sessions, averageAccuracy } = await getPlanAdherenceInputs(ctx.user.id, new Date(input.periodStart), new Date(input.periodEnd));
       return { ...calculatePlanAdherence(sessions, averageAccuracy), averageAccuracy, alerts: await getCoachAlerts(ctx.user.id) };
     }),
-    refreshCoach: protectedProcedure.input(z25.object({ periodStart: z25.string(), periodEnd: z25.string() })).mutation(({ ctx, input }) => savePlanAdherence(ctx.user.id, new Date(input.periodStart), new Date(input.periodEnd))),
+    refreshCoach: protectedProcedure.input(z26.object({ periodStart: z26.string(), periodEnd: z26.string() })).mutation(({ ctx, input }) => savePlanAdherence(ctx.user.id, new Date(input.periodStart), new Date(input.periodEnd))),
     // Üst çubuktaki bildirim zili: okunmamış koç uyarıları (yalnızca okuma; uyarıları refreshCoach üretir).
     alerts: protectedProcedure.query(({ ctx }) => getCoachAlerts(ctx.user.id)),
-    readCoachAlert: protectedProcedure.input(z25.object({ alertId: z25.number().int() })).mutation(({ ctx, input }) => markCoachAlertRead(ctx.user.id, input.alertId)),
-    addFocusLog: protectedProcedure.input(z25.object({ subject: z25.string().max(80), topic: z25.string().max(180), studyDate: z25.string(), minutes: z25.number().int().min(1).max(1440), questions: z25.number().int().min(0).max(5e3), correct: z25.number().int().min(0).max(5e3), wrong: z25.number().int().min(0).max(5e3), blank: z25.number().int().min(0).max(5e3), note: z25.string().max(1e3).optional() })).mutation(({ ctx, input }) => addTopicStudyLog(ctx.user.id, { ...input, studyDate: new Date(input.studyDate), note: input.note ?? null, sessionId: null })),
+    readCoachAlert: protectedProcedure.input(z26.object({ alertId: z26.number().int() })).mutation(({ ctx, input }) => markCoachAlertRead(ctx.user.id, input.alertId)),
+    addFocusLog: protectedProcedure.input(z26.object({ subject: z26.string().max(80), topic: z26.string().max(180), studyDate: z26.string(), minutes: z26.number().int().min(1).max(1440), questions: z26.number().int().min(0).max(5e3), correct: z26.number().int().min(0).max(5e3), wrong: z26.number().int().min(0).max(5e3), blank: z26.number().int().min(0).max(5e3), note: z26.string().max(1e3).optional() })).mutation(({ ctx, input }) => addTopicStudyLog(ctx.user.id, { ...input, studyDate: new Date(input.studyDate), note: input.note ?? null, sessionId: null })),
     // Paragraf pratiği / gece okuması gibi "şimdi yaptım" alışkanlık kayıtları.
-    logRoutine: protectedProcedure.input(z25.object({ title: z25.string().max(180), subject: z25.string().max(80), topic: z25.string().max(180), kind: z25.string().max(40), plannedMinutes: z25.number().int().min(0).max(1440), actualMinutes: z25.number().int().min(0).max(1440), actualPages: z25.number().int().min(0).max(5e3).optional(), note: z25.string().max(1e3).optional(), readingBookId: z25.number().int().positive().optional() })).mutation(async ({ ctx, input }) => {
+    logRoutine: protectedProcedure.input(z26.object({ title: z26.string().max(180), subject: z26.string().max(80), topic: z26.string().max(180), kind: z26.string().max(40), plannedMinutes: z26.number().int().min(0).max(1440), actualMinutes: z26.number().int().min(0).max(1440), actualPages: z26.number().int().min(0).max(5e3).optional(), note: z26.string().max(1e3).optional(), readingBookId: z26.number().int().positive().optional() })).mutation(async ({ ctx, input }) => {
       const { readingBookId, ...routine } = input;
       const calendar = await logCompletedRoutineSession(ctx.user.id, routine);
       const readingBook = readingBookId && input.actualPages ? await recordReadingPages(ctx.user.id, readingBookId, input.actualPages) : null;
@@ -11491,7 +12077,12 @@ var appRouter = router({
       const weakTopics = input.topics.filter((topic) => topic.status === "Zay\u0131f");
       const recentExams = input.exams.slice(0, 3);
       const profile = input.studentProfile;
-      const targetContext = profile && (profile.targetScoreType || profile.targetUniversity || profile.targetDepartment || profile.targetRanking || profile.examYear) ? `
+      const serverProfile = ctx.user ? await getStudentProfile(ctx.user.id) : null;
+      const track = serverProfile?.examTrack ?? "YKS";
+      const lgsTargetContext = track === "LGS" && serverProfile && (serverProfile.targetHighSchool || serverProfile.targetLgsScore || serverProfile.examYear) ? `
+
+\xD6\u011Frencinin hedefi (onboarding'den \u2014 kesin bir puan/okul garantisi verme, yaln\u0131zca bu hedefe uygun tempo ve odak \xF6ner): LGS ${serverProfile.examYear ?? "y\u0131l\u0131 belirtilmemi\u015F"}, hedef lise ${serverProfile.targetHighSchool || "belirtilmemi\u015F"}, hedef puan ${serverProfile.targetLgsScore || "belirtilmemi\u015F"} / 500.` : "";
+      const targetContext = track === "LGS" ? lgsTargetContext : profile && (profile.targetScoreType || profile.targetUniversity || profile.targetDepartment || profile.targetRanking || profile.examYear) ? `
 
 \xD6\u011Frencinin hedefi (onboarding'den \u2014 plan\u0131n \xF6nceliklerini buna g\xF6re kur, ama kesin bir s\u0131ralama/puan garantisi verme, sadece bu hedefe uygun bir tempo ve odak \xF6ner): hedef s\u0131nav y\u0131l\u0131 ${profile.examYear ?? "belirtilmemi\u015F"}, hedef puan t\xFCr\xFC ${profile.targetScoreType ?? "belirtilmemi\u015F"}, hedef \xFCniversite ${profile.targetUniversity || "belirtilmemi\u015F"}, hedef b\xF6l\xFCm ${profile.targetDepartment || "belirtilmemi\u015F"}, tahmini hedef s\u0131ralama ${profile.targetRanking || "belirtilmemi\u015F"}.` : "";
       const coachingContext = profile && (profile.dailyStudyDuration || profile.preferredStudyMethods?.length || profile.studyObstacles || profile.coachingStyle || profile.mainGoal) ? `
@@ -11510,9 +12101,9 @@ ${notebookSignal}` : "";
       const scheduleSignal = ctx.user ? await getPlanScheduleContext(ctx.user.id, planStart).catch(() => null) : null;
       const scheduleContext = scheduleSignal ? `
 
-\xD6\u011Frencinin okul/dershane program\u0131na g\xF6re bu haftan\u0131n bo\u015F zaman\u0131 (oturumlar\u0131 yaln\u0131zca bu aral\u0131klara ve her g\xFCn\xFCn bo\u015F dakikas\u0131n\u0131 a\u015Fmayacak \u015Fekilde planla; 23:30'dan sonra oturum koyma; o g\xFCn okulda i\u015Flenen YKS derslerine ak\u015Fam k\u0131sa bir peki\u015Ftirme oturumu eklemek iyi olur):
+\xD6\u011Frencinin okul/dershane program\u0131na g\xF6re bu haftan\u0131n bo\u015F zaman\u0131 (oturumlar\u0131 yaln\u0131zca bu aral\u0131klara ve her g\xFCn\xFCn bo\u015F dakikas\u0131n\u0131 a\u015Fmayacak \u015Fekilde planla; 23:30'dan sonra oturum koyma; o g\xFCn okulda i\u015Flenen ${track} derslerine ak\u015Fam k\u0131sa bir peki\u015Ftirme oturumu eklemek iyi olur):
 ${scheduleSignal}` : "";
-      const prompt = `Bir YKS \xF6\u011Frencisi i\xE7in 7 g\xFCnl\xFCk uygulanabilir \xE7al\u0131\u015Fma program\u0131 olu\u015Ftur. Plan bug\xFCnden ba\u015Flar; days dizisi s\u0131ras\u0131yla \u015Fu 7 g\xFCn olsun ve her g\xFCn\xFCn day alan\u0131na g\xFCn ad\u0131n\u0131, date alan\u0131na YYYY-MM-DD tarihini yaz: ${planDays.join(", ")}. Hedef: ${input.goal}. Haftal\u0131k toplam s\xFCre: ${input.availableMinutes} dakika. \xD6ncelik, zay\u0131f konular ve son deneme performans\u0131 olsun. Zay\u0131f konular\u0131 tamamen yok sayma; orta konulara peki\u015Ftirme, iyi konulara koruma oturumu ekle. Her g\xFCn toplam 60-150 dakika ve 2-4 oturum planla. T\xFCrk\xE7e yan\u0131t \xFCret. Ki\u015Fisel raftaki kitaplar\u0131 m\xFCmk\xFCn oldu\u011Funca ilgili zay\u0131f konu oturumlar\u0131na ba\u011Fla. Bir kitab\u0131n mappings alan\u0131nda ilgili konu varsa targetPages alan\u0131na ger\xE7ek sayfa aral\u0131\u011F\u0131n\u0131 ve targetTests alan\u0131na ger\xE7ek test aral\u0131\u011F\u0131n\u0131 yaz; e\u015Fle\u015Ftirme yoksa uydurma aral\u0131k verme, bo\u015F metin ("") b\u0131rak. Soru oturumlar\u0131nda ger\xE7ek\xE7i g\xFCnl\xFCk soru hedefi yaz.
+      const prompt = `${track === "LGS" ? "LGS'ye haz\u0131rlanan bir ortaokul \xF6\u011Frencisi" : "Bir YKS \xF6\u011Frencisi"} i\xE7in 7 g\xFCnl\xFCk uygulanabilir \xE7al\u0131\u015Fma program\u0131 olu\u015Ftur. Plan bug\xFCnden ba\u015Flar; days dizisi s\u0131ras\u0131yla \u015Fu 7 g\xFCn olsun ve her g\xFCn\xFCn day alan\u0131na g\xFCn ad\u0131n\u0131, date alan\u0131na YYYY-MM-DD tarihini yaz: ${planDays.join(", ")}. Hedef: ${input.goal}. Haftal\u0131k toplam s\xFCre: ${input.availableMinutes} dakika. \xD6ncelik, zay\u0131f konular ve son deneme performans\u0131 olsun. Zay\u0131f konular\u0131 tamamen yok sayma; orta konulara peki\u015Ftirme, iyi konulara koruma oturumu ekle. ${track === "LGS" ? "Her g\xFCn toplam 45-120 dakika ve 2-4 k\u0131sa oturum planla (okul ve \xF6devlerle birlikte yorucu olmas\u0131n)." : "Her g\xFCn toplam 60-150 dakika ve 2-4 oturum planla."} T\xFCrk\xE7e yan\u0131t \xFCret. Ki\u015Fisel raftaki kitaplar\u0131 m\xFCmk\xFCn oldu\u011Funca ilgili zay\u0131f konu oturumlar\u0131na ba\u011Fla. Bir kitab\u0131n mappings alan\u0131nda ilgili konu varsa targetPages alan\u0131na ger\xE7ek sayfa aral\u0131\u011F\u0131n\u0131 ve targetTests alan\u0131na ger\xE7ek test aral\u0131\u011F\u0131n\u0131 yaz; e\u015Fle\u015Ftirme yoksa uydurma aral\u0131k verme, bo\u015F metin ("") b\u0131rak. Soru oturumlar\u0131nda ger\xE7ek\xE7i g\xFCnl\xFCk soru hedefi yaz.
 
 Zay\u0131f/orta/iyi konu verisi:
 ${JSON.stringify(input.topics)}
@@ -11529,7 +12120,7 @@ ${JSON.stringify(input.books)}${targetContext}${coachingContext}${notebookContex
         const response = await invokeLLM({
           reasoningEffort: "low",
           messages: [
-            { role: "system", content: "Sen deneyimli, \xF6l\xE7\xFCl\xFC ve motive edici bir YKS \xE7al\u0131\u015Fma ko\xE7usun. Sadece verilen verilere dayan; ger\xE7ek\xE7i olmayan hedefler verme. Yan\u0131t\u0131n JSON \u015Femas\u0131na tam uysun." },
+            { role: "system", content: `Sen deneyimli, \xF6l\xE7\xFCl\xFC ve motive edici bir ${track} \xE7al\u0131\u015Fma ko\xE7usun. ${examPromptContext(track)} Sadece verilen verilere dayan; ger\xE7ek\xE7i olmayan hedefler verme. Yan\u0131t\u0131n JSON \u015Femas\u0131na tam uysun.` },
             { role: "user", content: prompt }
           ],
           response_format: {
@@ -11557,14 +12148,14 @@ ${JSON.stringify(input.books)}${targetContext}${coachingContext}${notebookContex
         const normalized = normalizeAiPlan(parsed, fallbackPlan);
         if (normalized === fallbackPlan) {
           console.warn("[AI Plan] Unusable AI response; keys:", parsed && typeof parsed === "object" ? Object.keys(parsed).join(",") : typeof parsed);
-          throw new TRPCError13({ code: "INTERNAL_SERVER_ERROR", message: "AI plan\u0131 okunamad\u0131. Tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi." });
+          throw new TRPCError14({ code: "INTERNAL_SERVER_ERROR", message: "AI plan\u0131 okunamad\u0131. Tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi." });
         }
         return normalized;
       } catch (error) {
-        if (error instanceof TRPCError13) throw error;
+        if (error instanceof TRPCError14) throw error;
         console.warn("[AI Plan] LLM failed:", error);
         const quota = error instanceof LlmUnavailableError && error.reason === "quota";
-        throw new TRPCError13({
+        throw new TRPCError14({
           code: quota ? "TOO_MANY_REQUESTS" : "INTERNAL_SERVER_ERROR",
           message: quota ? "Yapay zek\xE2 servisinin kotas\u0131 \u015Fu an dolu; AI plan\u0131n\u0131 birka\xE7 saat sonra tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi." : "AI plan\u0131 \u015Fu an haz\u0131rlanamad\u0131; biraz sonra tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi."
         });
@@ -11577,7 +12168,9 @@ ${JSON.stringify(input.books)}${targetContext}${coachingContext}${notebookContex
     // free/premium kullanım kotasına tabi; ayrıca gönderilen dosya artık
     // gerçekten sunucu tarafında doğrulanıyor (magic bytes + gerçek boyut —
     // önceden yalnızca client'taki 8MB kontrolüne güveniliyordu).
-    extract: metredFeatureProcedure("OCR_EXAM_IMPORT").input(documentExtractionInput).mutation(async ({ input }) => {
+    extract: metredFeatureProcedure("OCR_EXAM_IMPORT").input(documentExtractionInput).mutation(async ({ ctx, input }) => {
+      const track = ctx.user ? (await getStudentProfile(ctx.user.id)).examTrack : "YKS";
+      const examHint = track === "LGS" ? "Bu bir LGS denemesi (exam = 'LGS'): dersler T\xFCrk\xE7e, \u0130nk\u0131lap Tarihi, Din K\xFClt\xFCr\xFC, \u0130ngilizce, Matematik, Fen Bilimleri adlar\u0131yla yaz\u0131ls\u0131n; neti do\u011Fru - yanl\u0131\u015F/3 olarak hesapla." : "Neti do\u011Fru - yanl\u0131\u015F/4 olarak hesapla.";
       const fileCheck = validateDataUrl(input.dataUrl, input.mimeType);
       if (!fileCheck.valid) throw new Error(fileCheck.reason);
       const isImage = input.mimeType.startsWith("image/");
@@ -11585,7 +12178,7 @@ ${JSON.stringify(input.books)}${targetContext}${coachingContext}${notebookContex
       try {
         const response = await invokeLLM({
           messages: [
-            { role: "system", content: "Sen YKS deneme sonu\xE7 belgesi okuyucususun. T\xFCrk\xE7e yan\u0131t ver ve yaln\u0131zca belgede g\xF6r\xFClen verileri \xE7\u0131kar. Belge \xF6rnekteki gibi konu ad\u0131, soru say\u0131s\u0131, do\u011Fru, yanl\u0131\u015F ve y\xFCzde s\xFCtunlar\u0131 i\xE7erir. Her konu sat\u0131r\u0131n\u0131 ayr\u0131 kaydet. Neti do\u011Fru - yanl\u0131\u015F/4 olarak hesapla; bilinmeyen tarih i\xE7in bo\u015F string, bilinmeyen s\xFCre i\xE7in 0 kullan. Ders toplam netlerini subjects i\xE7inde, belge a\xE7\u0131k\xE7a s\xFCre vermiyorsa timeSpent i\xE7inde 0 d\xF6nd\xFCr. JSON \u015Femas\u0131na tam uy." },
+            { role: "system", content: `Sen ${track} deneme sonu\xE7 belgesi okuyucususun. T\xFCrk\xE7e yan\u0131t ver ve yaln\u0131zca belgede g\xF6r\xFClen verileri \xE7\u0131kar. Belge \xF6rnekteki gibi konu ad\u0131, soru say\u0131s\u0131, do\u011Fru, yanl\u0131\u015F ve y\xFCzde s\xFCtunlar\u0131 i\xE7erir. Her konu sat\u0131r\u0131n\u0131 ayr\u0131 kaydet. ${examHint} Bilinmeyen tarih i\xE7in bo\u015F string, bilinmeyen s\xFCre i\xE7in 0 kullan. Ders toplam netlerini subjects i\xE7inde, belge a\xE7\u0131k\xE7a s\xFCre vermiyorsa timeSpent i\xE7inde 0 d\xF6nd\xFCr. JSON \u015Femas\u0131na tam uy.` },
             { role: "user", content }
           ],
           response_format: { type: "json_schema", json_schema: { name: "yks_exam_document", strict: true, schema: documentExtractionSchema } }
@@ -11608,6 +12201,7 @@ ${JSON.stringify(input.books)}${targetContext}${coachingContext}${notebookContex
   push: pushRouter,
   reading: readingRouter,
   org: orgRouter,
+  parent: parentRouter,
   catalog: resourceCatalogRouter,
   onboarding: onboardingRouter,
   subscription: subscriptionRouter,
@@ -11809,6 +12403,7 @@ var RuleBasedDifficultyClassifier = class {
 init_turkishText();
 var STOPWORDS2 = /* @__PURE__ */ new Set(["ve", "ile", "soru", "bankasi", "konu", "anlatimi", "anlatimli", "deneme", "kitap", "kitabi", "tyt", "ayt", "fasikul"]);
 var examScopeAllows = (examScope, topicExam) => {
+  if (topicExam === "LGS") return examScope === "LGS";
   if (examScope === "TYT_AYT" || examScope === "YKS" || examScope === "GENEL") return true;
   return examScope === topicExam;
 };
@@ -12228,9 +12823,9 @@ var HeuristicHtmlExtractor = class {
     const pattern = new RegExp(CATEGORY_LINK_PATTERN.source, "g");
     let match;
     while (match = pattern.exec(html)) {
-      const [, id4, url, rawTitle] = match;
-      if (seen.has(id4)) continue;
-      seen.add(id4);
+      const [, id5, url, rawTitle] = match;
+      if (seen.has(id5)) continue;
+      seen.add(id5);
       const title = decodeEntities(rawTitle).trim();
       if (isYksCategory(title, url)) links.push({ url, title });
     }

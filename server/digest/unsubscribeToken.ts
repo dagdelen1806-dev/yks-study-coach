@@ -7,8 +7,9 @@ import { ENV } from "../_core/env";
  * için oturum ya da e-posta doğrulama jetonu yerine kullanılamaz.
  *  - student: `sub` = kullanıcı id'si (student_profiles.weeklyDigestOptOut)
  *  - staff:   `sub` = kurum üyeliği id'si (organization_members.weeklyDigestOptOut)
+ *  - parent:  `sub` = veli bağlantısı id'si (parent_links.weeklyDigestOptOut)
  */
-export type DigestKind = "student" | "staff";
+export type DigestKind = "student" | "staff" | "parent";
 
 const AUDIENCE = "weekly-digest-unsubscribe";
 const secretKey = () => new TextEncoder().encode(ENV.cookieSecret);
@@ -25,7 +26,7 @@ export async function readUnsubscribeToken(token: string): Promise<{ kind: Diges
     const { payload } = await jwtVerify(token, secretKey(), { audience: AUDIENCE, algorithms: ["HS256"] });
     const id = Number(payload.sub);
     if (!Number.isInteger(id) || id <= 0) return null;
-    return { kind: payload.k === "staff" ? "staff" : "student", id };
+    return { kind: payload.k === "staff" ? "staff" : payload.k === "parent" ? "parent" : "student", id };
   } catch {
     return null;
   }

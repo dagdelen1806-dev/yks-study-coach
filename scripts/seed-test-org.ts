@@ -1,6 +1,7 @@
 /**
  * Kurum Paneli'ni yerelde denemek için örnek kurum: 1 yönetici, 2 öğretmen, 6 öğrenci,
- * 2 sınıf, öğretmen atamaları ve birkaç görüşme notu. Öğrencilerin çalışma verisi
+ * 2 sınıf, öğretmen atamaları ve birkaç görüşme notu; ayrıca kurumsuz bir LGS öğrencisi ve
+ * (veli paneli için) bir veli hesabı. Öğrencilerin çalışma verisi
  * seed-test-student.ts ile yazılır; biri "takip gerekiyor" görünsün diye son haftası boşaltılır.
  * Yalnızca @test.local hesapları kullanır; aynı kısa adlı kurumu silip baştan kurar.
  * Tüm hesapların şifresi: test1234
@@ -12,7 +13,7 @@ import { randomBytes, scryptSync } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { getDb } from "../server/db";
 import { parseIdentifier } from "../server/_core/loginIdentifier";
-import { classStudents, counselingNotes, organizationCreditUsage, organizationAuditLogs, organizationClasses, organizationInvitations, organizationMembers, organizations, studentProfiles, teacherAssignments, topicStudyLogs, users } from "../drizzle/schema";
+import { classStudents, counselingNotes, organizationCreditUsage, organizationAuditLogs, organizationClasses, organizationInvitations, organizationMembers, organizations, parentLinks, studentProfiles, teacherAssignments, topicStudyLogs, userMockExams, users } from "../drizzle/schema";
 
 const SLUG = "test-dershanesi";
 const PASSWORD = "test1234";
@@ -29,6 +30,9 @@ const students = [
   { email: "ogrenci5@test.local", name: "Defne", avatar: "girl" },
   { email: "ogrenci6@test.local", name: "Emir", avatar: "boy" },
 ];
+
+const LGS_STUDENT = { email: "lgs1@test.local", name: "Mert" };
+const PARENT = { email: "veli1@test.local", name: "Ayten Veli" };
 
 // localAuth.ts ile aynı scrypt biçimi (tuz:anahtar).
 const hashPassword = (password: string) => { const salt = randomBytes(16).toString("hex"); return `${salt}:${scryptSync(password, salt, 64).toString("hex")}`; };
@@ -101,7 +105,17 @@ async function main() {
   const usage = [[0, "NOTE_AI", 2, 14], [0, "NOTE_VOICE", 1, 9], [1, "AI_STUDY_PLAN", 5, 3], [2, "OCR_BOOK_IMPORT", 3, 4], [3, "NOTE_AI", 2, 6]] as const;
   await db.insert(organizationCreditUsage).values(usage.flatMap(([index, featureKey, credits, times]) => Array.from({ length: times }, () => ({ orgId, userId: studentIds[index], featureKey, credits }))));
 
+  // LGS öğrencisi (anketi bitmiş, 8. sınıf, verisi yok) ve henüz bağlanmamış bir veli hesabı.
+  const lgsId = await ensureUser(LGS_STUDENT.email, `${LGS_STUDENT.name} Test`);
+  const parentId = await ensureUser(PARENT.email, PARENT.name);
+  await db.delete(parentLinks).where(inArray(parentLinks.studentUserId, [lgsId, ...studentIds]));
+  await db.delete(parentLinks).where(eq(parentLinks.parentUserId, parentId));
+  await db.delete(studentProfiles).where(inArray(studentProfiles.userId, [lgsId, parentId]));
+  await db.delete(userMockExams).where(eq(userMockExams.userId, lgsId));
+  await db.insert(studentProfiles).values({ userId: lgsId, onboardingCompleted: 1, onboardingStep: 4, preferredName: LGS_STUDENT.name, avatarStyle: "boy", examTrack: "LGS", gradeLevel: "8", examYear: new Date().getFullYear() + 1, targetHighSchool: "Fen Lisesi", targetLgsScore: "450", dailyStudyDuration: 90, preferredStudyStartTime: "16:00" });
+
   console.log(`\nKurum hazır (id ${orgId}). Şifre: ${PASSWORD}`);
+  console.log(`  LGS öğrencisi: ${LGS_STUDENT.email} · Veli: ${PARENT.email}`);
   console.log(`  Yönetici: ${staff[0].email}\n  Öğretmenler: ${staff[1].email} (12-A), ${staff[2].email} (12-B)\n  Öğrenciler: ${students.map((student) => student.email).join(", ")}`);
   process.exit(0);
 }
