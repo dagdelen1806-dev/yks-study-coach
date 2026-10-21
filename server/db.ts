@@ -496,7 +496,7 @@ export async function getStudyCalendar(userId: number) {
   const overdue = await db.select({ id: studyPlanSessions.id, sessionDate: studyPlanSessions.sessionDate }).from(studyPlanSessions).where(and(eq(studyPlanSessions.userId, userId), eq(studyPlanSessions.status, "planned"), lt(studyPlanSessions.sessionDate, today)));
   const reschedules = rescheduleOverdueSessions(overdue, today, tomorrow, new Date());
   for (const instruction of reschedules) {
-    await db.update(studyPlanSessions).set({ sessionDate: instruction.sessionDate, rescheduledFrom: instruction.rescheduledFrom, rescheduledAt: instruction.rescheduledAt, rescheduleCount: sql`${studyPlanSessions.rescheduleCount} + 1` }).where(eq(studyPlanSessions.id, instruction.id));
+    await db.update(studyPlanSessions).set({ sessionDate: instruction.sessionDate, rescheduledFrom: instruction.rescheduledFrom, rescheduledAt: instruction.rescheduledAt, abandonedAt: null, rescheduleCount: sql`${studyPlanSessions.rescheduleCount} + 1` }).where(eq(studyPlanSessions.id, instruction.id));
   }
   const [plans, sessions, logs] = await Promise.all([
     db.select().from(studyPlans).where(eq(studyPlans.userId, userId)).orderBy(desc(studyPlans.weekStart)),
@@ -767,10 +767,11 @@ export async function upsertTopicProgress(userId: number, input: { exam: ExamTyp
  * İyi durumdaki konu Orta'ya ("Bir tur daha") çekilir; Zayıf/Orta olduğu gibi kalır; hiç verisi
  * yoksa Orta olarak eklenir. Gerçek bir sonuç olmadığından doğruluk ve son çalışma tarihi değişmez.
  */
-export async function markTopicForReview(userId: number, input: { exam: ExamType; subject: string; topic: string }) {
+export async function markTopicForReview(userId: number, input: { exam: ExamType; subject: string; topic: string; sessionId?: number }) {
   await ensureTopicCatalogSeeded();
   const db = await getDb();
   if (!db) return undefined;
+  if (input.sessionId) await db.update(studyPlanSessions).set({ abandonedAt: new Date() }).where(and(eq(studyPlanSessions.id, input.sessionId), eq(studyPlanSessions.userId, userId), eq(studyPlanSessions.status, "planned")));
   const topicRow = await findOrCreateTopic(db, input.exam, input.subject, input.topic);
   const [existing] = await db.select().from(topicProgress).where(and(eq(topicProgress.userId, userId), eq(topicProgress.topicId, topicRow.id))).limit(1);
   const status = statusAfterAbandonedSession(existing ? statusFromDb[existing.status] : null);

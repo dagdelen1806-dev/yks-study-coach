@@ -399,6 +399,9 @@ export const studyPlanSessions = mysqlTable("study_plan_sessions", {
   note: text("note"),
   // Oturum hatırlatma bildirimi gönderildiyse (server/push/sessionReminders.ts): aynı oturuma ikinci bildirim gitmez.
   reminderSentAt: timestamp("reminderSentAt"),
+  // Bu oturumdan açılan odak süre dolmadan bırakıldıysa (topics.markForReview): takvimde
+  // "Yarım kaldı" görünür; oturum planlı kalır, yeniden başlatılıp tamamlanabilir.
+  abandonedAt: timestamp("abandonedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 

@@ -111,7 +111,7 @@ export function StudentDetail({ scope, studentUserId, compact = false }: { scope
                   <li key={session.id} className="flex items-center gap-3 rounded-xl border border-rule px-3 py-2">
                     <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${session.status === "completed" ? "bg-success" : session.status === "skipped" ? "bg-rule-strong" : new Date(session.sessionDate) < new Date() ? "bg-warn-fill" : "bg-brand"}`} aria-hidden="true" />
                     <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-semibold text-ink">{session.title}{session.assignedByUserId && <span className="ml-1.5 rounded-full bg-violet-soft px-1.5 py-0.5 text-[10px] font-bold text-violet">Öğretmen</span>}</span><span className="block text-[12px] text-ink-3">{new Date(session.sessionDate).toLocaleString("tr-TR", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })} · {session.plannedMinutes} dk</span></span>
-                    <span className="shrink-0 text-[12px] font-semibold text-ink-3">{session.status === "completed" ? `${session.actualMinutes ?? 0} dk${session.actualQuestions ? ` · ${session.correct ?? 0}/${session.actualQuestions}` : ""}` : session.status === "skipped" ? "atlandı" : "planlı"}</span>
+                    <span className="shrink-0 text-[12px] font-semibold text-ink-3">{session.status === "completed" ? `${session.actualMinutes ?? 0} dk${session.actualQuestions ? ` · ${session.correct ?? 0}/${session.actualQuestions}` : ""}` : session.status === "skipped" ? "atlandı" : session.abandonedAt ? "yarım kaldı" : "planlı"}</span>
                   </li>
                 ))}
               </ul>

@@ -239,6 +239,13 @@
       "when": 1792503263920,
       "tag": "0033_testimonials",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "5",
+      "when": 1792570539742,
+      "tag": "0034_session_abandoned",
+      "breakpoints": true
     }
   ]
 }

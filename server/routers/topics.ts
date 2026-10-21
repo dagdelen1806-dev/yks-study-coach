@@ -19,6 +19,6 @@ export const topicsRouter = router({
     .mutation(({ ctx, input }) => upsertTopicProgress(ctx.user.id, { ...input, studyDate: new Date(input.studyDate) })),
   // Odak oturumu süresi dolmadan bırakıldı: konu tekrar gerektiren konulara eklenir.
   markForReview: protectedProcedure
-    .input(z.object({ exam: z.enum(["TYT", "AYT"]), subject: z.string().min(1).max(80), topic: z.string().min(1).max(180) }))
+    .input(z.object({ exam: z.enum(["TYT", "AYT"]), subject: z.string().min(1).max(80), topic: z.string().min(1).max(180), sessionId: z.number().int().positive().optional() }))
     .mutation(({ ctx, input }) => markTopicForReview(ctx.user.id, input)),
 });

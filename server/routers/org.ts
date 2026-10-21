@@ -177,7 +177,7 @@ export const orgRouter = router({
       summary: summarizeStudent(signals.get(input.studentUserId)!),
       exams,
       topics: topics.filter((topic) => !topic.insufficientData),
-      sessions: calendar.sessions.map((session) => ({ id: session.id, sessionDate: session.sessionDate, title: session.title, subject: session.subject, topic: session.topic, kind: session.kind, plannedMinutes: session.plannedMinutes, status: session.status, actualMinutes: session.actualMinutes, actualQuestions: session.actualQuestions, correct: session.correct, assignedByUserId: session.assignedByUserId })),
+      sessions: calendar.sessions.map((session) => ({ id: session.id, sessionDate: session.sessionDate, title: session.title, subject: session.subject, topic: session.topic, kind: session.kind, plannedMinutes: session.plannedMinutes, status: session.status, actualMinutes: session.actualMinutes, actualQuestions: session.actualQuestions, correct: session.correct, assignedByUserId: session.assignedByUserId, abandonedAt: session.abandonedAt })),
       logs: calendar.logs.map((log) => ({ studyDate: log.studyDate, subject: log.subject, topic: log.topic, minutes: log.minutes, questions: log.questions, correct: log.correct })),
       notes,
       classes: classes.filter((item) => item.studentUserIds.includes(input.studentUserId)).map((item) => ({ id: item.id, name: item.name })),

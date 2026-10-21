@@ -76,6 +76,26 @@ test("odak süresi dolmadan sonuç girilemez; çıkış yarım sayılır ve konu
   expect(["Zayıf", "Orta"]).toContain(rows.find((row) => row.topic === topic)?.status);
 });
 
+test("takvimden açılıp yarım bırakılan oturum takvimde 'Yarım kaldı' görünür", async ({ page }) => {
+  await signIn(page, STUDENT);
+  await page.goto("/");
+  await nav(page, "Takvim").click();
+  const topic = `E2E yarım ${Date.now()}`;
+  await page.getByRole("button", { name: /Fazladan çalışmak istersen/ }).click();
+  await page.getByPlaceholder("Konu (örn. İntegral)").fill(topic);
+  await page.getByRole("button", { name: "Ekle", exact: true }).first().click();
+  await expect(page.getByText("Fazladan oturum bugünün planına eklendi.")).toBeVisible();
+  await page.getByRole("tab", { name: "Günlük", exact: true }).click();
+  const card = () => page.locator("main div.rounded-2xl.border", { hasText: `${topic} (ekstra)` }).first();
+  await card().getByRole("button", { name: "Odakla başlat" }).click();
+  await page.getByRole("button", { name: "Odağı başlat" }).click();
+  await page.locator(".focus-topbar button", { hasText: "Çıkış" }).click();
+  await page.getByRole("alertdialog", { name: "Oturumdan çık" }).getByRole("button", { name: "Yarım bırak ve çık" }).click();
+  await expect(page.locator(".focus-topbar")).toHaveCount(0);
+  await expect(card().getByText("Yarım kaldı", { exact: true })).toBeVisible();
+  await expect(card().getByRole("button", { name: "Odakla başlat" })).toBeVisible();
+});
+
 test("soru defterine soru eklenir; Escape pencereyi kapatır", async ({ page }) => {
   await signIn(page, STUDENT);
   await page.goto("/");
