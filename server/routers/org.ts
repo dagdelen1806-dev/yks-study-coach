@@ -62,6 +62,8 @@ import {
   updateOrganization,
 } from "../org/orgDb";
 import { getClassSchedule, getCourseBlocks } from "../schedule/classScheduleDb";
+import { canReadNotes, filterPrivateNotes } from "../org/caseDb";
+import { orgCasesRouter } from "./orgCases";
 import { creditsUsedThisMonth, orgCreditReport } from "../org/orgCredits";
 
 const id = z.number().int().positive();
@@ -231,7 +233,8 @@ export const orgRouter = router({
       topics: topics.filter((topic) => !topic.insufficientData),
       sessions: calendar.sessions.map((session) => ({ id: session.id, sessionDate: session.sessionDate, title: session.title, subject: session.subject, topic: session.topic, kind: session.kind, plannedMinutes: session.plannedMinutes, status: session.status, actualMinutes: session.actualMinutes, actualQuestions: session.actualQuestions, correct: session.correct, assignedByUserId: session.assignedByUserId, abandonedAt: session.abandonedAt })),
       logs: calendar.logs.map((log) => ({ studyDate: log.studyDate, subject: log.subject, topic: log.topic, minutes: log.minutes, questions: log.questions, correct: log.correct })),
-      notes,
+      // Görüşme notları mahrem: yalnızca yazanı ve öğrencinin sorumlu öğretmenleri görür (koordinatör/yönetici görmez).
+      notes: filterPrivateNotes(notes, ctx.user.id, await canReadNotes(ctx.membership.orgId, ctx.user.id, input.studentUserId)),
       classes: classes.filter((item) => item.studentUserIds.includes(input.studentUserId)).map((item) => ({ id: item.id, name: item.name })),
       teachers: assignments.filter((row) => row.studentUserId === input.studentUserId).map((row) => ({ userId: row.teacherUserId, name: teachers.find((teacher) => teacher.userId === row.teacherUserId)?.name ?? "Öğretmen" })),
     };
@@ -436,7 +439,7 @@ export const orgRouter = router({
       const note = await getNote(ctx.membership.orgId, input.noteId);
       if (!note) throw new TRPCError({ code: "NOT_FOUND", message: "Not bulunamadı." });
       await assertCanViewStudent(ctx, note.studentUserId);
-      if (note.authorUserId !== ctx.user.id && !hasRole(ctx.membership.role, "admin")) throw new TRPCError({ code: "FORBIDDEN", message: "Yalnızca notu yazan ya da kurum yöneticisi silebilir." });
+      if (note.authorUserId !== ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "Notu yalnızca yazan öğretmen silebilir." });
       await deleteNote(ctx.membership.orgId, input.noteId);
       await audit(ctx, "note.remove", { type: "user", id: note.studentUserId }, { noteId: input.noteId });
       return { ok: true };
@@ -444,6 +447,9 @@ export const orgRouter = router({
   }),
 
   audit: orgProcedure("admin").query(({ ctx }) => listAudit(ctx.membership.orgId)),
+
+  // Novara Rehber: akademik takip dosyaları.
+  cases: orgCasesRouter,
 
   // --- Öğrenci (ve personel) tarafı: davet kodu ile katılma, ayrılma ---------------
   /** Davet kodunu doğrular, kurum adını ve rolü gösterir (katılmadan önce). */

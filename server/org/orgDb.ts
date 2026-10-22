@@ -387,12 +387,12 @@ export async function listPlannedSessionsOn(studentUserId: number, day: Date) {
 }
 
 /** Öğretmenin öğrenciye atadığı görev: öğrencinin takvimine "kim atadı" bilgisiyle tek oturum ekler. */
-export async function insertAssignedTask(input: { orgId: number; studentUserId: number; teacherUserId: number; sessionDate: Date; title: string; subject: string; topic: string; kind: string; plannedMinutes: number; targetQuestions: number | null; summary: string }) {
+export async function insertAssignedTask(input: { orgId: number; studentUserId: number; teacherUserId: number; sessionDate: Date; title: string; subject: string; topic: string; kind: string; plannedMinutes: number; targetQuestions: number | null; summary: string; caseActionId?: number | null; targetPages?: string | null; sourceBookId?: string | null }) {
   const db = await requireDb();
   const dayStart = new Date(input.sessionDate); dayStart.setHours(0, 0, 0, 0);
   const dayEnd = new Date(dayStart); dayEnd.setDate(dayEnd.getDate() + 1);
   const plan = await db.insert(studyPlans).values({ userId: input.studentUserId, title: "Öğretmenin atadığı görevler", weekStart: dayStart, weekEnd: dayEnd, summary: input.summary, source: "manual" }).returning({ id: studyPlans.id });
-  const session = await db.insert(studyPlanSessions).values({ userId: input.studentUserId, planId: Number(plan[0].id), sessionDate: input.sessionDate, title: input.title, subject: input.subject, topic: input.topic, kind: input.kind, plannedMinutes: input.plannedMinutes, targetQuestions: input.targetQuestions, assignedByUserId: input.teacherUserId, assignedOrgId: input.orgId }).returning({ id: studyPlanSessions.id });
+  const session = await db.insert(studyPlanSessions).values({ userId: input.studentUserId, planId: Number(plan[0].id), sessionDate: input.sessionDate, title: input.title, subject: input.subject, topic: input.topic, kind: input.kind, plannedMinutes: input.plannedMinutes, targetQuestions: input.targetQuestions, assignedByUserId: input.teacherUserId, assignedOrgId: input.orgId, caseActionId: input.caseActionId ?? null, targetPages: input.targetPages ?? null, sourceBookId: input.sourceBookId ?? null }).returning({ id: studyPlanSessions.id });
   return Number(session[0].id);
 }
 

@@ -75,6 +75,11 @@ vi.mock("./db", async (importOriginal) => ({
   getUserMockExams: vi.fn(async () => []),
   getUserTopicProgress: vi.fn(async () => []),
 }));
+// Sorumlu öğretmen = aktif ataması olan öğretmen (bellek içi atamalardan).
+vi.mock("./org/caseDb", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./org/caseDb")>()),
+  canReadNotes: vi.fn(async (orgId: number, viewerUserId: number, studentUserId: number) => store.assignments.some((a) => a.orgId === orgId && a.teacherUserId === viewerUserId && a.studentUserId === studentUserId && a.active === 1)),
+}));
 vi.mock("./schedule/classScheduleDb", async (importOriginal) => ({ ...(await importOriginal<typeof import("./schedule/classScheduleDb")>()), getClassSchedule: vi.fn(async () => ({ periods: [], blocks: [] })), getCourseBlocks: vi.fn(async () => courseBlocks) }));
 
 const { appRouter } = await import("./routers");
@@ -166,7 +171,13 @@ describe("kurum izolasyonu (docs/kurumsal.md §5)", () => {
     expect((await as(20).org.myFeedback()).map((n) => n.body)).toEqual(["Aferin, devam!"]);
     await expect(as(12).org.student({ orgId: 1, studentUserId: 20 })).rejects.toMatchObject({ code: "NOT_FOUND" });
     await expect(as(12).org.notes.create({ orgId: 1, studentUserId: 20, body: "x", visibility: "staff" })).rejects.toMatchObject({ code: "NOT_FOUND" });
-    expect((await as(10).org.student({ orgId: 1, studentUserId: 20 })).notes).toHaveLength(2);
+    // Yazışmalar mahrem: sorumlu öğretmen görür; kurum yöneticisi öğrenciyi görür ama notları göremez ve silemez.
+    expect((await as(11).org.student({ orgId: 1, studentUserId: 20 })).notes).toHaveLength(2);
+    expect((await as(10).org.student({ orgId: 1, studentUserId: 20 })).notes).toEqual([]);
+    await expect(as(10).org.notes.remove({ orgId: 1, noteId: store.notes[0].id })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    // Yöneticinin kendi yazdığı not kendisine görünür.
+    await as(10).org.notes.create({ orgId: 1, studentUserId: 20, body: "Yönetici notu", visibility: "staff" });
+    expect((await as(10).org.student({ orgId: 1, studentUserId: 20 })).notes.map((n) => n.body)).toEqual(["Yönetici notu"]);
   });
 
   it("9) kritik işlemler denetim kaydı üretir", async () => {

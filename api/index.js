@@ -109,6 +109,7 @@ import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { eq as eq3 } from "drizzle-orm";
 
 // drizzle/schema.ts
+import { sql } from "drizzle-orm";
 import { customType, decimal, index, integer, pgTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/pg-core";
 
 // shared/exams.ts
@@ -456,6 +457,10 @@ var userMockExams = pgTable("user_mock_exams", {
   topicNetsJson: text("topicNetsJson").notNull(),
   topicDetailsJson: text("topicDetailsJson").notNull(),
   importedFrom: text("importedFrom", { enum: ["manual", "ocr", "pdf", "csv", "xlsx"] }).default("manual").notNull(),
+  // Karşılaştırılabilirlik (Novara Rehber): yayınevi, kurumun deneme kodu, tam/branş denemesi. Boşsa tam deneme sayılır.
+  publisher: varchar("publisher", { length: 120 }),
+  examCode: varchar("examCode", { length: 60 }),
+  scope: text("scope", { enum: ["full", "branch"] }),
   notes: text("notes"),
   createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
 });
@@ -775,6 +780,10 @@ var studyPlanSessions = pgTable("study_plan_sessions", {
   // Kurum öğretmeninin atadığı görev (bkz. organization_*); öğrencinin kendi görevlerinde boş.
   assignedByUserId: integer("assignedByUserId"),
   assignedOrgId: integer("assignedOrgId"),
+  // Akademik takip dosyasından gelen görev ve öğrencinin geri bildirimi (Tamamladım / Zorlandım / Tekrar etmeliyim).
+  caseActionId: integer("caseActionId"),
+  studentFeedback: text("studentFeedback", { enum: ["done", "struggled", "needs_review"] }),
+  studentFeedbackAt: timestamp("studentFeedbackAt", { withTimezone: true }),
   completedAt: timestamp("completedAt", { withTimezone: true }),
   actualMinutes: integer("actualMinutes"),
   actualQuestions: integer("actualQuestions"),
@@ -840,6 +849,8 @@ var organizations = pgTable("organizations", {
   kvkkConsent: text("kvkkConsent"),
   kvkkVersion: integer("kvkkVersion").default(1).notNull(),
   kvkkUpdatedAt: timestamp("kvkkUpdatedAt", { withTimezone: true }),
+  // Akademik takip dosyaları (Novara Rehber) kurum bazında açılır; pilotta tek kurum.
+  academicCasesEnabled: integer("academicCasesEnabled").default(0).notNull(),
   createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
 });
 var organizationUpgradeRequests = pgTable("organization_upgrade_requests", {
@@ -958,12 +969,81 @@ var counselingNotes = pgTable("counseling_notes", {
   studentUserId: integer("studentUserId").notNull(),
   authorUserId: integer("authorUserId").notNull(),
   body: text("body").notNull(),
-  // staff: yalnızca kurum personeli görür; student: öğrenciye geri bildirim olarak gösterilir.
+  // Notlar mahremdir: yalnızca yazanı ve öğrencinin sorumlu öğretmenleri görür (koordinatör/yönetici/veli görmez).
+  // staff: öğrenci görmez; student: öğrenciye geri bildirim olarak da gösterilir.
   visibility: text("visibility", { enum: ["staff", "student"] }).default("staff").notNull(),
+  // Akademik takip dosyasına ait not ise dosya.
+  caseId: integer("caseId"),
   createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull()
 }, (table) => ({
   orgStudentIdx: index("counseling_notes_org_student_idx").on(table.orgId, table.studentUserId)
+}));
+var academicCases = pgTable("academic_cases", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  orgId: integer("orgId").notNull(),
+  studentUserId: integer("studentUserId").notNull(),
+  ownerUserId: integer("ownerUserId"),
+  examKind: text("examKind", { enum: EXAM_KINDS }),
+  ruleKey: varchar("ruleKey", { length: 40 }).notNull(),
+  comparabilityKey: varchar("comparabilityKey", { length: 120 }).default("").notNull(),
+  confidence: text("confidence", { enum: ["high", "medium", "low"] }).default("medium").notNull(),
+  status: text("status", { enum: ["open", "in_progress", "evaluating", "closed"] }).default("open").notNull(),
+  outcome: text("outcome", { enum: ["completed", "ongoing", "reassess"] }),
+  openedByUserId: integer("openedByUserId"),
+  openedAt: timestamp("openedAt", { withTimezone: true }).defaultNow().notNull(),
+  closedAt: timestamp("closedAt", { withTimezone: true }),
+  reopenedFromId: integer("reopenedFromId"),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull()
+}, (table) => ({
+  openUnique: uniqueIndex("academic_cases_open_unique").on(table.orgId, table.studentUserId, table.ruleKey, table.comparabilityKey).where(sql`${table.status} <> 'closed'`),
+  orgStatusIdx: index("academic_cases_org_status_idx").on(table.orgId, table.status),
+  orgOwnerIdx: index("academic_cases_org_owner_idx").on(table.orgId, table.ownerUserId, table.status)
+}));
+var caseEvidence = pgTable("case_evidence", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  caseId: integer("caseId").notNull(),
+  orgId: integer("orgId").notNull(),
+  kind: text("kind", { enum: ["exam", "study", "topic", "book", "question"] }).notNull(),
+  refId: integer("refId"),
+  snapshotJson: text("snapshotJson").notNull(),
+  capturedAt: timestamp("capturedAt", { withTimezone: true }).defaultNow().notNull()
+}, (table) => ({
+  caseIdx: index("case_evidence_case_idx").on(table.caseId)
+}));
+var caseActions = pgTable("case_actions", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  caseId: integer("caseId").notNull(),
+  orgId: integer("orgId").notNull(),
+  type: text("type", { enum: ["review", "meeting", "resource", "plan", "note"] }).notNull(),
+  payloadJson: text("payloadJson").notNull(),
+  bookId: varchar("bookId", { length: 120 }),
+  bookContentId: integer("bookContentId"),
+  status: text("status", { enum: ["planned", "done", "cancelled"] }).default("done").notNull(),
+  createdByUserId: integer("createdByUserId").notNull(),
+  idempotencyKey: varchar("idempotencyKey", { length: 64 }).notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
+}, (table) => ({
+  idempotencyUnique: uniqueIndex("case_actions_idempotency_unique").on(table.caseId, table.idempotencyKey),
+  caseIdx: index("case_actions_case_idx").on(table.caseId)
+}));
+var caseEvaluations = pgTable("case_evaluations", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  caseId: integer("caseId").notNull(),
+  orgId: integer("orgId").notNull(),
+  baselineExamId: integer("baselineExamId"),
+  followupExamId: integer("followupExamId"),
+  netChange: decimal("netChange", { precision: 6, scale: 2 }),
+  tasksDone: integer("tasksDone").default(0).notNull(),
+  tasksTotal: integer("tasksTotal").default(0).notNull(),
+  studentSignalsJson: text("studentSignalsJson").notNull(),
+  limitedEvidence: integer("limitedEvidence").default(0).notNull(),
+  uncertaintyNote: text("uncertaintyNote"),
+  teacherOutcome: text("teacherOutcome", { enum: ["completed", "ongoing", "reassess"] }).notNull(),
+  evaluatedByUserId: integer("evaluatedByUserId").notNull(),
+  evaluatedAt: timestamp("evaluatedAt", { withTimezone: true }).defaultNow().notNull()
+}, (table) => ({
+  caseIdx: index("case_evaluations_case_idx").on(table.caseId)
 }));
 var organizationAuditLogs = pgTable("organization_audit_logs", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
@@ -1436,7 +1516,7 @@ var appErrors = pgTable("app_errors", {
 }));
 
 // server/db.ts
-import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lt, sql as sql2 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
@@ -2669,7 +2749,7 @@ async function getStudyCalendar(userId) {
   const overdue = await db.select({ id: studyPlanSessions.id, sessionDate: studyPlanSessions.sessionDate }).from(studyPlanSessions).where(and(eq(studyPlanSessions.userId, userId), eq(studyPlanSessions.status, "planned"), lt(studyPlanSessions.sessionDate, today)));
   const reschedules = rescheduleOverdueSessions(overdue, today, tomorrow, /* @__PURE__ */ new Date());
   for (const instruction of reschedules) {
-    await db.update(studyPlanSessions).set({ sessionDate: instruction.sessionDate, rescheduledFrom: instruction.rescheduledFrom, rescheduledAt: instruction.rescheduledAt, abandonedAt: null, rescheduleCount: sql`${studyPlanSessions.rescheduleCount} + 1` }).where(eq(studyPlanSessions.id, instruction.id));
+    await db.update(studyPlanSessions).set({ sessionDate: instruction.sessionDate, rescheduledFrom: instruction.rescheduledFrom, rescheduledAt: instruction.rescheduledAt, abandonedAt: null, rescheduleCount: sql2`${studyPlanSessions.rescheduleCount} + 1` }).where(eq(studyPlanSessions.id, instruction.id));
   }
   const [plans, sessions, logs] = await Promise.all([
     db.select().from(studyPlans).where(eq(studyPlans.userId, userId)).orderBy(desc(studyPlans.weekStart)),
@@ -2828,7 +2908,7 @@ async function ensureCurriculumSeeded(db) {
   await db.insert(yksTopics).values(missing.map((def) => ({ slug: def.slug, exam: def.exam, subject: def.subject, topic: def.topic, unit: def.unit }))).onConflictDoNothing({ target: yksTopics.slug });
 }
 async function findOrCreateTopic(db, exam, subject2, topic) {
-  const existing = await db.select().from(yksTopics).where(and(eq(yksTopics.subject, subject2), eq(yksTopics.topic, topic))).orderBy(sql`${yksTopics.exam} = ${exam} DESC`, yksTopics.id).limit(1);
+  const existing = await db.select().from(yksTopics).where(and(eq(yksTopics.subject, subject2), eq(yksTopics.topic, topic))).orderBy(sql2`${yksTopics.exam} = ${exam} DESC`, yksTopics.id).limit(1);
   if (existing[0]) return existing[0];
   const slug = `${exam}-${slugify(subject2)}-${slugify(topic)}` || `topic-${Date.now()}`;
   const result = await db.insert(yksTopics).values({ slug, exam, subject: subject2, topic, unit: subject2 }).onConflictDoUpdate({ target: yksTopics.slug, set: { subject: subject2 } }).returning({ id: yksTopics.id });
@@ -3416,7 +3496,7 @@ function registerLocalAuthRoutes(app2) {
 
 // server/notes/attachmentStorage.ts
 import { randomUUID } from "node:crypto";
-import { and as and2, eq as eq4, inArray as inArray2, isNull as isNull2, lt as lt2, sql as sql2 } from "drizzle-orm";
+import { and as and2, eq as eq4, inArray as inArray2, isNull as isNull2, lt as lt2, sql as sql3 } from "drizzle-orm";
 
 // server/storage/supabaseStorage.ts
 var BlobStoreError = class extends Error {
@@ -3582,27 +3662,27 @@ var databaseAttachmentStorage = {
     const result = await db.insert(noteAttachments).values({ userId, kind: input.kind, mimeType: input.mimeType, byteSize: input.data.byteLength, data: storageKey ? null : input.data, storageKey, durationSec: input.durationSec ?? null }).returning({ id: noteAttachments.id });
     return { id: Number(result[0].id) };
   },
-  async get(userId, id5) {
+  async get(userId, id6) {
     const db = await requireDb();
-    const [row] = await db.select({ mimeType: noteAttachments.mimeType, data: noteAttachments.data, storageKey: noteAttachments.storageKey, kind: noteAttachments.kind, noteId: noteAttachments.noteId }).from(noteAttachments).where(and2(eq4(noteAttachments.id, id5), eq4(noteAttachments.userId, userId))).limit(1);
+    const [row] = await db.select({ mimeType: noteAttachments.mimeType, data: noteAttachments.data, storageKey: noteAttachments.storageKey, kind: noteAttachments.kind, noteId: noteAttachments.noteId }).from(noteAttachments).where(and2(eq4(noteAttachments.id, id6), eq4(noteAttachments.userId, userId))).limit(1);
     if (!row) return null;
     const store = getMediaBlobStore();
     const data = row.data ?? (row.storageKey && store ? await store.get(row.storageKey) : null);
     if (!data) return null;
     return { mimeType: row.mimeType, data, kind: row.kind, noteId: row.noteId };
   },
-  async locate(userId, id5) {
+  async locate(userId, id6) {
     const db = await requireDb();
-    const [row] = await db.select({ mimeType: noteAttachments.mimeType, data: noteAttachments.data, storageKey: noteAttachments.storageKey }).from(noteAttachments).where(and2(eq4(noteAttachments.id, id5), eq4(noteAttachments.userId, userId))).limit(1);
+    const [row] = await db.select({ mimeType: noteAttachments.mimeType, data: noteAttachments.data, storageKey: noteAttachments.storageKey }).from(noteAttachments).where(and2(eq4(noteAttachments.id, id6), eq4(noteAttachments.userId, userId))).limit(1);
     if (!row) return null;
     if (row.data) return { mimeType: row.mimeType, data: row.data };
     const store = getMediaBlobStore();
     if (!row.storageKey || !store) return null;
     return { mimeType: row.mimeType, url: await store.signedUrl(row.storageKey, SIGNED_URL_TTL_SEC) };
   },
-  async setOcrText(userId, id5, text3) {
+  async setOcrText(userId, id6, text3) {
     const db = await requireDb();
-    await db.update(noteAttachments).set({ ocrText: text3 }).where(and2(eq4(noteAttachments.id, id5), eq4(noteAttachments.userId, userId)));
+    await db.update(noteAttachments).set({ ocrText: text3 }).where(and2(eq4(noteAttachments.id, id6), eq4(noteAttachments.userId, userId)));
   },
   async syncNoteLinks(userId, noteId, referencedIds) {
     const db = await requireDb();
@@ -3623,12 +3703,12 @@ var databaseAttachmentStorage = {
   },
   async deleteForWallPost(userId, wallPostId) {
     const db = await requireDb();
-    await db.update(noteAttachments).set({ wallPostId: null }).where(and2(eq4(noteAttachments.userId, userId), eq4(noteAttachments.wallPostId, wallPostId), sql2`${noteAttachments.noteId} IS NOT NULL`));
+    await db.update(noteAttachments).set({ wallPostId: null }).where(and2(eq4(noteAttachments.userId, userId), eq4(noteAttachments.wallPostId, wallPostId), sql3`${noteAttachments.noteId} IS NOT NULL`));
     await deleteRows(and2(eq4(noteAttachments.userId, userId), eq4(noteAttachments.wallPostId, wallPostId)));
   },
   async usageBytes(userId) {
     const db = await requireDb();
-    const [row] = await db.select({ total: sql2`COALESCE(SUM(${noteAttachments.byteSize}), 0)` }).from(noteAttachments).where(eq4(noteAttachments.userId, userId));
+    const [row] = await db.select({ total: sql3`COALESCE(SUM(${noteAttachments.byteSize}), 0)` }).from(noteAttachments).where(eq4(noteAttachments.userId, userId));
     return Number(row?.total ?? 0);
   },
   async cleanupOrphans(userId) {
@@ -3640,8 +3720,8 @@ var getAttachmentStorage = () => databaseAttachmentStorage;
 // server/notes/attachmentRoutes.ts
 function registerNoteAttachmentRoutes(app2) {
   app2.get("/api/notes/attachments/:id", async (req, res) => {
-    const id5 = Number(req.params.id);
-    if (!Number.isInteger(id5) || id5 <= 0) {
+    const id6 = Number(req.params.id);
+    if (!Number.isInteger(id6) || id6 <= 0) {
       res.status(400).end();
       return;
     }
@@ -3653,7 +3733,7 @@ function registerNoteAttachmentRoutes(app2) {
       return;
     }
     try {
-      const attachment = await getAttachmentStorage().locate(userId, id5);
+      const attachment = await getAttachmentStorage().locate(userId, id6);
       if (!attachment) {
         res.status(404).end();
         return;
@@ -3795,7 +3875,7 @@ function buildWeeklyDigestEmail({ to, name, digest, start, end, appUrl, unsubscr
 }
 
 // server/notes/questionsDb.ts
-import { and as and5, asc, desc as desc3, eq as eq7, gte as gte4, isNotNull as isNotNull2, isNull as isNull4, lt as lt4, lte as lte3, ne as ne2, sql as sql4 } from "drizzle-orm";
+import { and as and5, asc, desc as desc3, eq as eq7, gte as gte4, isNotNull as isNotNull2, isNull as isNull4, lt as lt4, lte as lte3, ne as ne2, sql as sql5 } from "drizzle-orm";
 
 // server/studyPlan/planTasks.ts
 import { and as and3, eq as eq5, gte as gte2, lte } from "drizzle-orm";
@@ -4003,7 +4083,7 @@ async function insertPlanTask(userId, input) {
 }
 
 // server/notes/notesDb.ts
-import { and as and4, desc as desc2, eq as eq6, gte as gte3, inArray as inArray3, isNotNull, isNull as isNull3, ilike, lt as lt3, lte as lte2, ne, or, sql as sql3 } from "drizzle-orm";
+import { and as and4, desc as desc2, eq as eq6, gte as gte3, inArray as inArray3, isNotNull, isNull as isNull3, ilike, lt as lt3, lte as lte2, ne, or, sql as sql4 } from "drizzle-orm";
 
 // shared/noteContent.ts
 var BLOCK_TYPES = /* @__PURE__ */ new Set(["paragraph", "heading", "listItem", "taskItem", "blockquote", "formula", "noteImage", "voiceClip", "drawing", "horizontalRule"]);
@@ -4160,7 +4240,7 @@ async function saveNote(userId, input) {
     ...input.isFavorite !== void 0 ? { isFavorite: input.isFavorite ? 1 : 0 } : {},
     ...input.isPinned !== void 0 ? { isPinned: input.isPinned ? 1 : 0 } : {}
   };
-  await db.insert(notes).values({ userId, clientId: input.clientId, ...values, isFavorite: input.isFavorite ? 1 : 0, isPinned: input.isPinned ? 1 : 0 }).onConflictDoUpdate({ target: [notes.userId, notes.clientId], set: { ...values, version: sql3`${notes.version} + 1` } });
+  await db.insert(notes).values({ userId, clientId: input.clientId, ...values, isFavorite: input.isFavorite ? 1 : 0, isPinned: input.isPinned ? 1 : 0 }).onConflictDoUpdate({ target: [notes.userId, notes.clientId], set: { ...values, version: sql4`${notes.version} + 1` } });
   const [saved] = await db.select({ id: notes.id, version: notes.version, updatedAt: notes.updatedAt, title: notes.title }).from(notes).where(and4(eq6(notes.userId, userId), eq6(notes.clientId, input.clientId))).limit(1);
   if (!saved) throw new NoteError("Not kaydedilemedi.");
   await db.delete(noteTags).where(and4(eq6(noteTags.userId, userId), eq6(noteTags.noteId, saved.id)));
@@ -4169,9 +4249,9 @@ async function saveNote(userId, input) {
   return { id: saved.id, clientId: input.clientId, version: saved.version, title: saved.title, updatedAt: saved.updatedAt };
 }
 async function describeLinks(db, userId, rows) {
-  const topicIds = Array.from(new Set(rows.map((row) => row.topicId).filter((id5) => id5 !== null)));
-  const bookIds = Array.from(new Set(rows.map((row) => row.bookId).filter((id5) => Boolean(id5))));
-  const numeric = bookIds.filter((id5) => /^\d+$/.test(id5)).map(Number);
+  const topicIds = Array.from(new Set(rows.map((row) => row.topicId).filter((id6) => id6 !== null)));
+  const bookIds = Array.from(new Set(rows.map((row) => row.bookId).filter((id6) => Boolean(id6))));
+  const numeric = bookIds.filter((id6) => /^\d+$/.test(id6)).map(Number);
   const [topics, custom, catalog] = await Promise.all([
     topicIds.length ? db.select({ id: yksTopics.id, topic: yksTopics.topic, unit: yksTopics.unit }).from(yksTopics).where(inArray3(yksTopics.id, topicIds)) : Promise.resolve([]),
     bookIds.length ? db.select({ bookId: userResourceBooks.bookId, title: userResourceBooks.title }).from(userResourceBooks).where(and4(eq6(userResourceBooks.userId, userId), inArray3(userResourceBooks.bookId, bookIds))) : Promise.resolve([]),
@@ -4188,12 +4268,12 @@ var parseStats = (value) => {
     return computeNoteStats({ type: "doc", content: [] });
   }
 };
-async function getNote(userId, id5) {
+async function getNote(userId, id6) {
   const db = await requireDb2();
-  const [row] = await db.select().from(notes).where(and4(eq6(notes.id, id5), eq6(notes.userId, userId))).limit(1);
+  const [row] = await db.select().from(notes).where(and4(eq6(notes.id, id6), eq6(notes.userId, userId))).limit(1);
   if (!row) return null;
   const [tags, links] = await Promise.all([
-    db.select({ tag: noteTags.tag }).from(noteTags).where(and4(eq6(noteTags.userId, userId), eq6(noteTags.noteId, id5))),
+    db.select({ tag: noteTags.tag }).from(noteTags).where(and4(eq6(noteTags.userId, userId), eq6(noteTags.noteId, id6))),
     describeLinks(db, userId, [row])
   ]);
   return {
@@ -4218,7 +4298,7 @@ async function keywordCondition(db, userId, q) {
     ilike(notes.title, term),
     ilike(notes.plainText, term),
     ilike(notes.subject, term),
-    sql3`EXISTS (SELECT 1 FROM ${noteTags} WHERE ${noteTags.noteId} = ${notes.id} AND ${noteTags.tag} ILIKE ${term})`
+    sql4`EXISTS (SELECT 1 FROM ${noteTags} WHERE ${noteTags.noteId} = ${notes.id} AND ${noteTags.tag} ILIKE ${term})`
   ];
   if (topics.length) conditions.push(inArray3(notes.topicId, topics.map((row) => row.id)));
   if (books.length) conditions.push(inArray3(notes.bookId, books.map((row) => row.bookId)));
@@ -4242,17 +4322,17 @@ async function listNotes(userId, filters) {
   if (filters.questions === "only") conditions.push(eq6(notes.templateKey, QUESTION_TEMPLATE_KEY));
   if (filters.tag) {
     const tag = normalizeTag(filters.tag);
-    if (tag) conditions.push(sql3`EXISTS (SELECT 1 FROM ${noteTags} WHERE ${noteTags.noteId} = ${notes.id} AND ${noteTags.tag} = ${tag})`);
+    if (tag) conditions.push(sql4`EXISTS (SELECT 1 FROM ${noteTags} WHERE ${noteTags.noteId} = ${notes.id} AND ${noteTags.tag} = ${tag})`);
   }
   if (filters.kind) {
     const statKey = { voice: "voice", image: "images", formula: "formulas", drawing: "drawings" };
-    if (filters.kind === "text") conditions.push(sql3`CHAR_LENGTH(${notes.plainText}) > 0`);
-    else conditions.push(sql3`COALESCE((${notes.stats}::jsonb ->> ${statKey[filters.kind]})::int, 0) > 0`);
+    if (filters.kind === "text") conditions.push(sql4`CHAR_LENGTH(${notes.plainText}) > 0`);
+    else conditions.push(sql4`COALESCE((${notes.stats}::jsonb ->> ${statKey[filters.kind]})::int, 0) > 0`);
   }
   if (filters.q?.trim()) conditions.push(await keywordCondition(db, userId, filters.q));
   if (filters.cursor) {
-    const [time2, id5] = filters.cursor.split("_").map(Number);
-    if (Number.isFinite(time2) && Number.isFinite(id5)) conditions.push(or(lt3(notes.noteDate, new Date(time2)), and4(eq6(notes.noteDate, new Date(time2)), lt3(notes.id, id5))));
+    const [time2, id6] = filters.cursor.split("_").map(Number);
+    if (Number.isFinite(time2) && Number.isFinite(id6)) conditions.push(or(lt3(notes.noteDate, new Date(time2)), and4(eq6(notes.noteDate, new Date(time2)), lt3(notes.id, id6))));
   }
   const rows = await db.select({
     id: notes.id,
@@ -4300,7 +4380,7 @@ var endOfToday = () => {
   date.setHours(23, 59, 59, 999);
   return date;
 };
-async function updateNoteFlags(userId, id5, flags) {
+async function updateNoteFlags(userId, id6, flags) {
   const db = await requireDb2();
   const set = {
     ...flags.isFavorite !== void 0 ? { isFavorite: flags.isFavorite ? 1 : 0 } : {},
@@ -4308,23 +4388,23 @@ async function updateNoteFlags(userId, id5, flags) {
     ...flags.reviewAt !== void 0 ? { reviewAt: flags.reviewAt } : {},
     ...flags.archived !== void 0 ? { status: flags.archived ? "archived" : "active" } : {}
   };
-  const [row] = await db.select({ id: notes.id }).from(notes).where(and4(eq6(notes.id, id5), eq6(notes.userId, userId))).limit(1);
+  const [row] = await db.select({ id: notes.id }).from(notes).where(and4(eq6(notes.id, id6), eq6(notes.userId, userId))).limit(1);
   if (!row) throw new NoteError("Not bulunamad\u0131.");
   if (Object.keys(set).length === 0) return;
-  await db.update(notes).set(set).where(and4(eq6(notes.id, id5), eq6(notes.userId, userId)));
+  await db.update(notes).set(set).where(and4(eq6(notes.id, id6), eq6(notes.userId, userId)));
 }
-async function deleteNote(userId, id5) {
+async function deleteNote(userId, id6) {
   const db = await requireDb2();
-  const [row] = await db.select({ id: notes.id }).from(notes).where(and4(eq6(notes.id, id5), eq6(notes.userId, userId))).limit(1);
+  const [row] = await db.select({ id: notes.id }).from(notes).where(and4(eq6(notes.id, id6), eq6(notes.userId, userId))).limit(1);
   if (!row) throw new NoteError("Not bulunamad\u0131.");
-  await getAttachmentStorage().deleteForNote(userId, id5);
-  const [question] = await db.select({ id: notebookQuestions.id }).from(notebookQuestions).where(and4(eq6(notebookQuestions.userId, userId), eq6(notebookQuestions.noteId, id5))).limit(1);
+  await getAttachmentStorage().deleteForNote(userId, id6);
+  const [question] = await db.select({ id: notebookQuestions.id }).from(notebookQuestions).where(and4(eq6(notebookQuestions.userId, userId), eq6(notebookQuestions.noteId, id6))).limit(1);
   if (question) {
     await db.delete(questionAttempts).where(and4(eq6(questionAttempts.userId, userId), eq6(questionAttempts.questionId, question.id)));
     await db.delete(notebookQuestions).where(eq6(notebookQuestions.id, question.id));
   }
-  await db.delete(noteTags).where(and4(eq6(noteTags.userId, userId), eq6(noteTags.noteId, id5)));
-  await db.delete(notes).where(and4(eq6(notes.id, id5), eq6(notes.userId, userId)));
+  await db.delete(noteTags).where(and4(eq6(noteTags.userId, userId), eq6(noteTags.noteId, id6)));
+  await db.delete(notes).where(and4(eq6(notes.id, id6), eq6(notes.userId, userId)));
 }
 async function getNoteCalendar(userId, from, to) {
   const db = await requireDb2();
@@ -4336,7 +4416,7 @@ async function getNoteCalendar(userId, from, to) {
 }
 async function listTags(userId) {
   const db = await requireDb2();
-  const rows = await db.select({ tag: noteTags.tag, count: sql3`COUNT(*)::int` }).from(noteTags).where(eq6(noteTags.userId, userId)).groupBy(noteTags.tag).orderBy(desc2(sql3`COUNT(*)`)).limit(50);
+  const rows = await db.select({ tag: noteTags.tag, count: sql4`COUNT(*)::int` }).from(noteTags).where(eq6(noteTags.userId, userId)).groupBy(noteTags.tag).orderBy(desc2(sql4`COUNT(*)`)).limit(50);
   return rows.map((row) => ({ tag: row.tag, count: Number(row.count) }));
 }
 async function getNoteStatsForAdmin(userId) {
@@ -4382,9 +4462,9 @@ var endOfToday2 = () => {
   return date;
 };
 var clean = (value, max) => value?.trim() ? value.trim().slice(0, max) : null;
-async function assertAttachment(userId, id5, kind) {
-  if (!id5) return;
-  const attachment = await getAttachmentStorage().get(userId, id5);
+async function assertAttachment(userId, id6, kind) {
+  if (!id6) return;
+  const attachment = await getAttachmentStorage().get(userId, id6);
   if (!attachment || attachment.kind !== kind) throw new NoteError(kind === "image" ? "Foto\u011Fraf bulunamad\u0131." : "Ses kayd\u0131 bulunamad\u0131.");
 }
 async function resolveTopic(db, topicId) {
@@ -4445,9 +4525,9 @@ async function createQuestion(userId, input) {
   if (!row) throw new NoteError("Soru kaydedilemedi.");
   return await getQuestion(userId, row.id);
 }
-async function updateQuestion(userId, id5, patch) {
+async function updateQuestion(userId, id6, patch) {
   const db = await requireDb3();
-  const [row] = await db.select().from(notebookQuestions).where(and5(eq7(notebookQuestions.id, id5), eq7(notebookQuestions.userId, userId))).limit(1);
+  const [row] = await db.select().from(notebookQuestions).where(and5(eq7(notebookQuestions.id, id6), eq7(notebookQuestions.userId, userId))).limit(1);
   if (!row) throw new NoteError("Soru bulunamad\u0131.");
   const [note] = await db.select({ clientId: notes.clientId, content: notes.content, noteDate: notes.noteDate, bookId: notes.bookId, studySessionId: notes.studySessionId, isFavorite: notes.isFavorite, isPinned: notes.isPinned }).from(notes).where(and5(eq7(notes.id, row.noteId), eq7(notes.userId, userId))).limit(1);
   if (!note) throw new NoteError("Soru bulunamad\u0131.");
@@ -4481,8 +4561,8 @@ async function updateQuestion(userId, id5, patch) {
     isFavorite: note.isFavorite === 1,
     isPinned: note.isPinned === 1
   });
-  await db.update(notebookQuestions).set(next).where(eq7(notebookQuestions.id, id5));
-  return await getQuestion(userId, id5);
+  await db.update(notebookQuestions).set(next).where(eq7(notebookQuestions.id, id6));
+  return await getQuestion(userId, id6);
 }
 var questionColumns = {
   id: notebookQuestions.id,
@@ -4511,23 +4591,23 @@ var questionColumns = {
   createdAt: notebookQuestions.createdAt
 };
 var shape = (row) => ({ ...row, errorType: row.errorType, aiSolution: row.aiSolution ? parseAiSolution(row.aiSolution) : null });
-async function getQuestion(userId, id5) {
+async function getQuestion(userId, id6) {
   const db = await requireDb3();
-  const [row] = await db.select(questionColumns).from(notebookQuestions).leftJoin(yksTopics, eq7(yksTopics.id, notebookQuestions.topicId)).where(and5(eq7(notebookQuestions.id, id5), eq7(notebookQuestions.userId, userId))).limit(1);
+  const [row] = await db.select(questionColumns).from(notebookQuestions).leftJoin(yksTopics, eq7(yksTopics.id, notebookQuestions.topicId)).where(and5(eq7(notebookQuestions.id, id6), eq7(notebookQuestions.userId, userId))).limit(1);
   if (!row) return null;
-  const attempts = await db.select({ result: questionAttempts.result, sawSolution: questionAttempts.sawSolution, hintLevel: questionAttempts.hintLevel, attemptedAt: questionAttempts.attemptedAt }).from(questionAttempts).where(and5(eq7(questionAttempts.userId, userId), eq7(questionAttempts.questionId, id5))).orderBy(desc3(questionAttempts.attemptedAt), desc3(questionAttempts.id)).limit(20);
+  const attempts = await db.select({ result: questionAttempts.result, sawSolution: questionAttempts.sawSolution, hintLevel: questionAttempts.hintLevel, attemptedAt: questionAttempts.attemptedAt }).from(questionAttempts).where(and5(eq7(questionAttempts.userId, userId), eq7(questionAttempts.questionId, id6))).orderBy(desc3(questionAttempts.attemptedAt), desc3(questionAttempts.id)).limit(20);
   return { ...shape(row), attempts: attempts.map((attempt) => ({ ...attempt, sawSolution: attempt.sawSolution === 1 })) };
 }
-async function getSolveContext(userId, id5) {
+async function getSolveContext(userId, id6) {
   const db = await requireDb3();
-  const [row] = await db.select({ questionImageId: notebookQuestions.questionImageId, stuckPoint: notebookQuestions.stuckPoint, subject: notebookQuestions.subject, topic: yksTopics.topic, exam: yksTopics.exam, content: notes.content, aiSolution: notebookQuestions.aiSolution, aiSolutionModel: notebookQuestions.aiSolutionModel, difficulty: notebookQuestions.difficulty, lastResult: notebookQuestions.lastResult }).from(notebookQuestions).innerJoin(notes, eq7(notes.id, notebookQuestions.noteId)).leftJoin(yksTopics, eq7(yksTopics.id, notebookQuestions.topicId)).where(and5(eq7(notebookQuestions.id, id5), eq7(notebookQuestions.userId, userId))).limit(1);
+  const [row] = await db.select({ questionImageId: notebookQuestions.questionImageId, stuckPoint: notebookQuestions.stuckPoint, subject: notebookQuestions.subject, topic: yksTopics.topic, exam: yksTopics.exam, content: notes.content, aiSolution: notebookQuestions.aiSolution, aiSolutionModel: notebookQuestions.aiSolutionModel, difficulty: notebookQuestions.difficulty, lastResult: notebookQuestions.lastResult }).from(notebookQuestions).innerJoin(notes, eq7(notes.id, notebookQuestions.noteId)).leftJoin(yksTopics, eq7(yksTopics.id, notebookQuestions.topicId)).where(and5(eq7(notebookQuestions.id, id6), eq7(notebookQuestions.userId, userId))).limit(1);
   if (!row) throw new NoteError("Soru bulunamad\u0131.");
   return { questionImageId: row.questionImageId, ocrText: ocrTextOf(row.content, row.questionImageId), stuckPoint: row.stuckPoint, subject: row.subject, topic: row.topic, aiSolution: parseAiSolution(row.aiSolution), aiSolutionModel: row.aiSolutionModel, exam: row.exam, difficulty: row.difficulty, lastResult: row.lastResult };
 }
-async function saveAiSolution(userId, id5, solution, aiSolutionModel = null) {
+async function saveAiSolution(userId, id6, solution, aiSolutionModel = null) {
   const db = await requireDb3();
   const aiSolutionAt = /* @__PURE__ */ new Date();
-  await db.update(notebookQuestions).set({ aiSolution: JSON.stringify(solution), aiSolutionAt, aiSolutionModel }).where(and5(eq7(notebookQuestions.id, id5), eq7(notebookQuestions.userId, userId)));
+  await db.update(notebookQuestions).set({ aiSolution: JSON.stringify(solution), aiSolutionAt, aiSolutionModel }).where(and5(eq7(notebookQuestions.id, id6), eq7(notebookQuestions.userId, userId)));
   return { aiSolution: solution, aiSolutionAt, aiSolutionModel };
 }
 async function getQuestionIdByNote(userId, noteId) {
@@ -4549,21 +4629,21 @@ async function listQuestions(userId, filters) {
   const page2 = rows.slice(0, limit).map(shape);
   return { items: page2, nextCursor: !filters.due && rows.length > limit ? page2[page2.length - 1]?.id ?? null : null };
 }
-async function deleteQuestion(userId, id5) {
+async function deleteQuestion(userId, id6) {
   const db = await requireDb3();
-  const [row] = await db.select({ noteId: notebookQuestions.noteId }).from(notebookQuestions).where(and5(eq7(notebookQuestions.id, id5), eq7(notebookQuestions.userId, userId))).limit(1);
+  const [row] = await db.select({ noteId: notebookQuestions.noteId }).from(notebookQuestions).where(and5(eq7(notebookQuestions.id, id6), eq7(notebookQuestions.userId, userId))).limit(1);
   if (!row) throw new NoteError("Soru bulunamad\u0131.");
   await deleteNote(userId, row.noteId);
 }
-async function recordAttempt(userId, id5, input) {
+async function recordAttempt(userId, id6, input) {
   const db = await requireDb3();
-  const [row] = await db.select({ reviewStage: notebookQuestions.reviewStage }).from(notebookQuestions).where(and5(eq7(notebookQuestions.id, id5), eq7(notebookQuestions.userId, userId))).limit(1);
+  const [row] = await db.select({ reviewStage: notebookQuestions.reviewStage }).from(notebookQuestions).where(and5(eq7(notebookQuestions.id, id6), eq7(notebookQuestions.userId, userId))).limit(1);
   if (!row) throw new NoteError("Soru bulunamad\u0131.");
   const now = /* @__PURE__ */ new Date();
   const hintLevel = Math.min(Math.max(Math.round(input.hintLevel ?? 0), 0), HINT_LEVELS.solution);
   const next = scheduleAfterAttempt(row, input.result, input.sawSolution, now, hintLevel);
-  await db.insert(questionAttempts).values({ userId, questionId: id5, result: input.result, sawSolution: input.sawSolution ? 1 : 0, hintLevel, seconds: input.seconds ? Math.min(Math.round(input.seconds), 7200) : null, stageBefore: row.reviewStage, attemptedAt: now });
-  await db.update(notebookQuestions).set({ ...next, attemptCount: sql4`${notebookQuestions.attemptCount} + 1`, lastResult: input.result, lastAttemptAt: now }).where(eq7(notebookQuestions.id, id5));
+  await db.insert(questionAttempts).values({ userId, questionId: id6, result: input.result, sawSolution: input.sawSolution ? 1 : 0, hintLevel, seconds: input.seconds ? Math.min(Math.round(input.seconds), 7200) : null, stageBefore: row.reviewStage, attemptedAt: now });
+  await db.update(notebookQuestions).set({ ...next, attemptCount: sql5`${notebookQuestions.attemptCount} + 1`, lastResult: input.result, lastAttemptAt: now }).where(eq7(notebookQuestions.id, id6));
   return next;
 }
 var questionSubject = (subject2) => subject2 === void 0 ? [] : [subject2 === null ? isNull4(notebookQuestions.subject) : eq7(notebookQuestions.subject, subject2)];
@@ -4583,7 +4663,7 @@ async function todaysReviewTask(db, userId) {
 }
 var dueCondition = () => and5(ne2(notebookQuestions.status, "mastered"), isNotNull2(notebookQuestions.nextReviewAt), lte3(notebookQuestions.nextReviewAt, endOfToday2()));
 async function countDue(db, userId, subject2) {
-  const [row] = await db.select({ count: sql4`COUNT(*)::int` }).from(notebookQuestions).where(and5(eq7(notebookQuestions.userId, userId), dueCondition(), ...questionSubject(subject2)));
+  const [row] = await db.select({ count: sql5`COUNT(*)::int` }).from(notebookQuestions).where(and5(eq7(notebookQuestions.userId, userId), dueCondition(), ...questionSubject(subject2)));
   return Number(row?.count ?? 0);
 }
 async function getReviewSummary(userId, subject2) {
@@ -4591,7 +4671,7 @@ async function getReviewSummary(userId, subject2) {
   const [due, task, totals] = await Promise.all([
     countDue(db, userId, subject2),
     todaysReviewTask(db, userId),
-    db.select({ status: notebookQuestions.status, count: sql4`COUNT(*)::int` }).from(notebookQuestions).where(and5(eq7(notebookQuestions.userId, userId), ...questionSubject(subject2))).groupBy(notebookQuestions.status)
+    db.select({ status: notebookQuestions.status, count: sql5`COUNT(*)::int` }).from(notebookQuestions).where(and5(eq7(notebookQuestions.userId, userId), ...questionSubject(subject2))).groupBy(notebookQuestions.status)
   ]);
   const byStatus = Object.fromEntries(totals.map((row) => [row.status, Number(row.count)]));
   const reviewCount = Math.min(due, MAX_QUESTIONS_PER_REVIEW);
@@ -4624,10 +4704,10 @@ async function finishReviewSession(userId, input) {
 }
 async function getSubjectSummary(userId) {
   const db = await requireDb3();
-  const isQuestion = sql4`(${notes.templateKey} IS NOT DISTINCT FROM ${sql4.raw(`'${QUESTION_TEMPLATE_KEY}'`)})::int`;
+  const isQuestion = sql5`(${notes.templateKey} IS NOT DISTINCT FROM ${sql5.raw(`'${QUESTION_TEMPLATE_KEY}'`)})::int`;
   const [noteRows, dueRows] = await Promise.all([
-    db.select({ subject: notes.subject, isQuestion, count: sql4`COUNT(*)::int` }).from(notes).where(and5(eq7(notes.userId, userId), eq7(notes.status, "active"))).groupBy(notes.subject, isQuestion),
-    db.select({ subject: notebookQuestions.subject, count: sql4`COUNT(*)::int` }).from(notebookQuestions).where(and5(eq7(notebookQuestions.userId, userId), dueCondition())).groupBy(notebookQuestions.subject)
+    db.select({ subject: notes.subject, isQuestion, count: sql5`COUNT(*)::int` }).from(notes).where(and5(eq7(notes.userId, userId), eq7(notes.status, "active"))).groupBy(notes.subject, isQuestion),
+    db.select({ subject: notebookQuestions.subject, count: sql5`COUNT(*)::int` }).from(notebookQuestions).where(and5(eq7(notebookQuestions.userId, userId), dueCondition())).groupBy(notebookQuestions.subject)
   ]);
   const bySubject = /* @__PURE__ */ new Map();
   const entry = (subject2) => {
@@ -4861,7 +4941,7 @@ function buildTeacherDigestEmail({ to, name, orgName, digest, rangeLabel: rangeL
 }
 
 // server/org/orgDb.ts
-import { and as and6, desc as desc4, eq as eq8, gte as gte5, inArray as inArray4, isNull as isNull5, lt as lt5, sql as sql5 } from "drizzle-orm";
+import { and as and6, desc as desc4, eq as eq8, gte as gte5, inArray as inArray4, isNull as isNull5, lt as lt5, sql as sql6 } from "drizzle-orm";
 var OrgError = class extends Error {
 };
 async function requireDb4() {
@@ -4920,13 +5000,13 @@ async function setMemberRole(orgId, userId, role) {
 }
 async function setMemberSubject(orgId, userId, subject2) {
   const db = await requireDb4();
-  const result = await db.update(organizationMembers).set({ subject: subject2 }).where(and6(eq8(organizationMembers.orgId, orgId), eq8(organizationMembers.userId, userId), eq8(organizationMembers.status, "active"), sql5`${organizationMembers.role} <> 'student'`)).returning();
+  const result = await db.update(organizationMembers).set({ subject: subject2 }).where(and6(eq8(organizationMembers.orgId, orgId), eq8(organizationMembers.userId, userId), eq8(organizationMembers.status, "active"), sql6`${organizationMembers.role} <> 'student'`)).returning();
   return result.length > 0;
 }
 async function endMembership(orgId, userId, status) {
   const db = await requireDb4();
   await db.update(organizationMembers).set({ status, leftAt: /* @__PURE__ */ new Date() }).where(and6(eq8(organizationMembers.orgId, orgId), eq8(organizationMembers.userId, userId), eq8(organizationMembers.status, "active")));
-  await db.update(teacherAssignments).set({ active: 0 }).where(and6(eq8(teacherAssignments.orgId, orgId), sql5`(${teacherAssignments.studentUserId} = ${userId} OR ${teacherAssignments.teacherUserId} = ${userId})`));
+  await db.update(teacherAssignments).set({ active: 0 }).where(and6(eq8(teacherAssignments.orgId, orgId), sql6`(${teacherAssignments.studentUserId} = ${userId} OR ${teacherAssignments.teacherUserId} = ${userId})`));
   const classes = await db.select({ id: organizationClasses.id }).from(organizationClasses).where(eq8(organizationClasses.orgId, orgId));
   if (classes.length) await db.delete(classStudents).where(and6(eq8(classStudents.studentUserId, userId), inArray4(classStudents.classId, classes.map((row) => row.id))));
   await db.update(organizationClasses).set({ advisorUserId: null }).where(and6(eq8(organizationClasses.orgId, orgId), eq8(organizationClasses.advisorUserId, userId)));
@@ -4941,9 +5021,9 @@ async function listInvitations(orgId) {
   const db = await requireDb4();
   return db.select({ id: organizationInvitations.id, role: organizationInvitations.role, note: organizationInvitations.note, subject: organizationInvitations.subject, expiresAt: organizationInvitations.expiresAt, maxUses: organizationInvitations.maxUses, usedCount: organizationInvitations.usedCount, revokedAt: organizationInvitations.revokedAt, createdAt: organizationInvitations.createdAt }).from(organizationInvitations).where(eq8(organizationInvitations.orgId, orgId)).orderBy(desc4(organizationInvitations.createdAt)).limit(100);
 }
-async function revokeInvitation(orgId, id5) {
+async function revokeInvitation(orgId, id6) {
   const db = await requireDb4();
-  const result = await db.update(organizationInvitations).set({ revokedAt: /* @__PURE__ */ new Date() }).where(and6(eq8(organizationInvitations.orgId, orgId), eq8(organizationInvitations.id, id5), isNull5(organizationInvitations.revokedAt))).returning();
+  const result = await db.update(organizationInvitations).set({ revokedAt: /* @__PURE__ */ new Date() }).where(and6(eq8(organizationInvitations.orgId, orgId), eq8(organizationInvitations.id, id6), isNull5(organizationInvitations.revokedAt))).returning();
   return result.length > 0;
 }
 async function findInvitationByHash(codeHash) {
@@ -4960,7 +5040,7 @@ async function acceptInvitation(input) {
   const [existing] = await db.select({ id: organizationMembers.id }).from(organizationMembers).where(and6(eq8(organizationMembers.orgId, input.orgId), eq8(organizationMembers.userId, input.userId))).limit(1);
   if (existing) await db.update(organizationMembers).set({ role: input.role, status: "active", consentAt, subject: subject2, kvkkVersion, joinedAt: now, leftAt: null, invitedBy: input.invitedBy }).where(eq8(organizationMembers.id, existing.id));
   else await db.insert(organizationMembers).values({ orgId: input.orgId, userId: input.userId, role: input.role, status: "active", consentAt, subject: subject2, kvkkVersion, joinedAt: now, invitedBy: input.invitedBy });
-  await db.update(organizationInvitations).set({ usedCount: sql5`${organizationInvitations.usedCount} + 1` }).where(eq8(organizationInvitations.id, input.invitationId));
+  await db.update(organizationInvitations).set({ usedCount: sql6`${organizationInvitations.usedCount} + 1` }).where(eq8(organizationInvitations.id, input.invitationId));
 }
 async function listClasses(orgId) {
   const db = await requireDb4();
@@ -4991,7 +5071,7 @@ async function setClassStudents(orgId, classId, studentUserIds) {
   const db = await requireDb4();
   const [row] = await db.select({ id: organizationClasses.id }).from(organizationClasses).where(and6(eq8(organizationClasses.orgId, orgId), eq8(organizationClasses.id, classId))).limit(1);
   if (!row) return false;
-  const valid = studentUserIds.length ? (await listMembers(orgId, { role: "student" })).map((member) => member.userId).filter((id5) => studentUserIds.includes(id5)) : [];
+  const valid = studentUserIds.length ? (await listMembers(orgId, { role: "student" })).map((member) => member.userId).filter((id6) => studentUserIds.includes(id6)) : [];
   await db.delete(classStudents).where(eq8(classStudents.classId, classId));
   if (valid.length) await db.insert(classStudents).values(valid.map((studentUserId) => ({ classId, studentUserId })));
   return true;
@@ -5002,7 +5082,7 @@ async function listAssignments(orgId) {
 }
 async function setTeacherStudents(orgId, teacherUserId, studentUserIds) {
   const db = await requireDb4();
-  const valid = studentUserIds.length ? (await listMembers(orgId, { role: "student" })).map((member) => member.userId).filter((id5) => studentUserIds.includes(id5)) : [];
+  const valid = studentUserIds.length ? (await listMembers(orgId, { role: "student" })).map((member) => member.userId).filter((id6) => studentUserIds.includes(id6)) : [];
   await db.update(teacherAssignments).set({ active: 0 }).where(and6(eq8(teacherAssignments.orgId, orgId), eq8(teacherAssignments.teacherUserId, teacherUserId)));
   for (const studentUserId of valid) {
     await db.insert(teacherAssignments).values({ orgId, teacherUserId, studentUserId, active: 1 }).onConflictDoUpdate({ target: [teacherAssignments.orgId, teacherAssignments.teacherUserId, teacherAssignments.studentUserId], set: { active: 1 } });
@@ -5040,14 +5120,14 @@ async function createNote(input) {
   const result = await db.insert(counselingNotes).values(input).returning({ id: counselingNotes.id });
   return Number(result[0].id);
 }
-async function getNote2(orgId, id5) {
+async function getNote2(orgId, id6) {
   const db = await requireDb4();
-  const [row] = await db.select({ id: counselingNotes.id, studentUserId: counselingNotes.studentUserId, authorUserId: counselingNotes.authorUserId }).from(counselingNotes).where(and6(eq8(counselingNotes.orgId, orgId), eq8(counselingNotes.id, id5))).limit(1);
+  const [row] = await db.select({ id: counselingNotes.id, studentUserId: counselingNotes.studentUserId, authorUserId: counselingNotes.authorUserId }).from(counselingNotes).where(and6(eq8(counselingNotes.orgId, orgId), eq8(counselingNotes.id, id6))).limit(1);
   return row ?? null;
 }
-async function deleteNote2(orgId, id5) {
+async function deleteNote2(orgId, id6) {
   const db = await requireDb4();
-  await db.delete(counselingNotes).where(and6(eq8(counselingNotes.orgId, orgId), eq8(counselingNotes.id, id5)));
+  await db.delete(counselingNotes).where(and6(eq8(counselingNotes.orgId, orgId), eq8(counselingNotes.id, id6)));
 }
 async function listStudentFeedback(studentUserId) {
   const db = await requireDb4();
@@ -5062,14 +5142,14 @@ async function listAudit(orgId) {
   return db.select({ id: organizationAuditLogs.id, action: organizationAuditLogs.action, targetType: organizationAuditLogs.targetType, targetId: organizationAuditLogs.targetId, metadataJson: organizationAuditLogs.metadataJson, actorName: users.name, createdAt: organizationAuditLogs.createdAt }).from(organizationAuditLogs).innerJoin(users, eq8(users.id, organizationAuditLogs.actorUserId)).where(eq8(organizationAuditLogs.orgId, orgId)).orderBy(desc4(organizationAuditLogs.createdAt)).limit(200);
 }
 async function loadStudentSignals(studentUserIds, weekStart, weekEnd, logsSince) {
-  const signals = new Map(studentUserIds.map((id5) => [id5, { exams: [], logs: [], weekSessions: [], weakTopicCount: 0, lastSignedIn: null }]));
+  const signals = new Map(studentUserIds.map((id6) => [id6, { exams: [], logs: [], weekSessions: [], weakTopicCount: 0, lastSignedIn: null }]));
   if (!studentUserIds.length) return signals;
   const db = await requireDb4();
   const [exams, logs, sessions, weak, signins] = await Promise.all([
     db.select({ userId: userMockExams.userId, exam: userMockExams.exam, examDate: userMockExams.examDate, net: userMockExams.net }).from(userMockExams).where(inArray4(userMockExams.userId, studentUserIds)),
     db.select({ userId: topicStudyLogs.userId, studyDate: topicStudyLogs.studyDate, minutes: topicStudyLogs.minutes }).from(topicStudyLogs).where(and6(inArray4(topicStudyLogs.userId, studentUserIds), gte5(topicStudyLogs.studyDate, logsSince))),
     db.select({ userId: studyPlanSessions.userId, status: studyPlanSessions.status, plannedMinutes: studyPlanSessions.plannedMinutes, actualMinutes: studyPlanSessions.actualMinutes, targetQuestions: studyPlanSessions.targetQuestions, actualQuestions: studyPlanSessions.actualQuestions, sessionDate: studyPlanSessions.sessionDate, rescheduledFrom: studyPlanSessions.rescheduledFrom }).from(studyPlanSessions).where(and6(inArray4(studyPlanSessions.userId, studentUserIds), gte5(studyPlanSessions.sessionDate, weekStart), lt5(studyPlanSessions.sessionDate, weekEnd))),
-    db.select({ userId: topicProgress.userId, count: sql5`COUNT(*)::int` }).from(topicProgress).where(and6(inArray4(topicProgress.userId, studentUserIds), eq8(topicProgress.status, "weak"))).groupBy(topicProgress.userId),
+    db.select({ userId: topicProgress.userId, count: sql6`COUNT(*)::int` }).from(topicProgress).where(and6(inArray4(topicProgress.userId, studentUserIds), eq8(topicProgress.status, "weak"))).groupBy(topicProgress.userId),
     db.select({ id: users.id, lastSignedIn: users.lastSignedIn }).from(users).where(inArray4(users.id, studentUserIds))
   ]);
   for (const row of exams) signals.get(row.userId)?.exams.push({ exam: row.exam, examDate: row.examDate, net: Number(row.net) });
@@ -5108,7 +5188,7 @@ async function insertAssignedTask(input) {
   const dayEnd = new Date(dayStart);
   dayEnd.setDate(dayEnd.getDate() + 1);
   const plan = await db.insert(studyPlans).values({ userId: input.studentUserId, title: "\xD6\u011Fretmenin atad\u0131\u011F\u0131 g\xF6revler", weekStart: dayStart, weekEnd: dayEnd, summary: input.summary, source: "manual" }).returning({ id: studyPlans.id });
-  const session = await db.insert(studyPlanSessions).values({ userId: input.studentUserId, planId: Number(plan[0].id), sessionDate: input.sessionDate, title: input.title, subject: input.subject, topic: input.topic, kind: input.kind, plannedMinutes: input.plannedMinutes, targetQuestions: input.targetQuestions, assignedByUserId: input.teacherUserId, assignedOrgId: input.orgId }).returning({ id: studyPlanSessions.id });
+  const session = await db.insert(studyPlanSessions).values({ userId: input.studentUserId, planId: Number(plan[0].id), sessionDate: input.sessionDate, title: input.title, subject: input.subject, topic: input.topic, kind: input.kind, plannedMinutes: input.plannedMinutes, targetQuestions: input.targetQuestions, assignedByUserId: input.teacherUserId, assignedOrgId: input.orgId, caseActionId: input.caseActionId ?? null, targetPages: input.targetPages ?? null, sourceBookId: input.sourceBookId ?? null }).returning({ id: studyPlanSessions.id });
   return Number(session[0].id);
 }
 async function getOrganization(orgId) {
@@ -5146,7 +5226,7 @@ async function setPerStudentCreditCap(orgId, cap3) {
 }
 async function updateKvkk(orgId, notice, consent) {
   const db = await requireDb4();
-  await db.update(organizations).set({ kvkkNotice: notice, kvkkConsent: consent, kvkkVersion: sql5`${organizations.kvkkVersion} + 1`, kvkkUpdatedAt: /* @__PURE__ */ new Date() }).where(eq8(organizations.id, orgId));
+  await db.update(organizations).set({ kvkkNotice: notice, kvkkConsent: consent, kvkkVersion: sql6`${organizations.kvkkVersion} + 1`, kvkkUpdatedAt: /* @__PURE__ */ new Date() }).where(eq8(organizations.id, orgId));
 }
 async function listStudentKvkkVersions(orgId) {
   const db = await requireDb4();
@@ -5165,7 +5245,7 @@ async function createOrganization(name, slug) {
 async function listOrganizations() {
   const db = await requireDb4();
   const rows = await db.select({ id: organizations.id, name: organizations.name, slug: organizations.slug, status: organizations.status, createdAt: organizations.createdAt, plan: organizations.plan, membershipStartsAt: organizations.membershipStartsAt, membershipEndsAt: organizations.membershipEndsAt, aiCreditsMonthly: organizations.aiCreditsMonthly }).from(organizations).orderBy(desc4(organizations.createdAt));
-  const counts = rows.length ? await db.select({ orgId: organizationMembers.orgId, role: organizationMembers.role, count: sql5`COUNT(*)::int` }).from(organizationMembers).where(and6(inArray4(organizationMembers.orgId, rows.map((row) => row.id)), eq8(organizationMembers.status, "active"))).groupBy(organizationMembers.orgId, organizationMembers.role) : [];
+  const counts = rows.length ? await db.select({ orgId: organizationMembers.orgId, role: organizationMembers.role, count: sql6`COUNT(*)::int` }).from(organizationMembers).where(and6(inArray4(organizationMembers.orgId, rows.map((row) => row.id)), eq8(organizationMembers.status, "active"))).groupBy(organizationMembers.orgId, organizationMembers.role) : [];
   return rows.map((row) => ({ ...row, students: Number(counts.find((count4) => count4.orgId === row.id && count4.role === "student")?.count ?? 0), staff: counts.filter((count4) => count4.orgId === row.id && count4.role !== "student").reduce((sum, count4) => sum + Number(count4.count), 0) }));
 }
 async function setOrganizationStatus(orgId, status) {
@@ -5206,16 +5286,16 @@ async function resolveUpgradeRequest(requestId, status, resolvedBy) {
 import { SignJWT as SignJWT3, jwtVerify as jwtVerify3 } from "jose";
 var AUDIENCE = "weekly-digest-unsubscribe";
 var secretKey3 = () => new TextEncoder().encode(ENV.cookieSecret);
-async function createUnsubscribeToken(kind, id5) {
-  return new SignJWT3({ k: kind }).setProtectedHeader({ alg: "HS256" }).setSubject(String(id5)).setAudience(AUDIENCE).setIssuedAt().sign(secretKey3());
+async function createUnsubscribeToken(kind, id6) {
+  return new SignJWT3({ k: kind }).setProtectedHeader({ alg: "HS256" }).setSubject(String(id6)).setAudience(AUDIENCE).setIssuedAt().sign(secretKey3());
 }
-var unsubscribeUrlFor = async (appUrl, kind, id5) => `${appUrl}/api/email/weekly-digest/unsubscribe?token=${encodeURIComponent(await createUnsubscribeToken(kind, id5))}`;
+var unsubscribeUrlFor = async (appUrl, kind, id6) => `${appUrl}/api/email/weekly-digest/unsubscribe?token=${encodeURIComponent(await createUnsubscribeToken(kind, id6))}`;
 async function readUnsubscribeToken(token) {
   try {
     const { payload } = await jwtVerify3(token, secretKey3(), { audience: AUDIENCE, algorithms: ["HS256"] });
-    const id5 = Number(payload.sub);
-    if (!Number.isInteger(id5) || id5 <= 0) return null;
-    return { kind: payload.k === "staff" ? "staff" : payload.k === "parent" ? "parent" : "student", id: id5 };
+    const id6 = Number(payload.sub);
+    if (!Number.isInteger(id6) || id6 <= 0) return null;
+    return { kind: payload.k === "staff" ? "staff" : payload.k === "parent" ? "parent" : "student", id: id6 };
   } catch {
     return null;
   }
@@ -5667,7 +5747,7 @@ function registerWeeklyDigestRoutes(app2) {
 
 // server/errors/errorLog.ts
 import { createHash as createHash2 } from "node:crypto";
-import { and as and11, desc as desc9, eq as eq13, isNotNull as isNotNull6, isNull as isNull9, sql as sql6 } from "drizzle-orm";
+import { and as and11, desc as desc9, eq as eq13, isNotNull as isNotNull6, isNull as isNull9, sql as sql7 } from "drizzle-orm";
 import { z } from "zod";
 
 // shared/errorLog.ts
@@ -5704,7 +5784,7 @@ async function recordAppError(input) {
     const fingerprint = createHash2("sha256").update(errorFingerprintKey(input.source, message, stack)).digest("hex");
     const now = /* @__PURE__ */ new Date();
     const latest = { message, stack, path: input.path?.slice(0, 300) ?? null, lastUserId: input.userId ?? null, userAgent: input.userAgent?.slice(0, 300) ?? null };
-    await db.insert(appErrors).values({ fingerprint, source: input.source, ...latest, firstSeenAt: now, lastSeenAt: now }).onConflictDoUpdate({ target: appErrors.fingerprint, set: { ...latest, count: sql6`${appErrors.count} + 1`, lastSeenAt: now, resolvedAt: null } });
+    await db.insert(appErrors).values({ fingerprint, source: input.source, ...latest, firstSeenAt: now, lastSeenAt: now }).onConflictDoUpdate({ target: appErrors.fingerprint, set: { ...latest, count: sql7`${appErrors.count} + 1`, lastSeenAt: now, resolvedAt: null } });
   } catch (error) {
     console.error("[ErrorLog] could not record:", error instanceof Error ? error.message : error);
   }
@@ -5714,10 +5794,10 @@ async function listAppErrors(status, limit = 200) {
   if (!db) return [];
   return db.select().from(appErrors).where(status === "open" ? isNull9(appErrors.resolvedAt) : isNotNull6(appErrors.resolvedAt)).orderBy(desc9(appErrors.lastSeenAt)).limit(limit);
 }
-async function resolveAppError(id5) {
+async function resolveAppError(id6) {
   const db = await getDb();
   if (!db) return;
-  await db.update(appErrors).set({ resolvedAt: /* @__PURE__ */ new Date() }).where(and11(eq13(appErrors.id, id5), isNull9(appErrors.resolvedAt)));
+  await db.update(appErrors).set({ resolvedAt: /* @__PURE__ */ new Date() }).where(and11(eq13(appErrors.id, id6), isNull9(appErrors.resolvedAt)));
 }
 var clientReport = z.object({
   message: z.string().min(1).max(2e3),
@@ -6147,7 +6227,7 @@ function yksTermPrice(input) {
 }
 
 // server/subscriptions/subscriptionDb.ts
-import { and as and14, desc as desc10, eq as eq16, gte as gte10, sql as sql7 } from "drizzle-orm";
+import { and as and14, desc as desc10, eq as eq16, gte as gte10, sql as sql8 } from "drizzle-orm";
 async function listActivePlans() {
   const db = await getDb();
   if (!db) return [];
@@ -6173,10 +6253,10 @@ async function getPlanByCode(code) {
   const rows = await db.select().from(subscriptionPlans).where(eq16(subscriptionPlans.code, code)).limit(1);
   return rows[0];
 }
-async function getPlanById(id5) {
+async function getPlanById(id6) {
   const db = await getDb();
   if (!db) return void 0;
-  const rows = await db.select().from(subscriptionPlans).where(eq16(subscriptionPlans.id, id5)).limit(1);
+  const rows = await db.select().from(subscriptionPlans).where(eq16(subscriptionPlans.id, id6)).limit(1);
   return rows[0];
 }
 async function upsertPlan(input, options = {}) {
@@ -6195,11 +6275,11 @@ async function listAllPlans() {
   if (!db) return [];
   return db.select().from(subscriptionPlans).orderBy(subscriptionPlans.code);
 }
-async function updatePlanPricing(id5, patch) {
+async function updatePlanPricing(id6, patch) {
   const db = await getDb();
   if (!db) return void 0;
-  await db.update(subscriptionPlans).set({ ...patch.price !== void 0 ? { price: patch.price } : {}, ...patch.trialDays !== void 0 ? { trialDays: patch.trialDays } : {}, ...patch.isActive !== void 0 ? { isActive: patch.isActive ? 1 : 0 } : {} }).where(eq16(subscriptionPlans.id, id5));
-  return getPlanById(id5);
+  await db.update(subscriptionPlans).set({ ...patch.price !== void 0 ? { price: patch.price } : {}, ...patch.trialDays !== void 0 ? { trialDays: patch.trialDays } : {}, ...patch.isActive !== void 0 ? { isActive: patch.isActive ? 1 : 0 } : {} }).where(eq16(subscriptionPlans.id, id6));
+  return getPlanById(id6);
 }
 async function getSubscriptionByUserId(userId, track) {
   const db = await getDb();
@@ -6289,10 +6369,10 @@ async function recordEventReceived(input) {
     return rows[0]?.id ?? null;
   }
 }
-async function markEventProcessed(id5, status, errorMessage) {
+async function markEventProcessed(id6, status, errorMessage) {
   const db = await getDb();
   if (!db) return;
-  await db.update(paymentEvents).set({ status, processedAt: /* @__PURE__ */ new Date(), errorMessage: errorMessage ?? null }).where(eq16(paymentEvents.id, id5));
+  await db.update(paymentEvents).set({ status, processedAt: /* @__PURE__ */ new Date(), errorMessage: errorMessage ?? null }).where(eq16(paymentEvents.id, id6));
 }
 async function writeAuditLog(input) {
   const db = await getDb();
@@ -6553,7 +6633,7 @@ function registerWebhookRoutes(app2) {
 }
 
 // server/routers.ts
-import { TRPCError as TRPCError17 } from "@trpc/server";
+import { TRPCError as TRPCError18 } from "@trpc/server";
 
 // server/_core/systemRouter.ts
 import { z as z2 } from "zod";
@@ -6698,13 +6778,13 @@ async function getUsageSummaryForUser(userId, track) {
 }
 
 // server/org/orgCredits.ts
-import { and as and15, desc as desc11, eq as eq17, gte as gte11, sql as sql8 } from "drizzle-orm";
+import { and as and15, desc as desc11, eq as eq17, gte as gte11, sql as sql9 } from "drizzle-orm";
 async function sumCredits(orgId, since, userId) {
   const db = await getDb();
   if (!db) return 0;
   const conditions = [eq17(organizationCreditUsage.orgId, orgId), gte11(organizationCreditUsage.usedAt, since)];
   if (userId) conditions.push(eq17(organizationCreditUsage.userId, userId));
-  const [row] = await db.select({ total: sql8`COALESCE(SUM(${organizationCreditUsage.credits}), 0)`.mapWith(Number) }).from(organizationCreditUsage).where(and15(...conditions));
+  const [row] = await db.select({ total: sql9`COALESCE(SUM(${organizationCreditUsage.credits}), 0)`.mapWith(Number) }).from(organizationCreditUsage).where(and15(...conditions));
   return Number(row?.total ?? 0);
 }
 async function findOrgCreditSource(userId, feature, now = /* @__PURE__ */ new Date()) {
@@ -6728,8 +6808,8 @@ async function orgCreditReport(orgId, now = /* @__PURE__ */ new Date()) {
   if (!db) return { periodStart: creditPeriodStart(now), used: 0, byFeature: [], byStudent: [] };
   const since = creditPeriodStart(now);
   const scope = and15(eq17(organizationCreditUsage.orgId, orgId), gte11(organizationCreditUsage.usedAt, since));
-  const total = sql8`SUM(${organizationCreditUsage.credits})`.mapWith(Number);
-  const count4 = sql8`COUNT(*)::int`;
+  const total = sql9`SUM(${organizationCreditUsage.credits})`.mapWith(Number);
+  const count4 = sql9`COUNT(*)::int`;
   const [byFeature, byStudent] = await Promise.all([
     db.select({ featureKey: organizationCreditUsage.featureKey, credits: total, uses: count4 }).from(organizationCreditUsage).where(scope).groupBy(organizationCreditUsage.featureKey),
     db.select({ userId: organizationCreditUsage.userId, name: users.name, preferredName: studentProfiles.preferredName, credits: total, uses: count4 }).from(organizationCreditUsage).innerJoin(users, eq17(users.id, organizationCreditUsage.userId)).leftJoin(studentProfiles, eq17(studentProfiles.userId, organizationCreditUsage.userId)).where(scope).groupBy(organizationCreditUsage.userId, users.name, studentProfiles.preferredName).orderBy(desc11(total)).limit(20)
@@ -7210,7 +7290,7 @@ function validateDataUrl(dataUrl, declaredMimeType) {
 }
 
 // server/routers.ts
-import { z as z27 } from "zod";
+import { z as z28 } from "zod";
 
 // server/routers/topics.ts
 import { z as z3 } from "zod";
@@ -7428,11 +7508,11 @@ var CURRICULUM_SLUGS = new Set(CURRICULUM.map((def) => def.slug));
 function resolveToCurriculumTopicIds(row, topics) {
   const idBySlug = new Map(topics.map((topic) => [topic.slug, topic.id]));
   if (CURRICULUM_SLUGS.has(row.slug)) {
-    const id5 = idBySlug.get(row.slug);
-    return id5 === void 0 ? [] : [id5];
+    const id6 = idBySlug.get(row.slug);
+    return id6 === void 0 ? [] : [id6];
   }
   const linked = EXAM_TOPIC_LINKS.get(examTopicKey(row.topic));
-  if (linked) return Array.from(new Set(linked.map((def) => idBySlug.get(def.slug)).filter((id5) => id5 !== void 0)));
+  if (linked) return Array.from(new Set(linked.map((def) => idBySlug.get(def.slug)).filter((id6) => id6 !== void 0)));
   const curriculumTopics = topics.filter((topic) => CURRICULUM_SLUGS.has(topic.slug));
   const subjects = curriculumSubjectsFor(row.subject, row.category);
   const parts = [row.topic, ...row.topic.split(/[,()]/).map((part) => part.trim()).filter((part) => part.length >= 4)];
@@ -7453,16 +7533,16 @@ function deriveCurriculumWeakTopics(rows, topics) {
   for (const row of rows) {
     if (row.insufficientData) continue;
     const at = row.lastReviewedAt ? new Date(row.lastReviewedAt).getTime() : 0;
-    for (const id5 of resolveToCurriculumTopicIds(row, topics)) signals.set(id5, [...signals.get(id5) ?? [], { accuracy: row.progress, at }]);
+    for (const id6 of resolveToCurriculumTopicIds(row, topics)) signals.set(id6, [...signals.get(id6) ?? [], { accuracy: row.progress, at }]);
   }
   const weak = [];
-  for (const [id5, list] of Array.from(signals)) {
+  for (const [id6, list] of Array.from(signals)) {
     const latestDay = Math.floor(Math.max(...list.map((signal) => signal.at)) / DAY_MS8);
     const latest = list.filter((signal) => Math.floor(signal.at / DAY_MS8) === latestDay);
     const accuracy = Math.round(latest.reduce((sum, signal) => sum + signal.accuracy, 0) / latest.length);
-    const topic = topicById.get(id5);
+    const topic = topicById.get(id6);
     if (!topic || accuracy >= bookContentConfig.allocation.reviewMaxAccuracy) continue;
-    weak.push({ topicId: id5, topic: topic.topic, subject: topic.subject, exam: topic.exam, accuracy });
+    weak.push({ topicId: id6, topic: topic.topic, subject: topic.subject, exam: topic.exam, accuracy });
   }
   return weak;
 }
@@ -7489,10 +7569,10 @@ async function userOwnsBook(userId, bookId) {
 }
 async function replaceBookContents(userId, bookId, subject2, items, source) {
   const db = await requireDb6();
-  const topicIds = Array.from(new Set(items.map((item) => item.topicId).filter((id5) => id5 !== null)));
+  const topicIds = Array.from(new Set(items.map((item) => item.topicId).filter((id6) => id6 !== null)));
   const validTopics = topicIds.length ? await db.select().from(yksTopics).where(inArray8(yksTopics.id, topicIds)) : [];
   const topicById = new Map(validTopics.map((row) => [row.id, row]));
-  const unknown = topicIds.filter((id5) => !topicById.has(id5));
+  const unknown = topicIds.filter((id6) => !topicById.has(id6));
   if (unknown.length) throw new Error("Ge\xE7ersiz m\xFCfredat konusu se\xE7ildi. Sayfay\u0131 yenileyip tekrar dener misin?");
   const mixed = (type) => type === "review" || type === "simulation";
   const rows = items.map((item, index2) => ({
@@ -7538,7 +7618,7 @@ async function replaceBookContents(userId, bookId, subject2, items, source) {
 async function getBookContents(userId, bookId) {
   const db = await requireDb6();
   const rows = await db.select().from(userBookContents).where(and16(eq18(userBookContents.userId, userId), eq18(userBookContents.bookId, bookId))).orderBy(userBookContents.sortOrder);
-  const topicIds = Array.from(new Set(rows.map((row) => row.topicId).filter((id5) => id5 !== null)));
+  const topicIds = Array.from(new Set(rows.map((row) => row.topicId).filter((id6) => id6 !== null)));
   const topics = topicIds.length ? await db.select({ id: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject, unit: yksTopics.unit }).from(yksTopics).where(inArray8(yksTopics.id, topicIds)) : [];
   const topicById = new Map(topics.map((row) => [row.id, row]));
   return rows.map((row) => ({ ...row, mappingConfidence: Number(row.mappingConfidence), topic: row.topicId !== null ? topicById.get(row.topicId) ?? null : null }));
@@ -7558,7 +7638,7 @@ async function getBookContentSummaries(userId) {
     return {
       bookId,
       entries: contents.length,
-      topicIds: Array.from(new Set(contents.map((row) => row.topicId).filter((id5) => id5 !== null))),
+      topicIds: Array.from(new Set(contents.map((row) => row.topicId).filter((id6) => id6 !== null))),
       completion: computeBookCompletion({ contents, logs: logs.filter((log) => log.bookId === bookId), pageCount: pageCountByBook.get(bookId) ?? null })
     };
   });
@@ -7653,7 +7733,7 @@ async function addRecommendationToPlan(userId, input) {
 }
 
 // server/bookContent/sharedBooks.ts
-import { and as and17, desc as desc12, eq as eq19, isNull as isNull12, or as or5, sql as sql9, ilike as ilike2 } from "drizzle-orm";
+import { and as and17, desc as desc12, eq as eq19, isNull as isNull12, or as or5, sql as sql10, ilike as ilike2 } from "drizzle-orm";
 async function requireDb7() {
   const db = await getDb();
   if (!db) throw new Error("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
@@ -7757,7 +7837,7 @@ async function addBookToLibrary(userId, input) {
     sharedBookId: shared.id
   }).returning();
   await addBookToInventory(userId, bookId);
-  await db.update(sharedBooks).set({ ownerCount: sql9`${sharedBooks.ownerCount} + 1` }).where(eq19(sharedBooks.id, shared.id));
+  await db.update(sharedBooks).set({ ownerCount: sql10`${sharedBooks.ownerCount} + 1` }).where(eq19(sharedBooks.id, shared.id));
   let contentsCopied = 0, topicCount = 0;
   if (input.useSharedContents && shared.contentsJson) {
     try {
@@ -7765,7 +7845,7 @@ async function addBookToLibrary(userId, input) {
       await replaceBookContents(userId, bookId, stored.subject || row.subject, stored.items, shared.contentsSource ?? "ocr");
       contentsCopied = stored.items.length;
       topicCount = shared.contentsTopicCount;
-      await db.update(sharedBooks).set({ contentsReuseCount: sql9`${sharedBooks.contentsReuseCount} + 1` }).where(eq19(sharedBooks.id, shared.id));
+      await db.update(sharedBooks).set({ contentsReuseCount: sql10`${sharedBooks.contentsReuseCount} + 1` }).where(eq19(sharedBooks.id, shared.id));
     } catch (error) {
       console.warn("[shared books] contents reuse failed:", error instanceof Error ? error.message : error);
     }
@@ -7776,7 +7856,7 @@ function asAddedBook(row, sharedBookId) {
   return { id: row.bookId, title: row.title, publisher: row.publisher, subject: row.subject, exam: row.exam, level: row.level, format: row.format, reason: row.reason, sourceUrl: row.sourceUrl ?? "", tone: row.tone, authors: row.authors ?? void 0, isbn: row.isbn ?? void 0, sharedBookId };
 }
 async function shareBookContents(userId, bookId, subject2, items, source) {
-  const topicCount = new Set(items.map((item) => item.topicId).filter((id5) => id5 !== null)).size;
+  const topicCount = new Set(items.map((item) => item.topicId).filter((id6) => id6 !== null)).size;
   if (items.length < SHARED_CONTENTS_MIN_ITEMS || topicCount === 0) return false;
   const db = await requireDb7();
   const [own] = await db.select({ sharedBookId: userResourceBooks.sharedBookId }).from(userResourceBooks).where(and17(eq19(userResourceBooks.userId, userId), eq19(userResourceBooks.bookId, bookId))).limit(1);
@@ -9268,14 +9348,14 @@ async function matchEntries(userId, entries, subject2) {
 }
 function summarizeConfidence(entries, reports) {
   const average2 = (values, fallback) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : fallback;
-  const round2 = (value) => Math.round(value * 100) / 100;
+  const round3 = (value) => Math.round(value * 100) / 100;
   const matchable = entries.filter((entry) => entry.matchText);
-  const imageConfidence = round2(average2(reports.map((report) => report.confidence.image), 0.75));
-  const ocrConfidence = round2(average2(reports.map((report) => report.confidence.ocr), 0));
-  const structureConfidence = round2(average2(reports.map((report) => report.confidence.structure), 0));
-  const mappingConfidence = round2(average2(matchable.map((entry) => entry.suggestion?.confidence ?? 0), 1));
+  const imageConfidence = round3(average2(reports.map((report) => report.confidence.image), 0.75));
+  const ocrConfidence = round3(average2(reports.map((report) => report.confidence.ocr), 0));
+  const structureConfidence = round3(average2(reports.map((report) => report.confidence.structure), 0));
+  const mappingConfidence = round3(average2(matchable.map((entry) => entry.suggestion?.confidence ?? 0), 1));
   const weights = bookContentConfig.confidence.weights;
-  const finalConfidence = round2(weights.image * imageConfidence + weights.ocr * ocrConfidence + weights.structure * structureConfidence + weights.mapping * mappingConfidence);
+  const finalConfidence = round3(weights.image * imageConfidence + weights.ocr * ocrConfidence + weights.structure * structureConfidence + weights.mapping * mappingConfidence);
   const flagged = entries.filter((entry) => entry.review.title || entry.review.page).length;
   return { imageConfidence, ocrConfidence, structureConfidence, mappingConfidence, finalConfidence, flaggedEntries: flagged, needsReview: finalConfidence < bookContentConfig.confidence.needsReviewBelow || flagged > entries.length * 0.25 };
 }
@@ -9368,7 +9448,7 @@ var bookContentRouter = router({
   topicOptions: protectedProcedure.input(z4.object({ subject: z4.string().max(80).nullable().optional() }).optional()).query(async ({ ctx, input }) => {
     const topics = await getMatchableTopicsFor(ctx.user.id);
     const subject2 = input?.subject?.trim();
-    return topics.filter((topic) => !subject2 || topic.subject === subject2).map(({ id: id5, exam, subject: topicSubject, unit, topic }) => ({ id: id5, exam, subject: topicSubject, unit, topic })).sort((a, b) => a.exam.localeCompare(b.exam) || a.subject.localeCompare(b.subject, "tr") || a.unit.localeCompare(b.unit, "tr") || a.topic.localeCompare(b.topic, "tr"));
+    return topics.filter((topic) => !subject2 || topic.subject === subject2).map(({ id: id6, exam, subject: topicSubject, unit, topic }) => ({ id: id6, exam, subject: topicSubject, unit, topic })).sort((a, b) => a.exam.localeCompare(b.exam) || a.subject.localeCompare(b.subject, "tr") || a.unit.localeCompare(b.unit, "tr") || a.topic.localeCompare(b.topic, "tr"));
   }),
   // Öğrencinin onayladığı içerik (OCR'dan ya da tamamen elle).
   save: protectedProcedure.input(z4.object({
@@ -9797,7 +9877,7 @@ async function readLimited(response, maxBytes) {
 }
 
 // server/wall/wallDb.ts
-import { and as and19, desc as desc13, eq as eq21, ilike as ilike3, inArray as inArray9, isNull as isNull13, lt as lt10, or as or6, sql as sql10 } from "drizzle-orm";
+import { and as and19, desc as desc13, eq as eq21, ilike as ilike3, inArray as inArray9, isNull as isNull13, lt as lt10, or as or6, sql as sql11 } from "drizzle-orm";
 var WallError = class extends Error {
 };
 var WALL_PAGE_SIZE = 20;
@@ -9872,7 +9952,7 @@ async function prepare(db, input) {
   };
 }
 async function withTopics(db, rows) {
-  const ids = Array.from(new Set(rows.map((row) => row.topicId).filter((id5) => id5 !== null)));
+  const ids = Array.from(new Set(rows.map((row) => row.topicId).filter((id6) => id6 !== null)));
   const topics = ids.length ? await db.select({ id: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject }).from(yksTopics).where(inArray9(yksTopics.id, ids)) : [];
   const byId = new Map(topics.map((row) => [row.id, row]));
   return rows.map((row) => toPost(row, row.topicId !== null ? byId.get(row.topicId) ?? null : null));
@@ -9884,22 +9964,22 @@ async function createWallPost(userId, input) {
   await getAttachmentStorage().syncWallPostLinks(userId, row.id, referencedAttachmentIds(input.content));
   return (await withTopics(db, [row]))[0];
 }
-async function updateWallPost(userId, id5, input) {
+async function updateWallPost(userId, id6, input) {
   const db = await requireDb8();
   const values = await prepare(db, input);
-  const [row] = await db.update(wallPosts).set({ ...values, ...values.readLater ? {} : { readAt: null } }).where(and19(eq21(wallPosts.id, id5), eq21(wallPosts.userId, userId))).returning();
+  const [row] = await db.update(wallPosts).set({ ...values, ...values.readLater ? {} : { readAt: null } }).where(and19(eq21(wallPosts.id, id6), eq21(wallPosts.userId, userId))).returning();
   if (!row) throw new WallError("Kay\u0131t bulunamad\u0131.");
   await getAttachmentStorage().syncWallPostLinks(userId, row.id, referencedAttachmentIds(input.content));
   return (await withTopics(db, [row]))[0];
 }
-async function deleteWallPost(userId, id5) {
+async function deleteWallPost(userId, id6) {
   const db = await requireDb8();
-  const [row] = await db.delete(wallPosts).where(and19(eq21(wallPosts.id, id5), eq21(wallPosts.userId, userId))).returning({ id: wallPosts.id });
+  const [row] = await db.delete(wallPosts).where(and19(eq21(wallPosts.id, id6), eq21(wallPosts.userId, userId))).returning({ id: wallPosts.id });
   if (!row) return false;
-  await getAttachmentStorage().deleteForWallPost(userId, id5);
+  await getAttachmentStorage().deleteForWallPost(userId, id6);
   return true;
 }
-async function setWallPostFlags(userId, id5, flags) {
+async function setWallPostFlags(userId, id6, flags) {
   const db = await requireDb8();
   const set = {};
   if (flags.read !== void 0) set.readAt = flags.read ? /* @__PURE__ */ new Date() : null;
@@ -9909,7 +9989,7 @@ async function setWallPostFlags(userId, id5, flags) {
     if (flags.readLater) set.readAt = null;
   }
   if (!Object.keys(set).length) return true;
-  const rows = await db.update(wallPosts).set(set).where(and19(eq21(wallPosts.id, id5), eq21(wallPosts.userId, userId))).returning({ id: wallPosts.id });
+  const rows = await db.update(wallPosts).set(set).where(and19(eq21(wallPosts.id, id6), eq21(wallPosts.userId, userId))).returning({ id: wallPosts.id });
   return rows.length > 0;
 }
 async function listWallPosts(userId, options = {}) {
@@ -9919,7 +9999,7 @@ async function listWallPosts(userId, options = {}) {
   if (options.filter === "unread") conditions.push(eq21(wallPosts.readLater, 1), isNull13(wallPosts.readAt));
   if (options.filter === "pinned") conditions.push(eq21(wallPosts.isPinned, 1));
   const tag = options.tag ? normalizeTag(options.tag) : null;
-  if (tag) conditions.push(sql10`(',' || ${wallPosts.tags} || ',') LIKE ${`%,${tag.replace(/[%_]/g, "")},%`}`);
+  if (tag) conditions.push(sql11`(',' || ${wallPosts.tags} || ',') LIKE ${`%,${tag.replace(/[%_]/g, "")},%`}`);
   if (options.topicId) conditions.push(eq21(wallPosts.topicId, options.topicId));
   const q = options.q?.trim().replace(/[%_\\]/g, "").slice(0, 100);
   if (q) conditions.push(or6(ilike3(wallPosts.title, `%${q}%`), ilike3(wallPosts.plainText, `%${q}%`), ilike3(wallPosts.sourceTitle, `%${q}%`), ilike3(wallPosts.sourceUrl, `%${q}%`)));
@@ -9929,19 +10009,19 @@ async function listWallPosts(userId, options = {}) {
   const last = page2.at(-1);
   return { posts: await withTopics(db, page2), nextCursor: rows.length > limit && last ? { postedAt: last.postedAt, id: last.id } : null };
 }
-async function getWallPost(userId, id5) {
+async function getWallPost(userId, id6) {
   const db = await requireDb8();
-  const [row] = await db.select().from(wallPosts).where(and19(eq21(wallPosts.id, id5), eq21(wallPosts.userId, userId))).limit(1);
+  const [row] = await db.select().from(wallPosts).where(and19(eq21(wallPosts.id, id6), eq21(wallPosts.userId, userId))).limit(1);
   return row ? (await withTopics(db, [row]))[0] : null;
 }
 async function wallSummary(userId) {
   const db = await requireDb8();
   const [counts] = await db.select({
-    total: sql10`COUNT(*)`,
-    unread: sql10`COUNT(*) FILTER (WHERE ${wallPosts.readLater} = 1 AND ${wallPosts.readAt} IS NULL)`,
-    pinned: sql10`COUNT(*) FILTER (WHERE ${wallPosts.isPinned} = 1)`
+    total: sql11`COUNT(*)`,
+    unread: sql11`COUNT(*) FILTER (WHERE ${wallPosts.readLater} = 1 AND ${wallPosts.readAt} IS NULL)`,
+    pinned: sql11`COUNT(*) FILTER (WHERE ${wallPosts.isPinned} = 1)`
   }).from(wallPosts).where(eq21(wallPosts.userId, userId));
-  const tagRows = await db.select({ tags: wallPosts.tags }).from(wallPosts).where(and19(eq21(wallPosts.userId, userId), sql10`${wallPosts.tags} <> ''`)).orderBy(desc13(wallPosts.postedAt)).limit(300);
+  const tagRows = await db.select({ tags: wallPosts.tags }).from(wallPosts).where(and19(eq21(wallPosts.userId, userId), sql11`${wallPosts.tags} <> ''`)).orderBy(desc13(wallPosts.postedAt)).limit(300);
   const tagCounts = /* @__PURE__ */ new Map();
   for (const row of tagRows) for (const tag of tagList(row.tags)) tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
   return {
@@ -10011,9 +10091,715 @@ var wallRouter = router({
   })
 });
 
-// server/routers/questions.ts
+// server/routers/orgCases.ts
+import { TRPCError as TRPCError6 } from "@trpc/server";
+import { z as z8 } from "zod";
+
+// shared/academicCase.ts
+var ACADEMIC_CASE_RULES = {
+  /** Karşılaştırılan son deneme sayısı. */
+  examsCompared: 3,
+  /** Son denemeler en fazla bu kadar gün içine yayılmış olmalı. */
+  windowDays: 75,
+  /** Toplam düşüş eşiği (net). Sınav türünde tanım yoksa varsayılan. */
+  minTotalDrop: { default: 5, LGS: 3 },
+  /** Hazırlık dönemi bu ayda başlar (0 = Ocak; 7 = Ağustos): Ağustos–Temmuz arası aynı dönem. */
+  seasonStartMonth: 7
+};
+var DAY2 = 24 * 60 * 60 * 1e3;
+var normalizePublisher = (value) => (value ?? "").trim().toLocaleLowerCase("tr").replace(/\s+yay[ıi]nlar[ıi]$/, "").replace(/\s+/g, " ") || null;
+var round2 = (value) => Math.round(value * 100) / 100;
+function seasonOf(date, rules = ACADEMIC_CASE_RULES) {
+  return date.getMonth() >= rules.seasonStartMonth ? date.getFullYear() : date.getFullYear() - 1;
+}
+var minTotalDropFor = (kind, rules = ACADEMIC_CASE_RULES) => rules.minTotalDrop[kind] ?? rules.minTotalDrop.default ?? 5;
+function comparabilityKey(exam) {
+  return [exam.examKind, exam.scope ?? "full", normalizePublisher(exam.publisher) ?? "*"].join("|");
+}
+function trendDecline(exams, examKind2, rules = ACADEMIC_CASE_RULES) {
+  const recent = exams.filter((exam) => exam.examKind === examKind2 && exam.scope !== "branch" && Number.isFinite(exam.net)).sort((a, b) => b.date.getTime() - a.date.getTime() || b.id - a.id).slice(0, rules.examsCompared).reverse();
+  const evidence = recent.map(({ id: id6, date, net }) => ({ id: id6, date, net }));
+  if (recent.length < rules.examsCompared) return { status: "insufficient", examKind: examKind2, reason: "not_enough_exams", evidence };
+  if (recent.at(-1).date.getTime() - recent[0].date.getTime() > rules.windowDays * DAY2) return { status: "insufficient", examKind: examKind2, reason: "too_spread_out", evidence };
+  if (new Set(recent.map((exam) => seasonOf(exam.date, rules))).size > 1) return { status: "insufficient", examKind: examKind2, reason: "different_season", evidence };
+  const publishers2 = new Set(recent.map((exam) => normalizePublisher(exam.publisher)).filter((value) => Boolean(value)));
+  if (publishers2.size > 1) return { status: "insufficient", examKind: examKind2, reason: "mixed_publishers", evidence };
+  const steps = recent.slice(1).map((exam, index2) => round2(exam.net - recent[index2].net));
+  const totalChange = round2(recent.at(-1).net - recent[0].net);
+  const declining = steps.every((step) => step <= 0) && -totalChange >= minTotalDropFor(examKind2, rules);
+  if (!declining) return { status: "no_signal", examKind: examKind2, evidence, totalChange, steps };
+  const allKnown = recent.every((exam) => normalizePublisher(exam.publisher));
+  const confidence = recent.every((exam) => exam.source === "org") && allKnown ? "high" : "medium";
+  return { status: "signal", examKind: examKind2, confidence, evidence, totalChange, steps };
+}
+function trendSignals(exams, rules = ACADEMIC_CASE_RULES) {
+  const kinds = Array.from(new Set(exams.map((exam) => exam.examKind)));
+  return kinds.map((kind) => trendDecline(exams, kind, rules));
+}
+var ACADEMIC_REVIEW_TITLE = "Akademik inceleme \xF6nerisi";
+var ACADEMIC_REVIEW_TEXT = "\xD6\u011Frencinin son \xFC\xE7 kar\u015F\u0131la\u015Ft\u0131r\u0131labilir denemesinde netleri d\xFC\u015F\xFC\u015F e\u011Filimindedir. \xC7al\u0131\u015Fma kay\u0131tlar\u0131 ve ders bazl\u0131 sonu\xE7lar incelenerek rehberlik g\xF6r\xFC\u015Fmesi de\u011Ferlendirilmesi \xF6nerilir.";
+var INSUFFICIENT_REASON_TEXT = {
+  not_enough_exams: "Kar\u015F\u0131la\u015Ft\u0131rma i\xE7in bu s\u0131nav t\xFCr\xFCnde en az \xFC\xE7 tam deneme gerekli.",
+  mixed_publishers: "Son denemeler farkl\u0131 yay\u0131nevlerine ait; netler do\u011Frudan kar\u015F\u0131la\u015Ft\u0131r\u0131lamaz.",
+  different_season: "Son denemeler farkl\u0131 haz\u0131rl\u0131k d\xF6nemlerine ait.",
+  too_spread_out: "Son denemeler aras\u0131nda \xE7ok uzun s\xFCre var; e\u011Filim g\xFCvenilir de\u011Fil."
+};
+var CONFIDENCE_TEXT = {
+  high: "Y\xFCksek g\xFCven: kurumdan aktar\u0131lan, ayn\u0131 yay\u0131nevine ait denemeler.",
+  medium: "Orta g\xFCven: denemelerin bir k\u0131sm\u0131 \xF6\u011Frencinin kendi giri\u015Fi ya da yay\u0131nevi bilinmiyor."
+};
+function describeTrend(result) {
+  const label = EXAM_KIND_DEFS[result.examKind]?.label ?? result.examKind;
+  const chain = result.evidence.map((exam) => String(round2(exam.net)).replace(".", ",")).join(" \u2192 ");
+  if (result.status === "insufficient") return `${label}: inceleme i\xE7in yetersiz veri. ${INSUFFICIENT_REASON_TEXT[result.reason]}`;
+  const change = String(Math.abs(result.totalChange)).replace(".", ",");
+  return `${label}: ${chain} (${result.totalChange < 0 ? "\u2212" : "+"}${change} net)`;
+}
+
+// server/org/orgAccess.ts
 import { TRPCError as TRPCError5 } from "@trpc/server";
 import { z as z7 } from "zod";
+var notFound = (message = "Bulunamad\u0131.") => new TRPCError5({ code: "NOT_FOUND", message });
+function orgProcedure(minRole, options = {}) {
+  return protectedProcedure.input(z7.object({ orgId: z7.number().int().positive() })).use(async ({ ctx, input, next, type }) => {
+    const membership = await getActiveMembership(ctx.user.id, input.orgId);
+    if (!membership || !hasRole(membership.role, minRole)) throw notFound("Kurum bulunamad\u0131.");
+    if (type === "mutation" && !options.allowInactive && membership.state && membership.state !== "active") {
+      throw new TRPCError5({ code: "FORBIDDEN", message: membership.state === "expired" ? "Kurum \xFCyeli\u011Finin s\xFCresi doldu; panel salt okunur. Yenilemek i\xE7in platform y\xF6neticisiyle g\xF6r\xFC\u015F\xFCn." : "Kurum \xFCyeli\u011Fi hen\xFCz ba\u015Flamad\u0131." });
+    }
+    return next({ ctx: { ...ctx, membership } });
+  });
+}
+async function assertCanViewStudent(ctx, studentUserId) {
+  const { orgId, role } = ctx.membership;
+  if (!await isActiveStudent(orgId, studentUserId)) throw notFound("\xD6\u011Frenci bulunamad\u0131.");
+  if (seesAllStudents(role)) return;
+  if (role === "teacher" && await hasActiveAssignment(orgId, ctx.user.id, studentUserId)) return;
+  throw notFound("\xD6\u011Frenci bulunamad\u0131.");
+}
+function audit(ctx, action, target, metadata) {
+  return writeAudit({ orgId: ctx.membership.orgId, actorUserId: ctx.user.id, action, targetType: target?.type, targetId: target?.id, metadata });
+}
+
+// server/org/caseDb.ts
+import { and as and20, desc as desc14, eq as eq23, gte as gte13, inArray as inArray10, isNull as isNull14, lt as lt11, sql as sql12 } from "drizzle-orm";
+
+// shared/classSchedule.ts
+var SCHEDULE_SOURCES = ["school", "course", "tutor", "other"];
+var DAY_LABELS = ["Pazartesi", "Sal\u0131", "\xC7ar\u015Famba", "Per\u015Fembe", "Cuma", "Cumartesi", "Pazar"];
+var YKS_SUBJECTS = ["T\xFCrk\xE7e", "Matematik", "Geometri", "Fizik", "Kimya", "Biyoloji", "Edebiyat", "Tarih", "Co\u011Frafya", "Felsefe"];
+var NON_YKS_PRESETS = ["Din K\xFClt\xFCr\xFC", "Yabanc\u0131 Dil", "Rehberlik", "Beden E\u011Fitimi", "Sanat / M\xFCzik", "Di\u011Fer ders"];
+var LGS_SUBJECTS = ["T\xFCrk\xE7e", "Matematik", "Fen Bilimleri", "\u0130nk\u0131lap Tarihi", "Din K\xFClt\xFCr\xFC", "\u0130ngilizce"];
+var NON_LGS_PRESETS = ["Teknoloji ve Tasar\u0131m", "Bili\u015Fim Teknolojileri", "Rehberlik", "Beden E\u011Fitimi", "Sanat / M\xFCzik", "Di\u011Fer ders"];
+var SCHEDULE_SUBJECTS_BY_TRACK = {
+  YKS: { subjects: YKS_SUBJECTS, nonExamPresets: NON_YKS_PRESETS },
+  LGS: { subjects: LGS_SUBJECTS, nonExamPresets: NON_LGS_PRESETS },
+  // Yetişkin adaylar: programdaki bloklar çoğunlukla iş/kurs saatleri; ders olarak KPSS dersleri.
+  KPSS: { subjects: ["T\xFCrk\xE7e", "Matematik", "Tarih", "Co\u011Frafya", "Vatanda\u015Fl\u0131k", "G\xFCncel Bilgiler"], nonExamPresets: ["\u0130\u015F", "Kurs / dershane", "\xDCniversite dersi", "Di\u011Fer"] },
+  DGS: { subjects: ["Say\u0131sal", "S\xF6zel"], nonExamPresets: ["\xD6nlisans dersi", "\u0130\u015F", "Kurs / dershane", "Di\u011Fer"] },
+  MEB_AGS: { subjects: ["E\u011Fitim Bilimleri", "S\xF6zel Yetenek", "Say\u0131sal Yetenek", "Mevzuat", "Tarih", "T\xFCrkiye Co\u011Frafyas\u0131"], nonExamPresets: ["\xDCniversite dersi", "Staj / okul uygulamas\u0131", "\u0130\u015F", "Kurs / dershane", "Di\u011Fer"] },
+  KPSS_A: { subjects: ["Hukuk", "\u0130ktisat", "Maliye", "Muhasebe", "\u0130\u015Fletme", "\xC7al\u0131\u015Fma Ekonomisi", "\u0130statistik", "Kamu Y\xF6netimi", "Uluslararas\u0131 \u0130li\u015Fkiler"], nonExamPresets: ["\u0130\u015F", "Kurs / dershane", "Di\u011Fer"] }
+};
+var SCHEDULE_SUBJECTS = Array.from(new Set(Object.values(SCHEDULE_SUBJECTS_BY_TRACK).flatMap((entry) => entry.subjects)));
+var scheduleSubjectsFor = (track) => SCHEDULE_SUBJECTS_BY_TRACK[track].subjects;
+var nonExamPresetsFor = (track) => SCHEDULE_SUBJECTS_BY_TRACK[track].nonExamPresets;
+var AFTER_CLASS_BUFFER_MINUTES = 30;
+var PLAN_DAY_END = "23:30";
+var MAX_SCHEDULE_BLOCKS = 120;
+var MAX_SCHOOL_PERIODS = 12;
+var DEFAULT_SCHOOL_PERIODS = [
+  { start: "08:30", end: "09:10" },
+  { start: "09:20", end: "10:00" },
+  { start: "10:10", end: "10:50" },
+  { start: "11:00", end: "11:40" },
+  { start: "13:00", end: "13:40" },
+  { start: "13:50", end: "14:30" },
+  { start: "14:40", end: "15:20" },
+  { start: "15:30", end: "16:10" }
+];
+var TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
+var isValidTime = (value) => TIME_PATTERN.test(value);
+var toMinutes = (value) => {
+  const match = TIME_PATTERN.exec(value);
+  return match ? Number(match[1]) * 60 + Number(match[2]) : NaN;
+};
+var fromMinutes = (minutes) => `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+var weekdayOf = (date) => (date.getDay() + 6) % 7 + 1;
+var isYksBlock = (block) => block.subject !== null;
+function blocksOn(blocks, date) {
+  const day = weekdayOf(date);
+  return blocks.filter((block) => block.dayOfWeek === day).sort((a, b) => toMinutes(a.startTime) - toMinutes(b.startTime));
+}
+function validateSchedule(schedule) {
+  for (const period of schedule.periods) {
+    if (!isValidTime(period.start) || !isValidTime(period.end) || toMinutes(period.start) >= toMinutes(period.end)) return `Ders saati ${period.start}\u2013${period.end} ge\xE7ersiz: ba\u015Flang\u0131\xE7 biti\u015Ften \xF6nce olmal\u0131.`;
+  }
+  for (const block of schedule.blocks) {
+    if (!isValidTime(block.startTime) || !isValidTime(block.endTime) || toMinutes(block.startTime) >= toMinutes(block.endTime)) return `${block.label} (${block.startTime}\u2013${block.endTime}) ge\xE7ersiz: ba\u015Flang\u0131\xE7 biti\u015Ften \xF6nce olmal\u0131.`;
+  }
+  for (let day = 1; day <= 7; day++) {
+    const sorted = schedule.blocks.filter((block) => block.dayOfWeek === day).sort((a, b) => toMinutes(a.startTime) - toMinutes(b.startTime));
+    for (let index2 = 1; index2 < sorted.length; index2++) {
+      const previous = sorted[index2 - 1];
+      const current = sorted[index2];
+      if (toMinutes(current.startTime) < toMinutes(previous.endTime)) return `${DAY_LABELS[day - 1]}: ${previous.label} (${previous.startTime}\u2013${previous.endTime}) ile ${current.label} (${current.startTime}\u2013${current.endTime}) \xE7ak\u0131\u015F\u0131yor.`;
+    }
+  }
+  return null;
+}
+function computeFreeSlots(blocks, date, options) {
+  const from = toMinutes(options.from);
+  const to = toMinutes(options.to ?? PLAN_DAY_END);
+  const buffer = options.buffer ?? AFTER_CLASS_BUFFER_MINUTES;
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to) return [];
+  const busy = blocksOn(blocks, date).map((block) => ({ start: toMinutes(block.startTime), end: toMinutes(block.endTime) + buffer }));
+  const slots = [];
+  let cursor = from;
+  for (const interval of busy) {
+    if (interval.end <= cursor) continue;
+    if (interval.start > cursor) slots.push({ start: cursor, end: Math.min(interval.start, to) });
+    cursor = Math.max(cursor, interval.end);
+    if (cursor >= to) break;
+  }
+  if (cursor < to) slots.push({ start: cursor, end: to });
+  return slots.filter((slot) => slot.end > slot.start);
+}
+var freeMinutes = (slots) => slots.reduce((sum, slot) => sum + slot.end - slot.start, 0);
+function describeWeekForPlan(blocks, weekStart, from) {
+  if (blocks.length === 0) return null;
+  const lines = [];
+  for (let offset = 0; offset < 7; offset++) {
+    const date = new Date(weekStart);
+    date.setDate(weekStart.getDate() + offset);
+    const slots = computeFreeSlots(blocks, date, { from });
+    const subjects = Array.from(new Set(blocksOn(blocks, date).filter(isYksBlock).map((block) => block.subject)));
+    const slotText = slots.filter((slot) => slot.end - slot.start >= 30).map((slot) => `${fromMinutes(slot.start)}\u2013${fromMinutes(slot.end)}`).join(", ") || "yok";
+    const isoDate2 = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    lines.push(`${DAY_LABELS[weekdayOf(date) - 1]} (${isoDate2}): bo\u015F zaman ${freeMinutes(slots)} dk (${slotText})${subjects.length ? `; okulda/dershanede i\u015Flenen dersler: ${subjects.join(", ")}` : ""}`);
+  }
+  return lines.join("\n");
+}
+
+// shared/planPlacement.ts
+var TASK_EARLIEST = "08:00";
+var TASK_GAP_MINUTES = 10;
+var sameLocalDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+function busyOn(date, input) {
+  const fromBlocks = (blocks, kind) => blocksOn(blocks, date).map((block) => ({ start: toMinutes(block.startTime), end: toMinutes(block.endTime), label: block.label, kind }));
+  const sessions = (input.sessions ?? []).filter((session) => (session.status ?? "planned") === "planned").map((session) => ({ session, at: new Date(session.sessionDate) })).filter(({ at }) => sameLocalDay(at, date)).map(({ session, at }) => {
+    const start = at.getHours() * 60 + at.getMinutes();
+    return { start, end: start + Math.max(0, session.plannedMinutes), label: session.title?.trim() || "Planl\u0131 \xE7al\u0131\u015Fma", kind: "session" };
+  });
+  return [...fromBlocks(input.blocks, "class"), ...fromBlocks(input.courseBlocks ?? [], "course"), ...sessions].sort((a, b) => a.start - b.start || a.end - b.end);
+}
+function findTaskConflict(busy, start, minutes) {
+  const end = start + minutes;
+  return busy.find((interval) => start < interval.end && end > interval.start) ?? null;
+}
+function suggestStart(busy, minutes, options = {}) {
+  const gap = options.gap ?? TASK_GAP_MINUTES;
+  const to = options.to ?? toMinutes(PLAN_DAY_END);
+  let cursor = options.from ?? toMinutes(TASK_EARLIEST);
+  for (const interval of busy) {
+    if (cursor + minutes + gap <= interval.start) break;
+    cursor = Math.max(cursor, interval.end + gap);
+  }
+  return cursor + minutes <= to ? cursor : null;
+}
+function placePlanItems(items, from, days, busyFor, options = {}) {
+  const perDay = options.perDay ?? 1;
+  const earliest = toMinutes(options.earliest ?? TASK_EARLIEST);
+  const latest = toMinutes(options.latest ?? PLAN_DAY_END);
+  const dates = Array.from({ length: Math.max(1, days) }, (_, offset) => {
+    const date = new Date(from);
+    date.setHours(12, 0, 0, 0);
+    date.setDate(date.getDate() + offset);
+    return date;
+  });
+  const placedByDay = dates.map(() => []);
+  let dayCursor = 0;
+  return items.map((item, index2) => {
+    for (let attempt = 0; attempt < dates.length; attempt += 1) {
+      const dayIndex = (dayCursor + attempt) % dates.length;
+      if (placedByDay[dayIndex].length >= perDay) continue;
+      const busy = [...busyFor(dates[dayIndex]), ...placedByDay[dayIndex]].sort((a, b) => a.start - b.start);
+      const start = suggestStart(busy, item.minutes, { from: earliest, to: latest, gap: options.gap });
+      if (start === null) continue;
+      placedByDay[dayIndex].push({ start, end: start + item.minutes, label: "Yeni g\xF6rev", kind: "session" });
+      dayCursor = dayIndex + 1;
+      return { index: index2, date: dates[dayIndex], start };
+    }
+    return { index: index2, date: null, reason: "no_slot" };
+  });
+}
+var describeInterval = (interval) => `${interval.label} (${fromMinutes(interval.start)}\u2013${fromMinutes(interval.end)})`;
+
+// server/schedule/classScheduleDb.ts
+import { asc as asc3, eq as eq22 } from "drizzle-orm";
+var ScheduleError = class extends Error {
+};
+function parsePeriods(raw) {
+  if (!raw) return DEFAULT_SCHOOL_PERIODS;
+  try {
+    const value = JSON.parse(raw);
+    if (!Array.isArray(value)) return DEFAULT_SCHOOL_PERIODS;
+    return value.filter((item) => typeof item?.start === "string" && typeof item?.end === "string").map((item) => ({ start: item.start, end: item.end }));
+  } catch {
+    return DEFAULT_SCHOOL_PERIODS;
+  }
+}
+async function getClassSchedule(userId) {
+  const db = await getDb();
+  if (!db) return { periods: DEFAULT_SCHOOL_PERIODS, blocks: [] };
+  const [profile] = await db.select({ schoolPeriodsJson: studentProfiles.schoolPeriodsJson }).from(studentProfiles).where(eq22(studentProfiles.userId, userId)).limit(1);
+  const rows = await db.select({ source: classScheduleBlocks.source, dayOfWeek: classScheduleBlocks.dayOfWeek, startTime: classScheduleBlocks.startTime, endTime: classScheduleBlocks.endTime, subject: classScheduleBlocks.subject, label: classScheduleBlocks.label }).from(classScheduleBlocks).where(eq22(classScheduleBlocks.userId, userId)).orderBy(asc3(classScheduleBlocks.dayOfWeek), asc3(classScheduleBlocks.startTime));
+  return { periods: parsePeriods(profile?.schoolPeriodsJson), blocks: rows };
+}
+async function getPlanScheduleContext(userId, startDate) {
+  const db = await getDb();
+  if (!db) return null;
+  const [profile] = await db.select({ start: studentProfiles.preferredStudyStartTime }).from(studentProfiles).where(eq22(studentProfiles.userId, userId)).limit(1);
+  const { blocks } = await getClassSchedule(userId);
+  return describeWeekForPlan([...blocks, ...await getCourseBlocks(userId)], startDate, profile?.start && isValidTime(profile.start) ? profile.start : "16:00");
+}
+async function getCourseBlocks(userId) {
+  const rows = await listStudentTimetable(userId).catch(() => []);
+  return rows.map((slot) => ({ source: "course", dayOfWeek: slot.dayOfWeek, startTime: slot.startTime, endTime: slot.endTime, subject: slot.subject, label: `${slot.className} \xB7 ${slot.subject}`, orgName: slot.orgName, teacherName: slot.teacherName, room: slot.room }));
+}
+async function saveClassSchedule(userId, schedule) {
+  const problem = validateSchedule(schedule);
+  if (problem) throw new ScheduleError(problem);
+  const db = await getDb();
+  if (!db) throw new ScheduleError("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
+  const blocks = schedule.blocks.map((block) => ({ ...block, label: block.label.trim() || block.subject || "Ders" }));
+  const periodsJson = JSON.stringify(schedule.periods);
+  await db.transaction(async (tx) => {
+    await tx.delete(classScheduleBlocks).where(eq22(classScheduleBlocks.userId, userId));
+    if (blocks.length) await tx.insert(classScheduleBlocks).values(blocks.map((block) => ({ ...block, userId })));
+    await tx.insert(studentProfiles).values({ userId, schoolPeriodsJson: periodsJson }).onConflictDoUpdate({ target: studentProfiles.userId, set: { schoolPeriodsJson: periodsJson } });
+  });
+  return getClassSchedule(userId);
+}
+
+// server/org/caseDb.ts
+var CaseError = class extends Error {
+  constructor(message, code = "BAD_REQUEST") {
+    super(message);
+    this.code = code;
+  }
+};
+async function requireDb9() {
+  const db = await getDb();
+  if (!db) throw new CaseError("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
+  return db;
+}
+var DAY3 = 24 * 60 * 60 * 1e3;
+async function isCasesEnabled(orgId) {
+  const db = await requireDb9();
+  const [row] = await db.select({ enabled: organizations.academicCasesEnabled }).from(organizations).where(eq23(organizations.id, orgId)).limit(1);
+  return row?.enabled === 1;
+}
+async function setCasesEnabled(orgId, enabled) {
+  const db = await requireDb9();
+  await db.update(organizations).set({ academicCasesEnabled: enabled ? 1 : 0 }).where(eq23(organizations.id, orgId));
+}
+async function responsibleTeacherIds(orgId, studentUserId) {
+  const db = await requireDb9();
+  const [advisors, assigned] = await Promise.all([
+    db.select({ userId: organizationClasses.advisorUserId }).from(classStudents).innerJoin(organizationClasses, eq23(organizationClasses.id, classStudents.classId)).where(and20(eq23(organizationClasses.orgId, orgId), eq23(classStudents.studentUserId, studentUserId))),
+    db.select({ userId: teacherAssignments.teacherUserId }).from(teacherAssignments).where(and20(eq23(teacherAssignments.orgId, orgId), eq23(teacherAssignments.studentUserId, studentUserId), eq23(teacherAssignments.active, 1)))
+  ]);
+  return Array.from(new Set([...advisors, ...assigned].map((row) => row.userId).filter((id6) => typeof id6 === "number")));
+}
+async function canReadNotes(orgId, viewerUserId, studentUserId) {
+  return (await responsibleTeacherIds(orgId, studentUserId)).includes(viewerUserId);
+}
+function filterPrivateNotes(notes2, viewerUserId, viewerIsResponsible) {
+  return viewerIsResponsible ? notes2 : notes2.filter((note) => note.authorUserId === viewerUserId);
+}
+async function comparableExamsOf(studentUserId) {
+  const db = await requireDb9();
+  const rows = await db.select({ id: userMockExams.id, exam: userMockExams.exam, examDate: userMockExams.examDate, net: userMockExams.net, publisher: userMockExams.publisher, scope: userMockExams.scope }).from(userMockExams).where(eq23(userMockExams.userId, studentUserId));
+  return rows.map((row) => ({ id: row.id, examKind: row.exam, date: new Date(row.examDate), net: Number(row.net), source: "student", publisher: row.publisher, scope: row.scope }));
+}
+var keyOfTrend = (exams, result) => {
+  const latest = exams.filter((exam) => result.evidence.some((item) => item.id === exam.id)).at(-1);
+  return latest ? comparabilityKey(latest) : comparabilityKey({ examKind: result.examKind, scope: null, publisher: null });
+};
+async function listSignals(orgId, studentUserIds) {
+  if (!studentUserIds.length) return [];
+  const db = await requireDb9();
+  const open = await db.select({ studentUserId: academicCases.studentUserId, ruleKey: academicCases.ruleKey, comparabilityKey: academicCases.comparabilityKey, id: academicCases.id }).from(academicCases).where(and20(eq23(academicCases.orgId, orgId), inArray10(academicCases.studentUserId, studentUserIds), sql12`${academicCases.status} <> 'closed'`));
+  const result = [];
+  for (const studentUserId of studentUserIds) {
+    const exams = await comparableExamsOf(studentUserId);
+    for (const trend of trendSignals(exams)) {
+      if (trend.status === "no_signal") continue;
+      const key = keyOfTrend(exams, trend);
+      const existing = open.find((row) => row.studentUserId === studentUserId && row.ruleKey === "trend_decline" && row.comparabilityKey === key);
+      result.push({ studentUserId, examKind: trend.examKind, status: trend.status, confidence: trend.status === "signal" ? trend.confidence : null, description: describeTrend(trend), openCaseId: existing?.id ?? null });
+    }
+  }
+  return result.sort((a, b) => Number(b.status === "signal") - Number(a.status === "signal"));
+}
+var isUniqueViolation = (error) => {
+  const value = error;
+  return value?.code === "23505" || value?.cause?.code === "23505";
+};
+async function openCase(input) {
+  const db = await requireDb9();
+  const exams = await comparableExamsOf(input.studentUserId);
+  let trend = null;
+  let key = "";
+  let confidence = "medium";
+  if (input.ruleKey === "trend_decline") {
+    if (!input.examKind) throw new CaseError("S\u0131nav t\xFCr\xFC gerekli.");
+    trend = trendDecline(exams, input.examKind);
+    if (trend.status !== "signal") throw new CaseError(trend.status === "insufficient" ? describeTrend(trend) : "Bu s\u0131nav t\xFCr\xFCnde d\xFC\u015F\xFC\u015F e\u011Filimi g\xF6r\xFClm\xFCyor; inceleme \xF6nerisi yok.");
+    key = keyOfTrend(exams, trend);
+    confidence = trend.confidence;
+  } else {
+    key = `manual|${input.examKind ?? "*"}`;
+  }
+  const owners = await responsibleTeacherIds(input.orgId, input.studentUserId);
+  const ownerUserId = owners.includes(input.actorUserId) ? input.actorUserId : owners[0] ?? input.actorUserId;
+  let created;
+  try {
+    [created] = await db.insert(academicCases).values({ orgId: input.orgId, studentUserId: input.studentUserId, ownerUserId, examKind: input.examKind, ruleKey: input.ruleKey, comparabilityKey: key, confidence, openedByUserId: input.actorUserId }).returning();
+  } catch (error) {
+    if (!isUniqueViolation(error)) throw error;
+    const [existing] = await db.select({ id: academicCases.id }).from(academicCases).where(and20(eq23(academicCases.orgId, input.orgId), eq23(academicCases.studentUserId, input.studentUserId), eq23(academicCases.ruleKey, input.ruleKey), eq23(academicCases.comparabilityKey, key), sql12`${academicCases.status} <> 'closed'`)).limit(1);
+    return { caseId: existing.id, created: false };
+  }
+  await captureEvidence(db, created, exams, trend);
+  return { caseId: created.id, created: true };
+}
+async function captureEvidence(db, row, exams, trend) {
+  const examIds = trend ? trend.evidence.map((item) => item.id) : exams.filter((exam) => !row.examKind || exam.examKind === row.examKind).sort((a, b) => b.date.getTime() - a.date.getTime()).slice(0, 3).map((exam) => exam.id);
+  const examRows = examIds.length ? await db.select({ id: userMockExams.id, title: userMockExams.title, exam: userMockExams.exam, examDate: userMockExams.examDate, net: userMockExams.net, subjectsJson: userMockExams.subjectsJson }).from(userMockExams).where(and20(eq23(userMockExams.userId, row.studentUserId), inArray10(userMockExams.id, examIds))) : [];
+  const since = new Date(Date.now() - 28 * DAY3);
+  const logs = await db.select({ studyDate: topicStudyLogs.studyDate, minutes: topicStudyLogs.minutes, questions: topicStudyLogs.questions }).from(topicStudyLogs).where(and20(eq23(topicStudyLogs.userId, row.studentUserId), gte13(topicStudyLogs.studyDate, since)));
+  const weeks = [0, 1, 2, 3].map((index2) => {
+    const end = Date.now() - index2 * 7 * DAY3;
+    const inWeek = logs.filter((log) => {
+      const at = new Date(log.studyDate).getTime();
+      return at <= end && at > end - 7 * DAY3;
+    });
+    return { weeksAgo: index2, minutes: inWeek.reduce((sum, log) => sum + log.minutes, 0), questions: inWeek.reduce((sum, log) => sum + log.questions, 0) };
+  }).reverse();
+  const topics = (await getUserTopicProgress(row.studentUserId)).filter((topic) => !topic.insufficientData && topic.status === "Zay\u0131f" && (!row.examKind || topic.exam === row.examKind));
+  const values = [
+    ...examRows.sort((a, b) => new Date(a.examDate).getTime() - new Date(b.examDate).getTime()).map((exam) => ({ caseId: row.id, orgId: row.orgId, kind: "exam", refId: exam.id, snapshotJson: JSON.stringify({ title: exam.title, exam: exam.exam, date: exam.examDate, net: Number(exam.net), subjects: safeJson2(exam.subjectsJson) }) })),
+    { caseId: row.id, orgId: row.orgId, kind: "study", refId: null, snapshotJson: JSON.stringify({ weeks }) },
+    { caseId: row.id, orgId: row.orgId, kind: "topic", refId: null, snapshotJson: JSON.stringify({ weak: topics.slice(0, 12).map((topic) => ({ topicId: topic.id, subject: topic.subject, topic: topic.topic, progress: topic.progress })) }) }
+  ];
+  if (trend) values.unshift({ caseId: row.id, orgId: row.orgId, kind: "exam", refId: null, snapshotJson: JSON.stringify({ summary: describeTrend(trend), totalChange: trend.status !== "insufficient" ? trend.totalChange : null, confidence: row.confidence }) });
+  await db.insert(caseEvidence).values(values);
+}
+var safeJson2 = (value) => {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+};
+async function requireCase(db, orgId, caseId) {
+  const [row] = await db.select().from(academicCases).where(and20(eq23(academicCases.id, caseId), eq23(academicCases.orgId, orgId))).limit(1);
+  if (!row) throw new CaseError("Takip dosyas\u0131 bulunamad\u0131.", "NOT_FOUND");
+  return row;
+}
+async function getCaseRow(orgId, caseId) {
+  return requireCase(await requireDb9(), orgId, caseId);
+}
+async function listCases(orgId, options = {}) {
+  const db = await requireDb9();
+  if (options.studentUserIds && !options.studentUserIds.length) return [];
+  const conditions = [eq23(academicCases.orgId, orgId)];
+  if (options.studentUserIds) conditions.push(inArray10(academicCases.studentUserId, options.studentUserIds));
+  if (options.status) conditions.push(eq23(academicCases.status, options.status));
+  const rows = await db.select({ case: academicCases, studentName: users.name }).from(academicCases).innerJoin(users, eq23(users.id, academicCases.studentUserId)).where(and20(...conditions)).orderBy(desc14(academicCases.openedAt)).limit(200);
+  const ids = rows.map((row) => row.case.id);
+  const lastActions = ids.length ? await db.select({ caseId: caseActions.caseId, at: sql12`max(${caseActions.createdAt})` }).from(caseActions).where(inArray10(caseActions.caseId, ids)).groupBy(caseActions.caseId) : [];
+  return rows.map((row) => ({ ...row.case, studentName: row.studentName, lastActionAt: lastActions.find((item) => item.caseId === row.case.id)?.at ?? null }));
+}
+async function getCaseDetail(orgId, caseId) {
+  const db = await requireDb9();
+  const row = await requireCase(db, orgId, caseId);
+  const [evidence, actions, evaluations, notes2] = await Promise.all([
+    db.select().from(caseEvidence).where(eq23(caseEvidence.caseId, caseId)).orderBy(caseEvidence.id),
+    db.select().from(caseActions).where(eq23(caseActions.caseId, caseId)).orderBy(caseActions.createdAt),
+    db.select().from(caseEvaluations).where(eq23(caseEvaluations.caseId, caseId)).orderBy(caseEvaluations.evaluatedAt),
+    db.select({ id: counselingNotes.id, body: counselingNotes.body, visibility: counselingNotes.visibility, authorUserId: counselingNotes.authorUserId, authorName: users.name, createdAt: counselingNotes.createdAt }).from(counselingNotes).innerJoin(users, eq23(users.id, counselingNotes.authorUserId)).where(and20(eq23(counselingNotes.orgId, orgId), eq23(counselingNotes.caseId, caseId))).orderBy(desc14(counselingNotes.createdAt))
+  ]);
+  const actionIds = actions.map((action) => action.id);
+  const tasks = actionIds.length ? await db.select({ id: studyPlanSessions.id, caseActionId: studyPlanSessions.caseActionId, sessionDate: studyPlanSessions.sessionDate, title: studyPlanSessions.title, plannedMinutes: studyPlanSessions.plannedMinutes, status: studyPlanSessions.status, studentFeedback: studyPlanSessions.studentFeedback, actualQuestions: studyPlanSessions.actualQuestions, correct: studyPlanSessions.correct, wrong: studyPlanSessions.wrong }).from(studyPlanSessions).where(and20(eq23(studyPlanSessions.userId, row.studentUserId), inArray10(studyPlanSessions.caseActionId, actionIds))).orderBy(studyPlanSessions.sessionDate) : [];
+  return {
+    case: row,
+    evidence: evidence.map((item) => ({ ...item, snapshot: safeJson2(item.snapshotJson) })),
+    actions: actions.map((item) => ({ ...item, payload: safeJson2(item.payloadJson) })),
+    evaluations: evaluations.map((item) => ({ ...item, netChange: item.netChange === null ? null : Number(item.netChange), studentSignals: safeJson2(item.studentSignalsJson) })),
+    notes: notes2,
+    tasks
+  };
+}
+async function addCaseAction(input) {
+  const db = await requireDb9();
+  const row = await requireCase(db, input.orgId, input.caseId);
+  if (row.status === "closed") throw new CaseError("Dosya kapal\u0131. \xD6nce yeniden a\xE7.");
+  const [inserted] = await db.insert(caseActions).values({ caseId: row.id, orgId: row.orgId, type: input.type, payloadJson: JSON.stringify(input.payload), bookId: input.bookId ?? null, bookContentId: input.bookContentId ?? null, status: input.status ?? "done", createdByUserId: input.actorUserId, idempotencyKey: input.idempotencyKey }).onConflictDoNothing({ target: [caseActions.caseId, caseActions.idempotencyKey] }).returning({ id: caseActions.id });
+  if (!inserted) {
+    const [existing] = await db.select({ id: caseActions.id }).from(caseActions).where(and20(eq23(caseActions.caseId, row.id), eq23(caseActions.idempotencyKey, input.idempotencyKey))).limit(1);
+    return { actionId: existing.id, created: false };
+  }
+  if (row.status === "open") await db.update(academicCases).set({ status: "in_progress" }).where(eq23(academicCases.id, row.id));
+  return { actionId: inserted.id, created: true };
+}
+async function addCaseNote(input) {
+  const db = await requireDb9();
+  const row = await requireCase(db, input.orgId, input.caseId);
+  const [note] = await db.insert(counselingNotes).values({ orgId: row.orgId, studentUserId: row.studentUserId, authorUserId: input.authorUserId, body: input.body, visibility: input.visibility, caseId: row.id }).returning({ id: counselingNotes.id });
+  return note.id;
+}
+async function suggestOwnedResources(studentUserId, topicIds) {
+  const db = await requireDb9();
+  if (!topicIds.length) return { owned: [], missingTopicIds: [], catalog: [] };
+  const rows = await db.select({ bookId: userBookContents.bookId, contentId: userBookContents.id, topicId: userBookContents.topicId, label: userBookContents.label, title: userBookContents.title, unitTitle: userBookContents.unitTitle, testNumber: userBookContents.testNumber, pageStart: userBookContents.pageStart, pageEnd: userBookContents.pageEnd, bookTitle: userResourceBooks.title }).from(userBookContents).innerJoin(bookInventory, and20(eq23(bookInventory.userId, userBookContents.userId), eq23(bookInventory.bookId, userBookContents.bookId), isNull14(bookInventory.removedAt))).leftJoin(userResourceBooks, and20(eq23(userResourceBooks.userId, userBookContents.userId), eq23(userResourceBooks.bookId, userBookContents.bookId))).where(and20(eq23(userBookContents.userId, studentUserId), inArray10(userBookContents.topicId, topicIds))).orderBy(userBookContents.bookId, userBookContents.sortOrder);
+  const byBook = /* @__PURE__ */ new Map();
+  for (const row of rows) {
+    const entry = byBook.get(row.bookId) ?? { bookId: row.bookId, title: row.bookTitle ?? "Kitab\u0131m", items: [] };
+    entry.items.push({ bookContentId: row.contentId, topicId: row.topicId, label: row.label, title: row.title || row.unitTitle, pageStart: row.pageStart, pageEnd: row.pageEnd });
+    byBook.set(row.bookId, entry);
+  }
+  const covered2 = new Set(rows.map((row) => row.topicId));
+  const missingTopicIds = topicIds.filter((id6) => !covered2.has(id6));
+  const catalog = missingTopicIds.length ? await db.selectDistinct({ catalogBookId: catalogBooks.id, title: catalogBooks.name, topicId: bookCurriculumTopics.topicId }).from(bookCurriculumTopics).innerJoin(catalogBooks, eq23(catalogBooks.id, bookCurriculumTopics.bookId)).where(and20(inArray10(bookCurriculumTopics.topicId, missingTopicIds), eq23(catalogBooks.active, 1))).limit(3) : [];
+  return { owned: Array.from(byBook.values()), missingTopicIds, catalog };
+}
+async function busyProvider(studentUserId, from, days) {
+  const db = await requireDb9();
+  const start = new Date(from);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + days + 1);
+  const [schedule, courseBlocks, sessions] = await Promise.all([
+    getClassSchedule(studentUserId),
+    getCourseBlocks(studentUserId).catch(() => []),
+    db.select({ sessionDate: studyPlanSessions.sessionDate, plannedMinutes: studyPlanSessions.plannedMinutes, status: studyPlanSessions.status, title: studyPlanSessions.title }).from(studyPlanSessions).where(and20(eq23(studyPlanSessions.userId, studentUserId), eq23(studyPlanSessions.status, "planned"), gte13(studyPlanSessions.sessionDate, start), lt11(studyPlanSessions.sessionDate, end)))
+  ]);
+  return (date) => busyOn(date, { blocks: schedule.blocks, courseBlocks, sessions });
+}
+async function previewCasePlan(studentUserId, items, from, days) {
+  const busyFor = await busyProvider(studentUserId, from, days);
+  return placePlanItems(items.map((item) => ({ minutes: item.minutes })), from, days, busyFor, { earliest: "16:00" });
+}
+async function assignCasePlan(input) {
+  const db = await requireDb9();
+  const row = await requireCase(db, input.orgId, input.caseId);
+  const placements = await previewCasePlan(row.studentUserId, input.items, input.from, input.days);
+  const { actionId, created } = await addCaseAction({ orgId: input.orgId, caseId: input.caseId, type: "plan", payload: { items: input.items, from: input.from, days: input.days }, actorUserId: input.actorUserId, idempotencyKey: input.idempotencyKey, status: "planned" });
+  if (!created) {
+    const existing = await db.select({ id: studyPlanSessions.id }).from(studyPlanSessions).where(and20(eq23(studyPlanSessions.userId, row.studentUserId), eq23(studyPlanSessions.caseActionId, actionId)));
+    return { actionId, sessionIds: existing.map((session) => session.id), skipped: [], duplicate: true };
+  }
+  const sessionIds = [];
+  const skipped = [];
+  for (const placement of placements) {
+    const item = input.items[placement.index];
+    if (!placement.date) {
+      skipped.push({ itemIndex: placement.index, reason: "no_slot" });
+      continue;
+    }
+    const at = new Date(placement.date);
+    at.setHours(Math.floor(placement.start / 60), placement.start % 60, 0, 0);
+    sessionIds.push(await insertAssignedTask({ orgId: input.orgId, studentUserId: row.studentUserId, teacherUserId: input.actorUserId, sessionDate: at, title: `${item.subject} \xB7 ${item.topic}`, subject: item.subject, topic: item.topic, kind: "Konu tekrar\u0131", plannedMinutes: item.minutes, targetQuestions: item.targetQuestions ?? null, summary: "Akademik takip dosyas\u0131ndan \xF6\u011Fretmenin \xF6nerdi\u011Fi \xE7al\u0131\u015Fma.", caseActionId: actionId, targetPages: item.pages ?? null, sourceBookId: item.bookId ?? null }));
+  }
+  return { actionId, sessionIds, skipped, duplicate: false };
+}
+async function evaluateCase(input) {
+  const db = await requireDb9();
+  const detail = await getCaseDetail(input.orgId, input.caseId);
+  const row = detail.case;
+  if (row.status === "closed") throw new CaseError("Dosya kapal\u0131. \xD6nce yeniden a\xE7.");
+  const examEvidence = detail.evidence.filter((item) => item.kind === "exam" && item.refId !== null);
+  const baseline = examEvidence.at(-1) ?? null;
+  const baselineDate = baseline ? new Date(baseline.snapshot.date) : row.openedAt;
+  const exams = (await comparableExamsOf(row.studentUserId)).filter((exam) => (!row.examKind || exam.examKind === row.examKind) && exam.scope !== "branch" && exam.date.getTime() > Math.max(baselineDate.getTime(), new Date(row.openedAt).getTime() - DAY3));
+  const followup = exams.sort((a, b) => a.date.getTime() - b.date.getTime())[0] ?? null;
+  const baselineNet = baseline ? Number(baseline.snapshot.net) : null;
+  const netChange = followup && baselineNet !== null ? Math.round((followup.net - baselineNet) * 100) / 100 : null;
+  const signals = { done: 0, struggled: 0, needs_review: 0 };
+  for (const task of detail.tasks) if (task.studentFeedback) signals[task.studentFeedback] += 1;
+  const tasksDone = detail.tasks.filter((task) => task.status === "completed" || task.studentFeedback === "done").length;
+  const limited = !followup;
+  const uncertaintyNote = limited ? "Kar\u015F\u0131la\u015Ft\u0131r\u0131labilir yeni deneme yok; de\u011Ferlendirme yaln\u0131zca g\xF6rev tamamlama ve \xF6\u011Frencinin geri bildirimine dayan\u0131yor." : "Net de\u011Fi\u015Fimi tek ba\u015F\u0131na m\xFCdahalenin etkisini g\xF6stermez; deneme zorlu\u011Fu ve ba\u015Fka etkenler de rol oynar.";
+  const [evaluation] = await db.insert(caseEvaluations).values({ caseId: row.id, orgId: row.orgId, baselineExamId: baseline?.refId ?? null, followupExamId: followup?.id ?? null, netChange: netChange === null ? null : netChange.toFixed(2), tasksDone, tasksTotal: detail.tasks.length, studentSignalsJson: JSON.stringify(signals), limitedEvidence: limited ? 1 : 0, uncertaintyNote, teacherOutcome: input.outcome, evaluatedByUserId: input.actorUserId }).returning({ id: caseEvaluations.id });
+  await db.update(academicCases).set(input.outcome === "completed" ? { status: "closed", outcome: "completed", closedAt: /* @__PURE__ */ new Date() } : { status: "in_progress", outcome: input.outcome }).where(eq23(academicCases.id, row.id));
+  if (input.note?.trim()) await addCaseNote({ orgId: input.orgId, caseId: row.id, authorUserId: input.actorUserId, body: input.note.trim(), visibility: "staff" });
+  return { evaluationId: evaluation.id, limitedEvidence: limited, netChange, tasksDone, tasksTotal: detail.tasks.length };
+}
+async function reopenCase(input) {
+  const db = await requireDb9();
+  const row = await requireCase(db, input.orgId, input.caseId);
+  if (row.status !== "closed") throw new CaseError("Dosya zaten a\xE7\u0131k.");
+  try {
+    await db.update(academicCases).set({ status: "in_progress", outcome: null, closedAt: null }).where(eq23(academicCases.id, row.id));
+  } catch (error) {
+    if (isUniqueViolation(error)) throw new CaseError("Bu \xF6\u011Frenci i\xE7in ayn\u0131 konuda a\xE7\u0131k bir dosya var.", "CONFLICT");
+    throw error;
+  }
+  await addCaseAction({ orgId: input.orgId, caseId: row.id, type: "review", payload: { reopened: true, reason: input.reason }, actorUserId: input.actorUserId, idempotencyKey: `reopen-${Date.now()}` });
+}
+async function caseSummary(orgId, now = /* @__PURE__ */ new Date()) {
+  const cases = await listCases(orgId);
+  const stale = (row) => row.status !== "closed" && now.getTime() - new Date(row.lastActionAt ?? row.openedAt).getTime() > 7 * DAY3;
+  return {
+    open: cases.filter((row) => row.status === "open").length,
+    inProgress: cases.filter((row) => row.status === "in_progress").length,
+    evaluating: cases.filter((row) => row.status === "evaluating").length,
+    closedLast30: cases.filter((row) => row.status === "closed" && row.closedAt && now.getTime() - new Date(row.closedAt).getTime() <= 30 * DAY3).length,
+    overdue: cases.filter(stale).length
+  };
+}
+async function listStudentAssignedTasks(studentUserId, now = /* @__PURE__ */ new Date()) {
+  const db = await requireDb9();
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - (start.getDay() + 6) % 7);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 7);
+  return db.select({ id: studyPlanSessions.id, sessionDate: studyPlanSessions.sessionDate, title: studyPlanSessions.title, subject: studyPlanSessions.subject, topic: studyPlanSessions.topic, plannedMinutes: studyPlanSessions.plannedMinutes, targetPages: studyPlanSessions.targetPages, status: studyPlanSessions.status, studentFeedback: studyPlanSessions.studentFeedback, assignedBy: users.name }).from(studyPlanSessions).leftJoin(users, eq23(users.id, studyPlanSessions.assignedByUserId)).where(and20(eq23(studyPlanSessions.userId, studentUserId), sql12`${studyPlanSessions.assignedByUserId} IS NOT NULL`, gte13(studyPlanSessions.sessionDate, start), lt11(studyPlanSessions.sessionDate, end))).orderBy(studyPlanSessions.sessionDate);
+}
+async function setStudentFeedback(studentUserId, sessionId, feedback) {
+  const db = await requireDb9();
+  const now = /* @__PURE__ */ new Date();
+  const rows = await db.update(studyPlanSessions).set({ studentFeedback: feedback, studentFeedbackAt: now, ...feedback === "done" ? { status: "completed", completedAt: now } : {} }).where(and20(eq23(studyPlanSessions.id, sessionId), eq23(studyPlanSessions.userId, studentUserId), sql12`${studyPlanSessions.assignedByUserId} IS NOT NULL`)).returning({ id: studyPlanSessions.id });
+  return rows.length > 0;
+}
+
+// server/routers/orgCases.ts
+var id = z8.number().int().positive();
+var examKind = z8.enum(EXAM_KINDS);
+var planItem = z8.object({ subject: z8.string().trim().min(1).max(80), topicId: id.nullable(), topic: z8.string().trim().min(1).max(180), minutes: z8.number().int().min(10).max(180), targetQuestions: z8.number().int().min(0).max(200).optional(), bookId: z8.string().max(120).optional(), bookContentId: id.optional(), pages: z8.string().max(80).optional() });
+var planInput = z8.object({ caseId: id, items: z8.array(planItem).min(1).max(14), from: z8.string().regex(/^\d{4}-\d{2}-\d{2}$/), days: z8.number().int().min(1).max(14) });
+var dayOf = (value) => /* @__PURE__ */ new Date(`${value}T12:00:00`);
+async function wrap(work) {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof CaseError) throw new TRPCError6({ code: error.code, message: error.message });
+    throw error;
+  }
+}
+async function requireEnabled(orgId) {
+  if (!await isCasesEnabled(orgId)) throw new TRPCError6({ code: "FORBIDDEN", message: "Akademik takip dosyalar\u0131 bu kurumda a\xE7\u0131k de\u011Fil." });
+}
+async function caseFor(ctx, caseId) {
+  const row = await wrap(() => getCaseRow(ctx.membership.orgId, caseId));
+  await assertCanViewStudent(ctx, row.studentUserId);
+  return row;
+}
+async function visibleStudentIds(ctx) {
+  if (seesAllStudents(ctx.membership.role)) return void 0;
+  return teacherStudentIds(ctx.membership.orgId, ctx.user.id);
+}
+var orgCasesRouter = router({
+  status: orgProcedure("teacher").query(async ({ ctx }) => ({ enabled: await isCasesEnabled(ctx.membership.orgId), title: ACADEMIC_REVIEW_TITLE, text: ACADEMIC_REVIEW_TEXT, confidenceText: CONFIDENCE_TEXT })),
+  setEnabled: orgProcedure("admin").input(z8.object({ enabled: z8.boolean() })).mutation(async ({ ctx, input }) => {
+    await setCasesEnabled(ctx.membership.orgId, input.enabled);
+    await audit(ctx, "cases.enable", { type: "organization", id: ctx.membership.orgId }, { enabled: input.enabled });
+    return { enabled: input.enabled };
+  }),
+  /** Kural önerileri: düşüş eğilimi ya da "inceleme için yetersiz" (dosyası olmayanlar ve açık dosyası olanlar). */
+  signals: orgProcedure("teacher").query(async ({ ctx }) => {
+    await requireEnabled(ctx.membership.orgId);
+    const scoped = await visibleStudentIds(ctx);
+    const students = scoped ?? (await listMembers(ctx.membership.orgId, { role: "student" })).map((member) => member.userId);
+    const names = new Map((await listMembers(ctx.membership.orgId, { role: "student" })).map((member) => [member.userId, member.name]));
+    return (await listSignals(ctx.membership.orgId, students)).map((signal) => ({ ...signal, studentName: names.get(signal.studentUserId) ?? "\xD6\u011Frenci" }));
+  }),
+  queue: orgProcedure("teacher").input(z8.object({ status: z8.enum(["open", "in_progress", "evaluating", "closed"]).optional() })).query(async ({ ctx, input }) => {
+    await requireEnabled(ctx.membership.orgId);
+    return listCases(ctx.membership.orgId, { studentUserIds: await visibleStudentIds(ctx), status: input.status });
+  }),
+  open: orgProcedure("teacher").input(z8.object({ studentUserId: id, ruleKey: z8.enum(["trend_decline", "manual"]), examKind: examKind.nullable() })).mutation(async ({ ctx, input }) => {
+    await requireEnabled(ctx.membership.orgId);
+    await assertCanViewStudent(ctx, input.studentUserId);
+    const result = await wrap(() => openCase({ orgId: ctx.membership.orgId, studentUserId: input.studentUserId, ruleKey: input.ruleKey, examKind: input.examKind, actorUserId: ctx.user.id }));
+    if (result.created) await audit(ctx, "case.open", { type: "case", id: result.caseId }, { studentUserId: input.studentUserId, ruleKey: input.ruleKey, examKind: input.examKind });
+    return result;
+  }),
+  get: orgProcedure("teacher").input(z8.object({ caseId: id })).query(async ({ ctx, input }) => {
+    await requireEnabled(ctx.membership.orgId);
+    const row = await caseFor(ctx, input.caseId);
+    const detail = await wrap(() => getCaseDetail(ctx.membership.orgId, input.caseId));
+    const responsible = await canReadNotes(ctx.membership.orgId, ctx.user.id, row.studentUserId);
+    return { ...detail, notes: filterPrivateNotes(detail.notes, ctx.user.id, responsible), canReadNotes: responsible };
+  }),
+  addAction: orgProcedure("teacher").input(z8.object({ caseId: id, type: z8.enum(["review", "meeting"]), note: z8.string().trim().max(2e3).optional(), meetingAt: z8.string().max(40).optional(), place: z8.string().trim().max(120).optional(), idempotencyKey: z8.string().min(8).max(64) })).mutation(async ({ ctx, input }) => {
+    await requireEnabled(ctx.membership.orgId);
+    await caseFor(ctx, input.caseId);
+    const payload = input.type === "meeting" ? { meetingAt: input.meetingAt ?? null, place: input.place ?? null } : {};
+    const result = await wrap(() => addCaseAction({ orgId: ctx.membership.orgId, caseId: input.caseId, type: input.type, payload, actorUserId: ctx.user.id, idempotencyKey: input.idempotencyKey, status: input.type === "meeting" ? "planned" : "done" }));
+    if (input.note) await addCaseNote({ orgId: ctx.membership.orgId, caseId: input.caseId, authorUserId: ctx.user.id, body: input.note, visibility: "staff" });
+    if (result.created) await audit(ctx, `case.${input.type}`, { type: "case", id: input.caseId }, { actionId: result.actionId });
+    return result;
+  }),
+  addNote: orgProcedure("teacher").input(z8.object({ caseId: id, body: z8.string().trim().min(1).max(4e3), visibility: z8.enum(["staff", "student"]) })).mutation(async ({ ctx, input }) => {
+    await requireEnabled(ctx.membership.orgId);
+    await caseFor(ctx, input.caseId);
+    const noteId = await wrap(() => addCaseNote({ orgId: ctx.membership.orgId, caseId: input.caseId, authorUserId: ctx.user.id, body: input.body, visibility: input.visibility }));
+    await audit(ctx, "case.note", { type: "case", id: input.caseId }, { noteId, visibility: input.visibility });
+    return { noteId };
+  }),
+  suggestResources: orgProcedure("teacher").input(z8.object({ caseId: id, topicIds: z8.array(id).min(1).max(10) })).query(async ({ ctx, input }) => {
+    await requireEnabled(ctx.membership.orgId);
+    const row = await caseFor(ctx, input.caseId);
+    return suggestOwnedResources(row.studentUserId, input.topicIds);
+  }),
+  previewPlan: orgProcedure("teacher").input(planInput).query(async ({ ctx, input }) => {
+    await requireEnabled(ctx.membership.orgId);
+    const row = await caseFor(ctx, input.caseId);
+    const placements = await previewCasePlan(row.studentUserId, input.items, dayOf(input.from), input.days);
+    return placements.map((placement) => placement.date ? { itemIndex: placement.index, date: placement.date, start: placement.start } : { itemIndex: placement.index, date: null, reason: placement.reason });
+  }),
+  assignPlan: orgProcedure("teacher").input(planInput.extend({ idempotencyKey: z8.string().min(8).max(64) })).mutation(async ({ ctx, input }) => {
+    await requireEnabled(ctx.membership.orgId);
+    await caseFor(ctx, input.caseId);
+    const result = await wrap(() => assignCasePlan({ orgId: ctx.membership.orgId, caseId: input.caseId, actorUserId: ctx.user.id, items: input.items, from: dayOf(input.from), days: input.days, idempotencyKey: input.idempotencyKey }));
+    if (!result.duplicate) await audit(ctx, "case.plan", { type: "case", id: input.caseId }, { actionId: result.actionId, sessions: result.sessionIds.length, skipped: result.skipped.length });
+    return result;
+  }),
+  evaluate: orgProcedure("teacher").input(z8.object({ caseId: id, outcome: z8.enum(["completed", "ongoing", "reassess"]), note: z8.string().trim().max(2e3).optional() })).mutation(async ({ ctx, input }) => {
+    await requireEnabled(ctx.membership.orgId);
+    await caseFor(ctx, input.caseId);
+    const result = await wrap(() => evaluateCase({ orgId: ctx.membership.orgId, caseId: input.caseId, actorUserId: ctx.user.id, outcome: input.outcome, note: input.note }));
+    await audit(ctx, input.outcome === "completed" ? "case.close" : "case.evaluate", { type: "case", id: input.caseId }, { outcome: input.outcome, limitedEvidence: result.limitedEvidence });
+    return result;
+  }),
+  reopen: orgProcedure("teacher").input(z8.object({ caseId: id, reason: z8.string().trim().min(3).max(500) })).mutation(async ({ ctx, input }) => {
+    await requireEnabled(ctx.membership.orgId);
+    await caseFor(ctx, input.caseId);
+    await wrap(() => reopenCase({ orgId: ctx.membership.orgId, caseId: input.caseId, actorUserId: ctx.user.id, reason: input.reason }));
+    await audit(ctx, "case.reopen", { type: "case", id: input.caseId });
+    return { ok: true };
+  }),
+  /** Yönetici özeti: yalnızca sayılar; not ya da kanıt içeriği yok. */
+  summary: orgProcedure("coordinator").query(async ({ ctx }) => {
+    await requireEnabled(ctx.membership.orgId);
+    return caseSummary(ctx.membership.orgId);
+  })
+});
+var studyTasksRouter = router({
+  thisWeek: protectedProcedure.query(({ ctx }) => listStudentAssignedTasks(ctx.user.id)),
+  feedback: protectedProcedure.input(z8.object({ sessionId: id, feedback: z8.enum(["done", "struggled", "needs_review"]) })).mutation(async ({ ctx, input }) => {
+    if (!await setStudentFeedback(ctx.user.id, input.sessionId, input.feedback)) throw new TRPCError6({ code: "NOT_FOUND", message: "G\xF6rev bulunamad\u0131." });
+    return { ok: true };
+  })
+});
+
+// server/routers/questions.ts
+import { TRPCError as TRPCError7 } from "@trpc/server";
+import { z as z9 } from "zod";
 
 // server/notes/questionAi.ts
 async function suggestQuestionDetails(input, invoke = invokeLLM) {
@@ -10253,11 +11039,11 @@ async function userFacing2(work) {
   try {
     return await work();
   } catch (error) {
-    if (error instanceof NoteError || error instanceof AttachmentError || error instanceof PlanTaskError) throw new TRPCError5({ code: "BAD_REQUEST", message: error.message });
+    if (error instanceof NoteError || error instanceof AttachmentError || error instanceof PlanTaskError) throw new TRPCError7({ code: "BAD_REQUEST", message: error.message });
     throw error;
   }
 }
-var id = z7.number().int().positive();
+var id2 = z9.number().int().positive();
 async function loadQuestionForAi(userId, questionId) {
   const context = await getSolveContext(userId, questionId);
   let imageDataUrl = null;
@@ -10269,56 +11055,56 @@ async function loadQuestionForAi(userId, questionId) {
   const { examTrack: track } = await getStudentProfile(userId);
   return { context, imageDataUrl, track };
 }
-var subjectScope = z7.string().max(80).nullable().optional();
-var optionalId2 = id.nullable().optional();
+var subjectScope = z9.string().max(80).nullable().optional();
+var optionalId2 = id2.nullable().optional();
 var fields = {
-  subject: z7.string().max(80).nullable().optional(),
+  subject: z9.string().max(80).nullable().optional(),
   topicId: optionalId2,
-  stuckPoint: z7.string().max(4e3).nullable().optional(),
-  solutionText: z7.string().max(4e3).nullable().optional(),
+  stuckPoint: z9.string().max(4e3).nullable().optional(),
+  solutionText: z9.string().max(4e3).nullable().optional(),
   solutionImageId: optionalId2,
-  errorType: z7.enum(ERROR_TYPE_KEYS).nullable().optional(),
-  errorTypeSource: z7.enum(["student", "ai"]).nullable().optional(),
-  difficulty: z7.enum(DIFFICULTY_KEYS).nullable().optional()
+  errorType: z9.enum(ERROR_TYPE_KEYS).nullable().optional(),
+  errorTypeSource: z9.enum(["student", "ai"]).nullable().optional(),
+  difficulty: z9.enum(DIFFICULTY_KEYS).nullable().optional()
 };
 var questionsRouter = router({
-  list: protectedProcedure.input(z7.object({ status: z7.enum(["open", "mastered", "all"]).optional(), due: z7.boolean().optional(), subject: subjectScope, topicId: optionalId2, cursor: optionalId2, limit: z7.number().int().min(1).max(100).optional() })).query(({ ctx, input }) => userFacing2(() => listQuestions(ctx.user.id, input))),
-  get: protectedProcedure.input(z7.object({ id })).query(async ({ ctx, input }) => {
+  list: protectedProcedure.input(z9.object({ status: z9.enum(["open", "mastered", "all"]).optional(), due: z9.boolean().optional(), subject: subjectScope, topicId: optionalId2, cursor: optionalId2, limit: z9.number().int().min(1).max(100).optional() })).query(({ ctx, input }) => userFacing2(() => listQuestions(ctx.user.id, input))),
+  get: protectedProcedure.input(z9.object({ id: id2 })).query(async ({ ctx, input }) => {
     const question = await getQuestion(ctx.user.id, input.id);
-    if (!question) throw new TRPCError5({ code: "NOT_FOUND", message: "Soru bulunamad\u0131." });
+    if (!question) throw new TRPCError7({ code: "NOT_FOUND", message: "Soru bulunamad\u0131." });
     return question;
   }),
-  byNote: protectedProcedure.input(z7.object({ noteId: id })).query(({ ctx, input }) => userFacing2(async () => ({ id: await getQuestionIdByNote(ctx.user.id, input.noteId) }))),
-  create: protectedProcedure.input(z7.object({
-    clientId: z7.string().min(8).max(40).regex(/^[A-Za-z0-9_-]+$/),
+  byNote: protectedProcedure.input(z9.object({ noteId: id2 })).query(({ ctx, input }) => userFacing2(async () => ({ id: await getQuestionIdByNote(ctx.user.id, input.noteId) }))),
+  create: protectedProcedure.input(z9.object({
+    clientId: z9.string().min(8).max(40).regex(/^[A-Za-z0-9_-]+$/),
     questionImageId: optionalId2,
-    questionOcrText: z7.string().max(5e3).nullable().optional(),
+    questionOcrText: z9.string().max(5e3).nullable().optional(),
     voiceAttachmentId: optionalId2,
-    voiceDuration: z7.number().min(0).max(700).nullable().optional(),
+    voiceDuration: z9.number().min(0).max(700).nullable().optional(),
     aiTopicId: optionalId2,
-    bookId: z7.string().max(120).nullable().optional(),
+    bookId: z9.string().max(120).nullable().optional(),
     studySessionId: optionalId2,
     ...fields
   })).mutation(({ ctx, input }) => userFacing2(() => createQuestion(ctx.user.id, input))),
-  update: protectedProcedure.input(z7.object({ id, ...fields })).mutation(({ ctx, input }) => userFacing2(() => {
+  update: protectedProcedure.input(z9.object({ id: id2, ...fields })).mutation(({ ctx, input }) => userFacing2(() => {
     const { id: questionId, ...patch } = input;
     return updateQuestion(ctx.user.id, questionId, patch);
   })),
-  delete: protectedProcedure.input(z7.object({ id })).mutation(({ ctx, input }) => userFacing2(() => deleteQuestion(ctx.user.id, input.id))),
-  attempt: protectedProcedure.input(z7.object({ id, result: z7.enum(ATTEMPT_RESULT_KEYS), sawSolution: z7.boolean(), hintLevel: z7.number().int().min(HINT_LEVELS.none).max(HINT_LEVELS.solution).optional(), seconds: z7.number().min(0).max(7200).nullable().optional() })).mutation(({ ctx, input }) => userFacing2(() => recordAttempt(ctx.user.id, input.id, input))),
+  delete: protectedProcedure.input(z9.object({ id: id2 })).mutation(({ ctx, input }) => userFacing2(() => deleteQuestion(ctx.user.id, input.id))),
+  attempt: protectedProcedure.input(z9.object({ id: id2, result: z9.enum(ATTEMPT_RESULT_KEYS), sawSolution: z9.boolean(), hintLevel: z9.number().int().min(HINT_LEVELS.none).max(HINT_LEVELS.solution).optional(), seconds: z9.number().min(0).max(7200).nullable().optional() })).mutation(({ ctx, input }) => userFacing2(() => recordAttempt(ctx.user.id, input.id, input))),
   // subject: verilmezse tüm dersler, null ise derssiz ("Genel"), metinse o dersin defteri.
-  summary: protectedProcedure.input(z7.object({ subject: subjectScope }).optional()).query(({ ctx, input }) => userFacing2(() => getReviewSummary(ctx.user.id, input?.subject))),
-  errorMap: protectedProcedure.input(z7.object({ days: z7.number().int().min(1).max(365).nullable(), subject: subjectScope })).query(({ ctx, input }) => userFacing2(() => getErrorMap(ctx.user.id, input.days, input.subject))),
+  summary: protectedProcedure.input(z9.object({ subject: subjectScope }).optional()).query(({ ctx, input }) => userFacing2(() => getReviewSummary(ctx.user.id, input?.subject))),
+  errorMap: protectedProcedure.input(z9.object({ days: z9.number().int().min(1).max(365).nullable(), subject: subjectScope })).query(({ ctx, input }) => userFacing2(() => getErrorMap(ctx.user.id, input.days, input.subject))),
   /** Ders sekmeleri: ders başına not / soru / tekrar bekleyen sayısı. */
   subjectSummary: protectedProcedure.query(({ ctx }) => userFacing2(() => getSubjectSummary(ctx.user.id))),
   /** Notu ya da soru kartını bir ders defterine koy (null: "Genel"e döndür). */
-  moveToSubject: protectedProcedure.input(z7.object({ noteId: id, subject: z7.string().trim().min(1).max(80).nullable() })).mutation(({ ctx, input }) => userFacing2(() => moveNoteToSubject(ctx.user.id, input.noteId, input.subject))),
+  moveToSubject: protectedProcedure.input(z9.object({ noteId: id2, subject: z9.string().trim().min(1).max(80).nullable() })).mutation(({ ctx, input }) => userFacing2(() => moveNoteToSubject(ctx.user.id, input.noteId, input.subject))),
   addReviewTask: protectedProcedure.mutation(({ ctx }) => userFacing2(() => addReviewTask(ctx.user.id))),
-  finishReview: protectedProcedure.input(z7.object({ minutes: z7.number().min(0).max(600), solved: z7.number().int().min(0).max(100), partial: z7.number().int().min(0).max(100), failed: z7.number().int().min(0).max(100) })).mutation(({ ctx, input }) => userFacing2(() => finishReviewSession(ctx.user.id, input))),
+  finishReview: protectedProcedure.input(z9.object({ minutes: z9.number().min(0).max(600), solved: z9.number().int().min(0).max(100), partial: z9.number().int().min(0).max(100), failed: z9.number().int().min(0).max(100) })).mutation(({ ctx, input }) => userFacing2(() => finishReviewSession(ctx.user.id, input))),
   // ✨ Adım adım çöz: kartı AI ile çözer ve karta kaydeder (AI not araçları kotasından sayılır).
   // İstemci kayıtlı çözümü `get` ile zaten alır; bu uç yalnızca ilk çözüm ya da "Yeniden çöz" için çağrılır.
   // Model kademesi kartın zorluk/ders/sınav sinyallerinden seçilir; `escalate` = öğrenci "daha güçlü modelle çöz" dedi.
-  solve: metredFeatureProcedure("NOTE_AI").input(z7.object({ id, escalate: z7.boolean().optional() })).mutation(({ ctx, input }) => userFacing2(async () => {
+  solve: metredFeatureProcedure("NOTE_AI").input(z9.object({ id: id2, escalate: z9.boolean().optional() })).mutation(({ ctx, input }) => userFacing2(async () => {
     const { context, imageDataUrl, track } = await loadQuestionForAi(ctx.user.id, input.id);
     const tier = chooseSolveTier({ difficulty: context.difficulty, subject: context.subject, exam: context.exam, lastResult: context.lastResult, escalate: input.escalate });
     let routed;
@@ -10333,7 +11119,7 @@ var questionsRouter = router({
     return saveAiSolution(ctx.user.id, input.id, routed.solution, tag);
   })),
   // 🔁 Benzer soru: aynı yöntemi ölçen yeni alıştırma (YKS 5, LGS 4 şıklı); kaydedilmez, her üretim AI not hakkından sayılır.
-  similar: metredFeatureProcedure("NOTE_AI").input(z7.object({ id })).mutation(({ ctx, input }) => userFacing2(async () => {
+  similar: metredFeatureProcedure("NOTE_AI").input(z9.object({ id: id2 })).mutation(({ ctx, input }) => userFacing2(async () => {
     const { context, imageDataUrl, track } = await loadQuestionForAi(ctx.user.id, input.id);
     try {
       const tier = atLeastMedium(tierOfTag(context.aiSolutionModel) ?? chooseSolveTier({ difficulty: context.difficulty, subject: context.subject, exam: context.exam, lastResult: context.lastResult }));
@@ -10344,7 +11130,7 @@ var questionsRouter = router({
     }
   })),
   // ✨ Öner: fotoğrafı okur, müfredattan konu + zorluk + olası hata türü önerir (fotoğraf okuma kotasından sayılır).
-  suggest: metredFeatureProcedure("NOTE_OCR").input(z7.object({ attachmentId: optionalId2, stuckPoint: z7.string().max(4e3).nullable().optional() })).mutation(({ ctx, input }) => userFacing2(async () => {
+  suggest: metredFeatureProcedure("NOTE_OCR").input(z9.object({ attachmentId: optionalId2, stuckPoint: z9.string().max(4e3).nullable().optional() })).mutation(({ ctx, input }) => userFacing2(async () => {
     let imageDataUrl = null;
     if (input.attachmentId) {
       const attachment = await getAttachmentStorage().get(ctx.user.id, input.attachmentId);
@@ -10365,153 +11151,8 @@ var questionsRouter = router({
 });
 
 // server/routers/classSchedule.ts
-import { TRPCError as TRPCError6 } from "@trpc/server";
-import { z as z8 } from "zod";
-
-// server/schedule/classScheduleDb.ts
-import { asc as asc3, eq as eq22 } from "drizzle-orm";
-
-// shared/classSchedule.ts
-var SCHEDULE_SOURCES = ["school", "course", "tutor", "other"];
-var DAY_LABELS = ["Pazartesi", "Sal\u0131", "\xC7ar\u015Famba", "Per\u015Fembe", "Cuma", "Cumartesi", "Pazar"];
-var YKS_SUBJECTS = ["T\xFCrk\xE7e", "Matematik", "Geometri", "Fizik", "Kimya", "Biyoloji", "Edebiyat", "Tarih", "Co\u011Frafya", "Felsefe"];
-var NON_YKS_PRESETS = ["Din K\xFClt\xFCr\xFC", "Yabanc\u0131 Dil", "Rehberlik", "Beden E\u011Fitimi", "Sanat / M\xFCzik", "Di\u011Fer ders"];
-var LGS_SUBJECTS = ["T\xFCrk\xE7e", "Matematik", "Fen Bilimleri", "\u0130nk\u0131lap Tarihi", "Din K\xFClt\xFCr\xFC", "\u0130ngilizce"];
-var NON_LGS_PRESETS = ["Teknoloji ve Tasar\u0131m", "Bili\u015Fim Teknolojileri", "Rehberlik", "Beden E\u011Fitimi", "Sanat / M\xFCzik", "Di\u011Fer ders"];
-var SCHEDULE_SUBJECTS_BY_TRACK = {
-  YKS: { subjects: YKS_SUBJECTS, nonExamPresets: NON_YKS_PRESETS },
-  LGS: { subjects: LGS_SUBJECTS, nonExamPresets: NON_LGS_PRESETS },
-  // Yetişkin adaylar: programdaki bloklar çoğunlukla iş/kurs saatleri; ders olarak KPSS dersleri.
-  KPSS: { subjects: ["T\xFCrk\xE7e", "Matematik", "Tarih", "Co\u011Frafya", "Vatanda\u015Fl\u0131k", "G\xFCncel Bilgiler"], nonExamPresets: ["\u0130\u015F", "Kurs / dershane", "\xDCniversite dersi", "Di\u011Fer"] },
-  DGS: { subjects: ["Say\u0131sal", "S\xF6zel"], nonExamPresets: ["\xD6nlisans dersi", "\u0130\u015F", "Kurs / dershane", "Di\u011Fer"] },
-  MEB_AGS: { subjects: ["E\u011Fitim Bilimleri", "S\xF6zel Yetenek", "Say\u0131sal Yetenek", "Mevzuat", "Tarih", "T\xFCrkiye Co\u011Frafyas\u0131"], nonExamPresets: ["\xDCniversite dersi", "Staj / okul uygulamas\u0131", "\u0130\u015F", "Kurs / dershane", "Di\u011Fer"] },
-  KPSS_A: { subjects: ["Hukuk", "\u0130ktisat", "Maliye", "Muhasebe", "\u0130\u015Fletme", "\xC7al\u0131\u015Fma Ekonomisi", "\u0130statistik", "Kamu Y\xF6netimi", "Uluslararas\u0131 \u0130li\u015Fkiler"], nonExamPresets: ["\u0130\u015F", "Kurs / dershane", "Di\u011Fer"] }
-};
-var SCHEDULE_SUBJECTS = Array.from(new Set(Object.values(SCHEDULE_SUBJECTS_BY_TRACK).flatMap((entry) => entry.subjects)));
-var scheduleSubjectsFor = (track) => SCHEDULE_SUBJECTS_BY_TRACK[track].subjects;
-var nonExamPresetsFor = (track) => SCHEDULE_SUBJECTS_BY_TRACK[track].nonExamPresets;
-var AFTER_CLASS_BUFFER_MINUTES = 30;
-var PLAN_DAY_END = "23:30";
-var MAX_SCHEDULE_BLOCKS = 120;
-var MAX_SCHOOL_PERIODS = 12;
-var DEFAULT_SCHOOL_PERIODS = [
-  { start: "08:30", end: "09:10" },
-  { start: "09:20", end: "10:00" },
-  { start: "10:10", end: "10:50" },
-  { start: "11:00", end: "11:40" },
-  { start: "13:00", end: "13:40" },
-  { start: "13:50", end: "14:30" },
-  { start: "14:40", end: "15:20" },
-  { start: "15:30", end: "16:10" }
-];
-var TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
-var isValidTime = (value) => TIME_PATTERN.test(value);
-var toMinutes = (value) => {
-  const match = TIME_PATTERN.exec(value);
-  return match ? Number(match[1]) * 60 + Number(match[2]) : NaN;
-};
-var fromMinutes = (minutes) => `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
-var weekdayOf = (date) => (date.getDay() + 6) % 7 + 1;
-var isYksBlock = (block) => block.subject !== null;
-function blocksOn(blocks, date) {
-  const day = weekdayOf(date);
-  return blocks.filter((block) => block.dayOfWeek === day).sort((a, b) => toMinutes(a.startTime) - toMinutes(b.startTime));
-}
-function validateSchedule(schedule) {
-  for (const period of schedule.periods) {
-    if (!isValidTime(period.start) || !isValidTime(period.end) || toMinutes(period.start) >= toMinutes(period.end)) return `Ders saati ${period.start}\u2013${period.end} ge\xE7ersiz: ba\u015Flang\u0131\xE7 biti\u015Ften \xF6nce olmal\u0131.`;
-  }
-  for (const block of schedule.blocks) {
-    if (!isValidTime(block.startTime) || !isValidTime(block.endTime) || toMinutes(block.startTime) >= toMinutes(block.endTime)) return `${block.label} (${block.startTime}\u2013${block.endTime}) ge\xE7ersiz: ba\u015Flang\u0131\xE7 biti\u015Ften \xF6nce olmal\u0131.`;
-  }
-  for (let day = 1; day <= 7; day++) {
-    const sorted = schedule.blocks.filter((block) => block.dayOfWeek === day).sort((a, b) => toMinutes(a.startTime) - toMinutes(b.startTime));
-    for (let index2 = 1; index2 < sorted.length; index2++) {
-      const previous = sorted[index2 - 1];
-      const current = sorted[index2];
-      if (toMinutes(current.startTime) < toMinutes(previous.endTime)) return `${DAY_LABELS[day - 1]}: ${previous.label} (${previous.startTime}\u2013${previous.endTime}) ile ${current.label} (${current.startTime}\u2013${current.endTime}) \xE7ak\u0131\u015F\u0131yor.`;
-    }
-  }
-  return null;
-}
-function computeFreeSlots(blocks, date, options) {
-  const from = toMinutes(options.from);
-  const to = toMinutes(options.to ?? PLAN_DAY_END);
-  const buffer = options.buffer ?? AFTER_CLASS_BUFFER_MINUTES;
-  if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to) return [];
-  const busy = blocksOn(blocks, date).map((block) => ({ start: toMinutes(block.startTime), end: toMinutes(block.endTime) + buffer }));
-  const slots = [];
-  let cursor = from;
-  for (const interval of busy) {
-    if (interval.end <= cursor) continue;
-    if (interval.start > cursor) slots.push({ start: cursor, end: Math.min(interval.start, to) });
-    cursor = Math.max(cursor, interval.end);
-    if (cursor >= to) break;
-  }
-  if (cursor < to) slots.push({ start: cursor, end: to });
-  return slots.filter((slot) => slot.end > slot.start);
-}
-var freeMinutes = (slots) => slots.reduce((sum, slot) => sum + slot.end - slot.start, 0);
-function describeWeekForPlan(blocks, weekStart, from) {
-  if (blocks.length === 0) return null;
-  const lines = [];
-  for (let offset = 0; offset < 7; offset++) {
-    const date = new Date(weekStart);
-    date.setDate(weekStart.getDate() + offset);
-    const slots = computeFreeSlots(blocks, date, { from });
-    const subjects = Array.from(new Set(blocksOn(blocks, date).filter(isYksBlock).map((block) => block.subject)));
-    const slotText = slots.filter((slot) => slot.end - slot.start >= 30).map((slot) => `${fromMinutes(slot.start)}\u2013${fromMinutes(slot.end)}`).join(", ") || "yok";
-    const isoDate2 = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-    lines.push(`${DAY_LABELS[weekdayOf(date) - 1]} (${isoDate2}): bo\u015F zaman ${freeMinutes(slots)} dk (${slotText})${subjects.length ? `; okulda/dershanede i\u015Flenen dersler: ${subjects.join(", ")}` : ""}`);
-  }
-  return lines.join("\n");
-}
-
-// server/schedule/classScheduleDb.ts
-var ScheduleError = class extends Error {
-};
-function parsePeriods(raw) {
-  if (!raw) return DEFAULT_SCHOOL_PERIODS;
-  try {
-    const value = JSON.parse(raw);
-    if (!Array.isArray(value)) return DEFAULT_SCHOOL_PERIODS;
-    return value.filter((item) => typeof item?.start === "string" && typeof item?.end === "string").map((item) => ({ start: item.start, end: item.end }));
-  } catch {
-    return DEFAULT_SCHOOL_PERIODS;
-  }
-}
-async function getClassSchedule(userId) {
-  const db = await getDb();
-  if (!db) return { periods: DEFAULT_SCHOOL_PERIODS, blocks: [] };
-  const [profile] = await db.select({ schoolPeriodsJson: studentProfiles.schoolPeriodsJson }).from(studentProfiles).where(eq22(studentProfiles.userId, userId)).limit(1);
-  const rows = await db.select({ source: classScheduleBlocks.source, dayOfWeek: classScheduleBlocks.dayOfWeek, startTime: classScheduleBlocks.startTime, endTime: classScheduleBlocks.endTime, subject: classScheduleBlocks.subject, label: classScheduleBlocks.label }).from(classScheduleBlocks).where(eq22(classScheduleBlocks.userId, userId)).orderBy(asc3(classScheduleBlocks.dayOfWeek), asc3(classScheduleBlocks.startTime));
-  return { periods: parsePeriods(profile?.schoolPeriodsJson), blocks: rows };
-}
-async function getPlanScheduleContext(userId, startDate) {
-  const db = await getDb();
-  if (!db) return null;
-  const [profile] = await db.select({ start: studentProfiles.preferredStudyStartTime }).from(studentProfiles).where(eq22(studentProfiles.userId, userId)).limit(1);
-  const { blocks } = await getClassSchedule(userId);
-  return describeWeekForPlan([...blocks, ...await getCourseBlocks(userId)], startDate, profile?.start && isValidTime(profile.start) ? profile.start : "16:00");
-}
-async function getCourseBlocks(userId) {
-  const rows = await listStudentTimetable(userId).catch(() => []);
-  return rows.map((slot) => ({ source: "course", dayOfWeek: slot.dayOfWeek, startTime: slot.startTime, endTime: slot.endTime, subject: slot.subject, label: `${slot.className} \xB7 ${slot.subject}`, orgName: slot.orgName, teacherName: slot.teacherName, room: slot.room }));
-}
-async function saveClassSchedule(userId, schedule) {
-  const problem = validateSchedule(schedule);
-  if (problem) throw new ScheduleError(problem);
-  const db = await getDb();
-  if (!db) throw new ScheduleError("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
-  const blocks = schedule.blocks.map((block) => ({ ...block, label: block.label.trim() || block.subject || "Ders" }));
-  const periodsJson = JSON.stringify(schedule.periods);
-  await db.transaction(async (tx) => {
-    await tx.delete(classScheduleBlocks).where(eq22(classScheduleBlocks.userId, userId));
-    if (blocks.length) await tx.insert(classScheduleBlocks).values(blocks.map((block) => ({ ...block, userId })));
-    await tx.insert(studentProfiles).values({ userId, schoolPeriodsJson: periodsJson }).onConflictDoUpdate({ target: studentProfiles.userId, set: { schoolPeriodsJson: periodsJson } });
-  });
-  return getClassSchedule(userId);
-}
+import { TRPCError as TRPCError8 } from "@trpc/server";
+import { z as z10 } from "zod";
 
 // server/schedule/scheduleImport.ts
 var LESSON_RULES = {
@@ -10662,78 +11303,78 @@ async function readScheduleFromImage(dataUrl, invoke = invokeLLM, track = "YKS")
 }
 
 // server/routers/classSchedule.ts
-var time = z8.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Saat SS:dd bi\xE7iminde olmal\u0131.");
+var time = z10.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Saat SS:dd bi\xE7iminde olmal\u0131.");
 var classScheduleRouter = router({
   // `courseBlocks`: kurumun (dershane) sınıf programı; salt okunur, kaydedilen programa girmez.
   get: protectedProcedure.query(async ({ ctx }) => {
     const [schedule, courseBlocks] = await Promise.all([getClassSchedule(ctx.user.id), getCourseBlocks(ctx.user.id)]);
     return { ...schedule, courseBlocks };
   }),
-  save: protectedProcedure.input(z8.object({
-    periods: z8.array(z8.object({ start: time, end: time })).max(MAX_SCHOOL_PERIODS),
-    blocks: z8.array(z8.object({
-      source: z8.enum(SCHEDULE_SOURCES),
-      dayOfWeek: z8.number().int().min(1).max(7),
+  save: protectedProcedure.input(z10.object({
+    periods: z10.array(z10.object({ start: time, end: time })).max(MAX_SCHOOL_PERIODS),
+    blocks: z10.array(z10.object({
+      source: z10.enum(SCHEDULE_SOURCES),
+      dayOfWeek: z10.number().int().min(1).max(7),
       startTime: time,
       endTime: time,
-      subject: z8.enum(SCHEDULE_SUBJECTS).nullable(),
-      label: z8.string().max(80)
+      subject: z10.enum(SCHEDULE_SUBJECTS).nullable(),
+      label: z10.string().max(80)
     })).max(MAX_SCHEDULE_BLOCKS)
   })).mutation(async ({ ctx, input }) => {
     try {
       return await saveClassSchedule(ctx.user.id, input);
     } catch (error) {
-      if (error instanceof ScheduleError) throw new TRPCError6({ code: "BAD_REQUEST", message: error.message });
+      if (error instanceof ScheduleError) throw new TRPCError8({ code: "BAD_REQUEST", message: error.message });
       throw error;
     }
   }),
   // 📷 Fotoğraftan aktar: program okunur ama KAYDEDİLMEZ; düzenleyiciye dolar, öğrenci kontrol edip kaydeder.
   // Kota: fotoğraf okuma (NOTE_OCR); yalnızca başarılı okumada sayılır.
-  importPhoto: metredFeatureProcedure("NOTE_OCR").input(z8.object({ dataUrl: z8.string().max(12e6).regex(/^data:image\/(jpeg|png|webp);base64,/, "Foto\u011Fraf JPEG, PNG ya da WEBP olmal\u0131.") })).mutation(async ({ ctx, input }) => {
+  importPhoto: metredFeatureProcedure("NOTE_OCR").input(z10.object({ dataUrl: z10.string().max(12e6).regex(/^data:image\/(jpeg|png|webp);base64,/, "Foto\u011Fraf JPEG, PNG ya da WEBP olmal\u0131.") })).mutation(async ({ ctx, input }) => {
     try {
       const examTrack = ctx.user ? (await getStudentProfile(ctx.user.id)).examTrack : "YKS";
       return await readScheduleFromImage(input.dataUrl, void 0, examTrack);
     } catch (error) {
       console.warn("[Class Schedule] Photo import failed:", error);
-      throw new TRPCError6({ code: "BAD_REQUEST", message: llmUnavailableMessage(error) ?? "Program\u0131 foto\u011Fraftan okuyamad\u0131m. Tablonun tamam\u0131 g\xF6r\xFCnecek \u015Fekilde, d\xFCz ve net bir foto\u011Frafla tekrar dener misin? \u0130stersen tabloya elle de girebilirsin." });
+      throw new TRPCError8({ code: "BAD_REQUEST", message: llmUnavailableMessage(error) ?? "Program\u0131 foto\u011Fraftan okuyamad\u0131m. Tablonun tamam\u0131 g\xF6r\xFCnecek \u015Fekilde, d\xFCz ve net bir foto\u011Frafla tekrar dener misin? \u0130stersen tabloya elle de girebilirsin." });
     }
   })
 });
 
 // server/routers/push.ts
-import { TRPCError as TRPCError7 } from "@trpc/server";
-import { z as z9 } from "zod";
-var subscriptionInput = z9.object({
-  endpoint: z9.string().url().max(600),
-  keys: z9.object({ p256dh: z9.string().min(1).max(200), auth: z9.string().min(1).max(100) })
+import { TRPCError as TRPCError9 } from "@trpc/server";
+import { z as z11 } from "zod";
+var subscriptionInput = z11.object({
+  endpoint: z11.string().url().max(600),
+  keys: z11.object({ p256dh: z11.string().min(1).max(200), auth: z11.string().min(1).max(100) })
 });
 var pushRouter = router({
   // VAPID anahtarı yoksa null: istemci hatırlatma seçeneğini hiç göstermez.
   config: publicProcedure.query(() => ({ publicKey: pushPublicKey() })),
   // Bu cihazın aboneliği sunucuda kayıtlı mı (tarayıcıda abonelik olup sunucuda silinmiş olabilir).
-  status: protectedProcedure.input(z9.object({ endpoint: z9.string().max(600) })).query(async ({ ctx, input }) => ({ subscribed: await hasSubscription(ctx.user.id, input.endpoint) })),
+  status: protectedProcedure.input(z11.object({ endpoint: z11.string().max(600) })).query(async ({ ctx, input }) => ({ subscribed: await hasSubscription(ctx.user.id, input.endpoint) })),
   subscribe: protectedProcedure.input(subscriptionInput).mutation(async ({ ctx, input }) => {
-    if (!pushPublicKey()) throw new TRPCError7({ code: "PRECONDITION_FAILED", message: "Bildirimler \u015Fu an kullan\u0131lam\u0131yor." });
+    if (!pushPublicKey()) throw new TRPCError9({ code: "PRECONDITION_FAILED", message: "Bildirimler \u015Fu an kullan\u0131lam\u0131yor." });
     await saveSubscription(ctx.user.id, input, ctx.req.headers["user-agent"] ?? null);
     return { subscribed: true };
   }),
-  unsubscribe: protectedProcedure.input(z9.object({ endpoint: z9.string().max(600) })).mutation(async ({ ctx, input }) => {
+  unsubscribe: protectedProcedure.input(z11.object({ endpoint: z11.string().max(600) })).mutation(async ({ ctx, input }) => {
     await removeSubscription(ctx.user.id, input.endpoint);
     return { subscribed: false };
   }),
   test: protectedProcedure.mutation(async ({ ctx }) => {
     const outcome = await sendToUser(ctx.user.id, { title: "Hat\u0131rlatmalar a\xE7\u0131k", body: "Plan\u0131ndaki her oturumdan birka\xE7 dakika \xF6nce burada haber verece\u011Fim.", url: "/takvim", tag: "test" });
-    if (!outcome.delivered) throw new TRPCError7({ code: "BAD_REQUEST", message: "Bildirim g\xF6nderilemedi. Bildirim iznini kontrol edip tekrar dener misin?" });
+    if (!outcome.delivered) throw new TRPCError9({ code: "BAD_REQUEST", message: "Bildirim g\xF6nderilemedi. Bildirim iznini kontrol edip tekrar dener misin?" });
     return outcome;
   })
 });
 
 // server/routers/reading.ts
-import { TRPCError as TRPCError8 } from "@trpc/server";
-import { z as z10 } from "zod";
+import { TRPCError as TRPCError10 } from "@trpc/server";
+import { z as z12 } from "zod";
 
 // server/reading/readingDb.ts
-import { and as and20, count, desc as desc14, eq as eq23 } from "drizzle-orm";
+import { and as and21, count, desc as desc15, eq as eq24 } from "drizzle-orm";
 
 // shared/reading.ts
 var MAX_READING_BOOKS = 50;
@@ -10752,19 +11393,19 @@ var columns = { id: readingBooks.id, title: readingBooks.title, author: readingB
 async function listReadingBooks(userId) {
   const db = await getDb();
   if (!db) return [];
-  const rows = await db.select(columns).from(readingBooks).where(eq23(readingBooks.userId, userId)).orderBy(desc14(readingBooks.updatedAt));
+  const rows = await db.select(columns).from(readingBooks).where(eq24(readingBooks.userId, userId)).orderBy(desc15(readingBooks.updatedAt));
   return [...rows.filter((row) => row.status === "reading"), ...rows.filter((row) => row.status === "finished")];
 }
 async function addReadingBook(userId, input) {
   const db = await getDb();
   if (!db) throw new ReadingError("Veritaban\u0131na ula\u015F\u0131lamad\u0131.");
-  const [{ total }] = await db.select({ total: count() }).from(readingBooks).where(eq23(readingBooks.userId, userId));
+  const [{ total }] = await db.select({ total: count() }).from(readingBooks).where(eq24(readingBooks.userId, userId));
   if (total >= MAX_READING_BOOKS) throw new ReadingError(`En fazla ${MAX_READING_BOOKS} okuma kitab\u0131 eklenebilir.`);
   const result = await db.insert(readingBooks).values({ userId, title: input.title.trim(), author: input.author?.trim() || null, totalPages: input.totalPages || null }).returning({ id: readingBooks.id });
-  const [row] = await db.select(columns).from(readingBooks).where(and20(eq23(readingBooks.id, Number(result[0].id)), eq23(readingBooks.userId, userId))).limit(1);
+  const [row] = await db.select(columns).from(readingBooks).where(and21(eq24(readingBooks.id, Number(result[0].id)), eq24(readingBooks.userId, userId))).limit(1);
   return row;
 }
-async function updateReadingBook(userId, id5, patch) {
+async function updateReadingBook(userId, id6, patch) {
   const db = await getDb();
   if (!db) throw new ReadingError("Veritaban\u0131na ula\u015F\u0131lamad\u0131.");
   const values = {};
@@ -10773,76 +11414,48 @@ async function updateReadingBook(userId, id5, patch) {
     values.status = patch.status;
     values.finishedAt = patch.status === "finished" ? /* @__PURE__ */ new Date() : null;
   }
-  if (Object.keys(values).length) await db.update(readingBooks).set(values).where(and20(eq23(readingBooks.id, id5), eq23(readingBooks.userId, userId)));
-  const [row] = await db.select(columns).from(readingBooks).where(and20(eq23(readingBooks.id, id5), eq23(readingBooks.userId, userId))).limit(1);
+  if (Object.keys(values).length) await db.update(readingBooks).set(values).where(and21(eq24(readingBooks.id, id6), eq24(readingBooks.userId, userId)));
+  const [row] = await db.select(columns).from(readingBooks).where(and21(eq24(readingBooks.id, id6), eq24(readingBooks.userId, userId))).limit(1);
   if (!row) throw new ReadingError("Kitap bulunamad\u0131.");
   return row;
 }
-async function removeReadingBook(userId, id5) {
+async function removeReadingBook(userId, id6) {
   const db = await getDb();
   if (!db) return;
-  await db.delete(readingBooks).where(and20(eq23(readingBooks.id, id5), eq23(readingBooks.userId, userId)));
+  await db.delete(readingBooks).where(and21(eq24(readingBooks.id, id6), eq24(readingBooks.userId, userId)));
 }
-async function recordReadingPages(userId, id5, pages2) {
+async function recordReadingPages(userId, id6, pages2) {
   const db = await getDb();
   if (!db) return null;
-  const [book] = await db.select(columns).from(readingBooks).where(and20(eq23(readingBooks.id, id5), eq23(readingBooks.userId, userId))).limit(1);
+  const [book] = await db.select(columns).from(readingBooks).where(and21(eq24(readingBooks.id, id6), eq24(readingBooks.userId, userId))).limit(1);
   if (!book) return null;
   const next = applyReadingProgress(book, pages2);
-  await db.update(readingBooks).set({ pagesRead: next.pagesRead, status: next.status, ...next.justFinished ? { finishedAt: /* @__PURE__ */ new Date() } : {} }).where(and20(eq23(readingBooks.id, id5), eq23(readingBooks.userId, userId)));
+  await db.update(readingBooks).set({ pagesRead: next.pagesRead, status: next.status, ...next.justFinished ? { finishedAt: /* @__PURE__ */ new Date() } : {} }).where(and21(eq24(readingBooks.id, id6), eq24(readingBooks.userId, userId)));
   return { ...book, pagesRead: next.pagesRead, status: next.status, justFinished: next.justFinished };
 }
 
 // server/routers/reading.ts
-var id2 = z10.number().int().positive();
-var pages = z10.number().int().min(1).max(1e4).nullable().optional();
+var id3 = z12.number().int().positive();
+var pages = z12.number().int().min(1).max(1e4).nullable().optional();
 async function userFacing3(work) {
   try {
     return await work();
   } catch (error) {
-    if (error instanceof ReadingError) throw new TRPCError8({ code: "BAD_REQUEST", message: error.message });
+    if (error instanceof ReadingError) throw new TRPCError10({ code: "BAD_REQUEST", message: error.message });
     throw error;
   }
 }
 var readingRouter = router({
   list: protectedProcedure.query(({ ctx }) => listReadingBooks(ctx.user.id)),
-  add: protectedProcedure.input(z10.object({ title: z10.string().trim().min(1, "Kitap ad\u0131n\u0131 yaz.").max(180), author: z10.string().trim().max(120).nullable().optional(), totalPages: pages })).mutation(({ ctx, input }) => userFacing3(() => addReadingBook(ctx.user.id, input))),
-  update: protectedProcedure.input(z10.object({ id: id2, status: z10.enum(["reading", "finished"]).optional(), totalPages: pages })).mutation(({ ctx, input }) => userFacing3(() => updateReadingBook(ctx.user.id, input.id, { status: input.status, totalPages: input.totalPages }))),
-  remove: protectedProcedure.input(z10.object({ id: id2 })).mutation(({ ctx, input }) => removeReadingBook(ctx.user.id, input.id))
+  add: protectedProcedure.input(z12.object({ title: z12.string().trim().min(1, "Kitap ad\u0131n\u0131 yaz.").max(180), author: z12.string().trim().max(120).nullable().optional(), totalPages: pages })).mutation(({ ctx, input }) => userFacing3(() => addReadingBook(ctx.user.id, input))),
+  update: protectedProcedure.input(z12.object({ id: id3, status: z12.enum(["reading", "finished"]).optional(), totalPages: pages })).mutation(({ ctx, input }) => userFacing3(() => updateReadingBook(ctx.user.id, input.id, { status: input.status, totalPages: input.totalPages }))),
+  remove: protectedProcedure.input(z12.object({ id: id3 })).mutation(({ ctx, input }) => removeReadingBook(ctx.user.id, input.id))
 });
 
 // server/routers/org.ts
-import { TRPCError as TRPCError10 } from "@trpc/server";
+import { TRPCError as TRPCError11 } from "@trpc/server";
 import { createHash as createHash4, randomInt } from "node:crypto";
-import { z as z12 } from "zod";
-
-// shared/planPlacement.ts
-var TASK_EARLIEST = "08:00";
-var TASK_GAP_MINUTES = 10;
-var sameLocalDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-function busyOn(date, input) {
-  const fromBlocks = (blocks, kind) => blocksOn(blocks, date).map((block) => ({ start: toMinutes(block.startTime), end: toMinutes(block.endTime), label: block.label, kind }));
-  const sessions = (input.sessions ?? []).filter((session) => (session.status ?? "planned") === "planned").map((session) => ({ session, at: new Date(session.sessionDate) })).filter(({ at }) => sameLocalDay(at, date)).map(({ session, at }) => {
-    const start = at.getHours() * 60 + at.getMinutes();
-    return { start, end: start + Math.max(0, session.plannedMinutes), label: session.title?.trim() || "Planl\u0131 \xE7al\u0131\u015Fma", kind: "session" };
-  });
-  return [...fromBlocks(input.blocks, "class"), ...fromBlocks(input.courseBlocks ?? [], "course"), ...sessions].sort((a, b) => a.start - b.start || a.end - b.end);
-}
-function findTaskConflict(busy, start, minutes) {
-  const end = start + minutes;
-  return busy.find((interval) => start < interval.end && end > interval.start) ?? null;
-}
-function suggestStart(busy, minutes, options = {}) {
-  const gap = options.gap ?? TASK_GAP_MINUTES;
-  const to = options.to ?? toMinutes(PLAN_DAY_END);
-  let cursor = options.from ?? toMinutes(TASK_EARLIEST);
-  for (const interval of busy) {
-    if (cursor + minutes + gap <= interval.start) break;
-    cursor = Math.max(cursor, interval.end + gap);
-  }
-  return cursor + minutes <= to ? cursor : null;
-}
-var describeInterval = (interval) => `${interval.label} (${fromMinutes(interval.start)}\u2013${fromMinutes(interval.end)})`;
+import { z as z13 } from "zod";
 
 // shared/kvkk.ts
 var DEFAULT_KVKK_NOTICE = `K\u0130\u015E\u0130SEL VER\u0130LER\u0130N \u0130\u015ELENMES\u0130NE \u0130L\u0130\u015EK\u0130N AYDINLATMA METN\u0130
@@ -10939,40 +11552,15 @@ function sameBranch(subject2, branch) {
 }
 var sortSlots = (slots) => slots.slice().sort((a, b) => a.dayOfWeek - b.dayOfWeek || toMinutes(a.startTime) - toMinutes(b.startTime));
 
-// server/org/orgAccess.ts
-import { TRPCError as TRPCError9 } from "@trpc/server";
-import { z as z11 } from "zod";
-var notFound = (message = "Bulunamad\u0131.") => new TRPCError9({ code: "NOT_FOUND", message });
-function orgProcedure(minRole, options = {}) {
-  return protectedProcedure.input(z11.object({ orgId: z11.number().int().positive() })).use(async ({ ctx, input, next, type }) => {
-    const membership = await getActiveMembership(ctx.user.id, input.orgId);
-    if (!membership || !hasRole(membership.role, minRole)) throw notFound("Kurum bulunamad\u0131.");
-    if (type === "mutation" && !options.allowInactive && membership.state && membership.state !== "active") {
-      throw new TRPCError9({ code: "FORBIDDEN", message: membership.state === "expired" ? "Kurum \xFCyeli\u011Finin s\xFCresi doldu; panel salt okunur. Yenilemek i\xE7in platform y\xF6neticisiyle g\xF6r\xFC\u015F\xFCn." : "Kurum \xFCyeli\u011Fi hen\xFCz ba\u015Flamad\u0131." });
-    }
-    return next({ ctx: { ...ctx, membership } });
-  });
-}
-async function assertCanViewStudent(ctx, studentUserId) {
-  const { orgId, role } = ctx.membership;
-  if (!await isActiveStudent(orgId, studentUserId)) throw notFound("\xD6\u011Frenci bulunamad\u0131.");
-  if (seesAllStudents(role)) return;
-  if (role === "teacher" && await hasActiveAssignment(orgId, ctx.user.id, studentUserId)) return;
-  throw notFound("\xD6\u011Frenci bulunamad\u0131.");
-}
-function audit(ctx, action, target, metadata) {
-  return writeAudit({ orgId: ctx.membership.orgId, actorUserId: ctx.user.id, action, targetType: target?.type, targetId: target?.id, metadata });
-}
-
 // server/routers/org.ts
-var id3 = z12.number().int().positive();
+var id4 = z13.number().int().positive();
 var hashCode = (code) => createHash4("sha256").update(normalizeInviteCode(code)).digest("hex");
-var DAY2 = 24 * 60 * 60 * 1e3;
+var DAY4 = 24 * 60 * 60 * 1e3;
 async function userFacing4(work) {
   try {
     return await work();
   } catch (error) {
-    if (error instanceof OrgError) throw new TRPCError10({ code: "BAD_REQUEST", message: error.message });
+    if (error instanceof OrgError) throw new TRPCError11({ code: "BAD_REQUEST", message: error.message });
     throw error;
   }
 }
@@ -10988,45 +11576,45 @@ async function visibleStudentsWithSummary(ctx) {
   const { orgId, role } = ctx.membership;
   const students = await listMembers(orgId, seesAllStudents(role) ? { role: "student" } : { role: "student", teacherUserId: ctx.user.id });
   const { start, end } = currentWeek();
-  const signals = await loadStudentSignals(students.map((student) => student.userId), start, end, new Date(Date.now() - 30 * DAY2));
+  const signals = await loadStudentSignals(students.map((student) => student.userId), start, end, new Date(Date.now() - 30 * DAY4));
   return students.map((student) => ({ ...student, summary: summarizeStudent(signals.get(student.userId)) }));
 }
-var optionalText = (max) => z12.string().trim().max(max).optional().transform((value) => value || null);
-var classInput = z12.object({ name: z12.string().trim().min(1).max(80), gradeLevel: z12.enum(CLASS_GRADES).nullable().optional(), track: z12.enum(CLASS_TRACKS).nullable().optional(), advisorUserId: id3.nullable().optional() });
+var optionalText = (max) => z13.string().trim().max(max).optional().transform((value) => value || null);
+var classInput = z13.object({ name: z13.string().trim().min(1).max(80), gradeLevel: z13.enum(CLASS_GRADES).nullable().optional(), track: z13.enum(CLASS_TRACKS).nullable().optional(), advisorUserId: id4.nullable().optional() });
 async function classFields(orgId, input) {
   if (input.advisorUserId) {
     const role = await getMemberRole(orgId, input.advisorUserId);
-    if (!role || !isStaffRole(role)) throw new TRPCError10({ code: "NOT_FOUND", message: "Sorumlu \xF6\u011Fretmen bulunamad\u0131." });
+    if (!role || !isStaffRole(role)) throw new TRPCError11({ code: "NOT_FOUND", message: "Sorumlu \xF6\u011Fretmen bulunamad\u0131." });
   }
   return { name: input.name, gradeLevel: input.gradeLevel ?? null, track: input.track ?? null, advisorUserId: input.advisorUserId ?? null };
 }
-var timetableSlotInput = z12.object({
-  dayOfWeek: z12.number().int().min(1).max(7),
-  startTime: z12.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
-  endTime: z12.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
-  subject: z12.string().trim().min(1).max(60),
-  teacherUserId: id3.nullable(),
+var timetableSlotInput = z13.object({
+  dayOfWeek: z13.number().int().min(1).max(7),
+  startTime: z13.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  endTime: z13.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  subject: z13.string().trim().min(1).max(60),
+  teacherUserId: id4.nullable(),
   room: optionalText(40)
 });
 async function saveTimetables(ctx, plans) {
   const orgId = ctx.membership.orgId;
   const prepared = plans.map((plan) => ({ classId: plan.classId, slots: sortSlots(plan.slots.map((slot) => ({ ...slot, room: slot.room ?? null }))) }));
-  if (new Set(prepared.map((plan) => plan.classId)).size !== prepared.length) throw new TRPCError10({ code: "BAD_REQUEST", message: "Bir s\u0131n\u0131f iki kez g\xF6nderildi." });
+  if (new Set(prepared.map((plan) => plan.classId)).size !== prepared.length) throw new TRPCError11({ code: "BAD_REQUEST", message: "Bir s\u0131n\u0131f iki kez g\xF6nderildi." });
   const [members, classes, current] = await Promise.all([listMembers(orgId), listClasses(orgId), listOrgTimetable(orgId)]);
   const staff = new Map(members.filter((member) => isStaffRole(member.role)).map((member) => [member.userId, member]));
   const className = (classId) => classes.find((item) => item.id === classId)?.name ?? "ba\u015Fka bir";
   for (const plan of prepared) {
-    if (!classes.some((item) => item.id === plan.classId)) throw new TRPCError10({ code: "NOT_FOUND", message: "S\u0131n\u0131f bulunamad\u0131." });
+    if (!classes.some((item) => item.id === plan.classId)) throw new TRPCError11({ code: "NOT_FOUND", message: "S\u0131n\u0131f bulunamad\u0131." });
     const problem = validateClassTimetable(plan.slots);
-    if (problem) throw new TRPCError10({ code: "BAD_REQUEST", message: prepared.length > 1 ? `${className(plan.classId)}: ${problem}` : problem });
-    if (plan.slots.some((slot) => slot.teacherUserId && !staff.has(slot.teacherUserId))) throw new TRPCError10({ code: "NOT_FOUND", message: "\xD6\u011Fretmen bulunamad\u0131." });
+    if (problem) throw new TRPCError11({ code: "BAD_REQUEST", message: prepared.length > 1 ? `${className(plan.classId)}: ${problem}` : problem });
+    if (plan.slots.some((slot) => slot.teacherUserId && !staff.has(slot.teacherUserId))) throw new TRPCError11({ code: "NOT_FOUND", message: "\xD6\u011Fretmen bulunamad\u0131." });
   }
   const replaced = new Set(prepared.map((plan) => plan.classId));
   const placed = [...current.filter((slot) => !replaced.has(slot.classId)).map((slot) => ({ ...slot, room: slot.room ?? null })), ...prepared.flatMap((plan) => plan.slots.map((slot) => ({ ...slot, classId: plan.classId })))];
   const conflicts = prepared.flatMap((plan) => findCrossClassConflicts(plan.classId, plan.slots, placed));
   if (conflicts.length) {
     const names = { teacher: (userId) => staff.get(userId)?.name ?? "\xD6\u011Fretmen", className };
-    throw new TRPCError10({ code: "CONFLICT", message: conflicts.slice(0, 3).map((conflict) => describeConflict(conflict, names)).join(" ") });
+    throw new TRPCError11({ code: "CONFLICT", message: conflicts.slice(0, 3).map((conflict) => describeConflict(conflict, names)).join(" ") });
   }
   await replaceClassTimetables(orgId, prepared);
   for (const plan of prepared) await audit(ctx, "timetable.update", { type: "class", id: plan.classId }, { slots: plan.slots.length, auto: prepared.length > 1 });
@@ -11039,7 +11627,7 @@ var orgRouter = router({
   mine: protectedProcedure.query(({ ctx }) => listMyMemberships(ctx.user.id)),
   /** Personelin pazar akşamı aldığı sınıf özeti (server/digest/teacherDigest.ts); üyelik başına. */
   myDigest: orgProcedure("teacher").query(async ({ ctx }) => ({ enabled: await getStaffDigestEnabled(ctx.user.id, ctx.membership.orgId) })),
-  setMyDigest: orgProcedure("teacher", { allowInactive: true }).input(z12.object({ enabled: z12.boolean() })).mutation(async ({ ctx, input }) => ({ enabled: await setStaffDigestEnabled(ctx.user.id, ctx.membership.orgId, input.enabled) })),
+  setMyDigest: orgProcedure("teacher", { allowInactive: true }).input(z13.object({ enabled: z13.boolean() })).mutation(async ({ ctx, input }) => ({ enabled: await setStaffDigestEnabled(ctx.user.id, ctx.membership.orgId, input.enabled) })),
   overview: orgProcedure("teacher").query(async ({ ctx }) => {
     const students = await visibleStudentsWithSummary(ctx);
     const classes = await listClasses(ctx.membership.orgId);
@@ -11068,7 +11656,7 @@ var orgRouter = router({
       })
     };
   }),
-  students: orgProcedure("teacher").input(z12.object({ classId: id3.optional(), teacherUserId: id3.optional(), risk: z12.enum(["inactive", "low_adherence", "net_drop", "any"]).optional(), q: z12.string().max(80).optional() })).query(async ({ ctx, input }) => {
+  students: orgProcedure("teacher").input(z13.object({ classId: id4.optional(), teacherUserId: id4.optional(), risk: z13.enum(["inactive", "low_adherence", "net_drop", "any"]).optional(), q: z13.string().max(80).optional() })).query(async ({ ctx, input }) => {
     const students = await visibleStudentsWithSummary(ctx);
     const [classes, assignments, teachers] = await Promise.all([listClasses(ctx.membership.orgId), listAssignments(ctx.membership.orgId), listMembers(ctx.membership.orgId, { role: "teacher" })]);
     const query = input.q?.trim().toLocaleLowerCase("tr") ?? "";
@@ -11081,9 +11669,9 @@ var orgRouter = router({
       summary: student.summary
     })).filter((student) => (!input.classId || student.classes.some((item) => item.id === input.classId)) && (!input.teacherUserId || student.teachers.some((teacher) => teacher.userId === input.teacherUserId)) && (!input.risk || (input.risk === "any" ? student.summary.risks.length > 0 : student.summary.risks.includes(input.risk))) && (!query || student.name.toLocaleLowerCase("tr").includes(query)));
   }),
-  student: orgProcedure("teacher").input(z12.object({ studentUserId: id3 })).query(async ({ ctx, input }) => {
+  student: orgProcedure("teacher").input(z13.object({ studentUserId: id4 })).query(async ({ ctx, input }) => {
     await assertCanViewStudent(ctx, input.studentUserId);
-    const since = new Date(Date.now() - 42 * DAY2);
+    const since = new Date(Date.now() - 42 * DAY4);
     const { start, end } = currentWeek();
     const [profile, exams, topics, calendar, notes2, signals, classes, assignments, teachers] = await Promise.all([
       getStudentProfile(input.studentUserId),
@@ -11091,7 +11679,7 @@ var orgRouter = router({
       getUserTopicProgress(input.studentUserId),
       getStudentCalendarReadOnly(input.studentUserId, since),
       listNotes2(ctx.membership.orgId, input.studentUserId),
-      loadStudentSignals([input.studentUserId], start, end, new Date(Date.now() - 30 * DAY2)),
+      loadStudentSignals([input.studentUserId], start, end, new Date(Date.now() - 30 * DAY4)),
       listClasses(ctx.membership.orgId),
       listAssignments(ctx.membership.orgId),
       listMembers(ctx.membership.orgId, { role: "teacher" })
@@ -11106,7 +11694,8 @@ var orgRouter = router({
       topics: topics.filter((topic) => !topic.insufficientData),
       sessions: calendar.sessions.map((session) => ({ id: session.id, sessionDate: session.sessionDate, title: session.title, subject: session.subject, topic: session.topic, kind: session.kind, plannedMinutes: session.plannedMinutes, status: session.status, actualMinutes: session.actualMinutes, actualQuestions: session.actualQuestions, correct: session.correct, assignedByUserId: session.assignedByUserId, abandonedAt: session.abandonedAt })),
       logs: calendar.logs.map((log) => ({ studyDate: log.studyDate, subject: log.subject, topic: log.topic, minutes: log.minutes, questions: log.questions, correct: log.correct })),
-      notes: notes2,
+      // Görüşme notları mahrem: yalnızca yazanı ve öğrencinin sorumlu öğretmenleri görür (koordinatör/yönetici görmez).
+      notes: filterPrivateNotes(notes2, ctx.user.id, await canReadNotes(ctx.membership.orgId, ctx.user.id, input.studentUserId)),
       classes: classes.filter((item) => item.studentUserIds.includes(input.studentUserId)).map((item) => ({ id: item.id, name: item.name })),
       teachers: assignments.filter((row) => row.studentUserId === input.studentUserId).map((row) => ({ userId: row.teacherUserId, name: teachers.find((teacher) => teacher.userId === row.teacherUserId)?.name ?? "\xD6\u011Fretmen" }))
     };
@@ -11115,40 +11704,40 @@ var orgRouter = router({
   settings: router({
     get: orgProcedure("teacher").query(async ({ ctx }) => {
       const org = await getOrganization(ctx.membership.orgId);
-      if (!org) throw new TRPCError10({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+      if (!org) throw new TRPCError11({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
       return { ...org, membershipState: membershipState(org), kvkk: effectiveKvkk(org) };
     }),
     /** Kurum yöneticisi: öğrenci başına aylık AI kredi üst sınırı (null = sınırsız). */
-    setCreditCap: orgProcedure("admin").input(z12.object({ cap: z12.number().int().min(1).max(1e6).nullable() })).mutation(async ({ ctx, input }) => {
+    setCreditCap: orgProcedure("admin").input(z13.object({ cap: z13.number().int().min(1).max(1e6).nullable() })).mutation(async ({ ctx, input }) => {
       await setPerStudentCreditCap(ctx.membership.orgId, input.cap);
       await audit(ctx, "org.credit_cap", { type: "organization", id: ctx.membership.orgId }, { cap: input.cap });
       return { ok: true };
     }),
     credits: orgProcedure("coordinator").query(async ({ ctx }) => {
       const org = await getOrganization(ctx.membership.orgId);
-      if (!org) throw new TRPCError10({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+      if (!org) throw new TRPCError11({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
       const report = await orgCreditReport(ctx.membership.orgId);
       return { monthly: org.aiCreditsMonthly, cap: org.perStudentCreditCap, remaining: Math.max(0, org.aiCreditsMonthly - report.used), ...report };
     }),
     /** KVKK metinleri: boş gönderilen metin platform şablonuna döner. Her kayıtta sürüm artar. */
-    updateKvkk: orgProcedure("admin").input(z12.object({ notice: z12.string().trim().max(2e4).nullable(), consent: z12.string().trim().max(5e3).nullable() })).mutation(async ({ ctx, input }) => {
+    updateKvkk: orgProcedure("admin").input(z13.object({ notice: z13.string().trim().max(2e4).nullable(), consent: z13.string().trim().max(5e3).nullable() })).mutation(async ({ ctx, input }) => {
       await updateKvkk(ctx.membership.orgId, input.notice || null, input.consent || null);
       await audit(ctx, "org.kvkk", { type: "organization", id: ctx.membership.orgId }, { custom: Boolean(input.notice || input.consent) });
       return { ok: true };
     }),
     /** Paket yükseltme / süre uzatma talebi: kurum yöneticisi gönderir, platform yöneticisi onaylar. Süresi dolmuş kurumda da açık. */
     upgrades: orgProcedure("admin").query(({ ctx }) => listOrgUpgradeRequests(ctx.membership.orgId)),
-    requestUpgrade: orgProcedure("admin", { allowInactive: true }).input(z12.object({ plan: z12.enum(ORG_PLANS), note: z12.string().trim().max(300).optional() })).mutation(({ ctx, input }) => userFacing4(async () => {
+    requestUpgrade: orgProcedure("admin", { allowInactive: true }).input(z13.object({ plan: z13.enum(ORG_PLANS), note: z13.string().trim().max(300).optional() })).mutation(({ ctx, input }) => userFacing4(async () => {
       const org = await getOrganization(ctx.membership.orgId);
-      if (!org) throw new TRPCError10({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+      if (!org) throw new TRPCError11({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
       if (!canRequestPlan(org.plan, input.plan)) throw new OrgError("Bu pakete ge\xE7i\u015F talep edilemez; yaln\u0131zca \xFCst pakete y\xFCkseltme ya da s\xFCre uzatma istenebilir.");
       if ((await listOrgUpgradeRequests(ctx.membership.orgId)).some((row) => row.status === "pending")) throw new OrgError("Zaten bekleyen bir talebin var; sonu\xE7lanmas\u0131n\u0131 bekle ya da iptal et.");
       const requestId = await createUpgradeRequest({ orgId: ctx.membership.orgId, requestedBy: ctx.user.id, currentPlan: org.plan, requestedPlan: input.plan, note: input.note || null });
       await audit(ctx, "org.upgrade_request", { type: "upgrade", id: requestId }, { from: org.plan, to: input.plan });
       return { id: requestId };
     })),
-    cancelUpgrade: orgProcedure("admin", { allowInactive: true }).input(z12.object({ requestId: id3 })).mutation(async ({ ctx, input }) => {
-      if (!await cancelUpgradeRequest(ctx.membership.orgId, input.requestId)) throw new TRPCError10({ code: "NOT_FOUND", message: "Bekleyen talep bulunamad\u0131." });
+    cancelUpgrade: orgProcedure("admin", { allowInactive: true }).input(z13.object({ requestId: id4 })).mutation(async ({ ctx, input }) => {
+      if (!await cancelUpgradeRequest(ctx.membership.orgId, input.requestId)) throw new TRPCError11({ code: "NOT_FOUND", message: "Bekleyen talep bulunamad\u0131." });
       await audit(ctx, "org.upgrade_cancel", { type: "upgrade", id: input.requestId });
       return { ok: true };
     }),
@@ -11157,7 +11746,7 @@ var orgRouter = router({
       const current = org?.kvkkVersion ?? 1;
       return { current, students: versions.length, onCurrent: versions.filter((version) => version === current).length, onOlder: versions.filter((version) => version !== null && version !== current).length, missing: versions.filter((version) => version === null).length };
     }),
-    update: orgProcedure("admin").input(z12.object({ name: z12.string().trim().min(2).max(160), kind: z12.enum(ORG_KINDS), city: optionalText(80), district: optionalText(80), address: optionalText(300), phone: optionalText(40), contactEmail: z12.union([z12.literal(""), z12.string().trim().email("Ge\xE7erli bir e-posta yaz.").max(160)]).optional().transform((value) => value || null) })).mutation(async ({ ctx, input }) => {
+    update: orgProcedure("admin").input(z13.object({ name: z13.string().trim().min(2).max(160), kind: z13.enum(ORG_KINDS), city: optionalText(80), district: optionalText(80), address: optionalText(300), phone: optionalText(40), contactEmail: z13.union([z13.literal(""), z13.string().trim().email("Ge\xE7erli bir e-posta yaz.").max(160)]).optional().transform((value) => value || null) })).mutation(async ({ ctx, input }) => {
       await updateOrganization(ctx.membership.orgId, input);
       await audit(ctx, "org.update", { type: "organization", id: ctx.membership.orgId }, { name: input.name });
       return { ok: true };
@@ -11168,17 +11757,17 @@ var orgRouter = router({
       const rows = await listInvitations(ctx.membership.orgId);
       return hasRole(ctx.membership.role, "coordinator") ? rows : rows.filter((row) => row.role === "student");
     }),
-    create: orgProcedure("teacher").input(z12.object({ role: z12.enum(INVITABLE_ROLES), note: z12.string().trim().max(160).optional(), subject: z12.string().trim().max(60).optional(), days: z12.number().int().min(1).max(60).default(14), maxUses: z12.number().int().min(1).max(500).default(1) })).mutation(({ ctx, input }) => userFacing4(async () => {
-      if (!canInviteRole(ctx.membership.role, input.role)) throw new TRPCError10({ code: "FORBIDDEN", message: "Bu rol i\xE7in davet olu\u015Fturma yetkin yok." });
+    create: orgProcedure("teacher").input(z13.object({ role: z13.enum(INVITABLE_ROLES), note: z13.string().trim().max(160).optional(), subject: z13.string().trim().max(60).optional(), days: z13.number().int().min(1).max(60).default(14), maxUses: z13.number().int().min(1).max(500).default(1) })).mutation(({ ctx, input }) => userFacing4(async () => {
+      if (!canInviteRole(ctx.membership.role, input.role)) throw new TRPCError11({ code: "FORBIDDEN", message: "Bu rol i\xE7in davet olu\u015Fturma yetkin yok." });
       const code = generateInviteCode((max) => randomInt(max));
-      const invitationId = await createInvitation({ orgId: ctx.membership.orgId, role: input.role, codeHash: hashCode(code), note: input.note || null, subject: input.role === "student" ? null : input.subject || null, expiresAt: new Date(Date.now() + input.days * DAY2), maxUses: input.maxUses, createdBy: ctx.user.id });
+      const invitationId = await createInvitation({ orgId: ctx.membership.orgId, role: input.role, codeHash: hashCode(code), note: input.note || null, subject: input.role === "student" ? null : input.subject || null, expiresAt: new Date(Date.now() + input.days * DAY4), maxUses: input.maxUses, createdBy: ctx.user.id });
       await audit(ctx, "invitation.create", { type: "invitation", id: invitationId }, { role: input.role, maxUses: input.maxUses, days: input.days });
       return { id: invitationId, code };
     })),
-    revoke: orgProcedure("teacher").input(z12.object({ invitationId: id3 })).mutation(async ({ ctx, input }) => {
+    revoke: orgProcedure("teacher").input(z13.object({ invitationId: id4 })).mutation(async ({ ctx, input }) => {
       const rows = await listInvitations(ctx.membership.orgId);
       const target = rows.find((row) => row.id === input.invitationId);
-      if (!target || !hasRole(ctx.membership.role, "coordinator") && target.role !== "student") throw new TRPCError10({ code: "NOT_FOUND", message: "Davet bulunamad\u0131." });
+      if (!target || !hasRole(ctx.membership.role, "coordinator") && target.role !== "student") throw new TRPCError11({ code: "NOT_FOUND", message: "Davet bulunamad\u0131." });
       await revokeInvitation(ctx.membership.orgId, input.invitationId);
       await audit(ctx, "invitation.revoke", { type: "invitation", id: input.invitationId });
       return { ok: true };
@@ -11186,23 +11775,23 @@ var orgRouter = router({
   }),
   members: router({
     list: orgProcedure("coordinator").query(async ({ ctx }) => (await listMembers(ctx.membership.orgId)).filter((member) => isStaffRole(member.role))),
-    setRole: orgProcedure("admin").input(z12.object({ userId: id3, role: z12.enum(ORG_ROLES) })).mutation(async ({ ctx, input }) => {
+    setRole: orgProcedure("admin").input(z13.object({ userId: id4, role: z13.enum(ORG_ROLES) })).mutation(async ({ ctx, input }) => {
       const current = await getMemberRole(ctx.membership.orgId, input.userId);
-      if (!current || input.userId === ctx.user.id) throw new TRPCError10({ code: "NOT_FOUND", message: "\xDCye bulunamad\u0131." });
-      if (!canAssignRole(ctx.membership.role, current, input.role)) throw new TRPCError10({ code: "FORBIDDEN", message: "Bu rol de\u011Fi\u015Fikli\u011Fini yapma yetkin yok." });
-      if (current === "student" !== (input.role === "student")) throw new TRPCError10({ code: "BAD_REQUEST", message: "\xD6\u011Frenci ve personel rolleri birbirine \xE7evrilemez." });
+      if (!current || input.userId === ctx.user.id) throw new TRPCError11({ code: "NOT_FOUND", message: "\xDCye bulunamad\u0131." });
+      if (!canAssignRole(ctx.membership.role, current, input.role)) throw new TRPCError11({ code: "FORBIDDEN", message: "Bu rol de\u011Fi\u015Fikli\u011Fini yapma yetkin yok." });
+      if (current === "student" !== (input.role === "student")) throw new TRPCError11({ code: "BAD_REQUEST", message: "\xD6\u011Frenci ve personel rolleri birbirine \xE7evrilemez." });
       await setMemberRole(ctx.membership.orgId, input.userId, input.role);
       await audit(ctx, "member.role", { type: "user", id: input.userId }, { from: current, to: input.role });
       return { ok: true };
     }),
-    setSubject: orgProcedure("coordinator").input(z12.object({ userId: id3, subject: optionalText(60) })).mutation(async ({ ctx, input }) => {
-      if (!await setMemberSubject(ctx.membership.orgId, input.userId, input.subject)) throw new TRPCError10({ code: "NOT_FOUND", message: "Personel bulunamad\u0131." });
+    setSubject: orgProcedure("coordinator").input(z13.object({ userId: id4, subject: optionalText(60) })).mutation(async ({ ctx, input }) => {
+      if (!await setMemberSubject(ctx.membership.orgId, input.userId, input.subject)) throw new TRPCError11({ code: "NOT_FOUND", message: "Personel bulunamad\u0131." });
       await audit(ctx, "member.subject", { type: "user", id: input.userId }, { subject: input.subject });
       return { ok: true };
     }),
-    remove: orgProcedure("admin").input(z12.object({ userId: id3 })).mutation(async ({ ctx, input }) => {
+    remove: orgProcedure("admin").input(z13.object({ userId: id4 })).mutation(async ({ ctx, input }) => {
       const current = await getMemberRole(ctx.membership.orgId, input.userId);
-      if (!current || input.userId === ctx.user.id || !canAssignRole(ctx.membership.role, current, current === "student" ? "student" : "teacher")) throw new TRPCError10({ code: "NOT_FOUND", message: "\xDCye bulunamad\u0131." });
+      if (!current || input.userId === ctx.user.id || !canAssignRole(ctx.membership.role, current, current === "student" ? "student" : "teacher")) throw new TRPCError11({ code: "NOT_FOUND", message: "\xDCye bulunamad\u0131." });
       await endMembership(ctx.membership.orgId, input.userId, "removed");
       await audit(ctx, "member.remove", { type: "user", id: input.userId }, { role: current });
       return { ok: true };
@@ -11215,18 +11804,18 @@ var orgRouter = router({
       await audit(ctx, "class.create", { type: "class", id: classId }, { name: input.name });
       return { id: classId };
     }),
-    update: orgProcedure("coordinator").input(classInput.extend({ classId: id3 })).mutation(async ({ ctx, input }) => {
-      if (!await updateClass(ctx.membership.orgId, input.classId, await classFields(ctx.membership.orgId, input))) throw new TRPCError10({ code: "NOT_FOUND", message: "S\u0131n\u0131f bulunamad\u0131." });
+    update: orgProcedure("coordinator").input(classInput.extend({ classId: id4 })).mutation(async ({ ctx, input }) => {
+      if (!await updateClass(ctx.membership.orgId, input.classId, await classFields(ctx.membership.orgId, input))) throw new TRPCError11({ code: "NOT_FOUND", message: "S\u0131n\u0131f bulunamad\u0131." });
       await audit(ctx, "class.update", { type: "class", id: input.classId }, { name: input.name });
       return { ok: true };
     }),
-    remove: orgProcedure("coordinator").input(z12.object({ classId: id3 })).mutation(async ({ ctx, input }) => {
-      if (!await deleteClass(ctx.membership.orgId, input.classId)) throw new TRPCError10({ code: "NOT_FOUND", message: "S\u0131n\u0131f bulunamad\u0131." });
+    remove: orgProcedure("coordinator").input(z13.object({ classId: id4 })).mutation(async ({ ctx, input }) => {
+      if (!await deleteClass(ctx.membership.orgId, input.classId)) throw new TRPCError11({ code: "NOT_FOUND", message: "S\u0131n\u0131f bulunamad\u0131." });
       await audit(ctx, "class.remove", { type: "class", id: input.classId });
       return { ok: true };
     }),
-    setStudents: orgProcedure("coordinator").input(z12.object({ classId: id3, studentUserIds: z12.array(id3).max(500) })).mutation(async ({ ctx, input }) => {
-      if (!await setClassStudents(ctx.membership.orgId, input.classId, input.studentUserIds)) throw new TRPCError10({ code: "NOT_FOUND", message: "S\u0131n\u0131f bulunamad\u0131." });
+    setStudents: orgProcedure("coordinator").input(z13.object({ classId: id4, studentUserIds: z13.array(id4).max(500) })).mutation(async ({ ctx, input }) => {
+      if (!await setClassStudents(ctx.membership.orgId, input.classId, input.studentUserIds)) throw new TRPCError11({ code: "NOT_FOUND", message: "S\u0131n\u0131f bulunamad\u0131." });
       await audit(ctx, "class.students", { type: "class", id: input.classId }, { count: input.studentUserIds.length });
       return { ok: true };
     })
@@ -11245,24 +11834,24 @@ var orgRouter = router({
         teachers: members.filter((member) => isStaffRole(member.role)).map((member) => ({ userId: member.userId, name: member.name, role: member.role, subject: member.subject }))
       };
     }),
-    saveClass: orgProcedure("coordinator").input(z12.object({ classId: id3, slots: z12.array(timetableSlotInput).max(MAX_TIMETABLE_SLOTS_PER_CLASS) })).mutation(({ ctx, input }) => saveTimetables(ctx, [input])),
+    saveClass: orgProcedure("coordinator").input(z13.object({ classId: id4, slots: z13.array(timetableSlotInput).max(MAX_TIMETABLE_SLOTS_PER_CLASS) })).mutation(({ ctx, input }) => saveTimetables(ctx, [input])),
     // Otomatik dağıtımın sonucu: seçilen sınıfların programı birlikte, tek işlemde kaydedilir.
-    saveClasses: orgProcedure("coordinator").input(z12.object({ classes: z12.array(z12.object({ classId: id3, slots: z12.array(timetableSlotInput).max(MAX_TIMETABLE_SLOTS_PER_CLASS) })).min(1).max(100) })).mutation(({ ctx, input }) => saveTimetables(ctx, input.classes))
+    saveClasses: orgProcedure("coordinator").input(z13.object({ classes: z13.array(z13.object({ classId: id4, slots: z13.array(timetableSlotInput).max(MAX_TIMETABLE_SLOTS_PER_CLASS) })).min(1).max(100) })).mutation(({ ctx, input }) => saveTimetables(ctx, input.classes))
   }),
   assignments: router({
     list: orgProcedure("coordinator").query(({ ctx }) => listAssignments(ctx.membership.orgId)),
-    setTeacherStudents: orgProcedure("coordinator").input(z12.object({ teacherUserId: id3, studentUserIds: z12.array(id3).max(500) })).mutation(async ({ ctx, input }) => {
-      if (await getMemberRole(ctx.membership.orgId, input.teacherUserId) !== "teacher") throw new TRPCError10({ code: "NOT_FOUND", message: "\xD6\u011Fretmen bulunamad\u0131." });
+    setTeacherStudents: orgProcedure("coordinator").input(z13.object({ teacherUserId: id4, studentUserIds: z13.array(id4).max(500) })).mutation(async ({ ctx, input }) => {
+      if (await getMemberRole(ctx.membership.orgId, input.teacherUserId) !== "teacher") throw new TRPCError11({ code: "NOT_FOUND", message: "\xD6\u011Fretmen bulunamad\u0131." });
       const assigned = await setTeacherStudents(ctx.membership.orgId, input.teacherUserId, input.studentUserIds);
       await audit(ctx, "assignment.set", { type: "user", id: input.teacherUserId }, { count: assigned.length });
       return { assigned: assigned.length };
     })
   }),
   tasks: router({
-    assign: orgProcedure("teacher").input(z12.object({ studentUserId: id3, date: z12.string().regex(/^\d{4}-\d{2}-\d{2}$/), time: z12.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), subject: z12.string().trim().min(1).max(80), topic: z12.string().trim().min(1).max(180), kind: z12.enum(["Soru \xE7\xF6z\xFCm\xFC", "Konu tekrar\u0131", "Konu \xE7al\u0131\u015Fmas\u0131"]), minutes: z12.number().int().min(10).max(240), targetQuestions: z12.number().int().min(0).max(300).optional(), note: z12.string().trim().max(300).optional() })).mutation(async ({ ctx, input }) => {
+    assign: orgProcedure("teacher").input(z13.object({ studentUserId: id4, date: z13.string().regex(/^\d{4}-\d{2}-\d{2}$/), time: z13.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), subject: z13.string().trim().min(1).max(80), topic: z13.string().trim().min(1).max(180), kind: z13.enum(["Soru \xE7\xF6z\xFCm\xFC", "Konu tekrar\u0131", "Konu \xE7al\u0131\u015Fmas\u0131"]), minutes: z13.number().int().min(10).max(240), targetQuestions: z13.number().int().min(0).max(300).optional(), note: z13.string().trim().max(300).optional() })).mutation(async ({ ctx, input }) => {
       await assertCanViewStudent(ctx, input.studentUserId);
       const start = toMinutes(input.time);
-      if (start + input.minutes > 23 * 60 + 30) throw new TRPCError10({ code: "BAD_REQUEST", message: "G\xF6rev 23:30'dan \xF6nce bitmeli." });
+      if (start + input.minutes > 23 * 60 + 30) throw new TRPCError11({ code: "BAD_REQUEST", message: "G\xF6rev 23:30'dan \xF6nce bitmeli." });
       const day = /* @__PURE__ */ new Date(`${input.date}T12:00:00`);
       const [schedule, courseBlocks, sessions] = await Promise.all([getClassSchedule(input.studentUserId), getCourseBlocks(input.studentUserId), listPlannedSessionsOn(input.studentUserId, day)]);
       const busy = busyOn(day, { blocks: schedule.blocks, courseBlocks, sessions });
@@ -11270,7 +11859,7 @@ var orgRouter = router({
       if (conflict) {
         const suggestion = suggestStart(busy, input.minutes, { from: start });
         const what = conflict.kind === "session" ? `planl\u0131 \xE7al\u0131\u015Fmas\u0131yla: ${describeInterval(conflict)}` : `${describeInterval(conflict)} dersiyle`;
-        throw new TRPCError10({ code: "BAD_REQUEST", message: `\xD6\u011Frencinin ${what} \xE7ak\u0131\u015F\u0131yor. ${suggestion !== null ? `Ayn\u0131 g\xFCn uygun ilk saat: ${fromMinutes(suggestion)}.` : "Bu g\xFCn uygun saat yok; ba\u015Fka bir g\xFCn se\xE7."}` });
+        throw new TRPCError11({ code: "BAD_REQUEST", message: `\xD6\u011Frencinin ${what} \xE7ak\u0131\u015F\u0131yor. ${suggestion !== null ? `Ayn\u0131 g\xFCn uygun ilk saat: ${fromMinutes(suggestion)}.` : "Bu g\xFCn uygun saat yok; ba\u015Fka bir g\xFCn se\xE7."}` });
       }
       const sessionId = await insertAssignedTask({ orgId: ctx.membership.orgId, studentUserId: input.studentUserId, teacherUserId: ctx.user.id, sessionDate: /* @__PURE__ */ new Date(`${input.date}T${input.time}:00`), title: `${input.subject} \xB7 ${input.topic}`, subject: input.subject, topic: input.topic, kind: input.kind, plannedMinutes: input.minutes, targetQuestions: input.targetQuestions || null, summary: input.note || `${ctx.membership.orgName} \xF6\u011Fretmeninin atad\u0131\u011F\u0131 g\xF6rev.` });
       await audit(ctx, "task.assign", { type: "user", id: input.studentUserId }, { sessionId, subject: input.subject, topic: input.topic });
@@ -11278,34 +11867,36 @@ var orgRouter = router({
     })
   }),
   notes: router({
-    create: orgProcedure("teacher").input(z12.object({ studentUserId: id3, body: z12.string().trim().min(1).max(4e3), visibility: z12.enum(["staff", "student"]) })).mutation(async ({ ctx, input }) => {
+    create: orgProcedure("teacher").input(z13.object({ studentUserId: id4, body: z13.string().trim().min(1).max(4e3), visibility: z13.enum(["staff", "student"]) })).mutation(async ({ ctx, input }) => {
       await assertCanViewStudent(ctx, input.studentUserId);
       const noteId = await createNote({ orgId: ctx.membership.orgId, studentUserId: input.studentUserId, authorUserId: ctx.user.id, body: input.body, visibility: input.visibility });
       await audit(ctx, "note.create", { type: "user", id: input.studentUserId }, { noteId, visibility: input.visibility });
       return { id: noteId };
     }),
-    remove: orgProcedure("teacher").input(z12.object({ noteId: id3 })).mutation(async ({ ctx, input }) => {
+    remove: orgProcedure("teacher").input(z13.object({ noteId: id4 })).mutation(async ({ ctx, input }) => {
       const note = await getNote2(ctx.membership.orgId, input.noteId);
-      if (!note) throw new TRPCError10({ code: "NOT_FOUND", message: "Not bulunamad\u0131." });
+      if (!note) throw new TRPCError11({ code: "NOT_FOUND", message: "Not bulunamad\u0131." });
       await assertCanViewStudent(ctx, note.studentUserId);
-      if (note.authorUserId !== ctx.user.id && !hasRole(ctx.membership.role, "admin")) throw new TRPCError10({ code: "FORBIDDEN", message: "Yaln\u0131zca notu yazan ya da kurum y\xF6neticisi silebilir." });
+      if (note.authorUserId !== ctx.user.id) throw new TRPCError11({ code: "FORBIDDEN", message: "Notu yaln\u0131zca yazan \xF6\u011Fretmen silebilir." });
       await deleteNote2(ctx.membership.orgId, input.noteId);
       await audit(ctx, "note.remove", { type: "user", id: note.studentUserId }, { noteId: input.noteId });
       return { ok: true };
     })
   }),
   audit: orgProcedure("admin").query(({ ctx }) => listAudit(ctx.membership.orgId)),
+  // Novara Rehber: akademik takip dosyaları.
+  cases: orgCasesRouter,
   // --- Öğrenci (ve personel) tarafı: davet kodu ile katılma, ayrılma ---------------
   /** Davet kodunu doğrular, kurum adını ve rolü gösterir (katılmadan önce). */
-  previewInvitation: protectedProcedure.input(z12.object({ code: z12.string().trim().min(4).max(20) })).mutation(async ({ input }) => {
+  previewInvitation: protectedProcedure.input(z13.object({ code: z13.string().trim().min(4).max(20) })).mutation(async ({ input }) => {
     const invitation = await findInvitationByHash(hashCode(input.code));
     const problem = !invitation || invitation.orgStatus !== "active" ? "Davet kodu bulunamad\u0131." : invitationProblem(invitation);
-    if (problem) throw new TRPCError10({ code: "BAD_REQUEST", message: problem });
-    if (membershipState(invitation) === "expired") throw new TRPCError10({ code: "BAD_REQUEST", message: "Bu kurumun \xFCyelik s\xFCresi dolmu\u015F; yeni kat\u0131l\u0131m al\u0131nm\u0131yor." });
+    if (problem) throw new TRPCError11({ code: "BAD_REQUEST", message: problem });
+    if (membershipState(invitation) === "expired") throw new TRPCError11({ code: "BAD_REQUEST", message: "Bu kurumun \xFCyelik s\xFCresi dolmu\u015F; yeni kat\u0131l\u0131m al\u0131nm\u0131yor." });
     const org = invitation.role === "student" ? await getOrganization(invitation.orgId) : null;
     return { orgName: invitation.orgName, role: invitation.role, kvkk: org ? effectiveKvkk(org) : null };
   }),
-  join: protectedProcedure.input(z12.object({ code: z12.string().trim().min(4).max(20), consent: z12.literal(true), kvkkVersion: z12.number().int().positive().optional() })).mutation(({ ctx, input }) => userFacing4(async () => {
+  join: protectedProcedure.input(z13.object({ code: z13.string().trim().min(4).max(20), consent: z13.literal(true), kvkkVersion: z13.number().int().positive().optional() })).mutation(({ ctx, input }) => userFacing4(async () => {
     const invitation = await findInvitationByHash(hashCode(input.code));
     const problem = !invitation || invitation.orgStatus !== "active" ? "Davet kodu bulunamad\u0131." : invitationProblem(invitation);
     if (problem) throw new OrgError(problem);
@@ -11323,11 +11914,11 @@ var orgRouter = router({
     await audit({ user: { id: ctx.user.id }, membership: { orgId: invitation.orgId, orgName: invitation.orgName, role: invitation.role } }, "member.join", { type: "user", id: ctx.user.id }, { role: invitation.role });
     return { orgId: invitation.orgId, orgName: invitation.orgName, role: invitation.role };
   })),
-  leave: protectedProcedure.input(z12.object({ orgId: id3 })).mutation(async ({ ctx, input }) => {
+  leave: protectedProcedure.input(z13.object({ orgId: id4 })).mutation(async ({ ctx, input }) => {
     const memberships = await listMyMemberships(ctx.user.id);
     const membership = memberships.find((row) => row.orgId === input.orgId);
-    if (!membership) throw new TRPCError10({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
-    if (membership.role === "owner") throw new TRPCError10({ code: "BAD_REQUEST", message: "Kurum sahibi kurumdan ayr\u0131lamaz." });
+    if (!membership) throw new TRPCError11({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+    if (membership.role === "owner") throw new TRPCError11({ code: "BAD_REQUEST", message: "Kurum sahibi kurumdan ayr\u0131lamaz." });
     await endMembership(input.orgId, ctx.user.id, "left");
     await audit({ user: { id: ctx.user.id }, membership }, "member.leave", { type: "user", id: ctx.user.id }, { role: membership.role });
     return { ok: true };
@@ -11336,10 +11927,10 @@ var orgRouter = router({
   /** Öğrencinin dershane programı (sınıflarının dersleri). */
   myTimetable: protectedProcedure.query(({ ctx }) => listStudentTimetable(ctx.user.id)),
   /** Üyenin bağlı olduğu kurumun KVKK metinleri ve kendi onayladığı sürüm ("Kurumum"). */
-  myKvkk: protectedProcedure.input(z12.object({ orgId: id3 })).query(async ({ ctx, input }) => {
+  myKvkk: protectedProcedure.input(z13.object({ orgId: id4 })).query(async ({ ctx, input }) => {
     const membership = (await listMyMemberships(ctx.user.id)).find((row) => row.orgId === input.orgId);
     const org = membership ? await getOrganization(input.orgId) : null;
-    if (!membership || !org) throw new TRPCError10({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+    if (!membership || !org) throw new TRPCError11({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
     return { ...effectiveKvkk(org), acceptedVersion: membership.kvkkVersion ?? null, consentAt: membership.consentAt ?? null };
   })
 });
@@ -11351,12 +11942,12 @@ var adminOrgsRouter = router({
   }),
   upgradeRequests: adminProcedure.query(() => listPendingUpgradeRequests()),
   /** Onay: paket talep edilene geçer, kredi en az paketin varsayılanı olur, süre 1 yıl uzar (bitmemişse üstüne). */
-  resolveUpgrade: adminProcedure.input(z12.object({ requestId: id3, approve: z12.boolean() })).mutation(async ({ ctx, input }) => {
+  resolveUpgrade: adminProcedure.input(z13.object({ requestId: id4, approve: z13.boolean() })).mutation(async ({ ctx, input }) => {
     const request = await getUpgradeRequest(input.requestId);
-    if (!request || request.status !== "pending") throw new TRPCError10({ code: "NOT_FOUND", message: "Bekleyen talep bulunamad\u0131." });
+    if (!request || request.status !== "pending") throw new TRPCError11({ code: "NOT_FOUND", message: "Bekleyen talep bulunamad\u0131." });
     const org = await getOrganization(request.orgId);
-    if (!org) throw new TRPCError10({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
-    if (!await resolveUpgradeRequest(input.requestId, input.approve ? "approved" : "rejected", ctx.user.id)) throw new TRPCError10({ code: "CONFLICT", message: "Talep az \xF6nce sonu\xE7land\u0131r\u0131ld\u0131." });
+    if (!org) throw new TRPCError11({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+    if (!await resolveUpgradeRequest(input.requestId, input.approve ? "approved" : "rejected", ctx.user.id)) throw new TRPCError11({ code: "CONFLICT", message: "Talep az \xF6nce sonu\xE7land\u0131r\u0131ld\u0131." });
     if (input.approve) {
       const now = /* @__PURE__ */ new Date();
       const expired = membershipState(org, now) !== "active";
@@ -11365,13 +11956,13 @@ var adminOrgsRouter = router({
     await writeAudit({ orgId: org.id, actorUserId: ctx.user.id, action: input.approve ? "org.upgrade_approved" : "org.upgrade_rejected", targetType: "upgrade", targetId: input.requestId, metadata: { plan: ORG_PLAN_LABELS[request.requestedPlan] } });
     return { ok: true };
   }),
-  setMembership: adminProcedure.input(z12.object({ orgId: id3, plan: z12.enum(ORG_PLANS), startsAt: z12.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), endsAt: z12.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), aiCreditsMonthly: z12.number().int().min(0).max(1e7) })).mutation(async ({ input }) => {
-    if (input.startsAt && input.endsAt && input.endsAt < input.startsAt) throw new TRPCError10({ code: "BAD_REQUEST", message: "Biti\u015F tarihi ba\u015Flang\u0131\xE7tan \xF6nce olamaz." });
+  setMembership: adminProcedure.input(z13.object({ orgId: id4, plan: z13.enum(ORG_PLANS), startsAt: z13.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), endsAt: z13.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), aiCreditsMonthly: z13.number().int().min(0).max(1e7) })).mutation(async ({ input }) => {
+    if (input.startsAt && input.endsAt && input.endsAt < input.startsAt) throw new TRPCError11({ code: "BAD_REQUEST", message: "Biti\u015F tarihi ba\u015Flang\u0131\xE7tan \xF6nce olamaz." });
     const day = (value) => value ? /* @__PURE__ */ new Date(`${value}T00:00:00`) : null;
     await updateOrgMembership(input.orgId, { plan: input.plan, membershipStartsAt: day(input.startsAt), membershipEndsAt: day(input.endsAt), aiCreditsMonthly: input.aiCreditsMonthly });
     return { ok: true };
   }),
-  create: adminProcedure.input(z12.object({ name: z12.string().trim().min(2).max(160), slug: z12.string().trim().regex(/^[a-z0-9-]{3,80}$/, "K\u0131sa ad k\xFC\xE7\xFCk harf, rakam ve tire i\xE7ermeli.") })).mutation(({ ctx, input }) => userFacing4(async () => {
+  create: adminProcedure.input(z13.object({ name: z13.string().trim().min(2).max(160), slug: z13.string().trim().regex(/^[a-z0-9-]{3,80}$/, "K\u0131sa ad k\xFC\xE7\xFCk harf, rakam ve tire i\xE7ermeli.") })).mutation(({ ctx, input }) => userFacing4(async () => {
     let orgId;
     try {
       orgId = await createOrganization(input.name, input.slug);
@@ -11379,34 +11970,34 @@ var adminOrgsRouter = router({
       if (/Duplicate/i.test(String(error?.message ?? error))) throw new OrgError("Bu k\u0131sa ad kullan\u0131l\u0131yor.");
       throw error;
     }
-    await updateOrgMembership(orgId, { plan: "trial", membershipStartsAt: /* @__PURE__ */ new Date(), membershipEndsAt: new Date(Date.now() + 30 * DAY2), aiCreditsMonthly: ORG_PLAN_DEFAULT_CREDITS.trial });
+    await updateOrgMembership(orgId, { plan: "trial", membershipStartsAt: /* @__PURE__ */ new Date(), membershipEndsAt: new Date(Date.now() + 30 * DAY4), aiCreditsMonthly: ORG_PLAN_DEFAULT_CREDITS.trial });
     const code = generateInviteCode((max) => randomInt(max));
-    await createInvitation({ orgId, role: "admin", codeHash: hashCode(code), note: "Kurum y\xF6neticisi daveti", expiresAt: new Date(Date.now() + 30 * DAY2), maxUses: 1, createdBy: ctx.user.id });
+    await createInvitation({ orgId, role: "admin", codeHash: hashCode(code), note: "Kurum y\xF6neticisi daveti", expiresAt: new Date(Date.now() + 30 * DAY4), maxUses: 1, createdBy: ctx.user.id });
     return { orgId, adminCode: code };
   })),
-  inviteAdmin: adminProcedure.input(z12.object({ orgId: id3 })).mutation(async ({ ctx, input }) => {
+  inviteAdmin: adminProcedure.input(z13.object({ orgId: id4 })).mutation(async ({ ctx, input }) => {
     const code = generateInviteCode((max) => randomInt(max));
-    await createInvitation({ orgId: input.orgId, role: "admin", codeHash: hashCode(code), note: "Kurum y\xF6neticisi daveti (platform)", expiresAt: new Date(Date.now() + 30 * DAY2), maxUses: 1, createdBy: ctx.user.id });
+    await createInvitation({ orgId: input.orgId, role: "admin", codeHash: hashCode(code), note: "Kurum y\xF6neticisi daveti (platform)", expiresAt: new Date(Date.now() + 30 * DAY4), maxUses: 1, createdBy: ctx.user.id });
     return { adminCode: code };
   }),
-  setStatus: adminProcedure.input(z12.object({ orgId: id3, status: z12.enum(["active", "suspended"]) })).mutation(async ({ input }) => {
+  setStatus: adminProcedure.input(z13.object({ orgId: id4, status: z13.enum(["active", "suspended"]) })).mutation(async ({ input }) => {
     await setOrganizationStatus(input.orgId, input.status);
     return { ok: true };
   })
 });
 
 // server/routers/parent.ts
-import { TRPCError as TRPCError11 } from "@trpc/server";
+import { TRPCError as TRPCError12 } from "@trpc/server";
 import { createHash as createHash5, randomInt as randomInt2 } from "node:crypto";
-import { z as z13 } from "zod";
+import { z as z14 } from "zod";
 var DAY_MS9 = 24 * 60 * 60 * 1e3;
-var id4 = z13.number().int().positive();
+var id5 = z14.number().int().positive();
 var hashCode2 = (code) => createHash5("sha256").update(`parent:${normalizeInviteCode(code)}`).digest("hex");
 var userFacing5 = async (work) => {
   try {
     return await work();
   } catch (error) {
-    if (error instanceof ParentLinkError) throw new TRPCError11({ code: "BAD_REQUEST", message: error.message });
+    if (error instanceof ParentLinkError) throw new TRPCError12({ code: "BAD_REQUEST", message: error.message });
     throw error;
   }
 };
@@ -11422,7 +12013,7 @@ var parentRouter = router({
   consentText: protectedProcedure.query(() => ({ version: PARENT_CONSENT_VERSION, text: PARENT_CONSENT_TEXT })),
   // --- Öğrenci tarafı ---------------------------------------------------------
   myParents: protectedProcedure.query(({ ctx }) => listLinksForStudent(ctx.user.id)),
-  createInvite: protectedProcedure.input(z13.object({ parentEmail: z13.string().trim().email("Ge\xE7erli bir e-posta adresi yaz.").max(320).optional().or(z13.literal("")) }).optional()).mutation(({ ctx, input }) => userFacing5(async () => {
+  createInvite: protectedProcedure.input(z14.object({ parentEmail: z14.string().trim().email("Ge\xE7erli bir e-posta adresi yaz.").max(320).optional().or(z14.literal("")) }).optional()).mutation(({ ctx, input }) => userFacing5(async () => {
     const code = generateInviteCode((max) => randomInt2(max));
     const { expiresAt } = await createParentInvite(ctx.user.id, hashCode2(code));
     const joinUrl = `${appBaseUrl(ctx.req)}/veli?kod=${encodeURIComponent(code)}`;
@@ -11438,16 +12029,16 @@ var parentRouter = router({
     }
     return { code, expiresAt, joinUrl, emailed };
   })),
-  decide: protectedProcedure.input(z13.object({ linkId: id4, approve: z13.boolean() })).mutation(({ ctx, input }) => userFacing5(() => decideParentRequest(ctx.user.id, input.linkId, input.approve))),
-  removeParent: protectedProcedure.input(z13.object({ linkId: id4 })).mutation(({ ctx, input }) => userFacing5(() => revokeParentLink({ userId: ctx.user.id, side: "student" }, input.linkId))),
+  decide: protectedProcedure.input(z14.object({ linkId: id5, approve: z14.boolean() })).mutation(({ ctx, input }) => userFacing5(() => decideParentRequest(ctx.user.id, input.linkId, input.approve))),
+  removeParent: protectedProcedure.input(z14.object({ linkId: id5 })).mutation(({ ctx, input }) => userFacing5(() => revokeParentLink({ userId: ctx.user.id, side: "student" }, input.linkId))),
   // --- Veli tarafı ------------------------------------------------------------
   myStudents: protectedProcedure.query(({ ctx }) => listLinksForParent(ctx.user.id)),
-  redeem: protectedProcedure.input(z13.object({ code: z13.string().trim().min(4).max(20), consent: z13.literal(true, { message: "Devam etmek i\xE7in r\u0131za metnini onaylamal\u0131s\u0131n." }) })).mutation(({ ctx, input }) => userFacing5(() => redeemParentInvite(ctx.user.id, hashCode2(input.code)))),
-  unlink: protectedProcedure.input(z13.object({ linkId: id4 })).mutation(({ ctx, input }) => userFacing5(() => revokeParentLink({ userId: ctx.user.id, side: "parent" }, input.linkId))),
-  setDigest: protectedProcedure.input(z13.object({ linkId: id4, enabled: z13.boolean() })).mutation(({ ctx, input }) => userFacing5(async () => ({ enabled: await setParentDigestEnabled(ctx.user.id, input.linkId, input.enabled) }))),
+  redeem: protectedProcedure.input(z14.object({ code: z14.string().trim().min(4).max(20), consent: z14.literal(true, { message: "Devam etmek i\xE7in r\u0131za metnini onaylamal\u0131s\u0131n." }) })).mutation(({ ctx, input }) => userFacing5(() => redeemParentInvite(ctx.user.id, hashCode2(input.code)))),
+  unlink: protectedProcedure.input(z14.object({ linkId: id5 })).mutation(({ ctx, input }) => userFacing5(() => revokeParentLink({ userId: ctx.user.id, side: "parent" }, input.linkId))),
+  setDigest: protectedProcedure.input(z14.object({ linkId: id5, enabled: z14.boolean() })).mutation(({ ctx, input }) => userFacing5(async () => ({ enabled: await setParentDigestEnabled(ctx.user.id, input.linkId, input.enabled) }))),
   /** Velinin gördüğü öğrenci özeti: salt okunur; not, soru defteri, öğretmen notu, iletişim bilgisi yok. */
-  student: protectedProcedure.input(z13.object({ studentUserId: id4 })).query(async ({ ctx, input }) => {
-    if (!await findActiveLink(ctx.user.id, input.studentUserId)) throw new TRPCError11({ code: "FORBIDDEN", message: "Bu \xF6\u011Frencinin bilgilerini g\xF6rme iznin yok." });
+  student: protectedProcedure.input(z14.object({ studentUserId: id5 })).query(async ({ ctx, input }) => {
+    if (!await findActiveLink(ctx.user.id, input.studentUserId)) throw new TRPCError12({ code: "FORBIDDEN", message: "Bu \xF6\u011Frencinin bilgilerini g\xF6rme iznin yok." });
     const since = new Date(Date.now() - 42 * DAY_MS9);
     const { start, end } = currentWeek2();
     const [name, profile, exams, topics, calendar, signals] = await Promise.all([
@@ -11549,11 +12140,11 @@ function normalizeAiPlan(raw, fallback) {
 }
 
 // server/routers/resourceCatalog.ts
-import { TRPCError as TRPCError13 } from "@trpc/server";
-import { z as z15 } from "zod";
+import { TRPCError as TRPCError14 } from "@trpc/server";
+import { z as z16 } from "zod";
 
 // server/resourceCatalog/catalogQueries.ts
-import { and as and21, asc as asc4, desc as desc15, eq as eq24, inArray as inArray10, isNull as isNull14, ilike as ilike4, sql as sql11 } from "drizzle-orm";
+import { and as and22, asc as asc4, desc as desc16, eq as eq25, inArray as inArray11, isNull as isNull15, ilike as ilike4, sql as sql13 } from "drizzle-orm";
 var DEFAULT_PAGE_SIZE = 24;
 var MAX_PAGE_SIZE = 60;
 async function listCatalogBooks(filters, page2) {
@@ -11561,26 +12152,26 @@ async function listCatalogBooks(filters, page2) {
   if (!db) return { items: [], total: 0 };
   const pageSize = Math.max(1, Math.min(page2.pageSize || DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE));
   const offset = Math.max(0, (page2.page - 1) * pageSize);
-  const conditions = [eq24(catalogBooks.active, 1)];
-  if (filters.exam) conditions.push(eq24(catalogBooks.examScope, filters.exam));
-  if (filters.subject) conditions.push(eq24(catalogBooks.subject, filters.subject));
-  if (filters.publisherId) conditions.push(eq24(catalogBooks.publisherId, filters.publisherId));
-  if (filters.bookType) conditions.push(eq24(catalogBooks.bookType, filters.bookType));
-  if (filters.difficulty) conditions.push(eq24(catalogBooks.difficultyLabel, filters.difficulty));
+  const conditions = [eq25(catalogBooks.active, 1)];
+  if (filters.exam) conditions.push(eq25(catalogBooks.examScope, filters.exam));
+  if (filters.subject) conditions.push(eq25(catalogBooks.subject, filters.subject));
+  if (filters.publisherId) conditions.push(eq25(catalogBooks.publisherId, filters.publisherId));
+  if (filters.bookType) conditions.push(eq25(catalogBooks.bookType, filters.bookType));
+  if (filters.difficulty) conditions.push(eq25(catalogBooks.difficultyLabel, filters.difficulty));
   if (filters.search) conditions.push(ilike4(catalogBooks.name, `%${filters.search}%`));
   let bookIdsForTopic = null;
   if (filters.topic) {
-    const topicRows = await db.select({ bookId: bookCurriculumTopics.bookId }).from(bookCurriculumTopics).innerJoin(yksTopics, eq24(bookCurriculumTopics.topicId, yksTopics.id)).where(eq24(yksTopics.topic, filters.topic));
+    const topicRows = await db.select({ bookId: bookCurriculumTopics.bookId }).from(bookCurriculumTopics).innerJoin(yksTopics, eq25(bookCurriculumTopics.topicId, yksTopics.id)).where(eq25(yksTopics.topic, filters.topic));
     bookIdsForTopic = topicRows.map((r) => r.bookId);
     if (bookIdsForTopic.length === 0) return { items: [], total: 0 };
-    conditions.push(inArray10(catalogBooks.id, bookIdsForTopic));
+    conditions.push(inArray11(catalogBooks.id, bookIdsForTopic));
   }
-  const where = and21(...conditions);
-  const [{ count: count4 }] = await db.select({ count: sql11`count(*)::int` }).from(catalogBooks).where(where);
-  let rows = await db.select().from(catalogBooks).where(where).orderBy(desc15(catalogBooks.createdAt)).limit(pageSize).offset(offset);
+  const where = and22(...conditions);
+  const [{ count: count4 }] = await db.select({ count: sql13`count(*)::int` }).from(catalogBooks).where(where);
+  let rows = await db.select().from(catalogBooks).where(where).orderBy(desc16(catalogBooks.createdAt)).limit(pageSize).offset(offset);
   if (filters.minPrice !== void 0 || filters.maxPrice !== void 0) {
     const ids = rows.map((r) => r.id);
-    const offerRows2 = ids.length ? await db.select().from(bookOffers).where(inArray10(bookOffers.bookId, ids)) : [];
+    const offerRows2 = ids.length ? await db.select().from(bookOffers).where(inArray11(bookOffers.bookId, ids)) : [];
     const bestPriceByBook = /* @__PURE__ */ new Map();
     for (const offer of offerRows2) {
       if (offer.price === null) continue;
@@ -11596,11 +12187,11 @@ async function listCatalogBooks(filters, page2) {
       return true;
     });
   }
-  const publisherIds = Array.from(new Set(rows.map((r) => r.publisherId).filter((id5) => id5 !== null)));
-  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray10(publishers.id, publisherIds)) : [];
+  const publisherIds = Array.from(new Set(rows.map((r) => r.publisherId).filter((id6) => id6 !== null)));
+  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray11(publishers.id, publisherIds)) : [];
   const publisherNameById = new Map(publisherRows.map((p) => [p.id, p.name]));
   const bookIds = rows.map((r) => r.id);
-  const offerRows = bookIds.length ? await db.select().from(bookOffers).where(inArray10(bookOffers.bookId, bookIds)) : [];
+  const offerRows = bookIds.length ? await db.select().from(bookOffers).where(inArray11(bookOffers.bookId, bookIds)) : [];
   const offerByBook = /* @__PURE__ */ new Map();
   for (const offer of offerRows) {
     if (!offerByBook.has(offer.bookId)) offerByBook.set(offer.bookId, { price: offer.price !== null ? Number(offer.price) : null, productUrl: offer.productUrl });
@@ -11628,16 +12219,16 @@ async function listCatalogBooksForAdmin(filters, page2) {
   const pageSize = Math.max(1, Math.min(page2.pageSize || DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE));
   const offset = Math.max(0, (page2.page - 1) * pageSize);
   const conditions = [];
-  if (filters.active !== void 0) conditions.push(eq24(catalogBooks.active, filters.active ? 1 : 0));
-  if (filters.subject) conditions.push(eq24(catalogBooks.subject, filters.subject));
+  if (filters.active !== void 0) conditions.push(eq25(catalogBooks.active, filters.active ? 1 : 0));
+  if (filters.subject) conditions.push(eq25(catalogBooks.subject, filters.subject));
   if (filters.search) conditions.push(ilike4(catalogBooks.name, `%${filters.search}%`));
-  const where = conditions.length ? and21(...conditions) : void 0;
-  const countQuery = db.select({ count: sql11`count(*)::int` }).from(catalogBooks);
+  const where = conditions.length ? and22(...conditions) : void 0;
+  const countQuery = db.select({ count: sql13`count(*)::int` }).from(catalogBooks);
   const [{ count: count4 }] = await (where ? countQuery.where(where) : countQuery);
-  const rowsQuery = db.select().from(catalogBooks).orderBy(desc15(catalogBooks.createdAt)).limit(pageSize).offset(offset);
+  const rowsQuery = db.select().from(catalogBooks).orderBy(desc16(catalogBooks.createdAt)).limit(pageSize).offset(offset);
   const rows = await (where ? rowsQuery.where(where) : rowsQuery);
-  const publisherIds = Array.from(new Set(rows.map((r) => r.publisherId).filter((id5) => id5 !== null)));
-  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray10(publishers.id, publisherIds)) : [];
+  const publisherIds = Array.from(new Set(rows.map((r) => r.publisherId).filter((id6) => id6 !== null)));
+  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray11(publishers.id, publisherIds)) : [];
   const publisherNameById = new Map(publisherRows.map((p) => [p.id, p.name]));
   const items = rows.map((row) => ({
     id: row.id,
@@ -11658,13 +12249,13 @@ async function listCatalogBooksForAdmin(filters, page2) {
 async function getCatalogBookBySlug(slug) {
   const db = await getDb();
   if (!db) return null;
-  const rows = await db.select().from(catalogBooks).where(eq24(catalogBooks.slug, slug)).limit(1);
+  const rows = await db.select().from(catalogBooks).where(eq25(catalogBooks.slug, slug)).limit(1);
   const book = rows[0];
   if (!book) return null;
   const [publisherRow, offerRows, topicRows] = await Promise.all([
-    book.publisherId ? db.select().from(publishers).where(eq24(publishers.id, book.publisherId)).limit(1) : Promise.resolve([]),
-    db.select().from(bookOffers).where(eq24(bookOffers.bookId, book.id)),
-    db.select({ topic: yksTopics.topic, subject: yksTopics.subject, confidence: bookCurriculumTopics.confidence, isVerified: bookCurriculumTopics.isVerified }).from(bookCurriculumTopics).innerJoin(yksTopics, eq24(bookCurriculumTopics.topicId, yksTopics.id)).where(eq24(bookCurriculumTopics.bookId, book.id))
+    book.publisherId ? db.select().from(publishers).where(eq25(publishers.id, book.publisherId)).limit(1) : Promise.resolve([]),
+    db.select().from(bookOffers).where(eq25(bookOffers.bookId, book.id)),
+    db.select({ topic: yksTopics.topic, subject: yksTopics.subject, confidence: bookCurriculumTopics.confidence, isVerified: bookCurriculumTopics.isVerified }).from(bookCurriculumTopics).innerJoin(yksTopics, eq25(bookCurriculumTopics.topicId, yksTopics.id)).where(eq25(bookCurriculumTopics.bookId, book.id))
   ]);
   return {
     id: book.id,
@@ -11684,16 +12275,16 @@ async function getCatalogBookBySlug(slug) {
 async function listPublishersForFilter() {
   const db = await getDb();
   if (!db) return [];
-  return db.select({ id: publishers.id, name: publishers.name }).from(publishers).where(eq24(publishers.isActive, 1)).orderBy(asc4(publishers.name));
+  return db.select({ id: publishers.id, name: publishers.name }).from(publishers).where(eq25(publishers.isActive, 1)).orderBy(asc4(publishers.name));
 }
 async function listCatalogBooksForRecommendation(subject2) {
   const db = await getDb();
   if (!db) return [];
-  const conditions = [eq24(catalogBooks.active, 1)];
-  if (subject2) conditions.push(eq24(catalogBooks.subject, subject2));
-  const rows = await db.select().from(catalogBooks).where(and21(...conditions));
+  const conditions = [eq25(catalogBooks.active, 1)];
+  if (subject2) conditions.push(eq25(catalogBooks.subject, subject2));
+  const rows = await db.select().from(catalogBooks).where(and22(...conditions));
   const bookIds = rows.map((r) => r.id);
-  const topicRows = bookIds.length ? await db.select({ bookId: bookCurriculumTopics.bookId, topic: yksTopics.topic }).from(bookCurriculumTopics).innerJoin(yksTopics, eq24(bookCurriculumTopics.topicId, yksTopics.id)).where(inArray10(bookCurriculumTopics.bookId, bookIds)) : [];
+  const topicRows = bookIds.length ? await db.select({ bookId: bookCurriculumTopics.bookId, topic: yksTopics.topic }).from(bookCurriculumTopics).innerJoin(yksTopics, eq25(bookCurriculumTopics.topicId, yksTopics.id)).where(inArray11(bookCurriculumTopics.bookId, bookIds)) : [];
   const topicsByBook = /* @__PURE__ */ new Map();
   for (const row of topicRows) {
     const list = topicsByBook.get(row.bookId) ?? [];
@@ -11716,15 +12307,15 @@ async function listCatalogBooksForRecommendation(subject2) {
 async function listMyLibraryCatalogBooks(userId) {
   const db = await getDb();
   if (!db) return [];
-  const inventoryRows = await db.select().from(bookInventory).where(and21(eq24(bookInventory.userId, userId), isNull14(bookInventory.removedAt)));
-  const numericIds = Array.from(new Set(inventoryRows.map((row) => row.bookId).filter((id5) => /^\d+$/.test(id5)).map(Number)));
+  const inventoryRows = await db.select().from(bookInventory).where(and22(eq25(bookInventory.userId, userId), isNull15(bookInventory.removedAt)));
+  const numericIds = Array.from(new Set(inventoryRows.map((row) => row.bookId).filter((id6) => /^\d+$/.test(id6)).map(Number)));
   if (numericIds.length === 0) return [];
   const [books, topicRows] = await Promise.all([
-    db.select().from(catalogBooks).where(inArray10(catalogBooks.id, numericIds)),
-    db.select({ bookId: bookCurriculumTopics.bookId, topicId: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject, isVerified: bookCurriculumTopics.isVerified, confidence: bookCurriculumTopics.confidence }).from(bookCurriculumTopics).innerJoin(yksTopics, eq24(bookCurriculumTopics.topicId, yksTopics.id)).where(inArray10(bookCurriculumTopics.bookId, numericIds))
+    db.select().from(catalogBooks).where(inArray11(catalogBooks.id, numericIds)),
+    db.select({ bookId: bookCurriculumTopics.bookId, topicId: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject, isVerified: bookCurriculumTopics.isVerified, confidence: bookCurriculumTopics.confidence }).from(bookCurriculumTopics).innerJoin(yksTopics, eq25(bookCurriculumTopics.topicId, yksTopics.id)).where(inArray11(bookCurriculumTopics.bookId, numericIds))
   ]);
-  const publisherIds = Array.from(new Set(books.map((b) => b.publisherId).filter((id5) => id5 !== null)));
-  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray10(publishers.id, publisherIds)) : [];
+  const publisherIds = Array.from(new Set(books.map((b) => b.publisherId).filter((id6) => id6 !== null)));
+  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray11(publishers.id, publisherIds)) : [];
   const publisherNameById = new Map(publisherRows.map((p) => [p.id, p.name]));
   const topicsByBook = /* @__PURE__ */ new Map();
   for (const row of topicRows) {
@@ -11878,11 +12469,11 @@ function recommendForStudent(topics, books, options = {}, config = resourceCatal
 }
 
 // server/routers/resourceCatalogAdmin.ts
-import { TRPCError as TRPCError12 } from "@trpc/server";
-import { z as z14 } from "zod";
+import { TRPCError as TRPCError13 } from "@trpc/server";
+import { z as z15 } from "zod";
 
 // server/resourceCatalog/catalogDb.ts
-import { and as and22, eq as eq25, inArray as inArray11 } from "drizzle-orm";
+import { and as and23, eq as eq26, inArray as inArray12 } from "drizzle-orm";
 var toCatalogBookRow = (row) => ({
   id: row.id,
   isbn: row.isbn,
@@ -11906,26 +12497,26 @@ var catalogDb = {
   async findPublisherByNormalizedName(normalizedName) {
     const db = await getDb();
     if (!db) return null;
-    const rows = await db.select().from(publishers).where(eq25(publishers.normalizedName, normalizedName)).limit(1);
+    const rows = await db.select().from(publishers).where(eq26(publishers.normalizedName, normalizedName)).limit(1);
     return rows[0] ? { id: rows[0].id, name: rows[0].name, slug: rows[0].slug, normalizedName: rows[0].normalizedName } : null;
   },
   async createPublisher(input) {
     const db = await getDb();
     if (!db) throw new Error("Database not available");
     const result = await db.insert(publishers).values(input).returning({ id: publishers.id });
-    const id5 = Number(result[0].id);
-    return { id: id5, ...input };
+    const id6 = Number(result[0].id);
+    return { id: id6, ...input };
   },
   async findExternalSource(source, sourceProductId) {
     const db = await getDb();
     if (!db) return null;
-    const rows = await db.select().from(externalBookSources).where(and22(eq25(externalBookSources.source, source), eq25(externalBookSources.sourceProductId, sourceProductId))).limit(1);
+    const rows = await db.select().from(externalBookSources).where(and23(eq26(externalBookSources.source, source), eq26(externalBookSources.sourceProductId, sourceProductId))).limit(1);
     return rows[0] ? { id: rows[0].id, source: rows[0].source, sourceProductId: rows[0].sourceProductId, matchedBookId: rows[0].matchedBookId, syncStatus: rows[0].syncStatus } : null;
   },
   async upsertExternalSource(row) {
     const db = await getDb();
     if (!db) throw new Error("Database not available");
-    const existing = await db.select().from(externalBookSources).where(and22(eq25(externalBookSources.source, row.source), eq25(externalBookSources.sourceProductId, row.sourceProductId))).limit(1);
+    const existing = await db.select().from(externalBookSources).where(and23(eq26(externalBookSources.source, row.source), eq26(externalBookSources.sourceProductId, row.sourceProductId))).limit(1);
     const values = {
       source: row.source,
       sourceProductId: row.sourceProductId,
@@ -11941,34 +12532,34 @@ var catalogDb = {
       rawMetadata: row.rawMetadata ? JSON.stringify(row.rawMetadata) : null
     };
     if (existing[0]) {
-      await db.update(externalBookSources).set(values).where(eq25(externalBookSources.id, existing[0].id));
+      await db.update(externalBookSources).set(values).where(eq26(externalBookSources.id, existing[0].id));
       return { id: existing[0].id, source: row.source, sourceProductId: row.sourceProductId, matchedBookId: existing[0].matchedBookId, syncStatus: existing[0].syncStatus };
     }
     const result = await db.insert(externalBookSources).values(values).returning({ id: externalBookSources.id });
-    const id5 = Number(result[0].id);
-    return { id: id5, source: row.source, sourceProductId: row.sourceProductId, matchedBookId: null, syncStatus: "pending" };
+    const id6 = Number(result[0].id);
+    return { id: id6, source: row.source, sourceProductId: row.sourceProductId, matchedBookId: null, syncStatus: "pending" };
   },
-  async markExternalSourceOutcome(id5, patch) {
+  async markExternalSourceOutcome(id6, patch) {
     const db = await getDb();
     if (!db) return;
-    await db.update(externalBookSources).set({ matchedBookId: patch.matchedBookId, syncStatus: patch.syncStatus, lastSyncedAt: /* @__PURE__ */ new Date(), errorMessage: patch.errorMessage ?? null }).where(eq25(externalBookSources.id, id5));
+    await db.update(externalBookSources).set({ matchedBookId: patch.matchedBookId, syncStatus: patch.syncStatus, lastSyncedAt: /* @__PURE__ */ new Date(), errorMessage: patch.errorMessage ?? null }).where(eq26(externalBookSources.id, id6));
   },
   async findCatalogBookByIsbn(isbn) {
     const db = await getDb();
     if (!db) return null;
-    const rows = await db.select().from(catalogBooks).where(eq25(catalogBooks.isbn, isbn)).limit(1);
+    const rows = await db.select().from(catalogBooks).where(eq26(catalogBooks.isbn, isbn)).limit(1);
     return rows[0] ? toCatalogBookRow(rows[0]) : null;
   },
   async listCatalogBooksByPublisher(publisherId) {
     const db = await getDb();
     if (!db) return [];
-    const rows = await db.select().from(catalogBooks).where(eq25(catalogBooks.publisherId, publisherId));
+    const rows = await db.select().from(catalogBooks).where(eq26(catalogBooks.publisherId, publisherId));
     return rows.map((row) => ({ id: row.id, isbn: row.isbn, publisherId: row.publisherId, name: row.name, editionYear: row.editionYear }));
   },
-  async getCatalogBookById(id5) {
+  async getCatalogBookById(id6) {
     const db = await getDb();
     if (!db) return null;
-    const rows = await db.select().from(catalogBooks).where(eq25(catalogBooks.id, id5)).limit(1);
+    const rows = await db.select().from(catalogBooks).where(eq26(catalogBooks.id, id6)).limit(1);
     return rows[0] ? toCatalogBookRow(rows[0]) : null;
   },
   async createCatalogBook(input) {
@@ -11987,12 +12578,12 @@ var catalogDb = {
       subject: input.subject,
       metadata: input.metadata ? JSON.stringify(input.metadata) : null
     }).returning({ id: catalogBooks.id });
-    const id5 = Number(result[0].id);
-    const row = await this.getCatalogBookById(id5);
+    const id6 = Number(result[0].id);
+    const row = await this.getCatalogBookById(id6);
     if (!row) throw new Error("Failed to read back created catalog book");
     return row;
   },
-  async updateCatalogBook(id5, patch) {
+  async updateCatalogBook(id6, patch) {
     const db = await getDb();
     if (!db) throw new Error("Database not available");
     const values = {};
@@ -12007,13 +12598,13 @@ var catalogDb = {
     if (patch.subject !== void 0) values.subject = patch.subject;
     if (patch.metadata !== void 0) values.metadata = patch.metadata ? JSON.stringify(patch.metadata) : null;
     if (Object.keys(values).length > 0) {
-      await db.update(catalogBooks).set(values).where(eq25(catalogBooks.id, id5));
+      await db.update(catalogBooks).set(values).where(eq26(catalogBooks.id, id6));
     }
-    const row = await this.getCatalogBookById(id5);
-    if (!row) throw new Error(`Catalog book ${id5} not found after update`);
+    const row = await this.getCatalogBookById(id6);
+    if (!row) throw new Error(`Catalog book ${id6} not found after update`);
     return row;
   },
-  async updateCatalogBookDifficulty(id5, patch) {
+  async updateCatalogBookDifficulty(id6, patch) {
     const db = await getDb();
     if (!db) return;
     await db.update(catalogBooks).set({
@@ -12023,15 +12614,15 @@ var catalogDb = {
       classificationMethod: patch.classificationMethod,
       needsReview: patch.needsReview ? 1 : 0,
       classifiedAt: patch.classifiedAt
-    }).where(eq25(catalogBooks.id, id5));
+    }).where(eq26(catalogBooks.id, id6));
   },
   async upsertBookOffer(input) {
     const db = await getDb();
     if (!db) return;
-    const existing = await db.select().from(bookOffers).where(and22(eq25(bookOffers.bookId, input.bookId), eq25(bookOffers.source, input.source))).limit(1);
+    const existing = await db.select().from(bookOffers).where(and23(eq26(bookOffers.bookId, input.bookId), eq26(bookOffers.source, input.source))).limit(1);
     const values = { price: input.price !== null ? String(input.price) : null, currency: input.currency, productUrl: input.productUrl, lastSyncedAt: /* @__PURE__ */ new Date() };
     if (existing[0]) {
-      await db.update(bookOffers).set(values).where(eq25(bookOffers.id, existing[0].id));
+      await db.update(bookOffers).set(values).where(eq26(bookOffers.id, existing[0].id));
     } else {
       await db.insert(bookOffers).values({ bookId: input.bookId, source: input.source, ...values });
     }
@@ -12045,10 +12636,10 @@ var catalogDb = {
   async upsertBookCurriculumMapping(input) {
     const db = await getDb();
     if (!db) return;
-    const existing = await db.select().from(bookCurriculumTopics).where(and22(eq25(bookCurriculumTopics.bookId, input.bookId), eq25(bookCurriculumTopics.topicId, input.topicId))).limit(1);
+    const existing = await db.select().from(bookCurriculumTopics).where(and23(eq26(bookCurriculumTopics.bookId, input.bookId), eq26(bookCurriculumTopics.topicId, input.topicId))).limit(1);
     if (existing[0]) {
       if (existing[0].isVerified === 1) return;
-      await db.update(bookCurriculumTopics).set({ confidence: String(input.confidence), mappingMethod: "rule" }).where(eq25(bookCurriculumTopics.id, existing[0].id));
+      await db.update(bookCurriculumTopics).set({ confidence: String(input.confidence), mappingMethod: "rule" }).where(eq26(bookCurriculumTopics.id, existing[0].id));
     } else {
       await db.insert(bookCurriculumTopics).values({ bookId: input.bookId, topicId: input.topicId, confidence: String(input.confidence), mappingMethod: "rule" });
     }
@@ -12059,8 +12650,8 @@ var catalogDb = {
     const result = await db.insert(resourceCatalogSyncLogs).values({ source: input.source, startedAt: input.startedAt, dryRun: input.dryRun ? 1 : 0, triggeredBy: input.triggeredBy }).returning({ id: resourceCatalogSyncLogs.id });
     return { id: Number(result[0].id) };
   },
-  async finishSyncLog(id5, patch) {
-    if (id5 < 0) return;
+  async finishSyncLog(id6, patch) {
+    if (id6 < 0) return;
     const db = await getDb();
     if (!db) return;
     await db.update(resourceCatalogSyncLogs).set({
@@ -12073,7 +12664,7 @@ var catalogDb = {
       needsReview: patch.needsReview,
       statsJson: patch.statsJson,
       errorLog: patch.errorLog
-    }).where(eq25(resourceCatalogSyncLogs.id, id5));
+    }).where(eq26(resourceCatalogSyncLogs.id, id6));
   }
 };
 async function listResourceCatalogSyncLogs(limit = 20) {
@@ -12084,27 +12675,27 @@ async function listResourceCatalogSyncLogs(limit = 20) {
 async function listNeedsReviewBooks() {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(catalogBooks).where(eq25(catalogBooks.needsReview, 1));
+  return db.select().from(catalogBooks).where(eq26(catalogBooks.needsReview, 1));
 }
 async function setManualDifficulty(bookId, input) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(catalogBooks).set({ difficultyLabel: input.label, difficultyScore: input.score, difficultyConfidence: "1", classificationMethod: "manual", manualOverride: 1, needsReview: 0, classifiedAt: /* @__PURE__ */ new Date() }).where(eq25(catalogBooks.id, bookId));
+  await db.update(catalogBooks).set({ difficultyLabel: input.label, difficultyScore: input.score, difficultyConfidence: "1", classificationMethod: "manual", manualOverride: 1, needsReview: 0, classifiedAt: /* @__PURE__ */ new Date() }).where(eq26(catalogBooks.id, bookId));
 }
 async function approveCatalogBookClassification(bookId) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(catalogBooks).set({ needsReview: 0 }).where(eq25(catalogBooks.id, bookId));
+  await db.update(catalogBooks).set({ needsReview: 0 }).where(eq26(catalogBooks.id, bookId));
 }
 async function markCatalogBookNeedsReview(bookId, needsReview) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(catalogBooks).set({ needsReview: needsReview ? 1 : 0 }).where(eq25(catalogBooks.id, bookId));
+  await db.update(catalogBooks).set({ needsReview: needsReview ? 1 : 0 }).where(eq26(catalogBooks.id, bookId));
 }
 async function setCatalogBookActive(bookId, active) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(catalogBooks).set({ active: active ? 1 : 0 }).where(eq25(catalogBooks.id, bookId));
+  await db.update(catalogBooks).set({ active: active ? 1 : 0 }).where(eq26(catalogBooks.id, bookId));
 }
 async function resolveOrCreatePublisherByName(rawName) {
   const trimmed = rawName.trim();
@@ -12182,26 +12773,26 @@ function slugForBook(name, publisherName) {
 }
 
 // server/routers/resourceCatalogAdmin.ts
-var bookTypeEnum = z14.enum(["question_bank", "topic_explanation", "topic_explanation_question_bank", "mock_exam", "fasikul", "past_questions", "camp", "test_book", "reference", "other"]);
-var examScopeEnum = z14.enum(CATALOG_EXAM_SCOPES);
-var catalogBookInput = z14.object({
-  name: z14.string().trim().min(1).max(300),
-  publisherName: z14.string().trim().max(120).optional(),
-  isbn: z14.string().trim().max(32).optional(),
-  editionYear: z14.number().int().min(1990).max(2100).optional(),
-  description: z14.string().trim().max(2e3).optional(),
-  imageUrl: z14.string().trim().max(500).optional(),
+var bookTypeEnum = z15.enum(["question_bank", "topic_explanation", "topic_explanation_question_bank", "mock_exam", "fasikul", "past_questions", "camp", "test_book", "reference", "other"]);
+var examScopeEnum = z15.enum(CATALOG_EXAM_SCOPES);
+var catalogBookInput = z15.object({
+  name: z15.string().trim().min(1).max(300),
+  publisherName: z15.string().trim().max(120).optional(),
+  isbn: z15.string().trim().max(32).optional(),
+  editionYear: z15.number().int().min(1990).max(2100).optional(),
+  description: z15.string().trim().max(2e3).optional(),
+  imageUrl: z15.string().trim().max(500).optional(),
   bookType: bookTypeEnum,
   examScope: examScopeEnum,
-  subject: z14.string().trim().max(80).optional()
+  subject: z15.string().trim().max(80).optional()
 });
 var resourceCatalogAdminRouter = router({
   needsReview: adminProcedure.query(() => listNeedsReviewBooks()),
-  syncLogs: adminProcedure.input(z14.object({ limit: z14.number().int().min(1).max(100).default(20) }).optional()).query(({ input }) => listResourceCatalogSyncLogs(input?.limit ?? 20)),
-  approve: adminProcedure.input(z14.object({ bookId: z14.number().int() })).mutation(({ input }) => approveCatalogBookClassification(input.bookId)),
-  setDifficulty: adminProcedure.input(z14.object({ bookId: z14.number().int(), label: z14.enum(["easy", "medium", "hard"]), score: z14.number().int().min(0).max(100) })).mutation(({ input }) => setManualDifficulty(input.bookId, { label: input.label, score: input.score })),
-  markNeedsReview: adminProcedure.input(z14.object({ bookId: z14.number().int(), needsReview: z14.boolean() })).mutation(({ input }) => markCatalogBookNeedsReview(input.bookId, input.needsReview)),
-  list: adminProcedure.input(z14.object({ page: z14.number().int().min(1).default(1), pageSize: z14.number().int().min(1).max(100).default(30), search: z14.string().max(120).optional(), subject: z14.string().max(80).optional(), active: z14.boolean().optional() })).query(async ({ input }) => {
+  syncLogs: adminProcedure.input(z15.object({ limit: z15.number().int().min(1).max(100).default(20) }).optional()).query(({ input }) => listResourceCatalogSyncLogs(input?.limit ?? 20)),
+  approve: adminProcedure.input(z15.object({ bookId: z15.number().int() })).mutation(({ input }) => approveCatalogBookClassification(input.bookId)),
+  setDifficulty: adminProcedure.input(z15.object({ bookId: z15.number().int(), label: z15.enum(["easy", "medium", "hard"]), score: z15.number().int().min(0).max(100) })).mutation(({ input }) => setManualDifficulty(input.bookId, { label: input.label, score: input.score })),
+  markNeedsReview: adminProcedure.input(z15.object({ bookId: z15.number().int(), needsReview: z15.boolean() })).mutation(({ input }) => markCatalogBookNeedsReview(input.bookId, input.needsReview)),
+  list: adminProcedure.input(z15.object({ page: z15.number().int().min(1).default(1), pageSize: z15.number().int().min(1).max(100).default(30), search: z15.string().max(120).optional(), subject: z15.string().max(80).optional(), active: z15.boolean().optional() })).query(async ({ input }) => {
     const { page: page2, pageSize, ...filters } = input;
     const { items, total } = await listCatalogBooksForAdmin(filters, { page: page2, pageSize });
     return { items, total, page: page2, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
@@ -12240,22 +12831,22 @@ var resourceCatalogAdminRouter = router({
           metadata: { source: "admin_manual" }
         });
       } catch {
-        throw new TRPCError12({ code: "CONFLICT", message: "Bu isim ve yay\u0131nevi ile bir kaynak zaten kay\u0131tl\u0131 olabilir. Farkl\u0131 bir isim dener misin?" });
+        throw new TRPCError13({ code: "CONFLICT", message: "Bu isim ve yay\u0131nevi ile bir kaynak zaten kay\u0131tl\u0131 olabilir. Farkl\u0131 bir isim dener misin?" });
       }
     }
   }),
   update: adminProcedure.input(
-    z14.object({
-      bookId: z14.number().int(),
-      name: z14.string().trim().min(1).max(300).optional(),
-      publisherName: z14.string().trim().max(120).optional(),
-      isbn: z14.string().trim().max(32).optional(),
-      editionYear: z14.number().int().min(1990).max(2100).optional(),
-      description: z14.string().trim().max(2e3).optional(),
-      imageUrl: z14.string().trim().max(500).optional(),
+    z15.object({
+      bookId: z15.number().int(),
+      name: z15.string().trim().min(1).max(300).optional(),
+      publisherName: z15.string().trim().max(120).optional(),
+      isbn: z15.string().trim().max(32).optional(),
+      editionYear: z15.number().int().min(1990).max(2100).optional(),
+      description: z15.string().trim().max(2e3).optional(),
+      imageUrl: z15.string().trim().max(500).optional(),
       bookType: bookTypeEnum.optional(),
       examScope: examScopeEnum.optional(),
-      subject: z14.string().trim().max(80).optional()
+      subject: z15.string().trim().max(80).optional()
     })
   ).mutation(async ({ input }) => {
     const { bookId, publisherName, ...rest } = input;
@@ -12265,25 +12856,25 @@ var resourceCatalogAdminRouter = router({
       ...publisherId !== void 0 ? { publisherId } : {}
     });
   }),
-  setActive: adminProcedure.input(z14.object({ bookId: z14.number().int(), active: z14.boolean() })).mutation(({ input }) => setCatalogBookActive(input.bookId, input.active))
+  setActive: adminProcedure.input(z15.object({ bookId: z15.number().int(), active: z15.boolean() })).mutation(({ input }) => setCatalogBookActive(input.bookId, input.active))
 });
 
 // server/routers/resourceCatalog.ts
-var bookTypeEnum2 = z15.enum(["question_bank", "topic_explanation", "topic_explanation_question_bank", "mock_exam", "fasikul", "past_questions", "camp", "test_book", "reference", "other"]);
-var examScopeEnum2 = z15.enum(CATALOG_EXAM_SCOPES);
-var difficultyEnum = z15.enum(["easy", "medium", "hard"]);
-var listInput = z15.object({
-  page: z15.number().int().min(1).default(1),
-  pageSize: z15.number().int().min(1).max(60).default(24),
+var bookTypeEnum2 = z16.enum(["question_bank", "topic_explanation", "topic_explanation_question_bank", "mock_exam", "fasikul", "past_questions", "camp", "test_book", "reference", "other"]);
+var examScopeEnum2 = z16.enum(CATALOG_EXAM_SCOPES);
+var difficultyEnum = z16.enum(["easy", "medium", "hard"]);
+var listInput = z16.object({
+  page: z16.number().int().min(1).default(1),
+  pageSize: z16.number().int().min(1).max(60).default(24),
   exam: examScopeEnum2.optional(),
-  subject: z15.string().max(80).optional(),
-  publisherId: z15.number().int().optional(),
+  subject: z16.string().max(80).optional(),
+  publisherId: z16.number().int().optional(),
   bookType: bookTypeEnum2.optional(),
   difficulty: difficultyEnum.optional(),
-  minPrice: z15.number().min(0).optional(),
-  maxPrice: z15.number().min(0).optional(),
-  search: z15.string().max(120).optional(),
-  topic: z15.string().max(180).optional()
+  minPrice: z16.number().min(0).optional(),
+  maxPrice: z16.number().min(0).optional(),
+  search: z16.string().max(120).optional(),
+  topic: z16.string().max(180).optional()
 });
 var resourceCatalogRouter = router({
   list: publicProcedure.input(listInput).query(async ({ input }) => {
@@ -12291,15 +12882,15 @@ var resourceCatalogRouter = router({
     const { items, total } = await listCatalogBooks(filters, { page: page2, pageSize });
     return { items, total, page: page2, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
   }),
-  get: publicProcedure.input(z15.object({ slug: z15.string().min(1).max(320) })).query(async ({ input }) => {
+  get: publicProcedure.input(z16.object({ slug: z16.string().min(1).max(320) })).query(async ({ input }) => {
     const book = await getCatalogBookBySlug(input.slug);
-    if (!book) throw new TRPCError13({ code: "NOT_FOUND", message: "Kaynak bulunamad\u0131" });
+    if (!book) throw new TRPCError14({ code: "NOT_FOUND", message: "Kaynak bulunamad\u0131" });
     return book;
   }),
   publishers: publicProcedure.query(() => listPublishersForFilter()),
   /** "Seviyene Uygun Kaynaklar" — deterministic, explainable per-topic
    * recommendations built from the student's own topic progress (spec §21/§34). */
-  recommendations: protectedProcedure.input(z15.object({ subject: z15.string().max(80).optional(), limit: z15.number().int().min(1).max(30).default(12) })).query(async ({ ctx, input }) => {
+  recommendations: protectedProcedure.input(z16.object({ subject: z16.string().max(80).optional(), limit: z16.number().int().min(1).max(30).default(12) })).query(async ({ ctx, input }) => {
     const progress = await getUserTopicProgress(ctx.user.id);
     const allTopics = progress.map((p) => ({ subject: p.subject, topic: p.topic, exam: p.exam, accuracy: p.progress, status: p.status }));
     const topics = input.subject ? allTopics.filter((t2) => t2.subject === input.subject) : allTopics;
@@ -12316,8 +12907,8 @@ var resourceCatalogRouter = router({
 });
 
 // server/routers/onboarding.ts
-import { TRPCError as TRPCError14 } from "@trpc/server";
-import { z as z16 } from "zod";
+import { TRPCError as TRPCError15 } from "@trpc/server";
+import { z as z17 } from "zod";
 
 // shared/onboarding.ts
 var AVATAR_STYLES = ["girl", "boy"];
@@ -12417,13 +13008,13 @@ function validateOnboardingStep(step, draft) {
 }
 
 // server/tracks/trackDb.ts
-import { and as and23, asc as asc5, eq as eq26 } from "drizzle-orm";
+import { and as and24, asc as asc5, eq as eq27 } from "drizzle-orm";
 var TrackError = class extends Error {
 };
 var TRACK_FIELDS = ["gradeLevel", "examYear", "targetScoreType", "currentTytNet", "currentAytNet", "currentNet", "targetUniversity", "targetDepartment", "targetRanking", "targetGoal", "targetScore", "selectedSubjectsJson"];
 var pick2 = (row) => Object.fromEntries(TRACK_FIELDS.map((key) => [key, row[key] ?? null]));
 var emptyFields = () => Object.fromEntries(TRACK_FIELDS.map((key) => [key, null]));
-async function requireDb9() {
+async function requireDb10() {
   const db = await getDb();
   if (!db) throw new Error("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
   return db;
@@ -12431,19 +13022,19 @@ async function requireDb9() {
 async function syncActiveTrack(userId) {
   const db = await getDb();
   if (!db) return;
-  const [profile] = await db.select().from(studentProfiles).where(eq26(studentProfiles.userId, userId)).limit(1);
+  const [profile] = await db.select().from(studentProfiles).where(eq27(studentProfiles.userId, userId)).limit(1);
   if (!profile) return;
   const fields2 = pick2(profile);
   await db.insert(studentExamTracks).values({ userId, track: profile.examTrack, ...fields2 }).onConflictDoUpdate({ target: [studentExamTracks.userId, studentExamTracks.track], set: fields2 });
 }
 async function listTracks(userId) {
-  const db = await requireDb9();
-  const [profile] = await db.select({ examTrack: studentProfiles.examTrack, onboardingCompleted: studentProfiles.onboardingCompleted }).from(studentProfiles).where(eq26(studentProfiles.userId, userId)).limit(1);
+  const db = await requireDb10();
+  const [profile] = await db.select({ examTrack: studentProfiles.examTrack, onboardingCompleted: studentProfiles.onboardingCompleted }).from(studentProfiles).where(eq27(studentProfiles.userId, userId)).limit(1);
   if (!profile) return [];
-  let rows = await db.select().from(studentExamTracks).where(eq26(studentExamTracks.userId, userId)).orderBy(asc5(studentExamTracks.createdAt));
+  let rows = await db.select().from(studentExamTracks).where(eq27(studentExamTracks.userId, userId)).orderBy(asc5(studentExamTracks.createdAt));
   if (!rows.some((row) => row.track === profile.examTrack) && profile.onboardingCompleted) {
     await syncActiveTrack(userId);
-    rows = await db.select().from(studentExamTracks).where(eq26(studentExamTracks.userId, userId)).orderBy(asc5(studentExamTracks.createdAt));
+    rows = await db.select().from(studentExamTracks).where(eq27(studentExamTracks.userId, userId)).orderBy(asc5(studentExamTracks.createdAt));
   }
   return rows.map((row) => ({ track: row.track, active: row.track === profile.examTrack, examYear: row.examYear, gradeLevel: row.gradeLevel, selectedSubjects: parseList(row.selectedSubjectsJson) })).sort((a, b) => Number(b.active) - Number(a.active));
 }
@@ -12457,30 +13048,30 @@ var parseList = (value) => {
   }
 };
 async function addTrack(userId, input) {
-  const db = await requireDb9();
+  const db = await requireDb10();
   const def = EXAM_TRACK_DEFS[input.track];
   if (!def.gradeLevels.includes(input.gradeLevel)) throw new TrackError("Bu s\u0131nav i\xE7in e\u011Fitim durumunu yeniden se\xE7.");
   const validSubjects = subjectNamesOf(defaultKindOf(input.track));
   const selected = (input.selectedSubjects ?? []).filter((subject2) => validSubjects.includes(subject2));
   if (def.chooseSubjects && selected.length === 0) throw new TrackError("Girece\u011Fin en az bir alan testini se\xE7.");
   await syncActiveTrack(userId);
-  const [existing] = await db.select({ id: studentExamTracks.id }).from(studentExamTracks).where(and23(eq26(studentExamTracks.userId, userId), eq26(studentExamTracks.track, input.track))).limit(1);
+  const [existing] = await db.select({ id: studentExamTracks.id }).from(studentExamTracks).where(and24(eq27(studentExamTracks.userId, userId), eq27(studentExamTracks.track, input.track))).limit(1);
   if (existing) throw new TrackError(`${def.label} zaten s\u0131navlar\u0131n aras\u0131nda.`);
   await db.insert(studentExamTracks).values({ userId, track: input.track, ...emptyFields(), gradeLevel: input.gradeLevel, examYear: input.examYear, selectedSubjectsJson: selected.length ? JSON.stringify(selected) : null });
   if (input.activate) await switchTrack(userId, input.track);
 }
 async function switchTrack(userId, track) {
-  const db = await requireDb9();
+  const db = await requireDb10();
   await syncActiveTrack(userId);
-  const [target] = await db.select().from(studentExamTracks).where(and23(eq26(studentExamTracks.userId, userId), eq26(studentExamTracks.track, track))).limit(1);
+  const [target] = await db.select().from(studentExamTracks).where(and24(eq27(studentExamTracks.userId, userId), eq27(studentExamTracks.track, track))).limit(1);
   if (!target) throw new TrackError("Bu s\u0131nav hen\xFCz eklenmemi\u015F.");
-  await db.update(studentProfiles).set({ examTrack: track, ...pick2(target) }).where(eq26(studentProfiles.userId, userId));
+  await db.update(studentProfiles).set({ examTrack: track, ...pick2(target) }).where(eq27(studentProfiles.userId, userId));
 }
 async function removeTrack(userId, track) {
-  const db = await requireDb9();
-  const [profile] = await db.select({ examTrack: studentProfiles.examTrack }).from(studentProfiles).where(eq26(studentProfiles.userId, userId)).limit(1);
+  const db = await requireDb10();
+  const [profile] = await db.select({ examTrack: studentProfiles.examTrack }).from(studentProfiles).where(eq27(studentProfiles.userId, userId)).limit(1);
   if (profile?.examTrack === track) throw new TrackError("Aktif s\u0131nav\u0131 \xE7\u0131karamazs\u0131n; \xF6nce ba\u015Fka bir s\u0131nava ge\xE7.");
-  await db.delete(studentExamTracks).where(and23(eq26(studentExamTracks.userId, userId), eq26(studentExamTracks.track, track)));
+  await db.delete(studentExamTracks).where(and24(eq27(studentExamTracks.userId, userId), eq27(studentExamTracks.track, track)));
 }
 
 // server/routers/onboarding.ts
@@ -12488,49 +13079,49 @@ var trackErrors = async (work) => {
   try {
     return await work();
   } catch (error) {
-    if (error instanceof TrackError) throw new TRPCError14({ code: "BAD_REQUEST", message: error.message });
+    if (error instanceof TrackError) throw new TRPCError15({ code: "BAD_REQUEST", message: error.message });
     throw error;
   }
 };
-var enumOrBlank = (values) => z16.union([z16.enum(values), z16.literal("")]);
-var draftSchema = z16.object({
-  preferredName: z16.string().trim().max(120).optional(),
+var enumOrBlank = (values) => z17.union([z17.enum(values), z17.literal("")]);
+var draftSchema = z17.object({
+  preferredName: z17.string().trim().max(120).optional(),
   avatarStyle: enumOrBlank(AVATAR_STYLES).optional(),
   examTrack: enumOrBlank(EXAM_TRACKS).optional(),
   gradeLevel: enumOrBlank(GRADE_LEVELS).optional(),
-  examYear: z16.string().max(4).optional(),
+  examYear: z17.string().max(4).optional(),
   targetScoreType: enumOrBlank(TARGET_SCORE_TYPES).optional(),
-  currentTytNet: z16.string().trim().max(40).optional(),
-  currentAytNet: z16.string().trim().max(40).optional(),
-  currentNet: z16.string().trim().max(40).optional(),
+  currentTytNet: z17.string().trim().max(40).optional(),
+  currentAytNet: z17.string().trim().max(40).optional(),
+  currentNet: z17.string().trim().max(40).optional(),
   mockExamFrequency: enumOrBlank(MOCK_EXAM_FREQUENCIES).optional(),
-  selectedSubjects: z16.array(z16.string().max(60)).max(15).optional(),
-  strongSubjects: z16.array(z16.string().max(40)).max(15).optional(),
-  weakSubjects: z16.array(z16.string().max(40)).max(15).optional(),
+  selectedSubjects: z17.array(z17.string().max(60)).max(15).optional(),
+  strongSubjects: z17.array(z17.string().max(40)).max(15).optional(),
+  weakSubjects: z17.array(z17.string().max(40)).max(15).optional(),
   hasPriorStudyPlan: enumOrBlank(["yes", "no"]).optional(),
-  targetUniversity: z16.string().trim().max(180).optional(),
-  targetDepartment: z16.string().trim().max(180).optional(),
-  targetRanking: z16.string().trim().max(60).optional(),
-  targetGoal: z16.string().trim().max(180).optional(),
-  targetScore: z16.string().trim().max(20).optional(),
-  mainGoal: z16.string().trim().max(500).optional(),
-  shortTermGoal: z16.string().trim().max(500).optional(),
-  longTermGoal: z16.string().trim().max(500).optional(),
-  dailyStudyDuration: z16.string().max(6).optional(),
-  preferredStudyStartTime: z16.string().max(5).optional(),
-  availableStudyDays: z16.array(z16.enum(STUDY_DAYS)).max(7).optional(),
-  preferredStudyTimes: z16.array(z16.enum(STUDY_TIMES)).max(4).optional(),
-  preferredStudyMethods: z16.array(z16.enum(STUDY_METHODS)).max(5).optional(),
-  studyObstacles: z16.string().trim().max(500).optional(),
-  coachingExpectations: z16.array(z16.enum(COACHING_EXPECTATIONS)).max(7).optional(),
+  targetUniversity: z17.string().trim().max(180).optional(),
+  targetDepartment: z17.string().trim().max(180).optional(),
+  targetRanking: z17.string().trim().max(60).optional(),
+  targetGoal: z17.string().trim().max(180).optional(),
+  targetScore: z17.string().trim().max(20).optional(),
+  mainGoal: z17.string().trim().max(500).optional(),
+  shortTermGoal: z17.string().trim().max(500).optional(),
+  longTermGoal: z17.string().trim().max(500).optional(),
+  dailyStudyDuration: z17.string().max(6).optional(),
+  preferredStudyStartTime: z17.string().max(5).optional(),
+  availableStudyDays: z17.array(z17.enum(STUDY_DAYS)).max(7).optional(),
+  preferredStudyTimes: z17.array(z17.enum(STUDY_TIMES)).max(4).optional(),
+  preferredStudyMethods: z17.array(z17.enum(STUDY_METHODS)).max(5).optional(),
+  studyObstacles: z17.string().trim().max(500).optional(),
+  coachingExpectations: z17.array(z17.enum(COACHING_EXPECTATIONS)).max(7).optional(),
   notificationPreference: enumOrBlank(NOTIFICATION_PREFERENCES).optional(),
   coachingStyle: enumOrBlank(COACHING_STYLES).optional(),
-  additionalNotes: z16.string().trim().max(1e3).optional()
+  additionalNotes: z17.string().trim().max(1e3).optional()
 });
-var saveStepInput = z16.object({
-  step: z16.number().int().min(0).max(TOTAL_ONBOARDING_STEPS - 1),
+var saveStepInput = z17.object({
+  step: z17.number().int().min(0).max(TOTAL_ONBOARDING_STEPS - 1),
   data: draftSchema,
-  complete: z16.boolean().optional()
+  complete: z17.boolean().optional()
 });
 function draftToPatch(data) {
   const patch = {};
@@ -12574,7 +13165,7 @@ var onboardingRouter = router({
     const draftForValidation = { ...emptyOnboardingDraft(), examTrack: "YKS", ...input.data };
     const errors = validateOnboardingStep(input.step, draftForValidation);
     if (Object.keys(errors).length > 0) {
-      throw new TRPCError14({ code: "BAD_REQUEST", message: Object.values(errors)[0] });
+      throw new TRPCError15({ code: "BAD_REQUEST", message: Object.values(errors)[0] });
     }
     const saved = await upsertStudentProfileStep(ctx.user.id, input.step, draftToPatch(input.data));
     if (input.complete) await completeOnboarding(ctx.user.id);
@@ -12588,27 +13179,27 @@ var onboardingRouter = router({
   }),
   // Birden çok sınav: liste, ekleme, aktif sınavı değiştirme, çıkarma (bkz. server/tracks/trackDb.ts).
   tracks: protectedProcedure.query(({ ctx }) => listTracks(ctx.user.id)),
-  addTrack: protectedProcedure.input(z16.object({ track: z16.enum(EXAM_TRACKS), gradeLevel: z16.enum(GRADE_LEVELS), examYear: z16.number().int().min(2020).max(2040), selectedSubjects: z16.array(z16.string().max(60)).max(15).optional(), activate: z16.boolean().optional() })).mutation(({ ctx, input }) => trackErrors(async () => {
+  addTrack: protectedProcedure.input(z17.object({ track: z17.enum(EXAM_TRACKS), gradeLevel: z17.enum(GRADE_LEVELS), examYear: z17.number().int().min(2020).max(2040), selectedSubjects: z17.array(z17.string().max(60)).max(15).optional(), activate: z17.boolean().optional() })).mutation(({ ctx, input }) => trackErrors(async () => {
     await addTrack(ctx.user.id, input);
     return listTracks(ctx.user.id);
   })),
-  switchTrack: protectedProcedure.input(z16.object({ track: z16.enum(EXAM_TRACKS) })).mutation(({ ctx, input }) => trackErrors(async () => {
+  switchTrack: protectedProcedure.input(z17.object({ track: z17.enum(EXAM_TRACKS) })).mutation(({ ctx, input }) => trackErrors(async () => {
     await switchTrack(ctx.user.id, input.track);
     return getStudentProfile(ctx.user.id);
   })),
-  removeTrack: protectedProcedure.input(z16.object({ track: z16.enum(EXAM_TRACKS) })).mutation(({ ctx, input }) => trackErrors(async () => {
+  removeTrack: protectedProcedure.input(z17.object({ track: z17.enum(EXAM_TRACKS) })).mutation(({ ctx, input }) => trackErrors(async () => {
     await removeTrack(ctx.user.id, input.track);
     return listTracks(ctx.user.id);
   })),
   // Genel Bakış'taki tek tıkla avatar seçimi (null = nötr tasarım).
-  setAvatar: protectedProcedure.input(z16.object({ avatarStyle: z16.enum(AVATAR_STYLES).nullable() })).mutation(({ ctx, input }) => setStudentAvatarStyle(ctx.user.id, input.avatarStyle)),
+  setAvatar: protectedProcedure.input(z17.object({ avatarStyle: z17.enum(AVATAR_STYLES).nullable() })).mutation(({ ctx, input }) => setStudentAvatarStyle(ctx.user.id, input.avatarStyle)),
   // Pazar akşamı giden haftalık ilerleme e-postası (profil menüsündeki seçenek).
   weeklyDigest: protectedProcedure.query(async ({ ctx }) => ({ enabled: await getWeeklyDigestEnabled(ctx.user.id) })),
-  setWeeklyDigest: protectedProcedure.input(z16.object({ enabled: z16.boolean() })).mutation(async ({ ctx, input }) => ({ enabled: await setWeeklyDigestEnabled(ctx.user.id, input.enabled) }))
+  setWeeklyDigest: protectedProcedure.input(z17.object({ enabled: z17.boolean() })).mutation(async ({ ctx, input }) => ({ enabled: await setWeeklyDigestEnabled(ctx.user.id, input.enabled) }))
 });
 
 // server/routers/subscription.ts
-import { z as z17 } from "zod";
+import { z as z18 } from "zod";
 
 // server/subscriptions/checkout.ts
 import { randomUUID as randomUUID3 } from "node:crypto";
@@ -12688,10 +13279,10 @@ async function completeMockCheckoutForUser(userId, items) {
 }
 
 // server/routers/subscription.ts
-import { TRPCError as TRPCError15 } from "@trpc/server";
-var trackInput = z17.object({ track: z17.enum(EXAM_TRACKS).optional() }).optional();
+import { TRPCError as TRPCError16 } from "@trpc/server";
+var trackInput = z18.object({ track: z18.enum(EXAM_TRACKS).optional() }).optional();
 var resolveTrack = async (userId, track) => track ?? await getStudentExamTrack(userId);
-var quoteItemsInput = z17.array(z17.object({ track: z17.enum(EXAM_TRACKS), tier: z17.enum(PAID_TIERS), period: z17.enum(["monthly", "yearly"]) })).min(1).max(EXAM_TRACKS.length);
+var quoteItemsInput = z18.array(z18.object({ track: z18.enum(EXAM_TRACKS), tier: z18.enum(PAID_TIERS), period: z18.enum(["monthly", "yearly"]) })).min(1).max(EXAM_TRACKS.length);
 var subscriptionRouter = router({
   getPlans: publicProcedure.query(() => listActivePlans()),
   // Client'ın useEntitlement() hook'unun okuduğu tek snapshot (spec §8) — bir sınavın aboneliği.
@@ -12705,15 +13296,15 @@ var subscriptionRouter = router({
     return Promise.all(tracks.map((track) => getEntitlements(ctx.user.id, track)));
   }),
   /** Sepet tutarı: paket (2+ sınav) ya da branş (KPSS aboneliği varken MEB-AGS / A grubu) indirimiyle. */
-  quote: protectedProcedure.input(z17.object({ items: quoteItemsInput })).query(async ({ ctx, input }) => {
+  quote: protectedProcedure.input(z18.object({ items: quoteItemsInput })).query(async ({ ctx, input }) => {
     try {
       return await quoteForUser(ctx.user.id, input.items);
     } catch (error) {
-      if (error instanceof QuoteError) throw new TRPCError15({ code: "BAD_REQUEST", message: error.message });
+      if (error instanceof QuoteError) throw new TRPCError16({ code: "BAD_REQUEST", message: error.message });
       throw error;
     }
   }),
-  cancel: protectedProcedure.input(z17.object({ immediate: z17.boolean().optional(), track: z17.enum(EXAM_TRACKS).optional() })).mutation(async ({ ctx, input }) => {
+  cancel: protectedProcedure.input(z18.object({ immediate: z18.boolean().optional(), track: z18.enum(EXAM_TRACKS).optional() })).mutation(async ({ ctx, input }) => {
     const track = await resolveTrack(ctx.user.id, input.track);
     const current = await getCurrentSubscription(ctx.user.id, track);
     const nextStatus = input.immediate ? "canceled" : current.status;
@@ -12731,7 +13322,7 @@ var subscriptionRouter = router({
     await writeAuditLog({ userId: ctx.user.id, action: "user_resumed", oldState: { status: current.status }, newState: { status: "active", track } });
     return getEntitlements(ctx.user.id, track);
   }),
-  restore: protectedProcedure.input(z17.object({ providerToken: z17.string().min(1) })).mutation(async ({ ctx, input }) => {
+  restore: protectedProcedure.input(z18.object({ providerToken: z18.string().min(1) })).mutation(async ({ ctx, input }) => {
     const provider = paymentProviderFactory();
     const result = await provider.restorePurchase({ userId: ctx.user.id, providerToken: input.providerToken });
     if (!result.valid) throw new Error(result.reason ?? "Sat\u0131n alma do\u011Frulanamad\u0131");
@@ -12741,10 +13332,10 @@ var subscriptionRouter = router({
 });
 
 // server/routers/payment.ts
-import { z as z18 } from "zod";
-import { TRPCError as TRPCError16 } from "@trpc/server";
+import { z as z19 } from "zod";
+import { TRPCError as TRPCError17 } from "@trpc/server";
 var paymentRouter = router({
-  createCheckout: protectedProcedure.input(z18.object({ planCode: z18.string().min(1), successUrl: z18.string().url(), cancelUrl: z18.string().url() })).mutation(async ({ ctx, input }) => {
+  createCheckout: protectedProcedure.input(z19.object({ planCode: z19.string().min(1), successUrl: z19.string().url(), cancelUrl: z19.string().url() })).mutation(async ({ ctx, input }) => {
     const plan = await getPlanByCode(input.planCode);
     if (!plan || !plan.isActive) throw new Error("Ge\xE7ersiz veya pasif plan.");
     const provider = paymentProviderFactory();
@@ -12764,7 +13355,7 @@ var paymentRouter = router({
    */
   // Sepet (`items`: bir ya da birden çok sınav) ya da eski istemciler için tek `planCode`.
   // Tutar sunucuda hesaplanır: paket (2+ sınav) ve branş indirimi (shared/checkoutQuote.ts).
-  completeMockCheckout: protectedProcedure.input(z18.object({ planCode: z18.string().min(1).optional(), items: quoteItemsInput.optional() })).mutation(async ({ ctx, input }) => {
+  completeMockCheckout: protectedProcedure.input(z19.object({ planCode: z19.string().min(1).optional(), items: quoteItemsInput.optional() })).mutation(async ({ ctx, input }) => {
     if (ENV.paymentProvider !== "mock") {
       throw new Error("Bu u\xE7 nokta yaln\u0131zca PAYMENT_PROVIDER=mock iken kullan\u0131labilir.");
     }
@@ -12774,14 +13365,14 @@ var paymentRouter = router({
       const { quote, checkoutId } = await completeMockCheckoutForUser(ctx.user.id, items);
       return { status: "processed", checkoutId, total: quote.total, lines: quote.lines };
     } catch (error) {
-      if (error instanceof QuoteError) throw new TRPCError16({ code: "BAD_REQUEST", message: error.message });
+      if (error instanceof QuoteError) throw new TRPCError17({ code: "BAD_REQUEST", message: error.message });
       throw error;
     }
   })
 });
 
 // server/admin/analyticsService.ts
-import { and as and24, count as count2, countDistinct, eq as eq27, gte as gte14, isNotNull as isNotNull7, lt as lt11, ne as ne4, sql as sql12 } from "drizzle-orm";
+import { and as and25, count as count2, countDistinct, eq as eq28, gte as gte15, isNotNull as isNotNull7, lt as lt12, ne as ne4, sql as sql14 } from "drizzle-orm";
 async function getAdminDashboardKpis() {
   const db = await getDb();
   const empty = {
@@ -12812,17 +13403,17 @@ async function getAdminDashboardKpis() {
   const [approvalCounts, accountStatusCounts, planStatusCounts, activeTodayRow, activeWeekRow, inactive7Row, inactive30Row, totalRow, trialStartedRow, stillTrialingRow, convertedRow, premiumUsersRow] = await Promise.all([
     db.select({ approvalStatus: users.approvalStatus, total: count2() }).from(users).groupBy(users.approvalStatus),
     db.select({ accountStatus: users.accountStatus, total: count2() }).from(users).groupBy(users.accountStatus),
-    db.select({ tier: subscriptionPlans.tier, billingPeriod: subscriptionPlans.billingPeriod, status: subscriptions.status, total: count2() }).from(subscriptions).innerJoin(subscriptionPlans, eq27(subscriptionPlans.id, subscriptions.planId)).groupBy(subscriptionPlans.tier, subscriptionPlans.billingPeriod, subscriptions.status),
-    db.select({ total: count2() }).from(users).where(gte14(users.lastSignedIn, todayStart)),
-    db.select({ total: count2() }).from(users).where(gte14(users.lastSignedIn, weekAgo)),
-    db.select({ total: count2() }).from(users).where(lt11(users.lastSignedIn, weekAgo)),
-    db.select({ total: count2() }).from(users).where(lt11(users.lastSignedIn, monthAgo)),
+    db.select({ tier: subscriptionPlans.tier, billingPeriod: subscriptionPlans.billingPeriod, status: subscriptions.status, total: count2() }).from(subscriptions).innerJoin(subscriptionPlans, eq28(subscriptionPlans.id, subscriptions.planId)).groupBy(subscriptionPlans.tier, subscriptionPlans.billingPeriod, subscriptions.status),
+    db.select({ total: count2() }).from(users).where(gte15(users.lastSignedIn, todayStart)),
+    db.select({ total: count2() }).from(users).where(gte15(users.lastSignedIn, weekAgo)),
+    db.select({ total: count2() }).from(users).where(lt12(users.lastSignedIn, weekAgo)),
+    db.select({ total: count2() }).from(users).where(lt12(users.lastSignedIn, monthAgo)),
     db.select({ total: count2() }).from(users),
     db.select({ total: count2() }).from(subscriptions).where(isNotNull7(subscriptions.trialStartedAt)),
-    db.select({ total: count2() }).from(subscriptions).where(eq27(subscriptions.status, "trialing")),
-    db.select({ total: count2() }).from(subscriptions).where(and24(isNotNull7(subscriptions.trialStartedAt), sql12`${subscriptions.status} in ('active','past_due','grace_period')`)),
+    db.select({ total: count2() }).from(subscriptions).where(eq28(subscriptions.status, "trialing")),
+    db.select({ total: count2() }).from(subscriptions).where(and25(isNotNull7(subscriptions.trialStartedAt), sql14`${subscriptions.status} in ('active','past_due','grace_period')`)),
     // Üye sayıları kişi başına: her sınavın aboneliği ayrı satır, bir aday birden fazla sınava abone olabilir.
-    db.select({ total: countDistinct(subscriptions.userId) }).from(subscriptions).innerJoin(subscriptionPlans, eq27(subscriptionPlans.id, subscriptions.planId)).where(and24(ne4(subscriptionPlans.tier, "free"), sql12`${subscriptions.status} in ('active','trialing','grace_period')`))
+    db.select({ total: countDistinct(subscriptions.userId) }).from(subscriptions).innerJoin(subscriptionPlans, eq28(subscriptionPlans.id, subscriptions.planId)).where(and25(ne4(subscriptionPlans.tier, "free"), sql14`${subscriptions.status} in ('active','trialing','grace_period')`))
   ]);
   const kpis = { ...empty, totalUsers: totalRow[0]?.total ?? 0, activeToday: activeTodayRow[0]?.total ?? 0, activeThisWeek: activeWeekRow[0]?.total ?? 0, inactive7Plus: inactive7Row[0]?.total ?? 0, inactive30Plus: inactive30Row[0]?.total ?? 0 };
   for (const row of approvalCounts) {
@@ -12857,35 +13448,35 @@ var adminAnalyticsRouter = router({
 });
 
 // server/routers/admin/audit.ts
-import { z as z19 } from "zod";
+import { z as z20 } from "zod";
 var adminAuditRouter = router({
-  list: adminProcedure.input(z19.object({ userId: z19.number().int().optional(), limit: z19.number().int().min(1).max(500).default(100) })).query(({ input }) => input.userId ? listAuditLogsForUser(input.userId) : listAllAuditLogs(input.limit))
+  list: adminProcedure.input(z20.object({ userId: z20.number().int().optional(), limit: z20.number().int().min(1).max(500).default(100) })).query(({ input }) => input.userId ? listAuditLogsForUser(input.userId) : listAllAuditLogs(input.limit))
 });
 
 // server/routers/admin/errors.ts
-import { z as z20 } from "zod";
+import { z as z21 } from "zod";
 var adminErrorsRouter = router({
-  list: adminProcedure.input(z20.object({ status: z20.enum(["open", "resolved"]).default("open") })).query(({ input }) => listAppErrors(input.status)),
-  resolve: adminProcedure.input(z20.object({ id: z20.number().int().positive() })).mutation(({ input }) => resolveAppError(input.id))
+  list: adminProcedure.input(z21.object({ status: z21.enum(["open", "resolved"]).default("open") })).query(({ input }) => listAppErrors(input.status)),
+  resolve: adminProcedure.input(z21.object({ id: z21.number().int().positive() })).mutation(({ input }) => resolveAppError(input.id))
 });
 
 // server/routers/admin/payments.ts
-import { z as z21 } from "zod";
+import { z as z22 } from "zod";
 var maskId = (value) => !value ? value : value.length <= 8 ? `${value.slice(0, 2)}\u2022\u2022\u2022\u2022` : `${value.slice(0, 4)}\u2022\u2022\u2022\u2022${value.slice(-4)}`;
 var adminPaymentsRouter = router({
   // Kart numarası/CVV gibi bir alan şemada zaten hiç yok (spec §27/§37 — "ASLA saklanmamalı"); providerPaymentId yine de maskelenir.
-  list: adminProcedure.input(z21.object({ limit: z21.number().int().min(1).max(500).default(100) })).query(async ({ input }) => {
+  list: adminProcedure.input(z22.object({ limit: z22.number().int().min(1).max(500).default(100) })).query(async ({ input }) => {
     const rows = await listAllPaymentsForAdmin(input.limit);
     return rows.map((row) => ({ ...row, providerPaymentId: maskId(row.providerPaymentId) }));
   })
 });
 
 // server/routers/admin/subscriptions.ts
-import { z as z22 } from "zod";
-var trackField = z22.enum(EXAM_TRACKS).default("YKS");
+import { z as z23 } from "zod";
+var trackField = z23.enum(EXAM_TRACKS).default("YKS");
 var adminSubscriptionsRouter = router({
   list: adminProcedure.query(() => listAllSubscriptionsForAdmin()),
-  get: adminProcedure.input(z22.object({ userId: z22.number().int() })).query(async ({ input }) => {
+  get: adminProcedure.input(z23.object({ userId: z23.number().int() })).query(async ({ input }) => {
     const [subscriptions2, payments2, auditLogs] = await Promise.all([listSubscriptionsForUser(input.userId), listPaymentsForUser(input.userId), listAuditLogsForUser(input.userId)]);
     const subscription = subscriptions2.find((row) => row.track === "YKS") ?? subscriptions2[0];
     return { subscription, subscriptions: subscriptions2, payments: payments2, auditLogs };
@@ -12901,7 +13492,7 @@ var adminSubscriptionsRouter = router({
    * schema'yı yeniden tasarlama, duplicate logic oluşturma" ile tutarlı;
    * bkz. docs/admin/ADMIN-COMMAND-CENTER.md "Known limitations".)
    */
-  grant: adminProcedure.input(z22.object({ userId: z22.number().int(), planCode: z22.string().min(1), days: z22.number().int().min(1).max(3650), reason: z22.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
+  grant: adminProcedure.input(z23.object({ userId: z23.number().int(), planCode: z23.string().min(1), days: z23.number().int().min(1).max(3650), reason: z23.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
     const plan = await getPlanByCode(input.planCode);
     if (!plan) throw new Error(`Plan bulunamad\u0131: ${input.planCode}`);
     const track = plan.track ?? "YKS";
@@ -12914,7 +13505,7 @@ var adminSubscriptionsRouter = router({
     await writeAuditLog({ userId: input.userId, adminId: ctx.user.id, action: "manual_grant", oldState: existing ? { status: existing.status } : null, newState: { status: "active", planCode: plan.code, track, until: periodEnd.toISOString() }, reason: input.reason });
     return getSubscriptionByUserId(input.userId, track);
   }),
-  revoke: adminProcedure.input(z22.object({ userId: z22.number().int(), track: trackField, reason: z22.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
+  revoke: adminProcedure.input(z23.object({ userId: z23.number().int(), track: trackField, reason: z23.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
     const existing = await getSubscriptionByUserId(input.userId, input.track);
     if (!existing) throw new Error("Abonelik bulunamad\u0131");
     const freePlan = await getPlanByCode("FREE");
@@ -12924,7 +13515,7 @@ var adminSubscriptionsRouter = router({
     await writeAuditLog({ userId: input.userId, adminId: ctx.user.id, action: "manual_revoke", oldState: { status: existing.status }, newState: { status: "canceled", planCode: "FREE", track: input.track }, reason: input.reason });
     return getSubscriptionByUserId(input.userId, input.track);
   }),
-  cancel: adminProcedure.input(z22.object({ userId: z22.number().int(), track: trackField, reason: z22.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
+  cancel: adminProcedure.input(z23.object({ userId: z23.number().int(), track: trackField, reason: z23.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
     const existing = await getSubscriptionByUserId(input.userId, input.track);
     if (!existing) throw new Error("Abonelik bulunamad\u0131");
     assertValidSubscriptionTransition(existing.status, "canceled");
@@ -12932,7 +13523,7 @@ var adminSubscriptionsRouter = router({
     await writeAuditLog({ userId: input.userId, adminId: ctx.user.id, action: "admin_canceled", oldState: { status: existing.status }, newState: { status: "canceled", track: input.track }, reason: input.reason });
     return getSubscriptionByUserId(input.userId, input.track);
   }),
-  resume: adminProcedure.input(z22.object({ userId: z22.number().int(), track: trackField })).mutation(async ({ ctx, input }) => {
+  resume: adminProcedure.input(z23.object({ userId: z23.number().int(), track: trackField })).mutation(async ({ ctx, input }) => {
     const existing = await getSubscriptionByUserId(input.userId, input.track);
     if (!existing) throw new Error("Abonelik bulunamad\u0131");
     assertValidSubscriptionTransition(existing.status, "active");
@@ -12942,7 +13533,7 @@ var adminSubscriptionsRouter = router({
   }),
   // Fiyatlar: her sınavın planları (satışta olmayanlar dahil) ve fiyat/deneme/satış durumu düzenleme.
   plans: adminProcedure.query(() => listAllPlans()),
-  updatePlan: adminProcedure.input(z22.object({ planId: z22.number().int().positive(), price: z22.number().int().min(0).max(1e8).optional(), trialDays: z22.number().int().min(0).max(60).optional(), isActive: z22.boolean().optional() })).mutation(async ({ ctx, input }) => {
+  updatePlan: adminProcedure.input(z23.object({ planId: z23.number().int().positive(), price: z23.number().int().min(0).max(1e8).optional(), trialDays: z23.number().int().min(0).max(60).optional(), isActive: z23.boolean().optional() })).mutation(async ({ ctx, input }) => {
     const plan = await updatePlanPricing(input.planId, { price: input.price, trialDays: input.trialDays, isActive: input.isActive });
     if (!plan) throw new Error("Plan bulunamad\u0131");
     await writeAuditLog({ userId: ctx.user.id, adminId: ctx.user.id, action: "plan_pricing_updated", newState: { planCode: plan.code, price: plan.price, trialDays: plan.trialDays, isActive: plan.isActive } });
@@ -13020,19 +13611,19 @@ var adminSystemRouter = router({
 });
 
 // server/routers/admin/testimonials.ts
-import { z as z23 } from "zod";
+import { z as z24 } from "zod";
 
 // server/testimonials/testimonials.ts
-import { desc as desc16, eq as eq28 } from "drizzle-orm";
+import { desc as desc17, eq as eq29 } from "drizzle-orm";
 async function listPublishedTestimonials(limit = 9) {
   const db = await getDb();
   if (!db) return [];
-  return db.select({ id: testimonials.id, displayName: testimonials.displayName, detail: testimonials.detail, rating: testimonials.rating, body: testimonials.body }).from(testimonials).where(eq28(testimonials.status, "approved")).orderBy(desc16(testimonials.reviewedAt)).limit(limit);
+  return db.select({ id: testimonials.id, displayName: testimonials.displayName, detail: testimonials.detail, rating: testimonials.rating, body: testimonials.body }).from(testimonials).where(eq29(testimonials.status, "approved")).orderBy(desc17(testimonials.reviewedAt)).limit(limit);
 }
 async function getMyTestimonial(userId) {
   const db = await getDb();
   if (!db) return null;
-  const [row] = await db.select().from(testimonials).where(eq28(testimonials.userId, userId)).limit(1);
+  const [row] = await db.select().from(testimonials).where(eq29(testimonials.userId, userId)).limit(1);
   return row ?? null;
 }
 async function saveMyTestimonial(userId, input) {
@@ -13045,43 +13636,43 @@ async function saveMyTestimonial(userId, input) {
 async function deleteMyTestimonial(userId) {
   const db = await getDb();
   if (!db) return;
-  await db.delete(testimonials).where(eq28(testimonials.userId, userId));
+  await db.delete(testimonials).where(eq29(testimonials.userId, userId));
 }
 async function listTestimonialsForAdmin(status) {
   const db = await getDb();
   if (!db) return [];
-  return db.select({ id: testimonials.id, displayName: testimonials.displayName, detail: testimonials.detail, rating: testimonials.rating, body: testimonials.body, status: testimonials.status, updatedAt: testimonials.updatedAt, userId: testimonials.userId, userName: users.name, userEmail: users.email }).from(testimonials).leftJoin(users, eq28(users.id, testimonials.userId)).where(eq28(testimonials.status, status)).orderBy(desc16(testimonials.updatedAt)).limit(200);
+  return db.select({ id: testimonials.id, displayName: testimonials.displayName, detail: testimonials.detail, rating: testimonials.rating, body: testimonials.body, status: testimonials.status, updatedAt: testimonials.updatedAt, userId: testimonials.userId, userName: users.name, userEmail: users.email }).from(testimonials).leftJoin(users, eq29(users.id, testimonials.userId)).where(eq29(testimonials.status, status)).orderBy(desc17(testimonials.updatedAt)).limit(200);
 }
-async function reviewTestimonial(id5, status, reviewerId) {
+async function reviewTestimonial(id6, status, reviewerId) {
   const db = await getDb();
   if (!db) return;
-  await db.update(testimonials).set({ status, reviewedAt: /* @__PURE__ */ new Date(), reviewedBy: reviewerId }).where(eq28(testimonials.id, id5));
+  await db.update(testimonials).set({ status, reviewedAt: /* @__PURE__ */ new Date(), reviewedBy: reviewerId }).where(eq29(testimonials.id, id6));
 }
 
 // server/routers/admin/testimonials.ts
 var adminTestimonialsRouter = router({
-  list: adminProcedure.input(z23.object({ status: z23.enum(["pending", "approved", "rejected"]).default("pending") })).query(({ input }) => listTestimonialsForAdmin(input.status)),
-  review: adminProcedure.input(z23.object({ id: z23.number().int().positive(), status: z23.enum(["approved", "rejected"]) })).mutation(async ({ ctx, input }) => {
+  list: adminProcedure.input(z24.object({ status: z24.enum(["pending", "approved", "rejected"]).default("pending") })).query(({ input }) => listTestimonialsForAdmin(input.status)),
+  review: adminProcedure.input(z24.object({ id: z24.number().int().positive(), status: z24.enum(["approved", "rejected"]) })).mutation(async ({ ctx, input }) => {
     await reviewTestimonial(input.id, input.status, ctx.user.id);
     return { ok: true };
   })
 });
 
 // server/routers/admin/usage.ts
-import { z as z24 } from "zod";
+import { z as z25 } from "zod";
 var adminUsageRouter = router({
-  get: adminProcedure.input(z24.object({ userId: z24.number().int(), track: z24.enum(EXAM_TRACKS).default("YKS") })).query(({ input }) => getUsageSummaryForUser(input.userId, input.track)),
-  reset: adminProcedure.input(z24.object({ userId: z24.number().int(), featureKey: z24.enum(FEATURE_KEYS) })).mutation(({ ctx, input }) => resetFeatureUsage(input.userId, input.featureKey, USAGE_WINDOW_DAYS, ctx.user.id))
+  get: adminProcedure.input(z25.object({ userId: z25.number().int(), track: z25.enum(EXAM_TRACKS).default("YKS") })).query(({ input }) => getUsageSummaryForUser(input.userId, input.track)),
+  reset: adminProcedure.input(z25.object({ userId: z25.number().int(), featureKey: z25.enum(FEATURE_KEYS) })).mutation(({ ctx, input }) => resetFeatureUsage(input.userId, input.featureKey, USAGE_WINDOW_DAYS, ctx.user.id))
 });
 
 // server/routers/admin/users.ts
-import { z as z25 } from "zod";
+import { z as z26 } from "zod";
 
 // server/admin/adminUserDb.ts
-import { and as and26, count as count3, desc as desc17, eq as eq30, gte as gte16, inArray as inArray12, isNull as isNull15, ilike as ilike5, lt as lt12, or as or7, sql as sql13 } from "drizzle-orm";
+import { and as and27, count as count3, desc as desc18, eq as eq31, gte as gte17, inArray as inArray13, isNull as isNull16, ilike as ilike5, lt as lt13, or as or7, sql as sql15 } from "drizzle-orm";
 
 // server/admin/progressService.ts
-import { and as and25, eq as eq29, gte as gte15 } from "drizzle-orm";
+import { and as and26, eq as eq30, gte as gte16 } from "drizzle-orm";
 
 // shared/progressScore.ts
 var PROGRESS_SCORE_CONFIG = {
@@ -13120,14 +13711,14 @@ async function getStudyProgressScore(userId) {
   const db = await getDb();
   const generatedAt = (/* @__PURE__ */ new Date()).toISOString();
   if (!db) return { overallScore: null, insufficientData: true, components: emptyComponents(), generatedAt };
-  const [userRow] = await db.select({ createdAt: users.createdAt }).from(users).where(eq29(users.id, userId)).limit(1);
+  const [userRow] = await db.select({ createdAt: users.createdAt }).from(users).where(eq30(users.id, userId)).limit(1);
   const accountAgeDays = userRow ? Math.max(0, Math.floor((Date.now() - userRow.createdAt.getTime()) / 864e5)) : 0;
   const windowStart = new Date(Date.now() - CONSISTENCY_WINDOW_DAYS * 864e5);
   const [recentLogs, allLogs, topicRows, examRows] = await Promise.all([
-    db.select({ studyDate: topicStudyLogs.studyDate }).from(topicStudyLogs).where(and25(eq29(topicStudyLogs.userId, userId), gte15(topicStudyLogs.studyDate, windowStart))),
-    db.select({ questions: topicStudyLogs.questions, correct: topicStudyLogs.correct }).from(topicStudyLogs).where(eq29(topicStudyLogs.userId, userId)),
-    db.select({ progress: topicProgress.progress }).from(topicProgress).where(eq29(topicProgress.userId, userId)),
-    db.select({ net: userMockExams.net }).from(userMockExams).where(eq29(userMockExams.userId, userId))
+    db.select({ studyDate: topicStudyLogs.studyDate }).from(topicStudyLogs).where(and26(eq30(topicStudyLogs.userId, userId), gte16(topicStudyLogs.studyDate, windowStart))),
+    db.select({ questions: topicStudyLogs.questions, correct: topicStudyLogs.correct }).from(topicStudyLogs).where(eq30(topicStudyLogs.userId, userId)),
+    db.select({ progress: topicProgress.progress }).from(topicProgress).where(eq30(topicProgress.userId, userId)),
+    db.select({ net: userMockExams.net }).from(userMockExams).where(eq30(userMockExams.userId, userId))
   ]);
   const activeDaysInWindow = new Set(recentLogs.map((row) => toLocalDateKey(row.studyDate))).size;
   const totalQuestions = allLogs.reduce((sum, row) => sum + row.questions, 0);
@@ -13179,16 +13770,16 @@ async function listUsersForAdminPaginated(filters) {
     const digits = filters.search.replace(/\D/g, "").replace(/^0/, "");
     conditions.push(or7(ilike5(users.name, term), ilike5(users.email, term), ...digits.length >= 4 ? [ilike5(users.openId, `dev_phone_%${digits}%`)] : []));
   }
-  if (filters.approvalStatus) conditions.push(eq30(users.approvalStatus, filters.approvalStatus));
-  if (filters.accountStatus) conditions.push(eq30(users.accountStatus, filters.accountStatus));
-  if (filters.planCode) conditions.push(eq30(subscriptionPlans.code, filters.planCode));
-  if (filters.subscriptionStatus) conditions.push(eq30(subscriptions.status, filters.subscriptionStatus));
-  if (filters.activity === "today") conditions.push(gte16(users.lastSignedIn, startOfToday2()));
-  else if (filters.activity === "week") conditions.push(gte16(users.lastSignedIn, daysAgo(7)));
-  else if (filters.activity === "inactive") conditions.push(lt12(users.lastSignedIn, daysAgo(7)));
-  const whereClause = conditions.length ? and26(...conditions) : void 0;
-  const activeSubscription = and26(eq30(subscriptions.userId, users.id), eq30(subscriptions.track, sql13`coalesce((select sp."examTrack" from student_profiles sp where sp."userId" = ${users.id}), 'YKS')`));
-  const countQuery = db.select({ total: count3() }).from(users).leftJoin(subscriptions, activeSubscription).leftJoin(subscriptionPlans, eq30(subscriptionPlans.id, subscriptions.planId));
+  if (filters.approvalStatus) conditions.push(eq31(users.approvalStatus, filters.approvalStatus));
+  if (filters.accountStatus) conditions.push(eq31(users.accountStatus, filters.accountStatus));
+  if (filters.planCode) conditions.push(eq31(subscriptionPlans.code, filters.planCode));
+  if (filters.subscriptionStatus) conditions.push(eq31(subscriptions.status, filters.subscriptionStatus));
+  if (filters.activity === "today") conditions.push(gte17(users.lastSignedIn, startOfToday2()));
+  else if (filters.activity === "week") conditions.push(gte17(users.lastSignedIn, daysAgo(7)));
+  else if (filters.activity === "inactive") conditions.push(lt13(users.lastSignedIn, daysAgo(7)));
+  const whereClause = conditions.length ? and27(...conditions) : void 0;
+  const activeSubscription = and27(eq31(subscriptions.userId, users.id), eq31(subscriptions.track, sql15`coalesce((select sp."examTrack" from student_profiles sp where sp."userId" = ${users.id}), 'YKS')`));
+  const countQuery = db.select({ total: count3() }).from(users).leftJoin(subscriptions, activeSubscription).leftJoin(subscriptionPlans, eq31(subscriptionPlans.id, subscriptions.planId));
   const [{ total }] = await (whereClause ? countQuery.where(whereClause) : countQuery);
   const pageQuery = db.select({
     id: users.id,
@@ -13207,13 +13798,13 @@ async function listUsersForAdminPaginated(filters) {
     subscriptionStatus: subscriptions.status,
     trialEndsAt: subscriptions.trialEndsAt,
     currentPeriodEnd: subscriptions.currentPeriodEnd
-  }).from(users).leftJoin(subscriptions, activeSubscription).leftJoin(subscriptionPlans, eq30(subscriptionPlans.id, subscriptions.planId)).orderBy(desc17(users.createdAt)).limit(pageSize).offset((page2 - 1) * pageSize);
+  }).from(users).leftJoin(subscriptions, activeSubscription).leftJoin(subscriptionPlans, eq31(subscriptionPlans.id, subscriptions.planId)).orderBy(desc18(users.createdAt)).limit(pageSize).offset((page2 - 1) * pageSize);
   const pageRows = await (whereClause ? pageQuery.where(whereClause) : pageQuery);
   const ids = pageRows.map((row) => row.id);
   const [topicAgg, examAgg, studyAgg] = ids.length ? await Promise.all([
-    db.select({ userId: topicProgress.userId, avgProgress: sql13`avg(${topicProgress.progress})`, topicCount: sql13`count(*)::int` }).from(topicProgress).where(inArray12(topicProgress.userId, ids)).groupBy(topicProgress.userId),
-    db.select({ userId: userMockExams.userId, examCount: sql13`count(*)::int`, latestNet: sql13`max(${userMockExams.net})` }).from(userMockExams).where(inArray12(userMockExams.userId, ids)).groupBy(userMockExams.userId),
-    db.select({ userId: topicStudyLogs.userId, totalMinutes: sql13`sum(${topicStudyLogs.minutes})` }).from(topicStudyLogs).where(inArray12(topicStudyLogs.userId, ids)).groupBy(topicStudyLogs.userId)
+    db.select({ userId: topicProgress.userId, avgProgress: sql15`avg(${topicProgress.progress})`, topicCount: sql15`count(*)::int` }).from(topicProgress).where(inArray13(topicProgress.userId, ids)).groupBy(topicProgress.userId),
+    db.select({ userId: userMockExams.userId, examCount: sql15`count(*)::int`, latestNet: sql15`max(${userMockExams.net})` }).from(userMockExams).where(inArray13(userMockExams.userId, ids)).groupBy(userMockExams.userId),
+    db.select({ userId: topicStudyLogs.userId, totalMinutes: sql15`sum(${topicStudyLogs.minutes})` }).from(topicStudyLogs).where(inArray13(topicStudyLogs.userId, ids)).groupBy(topicStudyLogs.userId)
   ]) : [[], [], []];
   const topicMap = new Map(topicAgg.map((row) => [row.userId, row]));
   const examMap = new Map(examAgg.map((row) => [row.userId, row]));
@@ -13247,19 +13838,19 @@ var daysAgo = (days) => new Date(Date.now() - days * 24 * 60 * 60 * 1e3);
 async function suspendUser(userId, adminId, reason) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ accountStatus: "suspended" }).where(eq30(users.id, userId));
+  await db.update(users).set({ accountStatus: "suspended" }).where(eq31(users.id, userId));
   await writeAuditLog({ userId, adminId, action: "user_suspended", newState: { accountStatus: "suspended" }, reason });
 }
 async function reactivateUser(userId, adminId) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ accountStatus: "active" }).where(eq30(users.id, userId));
+  await db.update(users).set({ accountStatus: "active" }).where(eq31(users.id, userId));
   await writeAuditLog({ userId, adminId, action: "user_reactivated", newState: { accountStatus: "active" } });
 }
 async function verifyUserEmailManually(userId, adminId) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ emailVerifiedAt: /* @__PURE__ */ new Date() }).where(and26(eq30(users.id, userId), isNull15(users.emailVerifiedAt)));
+  await db.update(users).set({ emailVerifiedAt: /* @__PURE__ */ new Date() }).where(and27(eq31(users.id, userId), isNull16(users.emailVerifiedAt)));
   await writeAuditLog({ userId, adminId, action: "email_verified_by_admin", newState: { emailVerified: true } });
 }
 function maskId2(value) {
@@ -13270,7 +13861,7 @@ function maskId2(value) {
 async function getUserDetailForAdmin(userId) {
   const db = await getDb();
   if (!db) return null;
-  const [userRow] = await db.select().from(users).where(eq30(users.id, userId)).limit(1);
+  const [userRow] = await db.select().from(users).where(eq31(users.id, userId)).limit(1);
   if (!userRow) return null;
   const activeTrack = await getStudentExamTrack(userId);
   const [entitlements, usage, progressScore, payments2, recentExams, topicRows, recentStudyLogs, auditLogs, profile, bookContentRows, notebook] = await Promise.all([
@@ -13278,12 +13869,12 @@ async function getUserDetailForAdmin(userId) {
     getUsageSummaryForUser(userId, activeTrack),
     getStudyProgressScore(userId),
     listPaymentsForUser(userId),
-    db.select().from(userMockExams).where(eq30(userMockExams.userId, userId)).orderBy(desc17(userMockExams.examDate)).limit(10),
-    db.select().from(topicProgress).where(eq30(topicProgress.userId, userId)),
-    db.select().from(topicStudyLogs).where(eq30(topicStudyLogs.userId, userId)).orderBy(desc17(topicStudyLogs.studyDate)).limit(20),
+    db.select().from(userMockExams).where(eq31(userMockExams.userId, userId)).orderBy(desc18(userMockExams.examDate)).limit(10),
+    db.select().from(topicProgress).where(eq31(topicProgress.userId, userId)),
+    db.select().from(topicStudyLogs).where(eq31(topicStudyLogs.userId, userId)).orderBy(desc18(topicStudyLogs.studyDate)).limit(20),
     listAuditLogsForUser(userId),
     getStudentProfile(userId),
-    db.select({ bookId: userBookContents.bookId, mappingStatus: userBookContents.mappingStatus, mappingMethod: userBookContents.mappingMethod, mappingConfidence: userBookContents.mappingConfidence, source: userBookContents.source, createdAt: userBookContents.createdAt }).from(userBookContents).where(eq30(userBookContents.userId, userId)),
+    db.select({ bookId: userBookContents.bookId, mappingStatus: userBookContents.mappingStatus, mappingMethod: userBookContents.mappingMethod, mappingConfidence: userBookContents.mappingConfidence, source: userBookContents.source, createdAt: userBookContents.createdAt }).from(userBookContents).where(eq31(userBookContents.userId, userId)),
     // Defter: yalnızca sayılar — öğrencinin not içeriği admin tarafından görülmez.
     getNoteStatsForAdmin(userId)
   ]);
@@ -13298,10 +13889,10 @@ async function getUserDetailForAdmin(userId) {
     return map;
   }, /* @__PURE__ */ new Map()).values());
   const bookIds = bookContents.map((book) => book.bookId);
-  const numericIds = bookIds.filter((id5) => /^\d+$/.test(id5)).map(Number);
+  const numericIds = bookIds.filter((id6) => /^\d+$/.test(id6)).map(Number);
   const [customTitles, catalogTitles] = bookIds.length ? await Promise.all([
-    db.select({ bookId: userResourceBooks.bookId, title: userResourceBooks.title }).from(userResourceBooks).where(and26(eq30(userResourceBooks.userId, userId), inArray12(userResourceBooks.bookId, bookIds))),
-    numericIds.length ? db.select({ id: catalogBooks.id, name: catalogBooks.name }).from(catalogBooks).where(inArray12(catalogBooks.id, numericIds)) : Promise.resolve([])
+    db.select({ bookId: userResourceBooks.bookId, title: userResourceBooks.title }).from(userResourceBooks).where(and27(eq31(userResourceBooks.userId, userId), inArray13(userResourceBooks.bookId, bookIds))),
+    numericIds.length ? db.select({ id: catalogBooks.id, name: catalogBooks.name }).from(catalogBooks).where(inArray13(catalogBooks.id, numericIds)) : Promise.resolve([])
   ]) : [[], []];
   const titleById = new Map([...customTitles.map((row) => [row.bookId, row.title]), ...catalogTitles.map((row) => [String(row.id), row.name])]);
   const bookContentsWithTitles = bookContents.map((book) => ({ ...book, title: titleById.get(book.bookId) ?? null }));
@@ -13332,25 +13923,25 @@ async function getUserDetailForAdmin(userId) {
 // server/routers/admin/users.ts
 var adminUsersRouter = router({
   list: adminProcedure.input(
-    z25.object({
-      search: z25.string().max(120).optional(),
-      approvalStatus: z25.enum(["pending", "approved", "rejected"]).optional(),
-      accountStatus: z25.enum(["active", "suspended", "deleted"]).optional(),
-      planCode: z25.string().max(40).optional(),
-      subscriptionStatus: z25.string().max(40).optional(),
-      activity: z25.enum(["today", "week", "inactive"]).optional(),
-      page: z25.number().int().min(1).default(1),
-      pageSize: z25.number().int().min(1).max(100).default(20)
+    z26.object({
+      search: z26.string().max(120).optional(),
+      approvalStatus: z26.enum(["pending", "approved", "rejected"]).optional(),
+      accountStatus: z26.enum(["active", "suspended", "deleted"]).optional(),
+      planCode: z26.string().max(40).optional(),
+      subscriptionStatus: z26.string().max(40).optional(),
+      activity: z26.enum(["today", "week", "inactive"]).optional(),
+      page: z26.number().int().min(1).default(1),
+      pageSize: z26.number().int().min(1).max(100).default(20)
     })
   ).query(({ input }) => listUsersForAdminPaginated(input)),
-  get: adminProcedure.input(z25.object({ userId: z25.number().int() })).query(({ input }) => getUserDetailForAdmin(input.userId)),
+  get: adminProcedure.input(z26.object({ userId: z26.number().int() })).query(({ input }) => getUserDetailForAdmin(input.userId)),
   listPending: adminProcedure.query(() => listPendingUsers()),
-  approve: adminProcedure.input(z25.object({ userId: z25.number().int() })).mutation(({ ctx, input }) => approveUser(input.userId, ctx.user.id)),
-  reject: adminProcedure.input(z25.object({ userId: z25.number().int(), reason: z25.string().max(300).optional() })).mutation(({ ctx, input }) => rejectUser(input.userId, ctx.user.id, input.reason)),
+  approve: adminProcedure.input(z26.object({ userId: z26.number().int() })).mutation(({ ctx, input }) => approveUser(input.userId, ctx.user.id)),
+  reject: adminProcedure.input(z26.object({ userId: z26.number().int(), reason: z26.string().max(300).optional() })).mutation(({ ctx, input }) => rejectUser(input.userId, ctx.user.id, input.reason)),
   // Hesap yaşam döngüsü — subscription iptaliyle KARIŞTIRILMAZ (spec §5/§23): bir kullanıcı aboneliğini iptal edince hesabı askıya alınmaz.
-  suspend: adminProcedure.input(z25.object({ userId: z25.number().int(), reason: z25.string().max(300).optional() })).mutation(({ ctx, input }) => suspendUser(input.userId, ctx.user.id, input.reason)),
-  reactivate: adminProcedure.input(z25.object({ userId: z25.number().int() })).mutation(({ ctx, input }) => reactivateUser(input.userId, ctx.user.id)),
-  verifyEmail: adminProcedure.input(z25.object({ userId: z25.number().int() })).mutation(({ ctx, input }) => verifyUserEmailManually(input.userId, ctx.user.id))
+  suspend: adminProcedure.input(z26.object({ userId: z26.number().int(), reason: z26.string().max(300).optional() })).mutation(({ ctx, input }) => suspendUser(input.userId, ctx.user.id, input.reason)),
+  reactivate: adminProcedure.input(z26.object({ userId: z26.number().int() })).mutation(({ ctx, input }) => reactivateUser(input.userId, ctx.user.id)),
+  verifyEmail: adminProcedure.input(z26.object({ userId: z26.number().int() })).mutation(({ ctx, input }) => verifyUserEmailManually(input.userId, ctx.user.id))
 });
 
 // server/routers/admin/index.ts
@@ -13368,17 +13959,17 @@ var adminRouter = router({
 });
 
 // server/routers/testimonials.ts
-import { z as z26 } from "zod";
+import { z as z27 } from "zod";
 
 // shared/testimonials.ts
 var TESTIMONIAL_LIMITS = { displayName: 60, detail: 80, bodyMin: 20, body: 600 };
 
 // server/routers/testimonials.ts
-var testimonialInput = z26.object({
-  displayName: z26.string().trim().min(2, "G\xF6r\xFCnecek ad\u0131n\u0131 yaz.").max(TESTIMONIAL_LIMITS.displayName),
-  detail: z26.string().trim().max(TESTIMONIAL_LIMITS.detail).optional(),
-  rating: z26.number().int().min(1).max(5),
-  body: z26.string().trim().min(TESTIMONIAL_LIMITS.bodyMin, `Yorumun en az ${TESTIMONIAL_LIMITS.bodyMin} karakter olmal\u0131.`).max(TESTIMONIAL_LIMITS.body)
+var testimonialInput = z27.object({
+  displayName: z27.string().trim().min(2, "G\xF6r\xFCnecek ad\u0131n\u0131 yaz.").max(TESTIMONIAL_LIMITS.displayName),
+  detail: z27.string().trim().max(TESTIMONIAL_LIMITS.detail).optional(),
+  rating: z27.number().int().min(1).max(5),
+  body: z27.string().trim().min(TESTIMONIAL_LIMITS.bodyMin, `Yorumun en az ${TESTIMONIAL_LIMITS.bodyMin} karakter olmal\u0131.`).max(TESTIMONIAL_LIMITS.body)
 });
 var testimonialsRouter = router({
   published: publicProcedure.query(() => listPublishedTestimonials()),
@@ -13391,73 +13982,73 @@ var testimonialsRouter = router({
 });
 
 // server/routers.ts
-var planInput = z27.object({
-  topics: z27.array(z27.object({
-    topic: z27.string(),
-    subject: z27.string(),
-    exam: z27.enum(EXAM_KINDS),
-    progress: z27.number(),
-    status: z27.enum(["Zay\u0131f", "Orta", "\u0130yi"])
+var planInput2 = z28.object({
+  topics: z28.array(z28.object({
+    topic: z28.string(),
+    subject: z28.string(),
+    exam: z28.enum(EXAM_KINDS),
+    progress: z28.number(),
+    status: z28.enum(["Zay\u0131f", "Orta", "\u0130yi"])
   })).max(50),
-  exams: z27.array(z27.object({
-    title: z27.string(),
-    date: z27.string(),
-    net: z27.number(),
-    subjects: z27.record(z27.string(), z27.number()),
-    topicDetails: z27.array(z27.object({
-      subject: z27.string(),
-      topic: z27.string(),
-      questionCount: z27.number(),
-      correct: z27.number(),
-      wrong: z27.number(),
-      blank: z27.number(),
-      accuracy: z27.number(),
-      net: z27.number()
+  exams: z28.array(z28.object({
+    title: z28.string(),
+    date: z28.string(),
+    net: z28.number(),
+    subjects: z28.record(z28.string(), z28.number()),
+    topicDetails: z28.array(z28.object({
+      subject: z28.string(),
+      topic: z28.string(),
+      questionCount: z28.number(),
+      correct: z28.number(),
+      wrong: z28.number(),
+      blank: z28.number(),
+      accuracy: z28.number(),
+      net: z28.number()
     })).optional()
   })).max(10),
-  books: z27.array(z27.object({
-    id: z27.string(),
-    title: z27.string(),
-    subject: z27.string(),
-    exam: z27.enum(EXAM_KINDS),
-    level: z27.enum(["Kolay", "Orta", "Zor"]),
-    pageCount: z27.number().optional(),
-    totalQuestions: z27.number().optional(),
-    accuracy: z27.number().optional(),
-    activeDays: z27.number().optional(),
-    mappings: z27.array(z27.object({ topic: z27.string(), pageStart: z27.number().optional(), pageEnd: z27.number().optional(), testStart: z27.number().optional(), testEnd: z27.number().optional() })).max(50).optional()
+  books: z28.array(z28.object({
+    id: z28.string(),
+    title: z28.string(),
+    subject: z28.string(),
+    exam: z28.enum(EXAM_KINDS),
+    level: z28.enum(["Kolay", "Orta", "Zor"]),
+    pageCount: z28.number().optional(),
+    totalQuestions: z28.number().optional(),
+    accuracy: z28.number().optional(),
+    activeDays: z28.number().optional(),
+    mappings: z28.array(z28.object({ topic: z28.string(), pageStart: z28.number().optional(), pageEnd: z28.number().optional(), testStart: z28.number().optional(), testEnd: z28.number().optional() })).max(50).optional()
   })).max(30).default([]),
-  availableMinutes: z27.number().min(120).max(2400).default(600),
+  availableMinutes: z28.number().min(120).max(2400).default(600),
   // Öğrencinin yerel "bugün"ü (YYYY-MM-DD): plan bugünden başlayan 7 günü kapsar.
-  startDate: z27.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  goal: z27.string().max(120).default("YKS 2027"),
+  startDate: z28.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  goal: z28.string().max(120).default("YKS 2027"),
   // Onboarding'den gelen koçluk bağlamı — tamamen isteğe bağlı, eski
   // istemciler (veya onboarding'i henüz tamamlamamış kullanıcılar) bu alanı
   // hiç göndermeyebilir.
-  studentProfile: z27.object({
+  studentProfile: z28.object({
     // Hedef bilgileri — onboarding'in "Kullanıcı tanımlama" ve "Hedefler"
     // adımlarından. AI planı önceliklendirirken (örn. hedef net/sıralamaya
     // göre tempo) ve dilini kişiselleştirirken kullanır.
-    targetScoreType: z27.string().max(20).optional(),
-    examYear: z27.number().int().optional(),
-    targetUniversity: z27.string().max(180).optional(),
-    targetDepartment: z27.string().max(180).optional(),
-    targetRanking: z27.string().max(60).optional(),
-    dailyStudyDuration: z27.number().int().min(0).max(960).optional(),
-    preferredStudyMethods: z27.array(z27.string().max(40)).max(5).optional(),
-    studyObstacles: z27.string().max(500).optional(),
-    coachingStyle: z27.string().max(40).optional(),
-    mainGoal: z27.string().max(500).optional()
+    targetScoreType: z28.string().max(20).optional(),
+    examYear: z28.number().int().optional(),
+    targetUniversity: z28.string().max(180).optional(),
+    targetDepartment: z28.string().max(180).optional(),
+    targetRanking: z28.string().max(60).optional(),
+    dailyStudyDuration: z28.number().int().min(0).max(960).optional(),
+    preferredStudyMethods: z28.array(z28.string().max(40)).max(5).optional(),
+    studyObstacles: z28.string().max(500).optional(),
+    coachingStyle: z28.string().max(40).optional(),
+    mainGoal: z28.string().max(500).optional()
   }).optional()
 });
-var documentExtractionInput = z27.object({
-  dataUrl: z27.string().min(20).max(12e6),
-  mimeType: z27.enum(["application/pdf", "image/png", "image/jpeg", "image/webp"]),
-  fileName: z27.string().max(180).optional()
+var documentExtractionInput = z28.object({
+  dataUrl: z28.string().min(20).max(12e6),
+  mimeType: z28.enum(["application/pdf", "image/png", "image/jpeg", "image/webp"]),
+  fileName: z28.string().max(180).optional()
 });
-var bookPhotoInput = z27.object({
-  dataUrl: z27.string().min(20).max(12e6),
-  mimeType: z27.enum(["image/png", "image/jpeg", "image/webp"])
+var bookPhotoInput = z28.object({
+  dataUrl: z28.string().min(20).max(12e6),
+  mimeType: z28.enum(["image/png", "image/jpeg", "image/webp"])
 });
 var bookPhotoSchema = {
   type: "object",
@@ -13483,18 +14074,18 @@ var bookPhotoSchema = {
   additionalProperties: false
 };
 var clamp013 = (value) => typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
-var userExamInput = z27.object({
-  title: z27.string().min(1).max(180),
-  exam: z27.enum(EXAM_KINDS),
-  date: z27.string().min(8).max(30),
-  net: z27.number().min(-100).max(200),
-  delta: z27.number().min(-200).max(200),
-  subjects: z27.record(z27.string(), z27.number().min(-50).max(100)),
-  timeSpent: z27.record(z27.string(), z27.number().int().min(0).max(1e3)),
-  topicNets: z27.record(z27.string(), z27.number().min(-50).max(100)),
-  topicDetails: z27.array(z27.object({ subject: z27.string(), topic: z27.string(), questionCount: z27.number().int().min(0), correct: z27.number().int().min(0), wrong: z27.number().int().min(0), blank: z27.number().int().min(0), accuracy: z27.number().min(0).max(100), net: z27.number().min(-50).max(100) })).max(300),
-  importedFrom: z27.enum(["manual", "ocr", "pdf", "csv", "xlsx"]),
-  notes: z27.string().max(5e3).optional()
+var userExamInput = z28.object({
+  title: z28.string().min(1).max(180),
+  exam: z28.enum(EXAM_KINDS),
+  date: z28.string().min(8).max(30),
+  net: z28.number().min(-100).max(200),
+  delta: z28.number().min(-200).max(200),
+  subjects: z28.record(z28.string(), z28.number().min(-50).max(100)),
+  timeSpent: z28.record(z28.string(), z28.number().int().min(0).max(1e3)),
+  topicNets: z28.record(z28.string(), z28.number().min(-50).max(100)),
+  topicDetails: z28.array(z28.object({ subject: z28.string(), topic: z28.string(), questionCount: z28.number().int().min(0), correct: z28.number().int().min(0), wrong: z28.number().int().min(0), blank: z28.number().int().min(0), accuracy: z28.number().min(0).max(100), net: z28.number().min(-50).max(100) })).max(300),
+  importedFrom: z28.enum(["manual", "ocr", "pdf", "csv", "xlsx"]),
+  notes: z28.string().max(5e3).optional()
 });
 var documentExtractionSchema = {
   type: "object",
@@ -13560,17 +14151,17 @@ var appRouter = router({
     }),
     // Profil menüsündeki "Şifre değiştir". Tahmin denemelerine karşı kullanıcı
     // başına 15 dakikada 5 deneme.
-    changePassword: protectedProcedure.input(z27.object({ currentPassword: z27.string().min(1).max(200), newPassword: z27.string().min(1).max(200) })).mutation(async ({ ctx, input }) => {
+    changePassword: protectedProcedure.input(z28.object({ currentPassword: z28.string().min(1).max(200), newPassword: z28.string().min(1).max(200) })).mutation(async ({ ctx, input }) => {
       try {
         checkRateLimit(`change-password:${ctx.user.id}`, 5, 15 * 6e4);
       } catch {
-        throw new TRPCError17({ code: "TOO_MANY_REQUESTS", message: "\xC7ok fazla deneme yapt\u0131n. 15 dakika sonra tekrar dener misin?" });
+        throw new TRPCError18({ code: "TOO_MANY_REQUESTS", message: "\xC7ok fazla deneme yapt\u0131n. 15 dakika sonra tekrar dener misin?" });
       }
       try {
         await changeLocalPassword(ctx.user.id, input.currentPassword, input.newPassword);
         return { success: true };
       } catch (error) {
-        if (error instanceof PasswordChangeError) throw new TRPCError17({ code: "BAD_REQUEST", message: error.message });
+        if (error instanceof PasswordChangeError) throw new TRPCError18({ code: "BAD_REQUEST", message: error.message });
         throw error;
       }
     }),
@@ -13581,7 +14172,7 @@ var appRouter = router({
         return await sendVerificationEmail(ctx.user, ctx.req);
       } catch (error) {
         console.error("[EmailVerification] resend failed:", error instanceof Error ? error.message : error);
-        throw new TRPCError17({ code: "INTERNAL_SERVER_ERROR", message: "Do\u011Frulama maili \u015Fu an g\xF6nderilemedi. Birka\xE7 dakika sonra tekrar dener misin?" });
+        throw new TRPCError18({ code: "INTERNAL_SERVER_ERROR", message: "Do\u011Frulama maili \u015Fu an g\xF6nderilemedi. Birka\xE7 dakika sonra tekrar dener misin?" });
       }
     })
   }),
@@ -13596,20 +14187,20 @@ var appRouter = router({
       ]);
       return { inventory, logs, mappings, switches, customBooks };
     }),
-    addBook: protectedProcedure.input(z27.object({ bookId: z27.string().max(120) })).mutation(({ ctx, input }) => addBookToInventory(ctx.user.id, input.bookId)),
-    removeBook: protectedProcedure.input(z27.object({ bookId: z27.string().max(120) })).mutation(({ ctx, input }) => removeBookFromInventory(ctx.user.id, input.bookId)),
-    addLog: protectedProcedure.input(z27.object({ bookId: z27.string().max(120), topic: z27.string().max(180).optional(), sessionDate: z27.string(), minutes: z27.number().int().min(0).max(1440), questions: z27.number().int().min(0).max(2e3), correct: z27.number().int().min(0).max(2e3), wrong: z27.number().int().min(0).max(2e3), blank: z27.number().int().min(0).max(2e3), pageStart: z27.number().int().min(0).optional(), pageEnd: z27.number().int().min(0).optional(), testStart: z27.number().int().min(0).optional(), testEnd: z27.number().int().min(0).optional() })).mutation(({ ctx, input }) => addBookStudyLog(ctx.user.id, { ...input, sessionDate: new Date(input.sessionDate) })),
-    upsertMapping: protectedProcedure.input(z27.object({ bookId: z27.string().max(120), topic: z27.string().max(180), subject: z27.string().max(80), pageStart: z27.number().int().min(0).optional(), pageEnd: z27.number().int().min(0).optional(), testStart: z27.number().int().min(0).optional(), testEnd: z27.number().int().min(0).optional() })).mutation(({ ctx, input }) => upsertBookTopicMapping(ctx.user.id, input)),
-    addSwitch: protectedProcedure.input(z27.object({ fromBookId: z27.string().max(120).optional(), toBookId: z27.string().max(120), reason: z27.string().max(300) })).mutation(({ ctx, input }) => addSourceSwitch(ctx.user.id, { ...input, switchedAt: /* @__PURE__ */ new Date() })),
-    importBooks: protectedProcedure.input(z27.object({ books: z27.array(z27.object({ id: z27.string().max(120), title: z27.string().min(1).max(180), publisher: z27.string().max(120), subject: z27.string().max(80), exam: z27.enum(EXAM_KINDS), level: z27.enum(["Kolay", "Orta", "Zor"]), format: z27.string().max(120), reason: z27.string().max(1e3), sourceUrl: z27.string().max(500).optional(), pageCount: z27.number().int().min(0).optional(), tone: z27.string().max(20), authors: z27.string().max(300).optional(), isbn: z27.string().max(32).optional() })).min(1).max(500) })).mutation(({ ctx, input }) => addUserResourceBooks(ctx.user.id, input.books)),
+    addBook: protectedProcedure.input(z28.object({ bookId: z28.string().max(120) })).mutation(({ ctx, input }) => addBookToInventory(ctx.user.id, input.bookId)),
+    removeBook: protectedProcedure.input(z28.object({ bookId: z28.string().max(120) })).mutation(({ ctx, input }) => removeBookFromInventory(ctx.user.id, input.bookId)),
+    addLog: protectedProcedure.input(z28.object({ bookId: z28.string().max(120), topic: z28.string().max(180).optional(), sessionDate: z28.string(), minutes: z28.number().int().min(0).max(1440), questions: z28.number().int().min(0).max(2e3), correct: z28.number().int().min(0).max(2e3), wrong: z28.number().int().min(0).max(2e3), blank: z28.number().int().min(0).max(2e3), pageStart: z28.number().int().min(0).optional(), pageEnd: z28.number().int().min(0).optional(), testStart: z28.number().int().min(0).optional(), testEnd: z28.number().int().min(0).optional() })).mutation(({ ctx, input }) => addBookStudyLog(ctx.user.id, { ...input, sessionDate: new Date(input.sessionDate) })),
+    upsertMapping: protectedProcedure.input(z28.object({ bookId: z28.string().max(120), topic: z28.string().max(180), subject: z28.string().max(80), pageStart: z28.number().int().min(0).optional(), pageEnd: z28.number().int().min(0).optional(), testStart: z28.number().int().min(0).optional(), testEnd: z28.number().int().min(0).optional() })).mutation(({ ctx, input }) => upsertBookTopicMapping(ctx.user.id, input)),
+    addSwitch: protectedProcedure.input(z28.object({ fromBookId: z28.string().max(120).optional(), toBookId: z28.string().max(120), reason: z28.string().max(300) })).mutation(({ ctx, input }) => addSourceSwitch(ctx.user.id, { ...input, switchedAt: /* @__PURE__ */ new Date() })),
+    importBooks: protectedProcedure.input(z28.object({ books: z28.array(z28.object({ id: z28.string().max(120), title: z28.string().min(1).max(180), publisher: z28.string().max(120), subject: z28.string().max(80), exam: z28.enum(EXAM_KINDS), level: z28.enum(["Kolay", "Orta", "Zor"]), format: z28.string().max(120), reason: z28.string().max(1e3), sourceUrl: z28.string().max(500).optional(), pageCount: z28.number().int().min(0).optional(), tone: z28.string().max(20), authors: z28.string().max(300).optional(), isbn: z28.string().max(32).optional() })).min(1).max(500) })).mutation(({ ctx, input }) => addUserResourceBooks(ctx.user.id, input.books)),
     // Ortak kitap kaydında ad/yayınevi/ISBN ile arama: kitap kayıtlıysa kapak fotoğrafı (OCR) gerekmez.
-    searchSharedBooks: protectedProcedure.input(z27.object({ q: z27.string().trim().min(2).max(120) })).query(({ input }) => searchSharedBooks(input.q)),
+    searchSharedBooks: protectedProcedure.input(z28.object({ q: z28.string().trim().min(2).max(120) })).query(({ input }) => searchSharedBooks(input.q)),
     // Kitabı kütüphaneye ekler ve ortak kayda bağlar; öğrenci "Bu kitap" dediyse (sharedBookId)
     // onaylanmış içindekiler de kopyalanır, içindekiler fotoğrafı okunmaz.
-    addBookFromCover: protectedProcedure.input(z27.object({
-      sharedBookId: z27.number().int().positive().nullable(),
-      useSharedContents: z27.boolean(),
-      draft: z27.object({ title: z27.string().trim().min(1).max(180), publisher: z27.string().max(120), subject: z27.string().max(80), exam: z27.enum(EXAM_KINDS), level: z27.enum(["Kolay", "Orta", "Zor"]), authors: z27.string().max(300).optional(), isbn: z27.string().max(32).optional(), edition: z27.string().max(120).optional() })
+    addBookFromCover: protectedProcedure.input(z28.object({
+      sharedBookId: z28.number().int().positive().nullable(),
+      useSharedContents: z28.boolean(),
+      draft: z28.object({ title: z28.string().trim().min(1).max(180), publisher: z28.string().max(120), subject: z28.string().max(80), exam: z28.enum(EXAM_KINDS), level: z28.enum(["Kolay", "Orta", "Zor"]), authors: z28.string().max(300).optional(), isbn: z28.string().max(32).optional(), edition: z28.string().max(120).optional() })
     })).mutation(({ ctx, input }) => addBookToLibrary(ctx.user.id, input)),
     // Öğrenci elindeki fiziksel kitabın kapak fotoğrafını çeker (telefon
     // kamerası); LLM görselden kitap adı/yayınevi/ders tahmini çıkarır.
@@ -13654,23 +14245,23 @@ var appRouter = router({
   }),
   exams: router({
     snapshot: protectedProcedure.query(({ ctx }) => getUserMockExams(ctx.user.id)),
-    importMany: protectedProcedure.input(z27.object({ exams: z27.array(userExamInput).min(1).max(200) })).mutation(({ ctx, input }) => addUserMockExams(ctx.user.id, input.exams.map((exam) => ({ ...exam, examDate: new Date(exam.date) }))))
+    importMany: protectedProcedure.input(z28.object({ exams: z28.array(userExamInput).min(1).max(200) })).mutation(({ ctx, input }) => addUserMockExams(ctx.user.id, input.exams.map((exam) => ({ ...exam, examDate: new Date(exam.date) }))))
   }),
   calendar: router({
     snapshot: protectedProcedure.query(({ ctx }) => getStudyCalendar(ctx.user.id)),
-    savePlan: protectedProcedure.input(z27.object({ title: z27.string().max(180), weekStart: z27.string(), weekEnd: z27.string(), summary: z27.string().max(2e3), source: z27.enum(["ai", "manual"]).optional(), replacePrevious: z27.boolean().optional(), sessions: z27.array(z27.object({ sessionDate: z27.string(), title: z27.string().max(180), subject: z27.string().max(80), topic: z27.string().max(180), kind: z27.string().max(40), plannedMinutes: z27.number().int().min(0).max(1440), targetQuestions: z27.number().int().min(0).optional(), targetPages: z27.string().max(80).nullable().optional(), targetTests: z27.string().max(80).nullable().optional() })).max(100) })).mutation(({ ctx, input }) => saveStudyPlan(ctx.user.id, { ...input, weekStart: new Date(input.weekStart), weekEnd: new Date(input.weekEnd), sessions: input.sessions.map((session) => ({ ...session, sessionDate: new Date(session.sessionDate) })) })),
-    completeSession: protectedProcedure.input(z27.object({ sessionId: z27.number().int(), actualMinutes: z27.number().int().min(0).max(1440), actualQuestions: z27.number().int().min(0).max(5e3), correct: z27.number().int().min(0).max(5e3), wrong: z27.number().int().min(0).max(5e3), blank: z27.number().int().min(0).max(5e3), actualPages: z27.number().int().min(0).max(5e3).optional(), note: z27.string().max(1e3).optional() })).mutation(({ ctx, input }) => completeStudySession(ctx.user.id, input)),
-    coachSnapshot: protectedProcedure.input(z27.object({ periodStart: z27.string(), periodEnd: z27.string() })).query(async ({ ctx, input }) => {
+    savePlan: protectedProcedure.input(z28.object({ title: z28.string().max(180), weekStart: z28.string(), weekEnd: z28.string(), summary: z28.string().max(2e3), source: z28.enum(["ai", "manual"]).optional(), replacePrevious: z28.boolean().optional(), sessions: z28.array(z28.object({ sessionDate: z28.string(), title: z28.string().max(180), subject: z28.string().max(80), topic: z28.string().max(180), kind: z28.string().max(40), plannedMinutes: z28.number().int().min(0).max(1440), targetQuestions: z28.number().int().min(0).optional(), targetPages: z28.string().max(80).nullable().optional(), targetTests: z28.string().max(80).nullable().optional() })).max(100) })).mutation(({ ctx, input }) => saveStudyPlan(ctx.user.id, { ...input, weekStart: new Date(input.weekStart), weekEnd: new Date(input.weekEnd), sessions: input.sessions.map((session) => ({ ...session, sessionDate: new Date(session.sessionDate) })) })),
+    completeSession: protectedProcedure.input(z28.object({ sessionId: z28.number().int(), actualMinutes: z28.number().int().min(0).max(1440), actualQuestions: z28.number().int().min(0).max(5e3), correct: z28.number().int().min(0).max(5e3), wrong: z28.number().int().min(0).max(5e3), blank: z28.number().int().min(0).max(5e3), actualPages: z28.number().int().min(0).max(5e3).optional(), note: z28.string().max(1e3).optional() })).mutation(({ ctx, input }) => completeStudySession(ctx.user.id, input)),
+    coachSnapshot: protectedProcedure.input(z28.object({ periodStart: z28.string(), periodEnd: z28.string() })).query(async ({ ctx, input }) => {
       const { sessions, averageAccuracy } = await getPlanAdherenceInputs(ctx.user.id, new Date(input.periodStart), new Date(input.periodEnd));
       return { ...calculatePlanAdherence(sessions, averageAccuracy), averageAccuracy, alerts: await getCoachAlerts(ctx.user.id) };
     }),
-    refreshCoach: protectedProcedure.input(z27.object({ periodStart: z27.string(), periodEnd: z27.string() })).mutation(({ ctx, input }) => savePlanAdherence(ctx.user.id, new Date(input.periodStart), new Date(input.periodEnd))),
+    refreshCoach: protectedProcedure.input(z28.object({ periodStart: z28.string(), periodEnd: z28.string() })).mutation(({ ctx, input }) => savePlanAdherence(ctx.user.id, new Date(input.periodStart), new Date(input.periodEnd))),
     // Üst çubuktaki bildirim zili: okunmamış koç uyarıları (yalnızca okuma; uyarıları refreshCoach üretir).
     alerts: protectedProcedure.query(({ ctx }) => getCoachAlerts(ctx.user.id)),
-    readCoachAlert: protectedProcedure.input(z27.object({ alertId: z27.number().int() })).mutation(({ ctx, input }) => markCoachAlertRead(ctx.user.id, input.alertId)),
-    addFocusLog: protectedProcedure.input(z27.object({ subject: z27.string().max(80), topic: z27.string().max(180), studyDate: z27.string(), minutes: z27.number().int().min(1).max(1440), questions: z27.number().int().min(0).max(5e3), correct: z27.number().int().min(0).max(5e3), wrong: z27.number().int().min(0).max(5e3), blank: z27.number().int().min(0).max(5e3), note: z27.string().max(1e3).optional() })).mutation(({ ctx, input }) => addTopicStudyLog(ctx.user.id, { ...input, studyDate: new Date(input.studyDate), note: input.note ?? null, sessionId: null })),
+    readCoachAlert: protectedProcedure.input(z28.object({ alertId: z28.number().int() })).mutation(({ ctx, input }) => markCoachAlertRead(ctx.user.id, input.alertId)),
+    addFocusLog: protectedProcedure.input(z28.object({ subject: z28.string().max(80), topic: z28.string().max(180), studyDate: z28.string(), minutes: z28.number().int().min(1).max(1440), questions: z28.number().int().min(0).max(5e3), correct: z28.number().int().min(0).max(5e3), wrong: z28.number().int().min(0).max(5e3), blank: z28.number().int().min(0).max(5e3), note: z28.string().max(1e3).optional() })).mutation(({ ctx, input }) => addTopicStudyLog(ctx.user.id, { ...input, studyDate: new Date(input.studyDate), note: input.note ?? null, sessionId: null })),
     // Paragraf pratiği / gece okuması gibi "şimdi yaptım" alışkanlık kayıtları.
-    logRoutine: protectedProcedure.input(z27.object({ title: z27.string().max(180), subject: z27.string().max(80), topic: z27.string().max(180), kind: z27.string().max(40), plannedMinutes: z27.number().int().min(0).max(1440), actualMinutes: z27.number().int().min(0).max(1440), actualPages: z27.number().int().min(0).max(5e3).optional(), note: z27.string().max(1e3).optional(), readingBookId: z27.number().int().positive().optional() })).mutation(async ({ ctx, input }) => {
+    logRoutine: protectedProcedure.input(z28.object({ title: z28.string().max(180), subject: z28.string().max(80), topic: z28.string().max(180), kind: z28.string().max(40), plannedMinutes: z28.number().int().min(0).max(1440), actualMinutes: z28.number().int().min(0).max(1440), actualPages: z28.number().int().min(0).max(5e3).optional(), note: z28.string().max(1e3).optional(), readingBookId: z28.number().int().positive().optional() })).mutation(async ({ ctx, input }) => {
       const { readingBookId, ...routine } = input;
       const calendar = await logCompletedRoutineSession(ctx.user.id, routine);
       const readingBook = readingBookId && input.actualPages ? await recordReadingPages(ctx.user.id, readingBookId, input.actualPages) : null;
@@ -13683,7 +14274,7 @@ var appRouter = router({
     // bir LLM çağrısı yapan (maliyetli) bir işlemdi. Artık giriş + onay
     // zorunlu (`protectedProcedure` içeren `metredFeatureProcedure`) VE
     // free/premium'a göre kullanım kotalı (bkz. shared/entitlements.ts).
-    generate: metredFeatureProcedure("AI_STUDY_PLAN").input(planInput).mutation(async ({ ctx, input }) => {
+    generate: metredFeatureProcedure("AI_STUDY_PLAN").input(planInput2).mutation(async ({ ctx, input }) => {
       const weakTopics = input.topics.filter((topic) => topic.status === "Zay\u0131f");
       const recentExams = input.exams.slice(0, 3);
       const profile = input.studentProfile;
@@ -13763,14 +14354,14 @@ ${JSON.stringify(input.books)}${targetContext}${chosenSubjectsContext}${coaching
         const normalized = normalizeAiPlan(parsed, fallbackPlan);
         if (normalized === fallbackPlan) {
           console.warn("[AI Plan] Unusable AI response; keys:", parsed && typeof parsed === "object" ? Object.keys(parsed).join(",") : typeof parsed);
-          throw new TRPCError17({ code: "INTERNAL_SERVER_ERROR", message: "AI plan\u0131 okunamad\u0131. Tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi." });
+          throw new TRPCError18({ code: "INTERNAL_SERVER_ERROR", message: "AI plan\u0131 okunamad\u0131. Tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi." });
         }
         return normalized;
       } catch (error) {
-        if (error instanceof TRPCError17) throw error;
+        if (error instanceof TRPCError18) throw error;
         console.warn("[AI Plan] LLM failed:", error);
         const quota = error instanceof LlmUnavailableError && error.reason === "quota";
-        throw new TRPCError17({
+        throw new TRPCError18({
           code: quota ? "TOO_MANY_REQUESTS" : "INTERNAL_SERVER_ERROR",
           message: quota ? "Yapay zek\xE2 servisinin kotas\u0131 \u015Fu an dolu; AI plan\u0131n\u0131 birka\xE7 saat sonra tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi." : "AI plan\u0131 \u015Fu an haz\u0131rlanamad\u0131; biraz sonra tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi."
         });
@@ -13812,6 +14403,7 @@ ${JSON.stringify(input.books)}${targetContext}${chosenSubjectsContext}${coaching
   bookContent: bookContentRouter,
   notes: notesRouter,
   wall: wallRouter,
+  studyTasks: studyTasksRouter,
   questions: questionsRouter,
   classSchedule: classScheduleRouter,
   push: pushRouter,
@@ -14435,9 +15027,9 @@ var HeuristicHtmlExtractor = class {
     const pattern = new RegExp(CATEGORY_LINK_PATTERN.source, "g");
     let match;
     while (match = pattern.exec(html)) {
-      const [, id5, url, rawTitle] = match;
-      if (seen.has(id5)) continue;
-      seen.add(id5);
+      const [, id6, url, rawTitle] = match;
+      if (seen.has(id6)) continue;
+      seen.add(id6);
       const title = decodeEntities(rawTitle).trim();
       if (isYksCategory(title, url)) links.push({ url, title });
     }

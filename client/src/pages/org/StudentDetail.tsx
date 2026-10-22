@@ -138,7 +138,7 @@ export function StudentDetail({ scope, studentUserId, compact = false }: { scope
       )}
 
       {tab === "notes" && (
-        <Panel icon={<NotebookPen size={18} />} title="Görüşme notları ve geri bildirim" subtitle="'Yalnızca personel' notları öğrenci görmez. 'Öğrenciye geri bildirim' öğrencinin uygulamasında görünür.">
+        <Panel icon={<NotebookPen size={18} />} title="Görüşme notları ve geri bildirim" subtitle="Notlar mahremdir: yalnızca yazanı ve öğrencinin sorumlu öğretmenleri görür; kurum yöneticisi ve veli görmez. 'Yalnızca personel' notunu öğrenci görmez, 'Öğrenciye geri bildirim' öğrencinin uygulamasında görünür.">
           <textarea value={note.body} onChange={(event) => setNote({ ...note, body: event.target.value })} maxLength={4000} rows={3} placeholder="Görüşme notu ya da öğrenciye geri bildirim…" className="form-input min-h-[84px] resize-y py-2" />
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
             <Segmented value={note.visibility} options={[{ value: "staff", label: "Yalnızca personel" }, { value: "student", label: "Öğrenciye geri bildirim" }]} onChange={(visibility) => setNote({ ...note, visibility })} label="Görünürlük" />

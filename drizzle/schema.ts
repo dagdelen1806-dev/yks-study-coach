@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { customType, decimal, index, integer, pgTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/pg-core";
 import { CATALOG_EXAM_SCOPES, EXAM_KINDS, EXAM_TRACKS, GRADE_LEVELS } from "../shared/exams";
 
@@ -84,6 +85,10 @@ export const userMockExams = pgTable("user_mock_exams", {
   topicNetsJson: text("topicNetsJson").notNull(),
   topicDetailsJson: text("topicDetailsJson").notNull(),
   importedFrom: text("importedFrom", { enum: ["manual", "ocr", "pdf", "csv", "xlsx"] }).default("manual").notNull(),
+  // Karşılaştırılabilirlik (Novara Rehber): yayınevi, kurumun deneme kodu, tam/branş denemesi. Boşsa tam deneme sayılır.
+  publisher: varchar("publisher", { length: 120 }),
+  examCode: varchar("examCode", { length: 60 }),
+  scope: text("scope", { enum: ["full", "branch"] }),
   notes: text("notes"),
   createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -461,6 +466,10 @@ export const studyPlanSessions = pgTable("study_plan_sessions", {
   // Kurum öğretmeninin atadığı görev (bkz. organization_*); öğrencinin kendi görevlerinde boş.
   assignedByUserId: integer("assignedByUserId"),
   assignedOrgId: integer("assignedOrgId"),
+  // Akademik takip dosyasından gelen görev ve öğrencinin geri bildirimi (Tamamladım / Zorlandım / Tekrar etmeliyim).
+  caseActionId: integer("caseActionId"),
+  studentFeedback: text("studentFeedback", { enum: ["done", "struggled", "needs_review"] }),
+  studentFeedbackAt: timestamp("studentFeedbackAt", { withTimezone: true }),
   completedAt: timestamp("completedAt", { withTimezone: true }),
   actualMinutes: integer("actualMinutes"),
   actualQuestions: integer("actualQuestions"),
@@ -540,6 +549,8 @@ export const organizations = pgTable("organizations", {
   kvkkConsent: text("kvkkConsent"),
   kvkkVersion: integer("kvkkVersion").default(1).notNull(),
   kvkkUpdatedAt: timestamp("kvkkUpdatedAt", { withTimezone: true }),
+  // Akademik takip dosyaları (Novara Rehber) kurum bazında açılır; pilotta tek kurum.
+  academicCasesEnabled: integer("academicCasesEnabled").default(0).notNull(),
   createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -670,12 +681,91 @@ export const counselingNotes = pgTable("counseling_notes", {
   studentUserId: integer("studentUserId").notNull(),
   authorUserId: integer("authorUserId").notNull(),
   body: text("body").notNull(),
-  // staff: yalnızca kurum personeli görür; student: öğrenciye geri bildirim olarak gösterilir.
+  // Notlar mahremdir: yalnızca yazanı ve öğrencinin sorumlu öğretmenleri görür (koordinatör/yönetici/veli görmez).
+  // staff: öğrenci görmez; student: öğrenciye geri bildirim olarak da gösterilir.
   visibility: text("visibility", { enum: ["staff", "student"] }).default("staff").notNull(),
+  // Akademik takip dosyasına ait not ise dosya.
+  caseId: integer("caseId"),
   createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => new Date()).notNull(),
 }, (table) => ({
   orgStudentIdx: index("counseling_notes_org_student_idx").on(table.orgId, table.studentUserId),
+}));
+
+// ---------------------------------------------------------------------------
+// Novara Rehber — akademik takip dosyası. Bir dosya bir öğrenci için açılan "akademik inceleme"dir:
+// kanıt (açılış anının anlık görüntüsü), öğretmen eylemleri (inceleme, görüşme, kaynak, plan) ve
+// değerlendirmeler buna bağlanır. Teşhis değildir; sonucu her zaman öğretmen işaretler. Aynı risk
+// için ikinci açık dosya açılmaz (kısmi tekil indeks); aynı eylem iki kez yazılmaz (idempotencyKey).
+// ---------------------------------------------------------------------------
+export const academicCases = pgTable("academic_cases", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  orgId: integer("orgId").notNull(),
+  studentUserId: integer("studentUserId").notNull(),
+  ownerUserId: integer("ownerUserId"),
+  examKind: text("examKind", { enum: EXAM_KINDS }),
+  ruleKey: varchar("ruleKey", { length: 40 }).notNull(),
+  comparabilityKey: varchar("comparabilityKey", { length: 120 }).default("").notNull(),
+  confidence: text("confidence", { enum: ["high", "medium", "low"] }).default("medium").notNull(),
+  status: text("status", { enum: ["open", "in_progress", "evaluating", "closed"] }).default("open").notNull(),
+  outcome: text("outcome", { enum: ["completed", "ongoing", "reassess"] }),
+  openedByUserId: integer("openedByUserId"),
+  openedAt: timestamp("openedAt", { withTimezone: true }).defaultNow().notNull(),
+  closedAt: timestamp("closedAt", { withTimezone: true }),
+  reopenedFromId: integer("reopenedFromId"),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => new Date()).notNull(),
+}, (table) => ({
+  openUnique: uniqueIndex("academic_cases_open_unique").on(table.orgId, table.studentUserId, table.ruleKey, table.comparabilityKey).where(sql`${table.status} <> 'closed'`),
+  orgStatusIdx: index("academic_cases_org_status_idx").on(table.orgId, table.status),
+  orgOwnerIdx: index("academic_cases_org_owner_idx").on(table.orgId, table.ownerUserId, table.status),
+}));
+
+export const caseEvidence = pgTable("case_evidence", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  caseId: integer("caseId").notNull(),
+  orgId: integer("orgId").notNull(),
+  kind: text("kind", { enum: ["exam", "study", "topic", "book", "question"] }).notNull(),
+  refId: integer("refId"),
+  snapshotJson: text("snapshotJson").notNull(),
+  capturedAt: timestamp("capturedAt", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  caseIdx: index("case_evidence_case_idx").on(table.caseId),
+}));
+
+export const caseActions = pgTable("case_actions", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  caseId: integer("caseId").notNull(),
+  orgId: integer("orgId").notNull(),
+  type: text("type", { enum: ["review", "meeting", "resource", "plan", "note"] }).notNull(),
+  payloadJson: text("payloadJson").notNull(),
+  bookId: varchar("bookId", { length: 120 }),
+  bookContentId: integer("bookContentId"),
+  status: text("status", { enum: ["planned", "done", "cancelled"] }).default("done").notNull(),
+  createdByUserId: integer("createdByUserId").notNull(),
+  idempotencyKey: varchar("idempotencyKey", { length: 64 }).notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  idempotencyUnique: uniqueIndex("case_actions_idempotency_unique").on(table.caseId, table.idempotencyKey),
+  caseIdx: index("case_actions_case_idx").on(table.caseId),
+}));
+
+export const caseEvaluations = pgTable("case_evaluations", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  caseId: integer("caseId").notNull(),
+  orgId: integer("orgId").notNull(),
+  baselineExamId: integer("baselineExamId"),
+  followupExamId: integer("followupExamId"),
+  netChange: decimal("netChange", { precision: 6, scale: 2 }),
+  tasksDone: integer("tasksDone").default(0).notNull(),
+  tasksTotal: integer("tasksTotal").default(0).notNull(),
+  studentSignalsJson: text("studentSignalsJson").notNull(),
+  limitedEvidence: integer("limitedEvidence").default(0).notNull(),
+  uncertaintyNote: text("uncertaintyNote"),
+  teacherOutcome: text("teacherOutcome", { enum: ["completed", "ongoing", "reassess"] }).notNull(),
+  evaluatedByUserId: integer("evaluatedByUserId").notNull(),
+  evaluatedAt: timestamp("evaluatedAt", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  caseIdx: index("case_evaluations_case_idx").on(table.caseId),
 }));
 
 export const organizationAuditLogs = pgTable("organization_audit_logs", {
