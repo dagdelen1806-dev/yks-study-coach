@@ -1,5 +1,6 @@
 import { toGray } from "@shared/imaging/image";
 import { analyzeImageQuality, type ImageQualityReport } from "@shared/imaging/quality";
+import { applyScanFilter } from "@shared/imaging/scanFilter";
 
 // Telefon fotoğrafları 5–10 MB olabilir; Vercel'de bir isteğin gövdesi ~4.5 MB
 // ile sınırlı ve OCR için bu çözünürlüğe gerek yok. Fotoğraf tarayıcıda
@@ -34,7 +35,7 @@ export const NO_CROP: CropInsets = { top: 0, right: 0, bottom: 0, left: 0 };
  * için iyileştirme artık SUNUCUDA, kalite analizine göre uyarlamalı yapılır
  * (shared/imaging/pipeline.ts); tarayıcı yalnızca küçültür/döndürür/kırpar.
  */
-export type EnhanceMode = "none" | "photo";
+export type EnhanceMode = "none" | "photo" | "scan";
 
 const percentile = (histogram: Uint32Array, total: number, fraction: number) => {
   let seen = 0;
@@ -119,7 +120,9 @@ export async function compressImage(file: File, options: { maxDimension?: number
       try {
         context.setTransform(1, 0, 0, 1, 0, 0);
         const frame = context.getImageData(0, 0, canvas.width, canvas.height);
-        enhancePhoto(frame.data, canvas.width, canvas.height);
+        // "scan": defter sorusu — gölge/karartı kalkar, kâğıt beyazlar (telefon tarayıcısı gibi).
+        if (options.enhance === "scan") applyScanFilter(frame);
+        else enhancePhoto(frame.data, canvas.width, canvas.height);
         context.putImageData(frame, 0, 0);
       } catch {
         // İyileştirme başarısız olursa (ör. bellek) fotoğraf olduğu gibi gönderilir.

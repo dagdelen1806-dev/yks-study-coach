@@ -494,8 +494,38 @@ var userResourceBooks = pgTable("user_resource_books", {
   // tespitinde en güçlü kimliktir; yoksa yayınevi + normalize ad + yazar.
   authors: varchar("authors", { length: 300 }),
   isbn: varchar("isbn", { length: 32 }),
+  // Ortak kitap kaydındaki karşılığı (shared_books); eski ve elle eklenmiş kitaplarda boş.
+  sharedBookId: integer("sharedBookId"),
   createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
 });
+var sharedBooks = pgTable("shared_books", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  title: varchar("title", { length: 180 }).notNull(),
+  publisher: varchar("publisher", { length: 120 }).notNull(),
+  subject: varchar("subject", { length: 80 }).notNull(),
+  exam: text("exam", { enum: EXAM_KINDS }).notNull(),
+  authors: varchar("authors", { length: 300 }),
+  isbn: varchar("isbn", { length: 32 }),
+  edition: varchar("edition", { length: 120 }),
+  /** normalizeBookText(title) / (publisher): arama ve eşleştirme anahtarı. */
+  titleKey: varchar("titleKey", { length: 200 }).notNull(),
+  publisherKey: varchar("publisherKey", { length: 140 }).notNull(),
+  ownerCount: integer("ownerCount").default(1).notNull(),
+  createdByUserId: integer("createdByUserId"),
+  /** Onaylanmış içindekiler (SaveContentInput[] JSON); yoksa null. */
+  contentsJson: text("contentsJson"),
+  contentsItemCount: integer("contentsItemCount").default(0).notNull(),
+  contentsTopicCount: integer("contentsTopicCount").default(0).notNull(),
+  contentsSource: text("contentsSource", { enum: ["ocr", "manual"] }),
+  contentsByUserId: integer("contentsByUserId"),
+  contentsUpdatedAt: timestamp("contentsUpdatedAt", { withTimezone: true }),
+  contentsReuseCount: integer("contentsReuseCount").default(0).notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull()
+}, (table) => ({
+  isbnIdx: index("shared_books_isbn_idx").on(table.isbn),
+  titleKeyIdx: index("shared_books_title_key_idx").on(table.titleKey)
+}));
 var bookInventory = pgTable("book_inventory", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   userId: integer("userId").notNull(),
@@ -1447,6 +1477,16 @@ function normalizeIsbn(value) {
     return `${body}${check2}`;
   }
   return null;
+}
+var normalizeBookText = (value) => value.replace(/İ/g, "i").replace(/I/g, "\u0131").toLowerCase().replace(/[çğıöşüâîû]/g, (char) => ({ \u00E7: "c", \u011F: "g", \u0131: "i", \u00F6: "o", \u015F: "s", \u00FC: "u", \u00E2: "a", \u00EE: "i", \u00FB: "u" })[char] ?? char).replace(/[^a-z0-9]+/g, " ").trim();
+function isSameBook(a, b) {
+  const isbnA = normalizeIsbn(a.isbn);
+  const isbnB = normalizeIsbn(b.isbn);
+  if (isbnA && isbnB) return isbnA === isbnB;
+  if (normalizeBookText(a.title) !== normalizeBookText(b.title) || normalizeBookText(a.publisher) !== normalizeBookText(b.publisher)) return false;
+  const authorsA = normalizeBookText(a.authors ?? "");
+  const authorsB = normalizeBookText(b.authors ?? "");
+  return !authorsA || !authorsB || authorsA === authorsB;
 }
 
 // shared/curriculum.ts
@@ -3751,9 +3791,9 @@ function computeBookCompletion(input) {
     return { percent: Math.round(done / total * 100), basis: "contents", done, total, accuracy, questions, units };
   }
   if (input.pageCount && input.pageCount > 0) {
-    const covered = /* @__PURE__ */ new Set();
-    for (const range of ranges) for (let page2 = range.pageStart; page2 <= Math.min(range.pageEnd, input.pageCount); page2++) covered.add(page2);
-    return { percent: Math.min(100, Math.round(covered.size / input.pageCount * 100)), basis: "pages", done: covered.size, total: input.pageCount, accuracy, questions, units: [] };
+    const covered2 = /* @__PURE__ */ new Set();
+    for (const range of ranges) for (let page2 = range.pageStart; page2 <= Math.min(range.pageEnd, input.pageCount); page2++) covered2.add(page2);
+    return { percent: Math.min(100, Math.round(covered2.size / input.pageCount * 100)), basis: "pages", done: covered2.size, total: input.pageCount, accuracy, questions, units: [] };
   }
   return { percent: null, basis: "none", done: 0, total: 0, accuracy, questions, units: [] };
 }
@@ -7457,6 +7497,134 @@ async function addRecommendationToPlan(userId, input) {
   return { date, title, minutes: recommendation.minutes };
 }
 
+// server/bookContent/sharedBooks.ts
+import { and as and17, desc as desc12, eq as eq19, isNull as isNull12, or as or5, sql as sql9, ilike as ilike2 } from "drizzle-orm";
+async function requireDb7() {
+  const db = await getDb();
+  if (!db) throw new Error("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
+  return db;
+}
+var SHARED_CONTENTS_MIN_ITEMS = 3;
+var MATCH_MIN_SCORE = 0.6;
+var SEARCH_MIN_SCORE = 0.5;
+var tokensOf = (value) => normalizeBookText(value).split(" ").filter((token) => token.length >= 2);
+var sameToken = (a, b) => a === b || a.length >= 4 && b.length >= 4 && a.slice(0, 5) === b.slice(0, 5);
+var covered = (tokens, pool) => tokens.filter((token) => pool.some((other) => sameToken(token, other))).length;
+var GENERIC_PUBLISHER_WORDS = /* @__PURE__ */ new Set(["yayin", "yayinlari", "yayinevi", "yayincilik", "yayinlar", "yay", "kitap", "kitaplari", "akademi"]);
+var publisherTokens = (value) => tokensOf(value).filter((token) => !GENERIC_PUBLISHER_WORDS.has(token));
+function scoreSharedBook(draft, row) {
+  const isbnA = normalizeIsbn(draft.isbn), isbnB = normalizeIsbn(row.isbn);
+  if (isbnA && isbnB) return isbnA === isbnB ? 1 : 0;
+  const a = tokensOf(draft.title), b = tokensOf(row.title);
+  if (!a.length || !b.length) return 0;
+  const dice2 = (covered(a, b) + covered(b, a)) / (a.length + b.length);
+  const publisherA = publisherTokens(draft.publisher), publisherB = publisherTokens(row.publisher);
+  const publisher = !publisherA.length || !publisherB.length ? 0 : covered(publisherA, publisherB) > 0 ? 0.15 : -0.2;
+  return Math.max(0, Math.min(1, dice2 + publisher));
+}
+var toMatch = (row, score, exact) => ({ id: row.id, title: row.title, publisher: row.publisher, subject: row.subject, exam: row.exam, authors: row.authors, isbn: row.isbn, edition: row.edition, ownerCount: row.ownerCount, contentsItemCount: row.contentsItemCount, contentsTopicCount: row.contentsTopicCount, score: Math.round(score * 100) / 100, exact });
+async function candidatesFor(db, title, isbn) {
+  const tokens = tokensOf(title).filter((token) => token.length >= 3).sort((a, b) => b.length - a.length).slice(0, 3);
+  const conditions = [...tokens.map((token) => ilike2(sharedBooks.titleKey, `%${token.slice(0, 5)}%`)), ...isbn ? [eq19(sharedBooks.isbn, isbn)] : []];
+  if (!conditions.length) return [];
+  return db.select().from(sharedBooks).where(or5(...conditions)).orderBy(desc12(sharedBooks.ownerCount)).limit(100);
+}
+async function findSharedBookMatches(draft, limit = 3) {
+  const db = await requireDb7();
+  const rows = await candidatesFor(db, draft.title, normalizeIsbn(draft.isbn));
+  return rows.map((row) => ({ row, score: scoreSharedBook(draft, row), exact: isSameBook(draft, row) })).filter((item) => item.exact || item.score >= MATCH_MIN_SCORE).sort((a, b) => Number(b.exact) - Number(a.exact) || b.score - a.score || b.row.ownerCount - a.row.ownerCount).slice(0, limit).map((item) => toMatch(item.row, item.exact ? Math.max(item.score, 0.95) : item.score, item.exact));
+}
+async function searchSharedBooks(query, limit = 8) {
+  const db = await requireDb7();
+  const queryTokens = tokensOf(query);
+  if (!queryTokens.length) return [];
+  const isbn = normalizeIsbn(query);
+  const rows = await candidatesFor(db, query, isbn);
+  return rows.map((row) => {
+    if (isbn && row.isbn === isbn) return { row, score: 1 };
+    const pool = [...tokensOf(row.title), ...tokensOf(row.publisher)];
+    return { row, score: covered(queryTokens, pool) / queryTokens.length };
+  }).filter((item) => item.score >= SEARCH_MIN_SCORE).sort((a, b) => b.score - a.score || b.row.ownerCount - a.row.ownerCount).slice(0, limit).map((item) => toMatch(item.row, item.score, item.score === 1));
+}
+async function registerSharedBook(db, userId, draft) {
+  const isbn = normalizeIsbn(draft.isbn);
+  const existing = (await candidatesFor(db, draft.title, isbn)).find((row) => isSameBook({ ...draft, isbn }, row));
+  if (existing) return existing;
+  const [created] = await db.insert(sharedBooks).values({
+    title: draft.title.trim().slice(0, 180),
+    publisher: draft.publisher.trim().slice(0, 120) || "Yay\u0131nevi belirtilmemi\u015F",
+    subject: draft.subject.trim().slice(0, 80) || "Genel",
+    exam: draft.exam,
+    authors: draft.authors?.trim().slice(0, 300) || null,
+    isbn,
+    edition: draft.edition?.trim().slice(0, 120) || null,
+    titleKey: normalizeBookText(draft.title).slice(0, 200),
+    publisherKey: normalizeBookText(draft.publisher).slice(0, 140),
+    ownerCount: 0,
+    createdByUserId: userId
+  }).returning();
+  return created;
+}
+async function addBookToLibrary(userId, input) {
+  const db = await requireDb7();
+  let shared;
+  if (input.sharedBookId) {
+    const [row2] = await db.select().from(sharedBooks).where(eq19(sharedBooks.id, input.sharedBookId)).limit(1);
+    if (!row2) throw new Error("Se\xE7ilen kitap bulunamad\u0131. Kapa\u011F\u0131 foto\u011Frafla ekleyebilirsin.");
+    shared = row2;
+  } else {
+    shared = await registerSharedBook(db, userId, input.draft);
+  }
+  const [owned] = await db.select().from(userResourceBooks).innerJoin(bookInventory, and17(eq19(bookInventory.userId, userResourceBooks.userId), eq19(bookInventory.bookId, userResourceBooks.bookId), isNull12(bookInventory.removedAt))).where(and17(eq19(userResourceBooks.userId, userId), eq19(userResourceBooks.sharedBookId, shared.id))).limit(1);
+  if (owned) return { book: asAddedBook(owned.user_resource_books, shared.id), contentsCopied: 0, topicCount: 0, alreadyOwned: true };
+  const identity = input.sharedBookId ? { title: shared.title, publisher: shared.publisher, subject: shared.subject, exam: shared.exam, authors: shared.authors, isbn: shared.isbn, edition: shared.edition } : input.draft;
+  const edition = identity.edition?.trim();
+  const bookId = `photo-book-${Date.now()}`;
+  const [row] = await db.insert(userResourceBooks).values({
+    userId,
+    bookId,
+    title: identity.title.trim().slice(0, 180),
+    publisher: identity.publisher.trim().slice(0, 120) || "Yay\u0131nevi belirtilmemi\u015F",
+    subject: identity.subject.trim().slice(0, 80) || "Genel",
+    exam: identity.exam,
+    level: input.draft.level,
+    format: "Kaynak",
+    reason: `\xD6\u011Frencinin kendi k\xFCt\xFCphanesinden${input.sharedBookId ? ", ortak kitap kayd\u0131ndan" : ", foto\u011Frafla"} eklendi.${edition ? ` Bask\u0131: ${edition}.` : ""}`,
+    tone: "blue",
+    authors: identity.authors?.trim() || null,
+    isbn: normalizeIsbn(identity.isbn),
+    sharedBookId: shared.id
+  }).returning();
+  await addBookToInventory(userId, bookId);
+  await db.update(sharedBooks).set({ ownerCount: sql9`${sharedBooks.ownerCount} + 1` }).where(eq19(sharedBooks.id, shared.id));
+  let contentsCopied = 0, topicCount = 0;
+  if (input.useSharedContents && shared.contentsJson) {
+    try {
+      const stored = JSON.parse(shared.contentsJson);
+      await replaceBookContents(userId, bookId, stored.subject || row.subject, stored.items, shared.contentsSource ?? "ocr");
+      contentsCopied = stored.items.length;
+      topicCount = shared.contentsTopicCount;
+      await db.update(sharedBooks).set({ contentsReuseCount: sql9`${sharedBooks.contentsReuseCount} + 1` }).where(eq19(sharedBooks.id, shared.id));
+    } catch (error) {
+      console.warn("[shared books] contents reuse failed:", error instanceof Error ? error.message : error);
+    }
+  }
+  return { book: asAddedBook(row, shared.id), contentsCopied, topicCount, alreadyOwned: false };
+}
+function asAddedBook(row, sharedBookId) {
+  return { id: row.bookId, title: row.title, publisher: row.publisher, subject: row.subject, exam: row.exam, level: row.level, format: row.format, reason: row.reason, sourceUrl: row.sourceUrl ?? "", tone: row.tone, authors: row.authors ?? void 0, isbn: row.isbn ?? void 0, sharedBookId };
+}
+async function shareBookContents(userId, bookId, subject2, items, source) {
+  const topicCount = new Set(items.map((item) => item.topicId).filter((id5) => id5 !== null)).size;
+  if (items.length < SHARED_CONTENTS_MIN_ITEMS || topicCount === 0) return false;
+  const db = await requireDb7();
+  const [own] = await db.select({ sharedBookId: userResourceBooks.sharedBookId }).from(userResourceBooks).where(and17(eq19(userResourceBooks.userId, userId), eq19(userResourceBooks.bookId, bookId))).limit(1);
+  if (!own?.sharedBookId) return false;
+  const contentsJson = JSON.stringify({ subject: subject2, items });
+  const updated = await db.update(sharedBooks).set({ contentsJson, contentsItemCount: items.length, contentsTopicCount: topicCount, contentsSource: source, contentsByUserId: userId, contentsUpdatedAt: /* @__PURE__ */ new Date() }).where(and17(eq19(sharedBooks.id, own.sharedBookId), eq19(sharedBooks.contentsItemCount, 0))).returning({ id: sharedBooks.id });
+  return updated.length > 0;
+}
+
 // server/bookContent/aiMapper.ts
 async function suggestTopicsWithAi(titles, candidates, invoke = invokeLLM) {
   const { enabled, maxCandidates, maxConfidence, minConfidence } = bookContentConfig.aiMapping;
@@ -7695,7 +7863,7 @@ async function extractPlainTextFromImage(imageDataUrl) {
 
 // server/bookContent/ocrCache.ts
 import { createHash as createHash3 } from "node:crypto";
-import { and as and17, eq as eq19, lt as lt9 } from "drizzle-orm";
+import { and as and18, eq as eq20, lt as lt9 } from "drizzle-orm";
 var OCR_PIPELINE_VERSION = "toc-2.0";
 var CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1e3;
 var disabledReason = null;
@@ -7710,7 +7878,7 @@ async function readOcrCache(userId, hash) {
   try {
     const db = await getDb();
     if (!db) return null;
-    const [row] = await db.select({ resultJson: ocrPageCache.resultJson, createdAt: ocrPageCache.createdAt }).from(ocrPageCache).where(and17(eq19(ocrPageCache.userId, userId), eq19(ocrPageCache.imageHash, hash), eq19(ocrPageCache.pipelineVersion, OCR_PIPELINE_VERSION))).limit(1);
+    const [row] = await db.select({ resultJson: ocrPageCache.resultJson, createdAt: ocrPageCache.createdAt }).from(ocrPageCache).where(and18(eq20(ocrPageCache.userId, userId), eq20(ocrPageCache.imageHash, hash), eq20(ocrPageCache.pipelineVersion, OCR_PIPELINE_VERSION))).limit(1);
     if (!row || Date.now() - new Date(row.createdAt).getTime() > CACHE_TTL_MS) return null;
     return JSON.parse(row.resultJson);
   } catch (error) {
@@ -7725,7 +7893,7 @@ async function writeOcrCache(userId, hash, result) {
     if (!db) return;
     const resultJson = JSON.stringify(result);
     await db.insert(ocrPageCache).values({ userId, imageHash: hash, pipelineVersion: OCR_PIPELINE_VERSION, resultJson }).onConflictDoUpdate({ target: [ocrPageCache.userId, ocrPageCache.imageHash, ocrPageCache.pipelineVersion], set: { resultJson, createdAt: /* @__PURE__ */ new Date() } });
-    await db.delete(ocrPageCache).where(and17(eq19(ocrPageCache.userId, userId), lt9(ocrPageCache.createdAt, new Date(Date.now() - CACHE_TTL_MS))));
+    await db.delete(ocrPageCache).where(and18(eq20(ocrPageCache.userId, userId), lt9(ocrPageCache.createdAt, new Date(Date.now() - CACHE_TTL_MS))));
   } catch (error) {
     disable(error);
   }
@@ -9065,7 +9233,9 @@ var bookContentRouter = router({
       if (item.pageStart !== null && item.pageEnd !== null && item.pageEnd < item.pageStart) throw new TRPCError2({ code: "BAD_REQUEST", message: `"${item.label}" sat\u0131r\u0131nda biti\u015F sayfas\u0131 ba\u015Flang\u0131\xE7tan k\xFC\xE7\xFCk.` });
     }
     try {
-      return await replaceBookContents(ctx.user.id, input.bookId, input.subject, input.items, input.source);
+      const saved = await replaceBookContents(ctx.user.id, input.bookId, input.subject, input.items, input.source);
+      await shareBookContents(ctx.user.id, input.bookId, input.subject, input.items, input.source).catch((error) => console.warn("[shared books] share failed:", error));
+      return saved;
     } catch (error) {
       throw new TRPCError2({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "\u0130\xE7erik kaydedilemedi." });
     }
@@ -9707,7 +9877,7 @@ import { TRPCError as TRPCError5 } from "@trpc/server";
 import { z as z7 } from "zod";
 
 // server/schedule/classScheduleDb.ts
-import { asc as asc3, eq as eq20 } from "drizzle-orm";
+import { asc as asc3, eq as eq21 } from "drizzle-orm";
 
 // shared/classSchedule.ts
 var SCHEDULE_SOURCES = ["school", "course", "tutor", "other"];
@@ -9825,14 +9995,14 @@ function parsePeriods(raw) {
 async function getClassSchedule(userId) {
   const db = await getDb();
   if (!db) return { periods: DEFAULT_SCHOOL_PERIODS, blocks: [] };
-  const [profile] = await db.select({ schoolPeriodsJson: studentProfiles.schoolPeriodsJson }).from(studentProfiles).where(eq20(studentProfiles.userId, userId)).limit(1);
-  const rows = await db.select({ source: classScheduleBlocks.source, dayOfWeek: classScheduleBlocks.dayOfWeek, startTime: classScheduleBlocks.startTime, endTime: classScheduleBlocks.endTime, subject: classScheduleBlocks.subject, label: classScheduleBlocks.label }).from(classScheduleBlocks).where(eq20(classScheduleBlocks.userId, userId)).orderBy(asc3(classScheduleBlocks.dayOfWeek), asc3(classScheduleBlocks.startTime));
+  const [profile] = await db.select({ schoolPeriodsJson: studentProfiles.schoolPeriodsJson }).from(studentProfiles).where(eq21(studentProfiles.userId, userId)).limit(1);
+  const rows = await db.select({ source: classScheduleBlocks.source, dayOfWeek: classScheduleBlocks.dayOfWeek, startTime: classScheduleBlocks.startTime, endTime: classScheduleBlocks.endTime, subject: classScheduleBlocks.subject, label: classScheduleBlocks.label }).from(classScheduleBlocks).where(eq21(classScheduleBlocks.userId, userId)).orderBy(asc3(classScheduleBlocks.dayOfWeek), asc3(classScheduleBlocks.startTime));
   return { periods: parsePeriods(profile?.schoolPeriodsJson), blocks: rows };
 }
 async function getPlanScheduleContext(userId, startDate) {
   const db = await getDb();
   if (!db) return null;
-  const [profile] = await db.select({ start: studentProfiles.preferredStudyStartTime }).from(studentProfiles).where(eq20(studentProfiles.userId, userId)).limit(1);
+  const [profile] = await db.select({ start: studentProfiles.preferredStudyStartTime }).from(studentProfiles).where(eq21(studentProfiles.userId, userId)).limit(1);
   const { blocks } = await getClassSchedule(userId);
   return describeWeekForPlan([...blocks, ...await getCourseBlocks(userId)], startDate, profile?.start && isValidTime(profile.start) ? profile.start : "16:00");
 }
@@ -9848,7 +10018,7 @@ async function saveClassSchedule(userId, schedule) {
   const blocks = schedule.blocks.map((block) => ({ ...block, label: block.label.trim() || block.subject || "Ders" }));
   const periodsJson = JSON.stringify(schedule.periods);
   await db.transaction(async (tx) => {
-    await tx.delete(classScheduleBlocks).where(eq20(classScheduleBlocks.userId, userId));
+    await tx.delete(classScheduleBlocks).where(eq21(classScheduleBlocks.userId, userId));
     if (blocks.length) await tx.insert(classScheduleBlocks).values(blocks.map((block) => ({ ...block, userId })));
     await tx.insert(studentProfiles).values({ userId, schoolPeriodsJson: periodsJson }).onConflictDoUpdate({ target: studentProfiles.userId, set: { schoolPeriodsJson: periodsJson } });
   });
@@ -10075,7 +10245,7 @@ import { TRPCError as TRPCError7 } from "@trpc/server";
 import { z as z9 } from "zod";
 
 // server/reading/readingDb.ts
-import { and as and18, count, desc as desc12, eq as eq21 } from "drizzle-orm";
+import { and as and19, count, desc as desc13, eq as eq22 } from "drizzle-orm";
 
 // shared/reading.ts
 var MAX_READING_BOOKS = 50;
@@ -10094,16 +10264,16 @@ var columns = { id: readingBooks.id, title: readingBooks.title, author: readingB
 async function listReadingBooks(userId) {
   const db = await getDb();
   if (!db) return [];
-  const rows = await db.select(columns).from(readingBooks).where(eq21(readingBooks.userId, userId)).orderBy(desc12(readingBooks.updatedAt));
+  const rows = await db.select(columns).from(readingBooks).where(eq22(readingBooks.userId, userId)).orderBy(desc13(readingBooks.updatedAt));
   return [...rows.filter((row) => row.status === "reading"), ...rows.filter((row) => row.status === "finished")];
 }
 async function addReadingBook(userId, input) {
   const db = await getDb();
   if (!db) throw new ReadingError("Veritaban\u0131na ula\u015F\u0131lamad\u0131.");
-  const [{ total }] = await db.select({ total: count() }).from(readingBooks).where(eq21(readingBooks.userId, userId));
+  const [{ total }] = await db.select({ total: count() }).from(readingBooks).where(eq22(readingBooks.userId, userId));
   if (total >= MAX_READING_BOOKS) throw new ReadingError(`En fazla ${MAX_READING_BOOKS} okuma kitab\u0131 eklenebilir.`);
   const result = await db.insert(readingBooks).values({ userId, title: input.title.trim(), author: input.author?.trim() || null, totalPages: input.totalPages || null }).returning({ id: readingBooks.id });
-  const [row] = await db.select(columns).from(readingBooks).where(and18(eq21(readingBooks.id, Number(result[0].id)), eq21(readingBooks.userId, userId))).limit(1);
+  const [row] = await db.select(columns).from(readingBooks).where(and19(eq22(readingBooks.id, Number(result[0].id)), eq22(readingBooks.userId, userId))).limit(1);
   return row;
 }
 async function updateReadingBook(userId, id5, patch) {
@@ -10115,23 +10285,23 @@ async function updateReadingBook(userId, id5, patch) {
     values.status = patch.status;
     values.finishedAt = patch.status === "finished" ? /* @__PURE__ */ new Date() : null;
   }
-  if (Object.keys(values).length) await db.update(readingBooks).set(values).where(and18(eq21(readingBooks.id, id5), eq21(readingBooks.userId, userId)));
-  const [row] = await db.select(columns).from(readingBooks).where(and18(eq21(readingBooks.id, id5), eq21(readingBooks.userId, userId))).limit(1);
+  if (Object.keys(values).length) await db.update(readingBooks).set(values).where(and19(eq22(readingBooks.id, id5), eq22(readingBooks.userId, userId)));
+  const [row] = await db.select(columns).from(readingBooks).where(and19(eq22(readingBooks.id, id5), eq22(readingBooks.userId, userId))).limit(1);
   if (!row) throw new ReadingError("Kitap bulunamad\u0131.");
   return row;
 }
 async function removeReadingBook(userId, id5) {
   const db = await getDb();
   if (!db) return;
-  await db.delete(readingBooks).where(and18(eq21(readingBooks.id, id5), eq21(readingBooks.userId, userId)));
+  await db.delete(readingBooks).where(and19(eq22(readingBooks.id, id5), eq22(readingBooks.userId, userId)));
 }
 async function recordReadingPages(userId, id5, pages2) {
   const db = await getDb();
   if (!db) return null;
-  const [book] = await db.select(columns).from(readingBooks).where(and18(eq21(readingBooks.id, id5), eq21(readingBooks.userId, userId))).limit(1);
+  const [book] = await db.select(columns).from(readingBooks).where(and19(eq22(readingBooks.id, id5), eq22(readingBooks.userId, userId))).limit(1);
   if (!book) return null;
   const next = applyReadingProgress(book, pages2);
-  await db.update(readingBooks).set({ pagesRead: next.pagesRead, status: next.status, ...next.justFinished ? { finishedAt: /* @__PURE__ */ new Date() } : {} }).where(and18(eq21(readingBooks.id, id5), eq21(readingBooks.userId, userId)));
+  await db.update(readingBooks).set({ pagesRead: next.pagesRead, status: next.status, ...next.justFinished ? { finishedAt: /* @__PURE__ */ new Date() } : {} }).where(and19(eq22(readingBooks.id, id5), eq22(readingBooks.userId, userId)));
   return { ...book, pagesRead: next.pagesRead, status: next.status, justFinished: next.justFinished };
 }
 
@@ -10852,7 +11022,7 @@ import { TRPCError as TRPCError12 } from "@trpc/server";
 import { z as z14 } from "zod";
 
 // server/resourceCatalog/catalogQueries.ts
-import { and as and19, asc as asc4, desc as desc13, eq as eq22, inArray as inArray9, isNull as isNull12, ilike as ilike2, sql as sql9 } from "drizzle-orm";
+import { and as and20, asc as asc4, desc as desc14, eq as eq23, inArray as inArray9, isNull as isNull13, ilike as ilike3, sql as sql10 } from "drizzle-orm";
 var DEFAULT_PAGE_SIZE = 24;
 var MAX_PAGE_SIZE = 60;
 async function listCatalogBooks(filters, page2) {
@@ -10860,23 +11030,23 @@ async function listCatalogBooks(filters, page2) {
   if (!db) return { items: [], total: 0 };
   const pageSize = Math.max(1, Math.min(page2.pageSize || DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE));
   const offset = Math.max(0, (page2.page - 1) * pageSize);
-  const conditions = [eq22(catalogBooks.active, 1)];
-  if (filters.exam) conditions.push(eq22(catalogBooks.examScope, filters.exam));
-  if (filters.subject) conditions.push(eq22(catalogBooks.subject, filters.subject));
-  if (filters.publisherId) conditions.push(eq22(catalogBooks.publisherId, filters.publisherId));
-  if (filters.bookType) conditions.push(eq22(catalogBooks.bookType, filters.bookType));
-  if (filters.difficulty) conditions.push(eq22(catalogBooks.difficultyLabel, filters.difficulty));
-  if (filters.search) conditions.push(ilike2(catalogBooks.name, `%${filters.search}%`));
+  const conditions = [eq23(catalogBooks.active, 1)];
+  if (filters.exam) conditions.push(eq23(catalogBooks.examScope, filters.exam));
+  if (filters.subject) conditions.push(eq23(catalogBooks.subject, filters.subject));
+  if (filters.publisherId) conditions.push(eq23(catalogBooks.publisherId, filters.publisherId));
+  if (filters.bookType) conditions.push(eq23(catalogBooks.bookType, filters.bookType));
+  if (filters.difficulty) conditions.push(eq23(catalogBooks.difficultyLabel, filters.difficulty));
+  if (filters.search) conditions.push(ilike3(catalogBooks.name, `%${filters.search}%`));
   let bookIdsForTopic = null;
   if (filters.topic) {
-    const topicRows = await db.select({ bookId: bookCurriculumTopics.bookId }).from(bookCurriculumTopics).innerJoin(yksTopics, eq22(bookCurriculumTopics.topicId, yksTopics.id)).where(eq22(yksTopics.topic, filters.topic));
+    const topicRows = await db.select({ bookId: bookCurriculumTopics.bookId }).from(bookCurriculumTopics).innerJoin(yksTopics, eq23(bookCurriculumTopics.topicId, yksTopics.id)).where(eq23(yksTopics.topic, filters.topic));
     bookIdsForTopic = topicRows.map((r) => r.bookId);
     if (bookIdsForTopic.length === 0) return { items: [], total: 0 };
     conditions.push(inArray9(catalogBooks.id, bookIdsForTopic));
   }
-  const where = and19(...conditions);
-  const [{ count: count4 }] = await db.select({ count: sql9`count(*)::int` }).from(catalogBooks).where(where);
-  let rows = await db.select().from(catalogBooks).where(where).orderBy(desc13(catalogBooks.createdAt)).limit(pageSize).offset(offset);
+  const where = and20(...conditions);
+  const [{ count: count4 }] = await db.select({ count: sql10`count(*)::int` }).from(catalogBooks).where(where);
+  let rows = await db.select().from(catalogBooks).where(where).orderBy(desc14(catalogBooks.createdAt)).limit(pageSize).offset(offset);
   if (filters.minPrice !== void 0 || filters.maxPrice !== void 0) {
     const ids = rows.map((r) => r.id);
     const offerRows2 = ids.length ? await db.select().from(bookOffers).where(inArray9(bookOffers.bookId, ids)) : [];
@@ -10927,13 +11097,13 @@ async function listCatalogBooksForAdmin(filters, page2) {
   const pageSize = Math.max(1, Math.min(page2.pageSize || DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE));
   const offset = Math.max(0, (page2.page - 1) * pageSize);
   const conditions = [];
-  if (filters.active !== void 0) conditions.push(eq22(catalogBooks.active, filters.active ? 1 : 0));
-  if (filters.subject) conditions.push(eq22(catalogBooks.subject, filters.subject));
-  if (filters.search) conditions.push(ilike2(catalogBooks.name, `%${filters.search}%`));
-  const where = conditions.length ? and19(...conditions) : void 0;
-  const countQuery = db.select({ count: sql9`count(*)::int` }).from(catalogBooks);
+  if (filters.active !== void 0) conditions.push(eq23(catalogBooks.active, filters.active ? 1 : 0));
+  if (filters.subject) conditions.push(eq23(catalogBooks.subject, filters.subject));
+  if (filters.search) conditions.push(ilike3(catalogBooks.name, `%${filters.search}%`));
+  const where = conditions.length ? and20(...conditions) : void 0;
+  const countQuery = db.select({ count: sql10`count(*)::int` }).from(catalogBooks);
   const [{ count: count4 }] = await (where ? countQuery.where(where) : countQuery);
-  const rowsQuery = db.select().from(catalogBooks).orderBy(desc13(catalogBooks.createdAt)).limit(pageSize).offset(offset);
+  const rowsQuery = db.select().from(catalogBooks).orderBy(desc14(catalogBooks.createdAt)).limit(pageSize).offset(offset);
   const rows = await (where ? rowsQuery.where(where) : rowsQuery);
   const publisherIds = Array.from(new Set(rows.map((r) => r.publisherId).filter((id5) => id5 !== null)));
   const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray9(publishers.id, publisherIds)) : [];
@@ -10957,13 +11127,13 @@ async function listCatalogBooksForAdmin(filters, page2) {
 async function getCatalogBookBySlug(slug) {
   const db = await getDb();
   if (!db) return null;
-  const rows = await db.select().from(catalogBooks).where(eq22(catalogBooks.slug, slug)).limit(1);
+  const rows = await db.select().from(catalogBooks).where(eq23(catalogBooks.slug, slug)).limit(1);
   const book = rows[0];
   if (!book) return null;
   const [publisherRow, offerRows, topicRows] = await Promise.all([
-    book.publisherId ? db.select().from(publishers).where(eq22(publishers.id, book.publisherId)).limit(1) : Promise.resolve([]),
-    db.select().from(bookOffers).where(eq22(bookOffers.bookId, book.id)),
-    db.select({ topic: yksTopics.topic, subject: yksTopics.subject, confidence: bookCurriculumTopics.confidence, isVerified: bookCurriculumTopics.isVerified }).from(bookCurriculumTopics).innerJoin(yksTopics, eq22(bookCurriculumTopics.topicId, yksTopics.id)).where(eq22(bookCurriculumTopics.bookId, book.id))
+    book.publisherId ? db.select().from(publishers).where(eq23(publishers.id, book.publisherId)).limit(1) : Promise.resolve([]),
+    db.select().from(bookOffers).where(eq23(bookOffers.bookId, book.id)),
+    db.select({ topic: yksTopics.topic, subject: yksTopics.subject, confidence: bookCurriculumTopics.confidence, isVerified: bookCurriculumTopics.isVerified }).from(bookCurriculumTopics).innerJoin(yksTopics, eq23(bookCurriculumTopics.topicId, yksTopics.id)).where(eq23(bookCurriculumTopics.bookId, book.id))
   ]);
   return {
     id: book.id,
@@ -10983,16 +11153,16 @@ async function getCatalogBookBySlug(slug) {
 async function listPublishersForFilter() {
   const db = await getDb();
   if (!db) return [];
-  return db.select({ id: publishers.id, name: publishers.name }).from(publishers).where(eq22(publishers.isActive, 1)).orderBy(asc4(publishers.name));
+  return db.select({ id: publishers.id, name: publishers.name }).from(publishers).where(eq23(publishers.isActive, 1)).orderBy(asc4(publishers.name));
 }
 async function listCatalogBooksForRecommendation(subject2) {
   const db = await getDb();
   if (!db) return [];
-  const conditions = [eq22(catalogBooks.active, 1)];
-  if (subject2) conditions.push(eq22(catalogBooks.subject, subject2));
-  const rows = await db.select().from(catalogBooks).where(and19(...conditions));
+  const conditions = [eq23(catalogBooks.active, 1)];
+  if (subject2) conditions.push(eq23(catalogBooks.subject, subject2));
+  const rows = await db.select().from(catalogBooks).where(and20(...conditions));
   const bookIds = rows.map((r) => r.id);
-  const topicRows = bookIds.length ? await db.select({ bookId: bookCurriculumTopics.bookId, topic: yksTopics.topic }).from(bookCurriculumTopics).innerJoin(yksTopics, eq22(bookCurriculumTopics.topicId, yksTopics.id)).where(inArray9(bookCurriculumTopics.bookId, bookIds)) : [];
+  const topicRows = bookIds.length ? await db.select({ bookId: bookCurriculumTopics.bookId, topic: yksTopics.topic }).from(bookCurriculumTopics).innerJoin(yksTopics, eq23(bookCurriculumTopics.topicId, yksTopics.id)).where(inArray9(bookCurriculumTopics.bookId, bookIds)) : [];
   const topicsByBook = /* @__PURE__ */ new Map();
   for (const row of topicRows) {
     const list = topicsByBook.get(row.bookId) ?? [];
@@ -11015,12 +11185,12 @@ async function listCatalogBooksForRecommendation(subject2) {
 async function listMyLibraryCatalogBooks(userId) {
   const db = await getDb();
   if (!db) return [];
-  const inventoryRows = await db.select().from(bookInventory).where(and19(eq22(bookInventory.userId, userId), isNull12(bookInventory.removedAt)));
+  const inventoryRows = await db.select().from(bookInventory).where(and20(eq23(bookInventory.userId, userId), isNull13(bookInventory.removedAt)));
   const numericIds = Array.from(new Set(inventoryRows.map((row) => row.bookId).filter((id5) => /^\d+$/.test(id5)).map(Number)));
   if (numericIds.length === 0) return [];
   const [books, topicRows] = await Promise.all([
     db.select().from(catalogBooks).where(inArray9(catalogBooks.id, numericIds)),
-    db.select({ bookId: bookCurriculumTopics.bookId, topicId: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject, isVerified: bookCurriculumTopics.isVerified, confidence: bookCurriculumTopics.confidence }).from(bookCurriculumTopics).innerJoin(yksTopics, eq22(bookCurriculumTopics.topicId, yksTopics.id)).where(inArray9(bookCurriculumTopics.bookId, numericIds))
+    db.select({ bookId: bookCurriculumTopics.bookId, topicId: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject, isVerified: bookCurriculumTopics.isVerified, confidence: bookCurriculumTopics.confidence }).from(bookCurriculumTopics).innerJoin(yksTopics, eq23(bookCurriculumTopics.topicId, yksTopics.id)).where(inArray9(bookCurriculumTopics.bookId, numericIds))
   ]);
   const publisherIds = Array.from(new Set(books.map((b) => b.publisherId).filter((id5) => id5 !== null)));
   const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray9(publishers.id, publisherIds)) : [];
@@ -11181,7 +11351,7 @@ import { TRPCError as TRPCError11 } from "@trpc/server";
 import { z as z13 } from "zod";
 
 // server/resourceCatalog/catalogDb.ts
-import { and as and20, eq as eq23, inArray as inArray10 } from "drizzle-orm";
+import { and as and21, eq as eq24, inArray as inArray10 } from "drizzle-orm";
 var toCatalogBookRow = (row) => ({
   id: row.id,
   isbn: row.isbn,
@@ -11205,7 +11375,7 @@ var catalogDb = {
   async findPublisherByNormalizedName(normalizedName) {
     const db = await getDb();
     if (!db) return null;
-    const rows = await db.select().from(publishers).where(eq23(publishers.normalizedName, normalizedName)).limit(1);
+    const rows = await db.select().from(publishers).where(eq24(publishers.normalizedName, normalizedName)).limit(1);
     return rows[0] ? { id: rows[0].id, name: rows[0].name, slug: rows[0].slug, normalizedName: rows[0].normalizedName } : null;
   },
   async createPublisher(input) {
@@ -11218,13 +11388,13 @@ var catalogDb = {
   async findExternalSource(source, sourceProductId) {
     const db = await getDb();
     if (!db) return null;
-    const rows = await db.select().from(externalBookSources).where(and20(eq23(externalBookSources.source, source), eq23(externalBookSources.sourceProductId, sourceProductId))).limit(1);
+    const rows = await db.select().from(externalBookSources).where(and21(eq24(externalBookSources.source, source), eq24(externalBookSources.sourceProductId, sourceProductId))).limit(1);
     return rows[0] ? { id: rows[0].id, source: rows[0].source, sourceProductId: rows[0].sourceProductId, matchedBookId: rows[0].matchedBookId, syncStatus: rows[0].syncStatus } : null;
   },
   async upsertExternalSource(row) {
     const db = await getDb();
     if (!db) throw new Error("Database not available");
-    const existing = await db.select().from(externalBookSources).where(and20(eq23(externalBookSources.source, row.source), eq23(externalBookSources.sourceProductId, row.sourceProductId))).limit(1);
+    const existing = await db.select().from(externalBookSources).where(and21(eq24(externalBookSources.source, row.source), eq24(externalBookSources.sourceProductId, row.sourceProductId))).limit(1);
     const values = {
       source: row.source,
       sourceProductId: row.sourceProductId,
@@ -11240,7 +11410,7 @@ var catalogDb = {
       rawMetadata: row.rawMetadata ? JSON.stringify(row.rawMetadata) : null
     };
     if (existing[0]) {
-      await db.update(externalBookSources).set(values).where(eq23(externalBookSources.id, existing[0].id));
+      await db.update(externalBookSources).set(values).where(eq24(externalBookSources.id, existing[0].id));
       return { id: existing[0].id, source: row.source, sourceProductId: row.sourceProductId, matchedBookId: existing[0].matchedBookId, syncStatus: existing[0].syncStatus };
     }
     const result = await db.insert(externalBookSources).values(values).returning({ id: externalBookSources.id });
@@ -11250,24 +11420,24 @@ var catalogDb = {
   async markExternalSourceOutcome(id5, patch) {
     const db = await getDb();
     if (!db) return;
-    await db.update(externalBookSources).set({ matchedBookId: patch.matchedBookId, syncStatus: patch.syncStatus, lastSyncedAt: /* @__PURE__ */ new Date(), errorMessage: patch.errorMessage ?? null }).where(eq23(externalBookSources.id, id5));
+    await db.update(externalBookSources).set({ matchedBookId: patch.matchedBookId, syncStatus: patch.syncStatus, lastSyncedAt: /* @__PURE__ */ new Date(), errorMessage: patch.errorMessage ?? null }).where(eq24(externalBookSources.id, id5));
   },
   async findCatalogBookByIsbn(isbn) {
     const db = await getDb();
     if (!db) return null;
-    const rows = await db.select().from(catalogBooks).where(eq23(catalogBooks.isbn, isbn)).limit(1);
+    const rows = await db.select().from(catalogBooks).where(eq24(catalogBooks.isbn, isbn)).limit(1);
     return rows[0] ? toCatalogBookRow(rows[0]) : null;
   },
   async listCatalogBooksByPublisher(publisherId) {
     const db = await getDb();
     if (!db) return [];
-    const rows = await db.select().from(catalogBooks).where(eq23(catalogBooks.publisherId, publisherId));
+    const rows = await db.select().from(catalogBooks).where(eq24(catalogBooks.publisherId, publisherId));
     return rows.map((row) => ({ id: row.id, isbn: row.isbn, publisherId: row.publisherId, name: row.name, editionYear: row.editionYear }));
   },
   async getCatalogBookById(id5) {
     const db = await getDb();
     if (!db) return null;
-    const rows = await db.select().from(catalogBooks).where(eq23(catalogBooks.id, id5)).limit(1);
+    const rows = await db.select().from(catalogBooks).where(eq24(catalogBooks.id, id5)).limit(1);
     return rows[0] ? toCatalogBookRow(rows[0]) : null;
   },
   async createCatalogBook(input) {
@@ -11306,7 +11476,7 @@ var catalogDb = {
     if (patch.subject !== void 0) values.subject = patch.subject;
     if (patch.metadata !== void 0) values.metadata = patch.metadata ? JSON.stringify(patch.metadata) : null;
     if (Object.keys(values).length > 0) {
-      await db.update(catalogBooks).set(values).where(eq23(catalogBooks.id, id5));
+      await db.update(catalogBooks).set(values).where(eq24(catalogBooks.id, id5));
     }
     const row = await this.getCatalogBookById(id5);
     if (!row) throw new Error(`Catalog book ${id5} not found after update`);
@@ -11322,15 +11492,15 @@ var catalogDb = {
       classificationMethod: patch.classificationMethod,
       needsReview: patch.needsReview ? 1 : 0,
       classifiedAt: patch.classifiedAt
-    }).where(eq23(catalogBooks.id, id5));
+    }).where(eq24(catalogBooks.id, id5));
   },
   async upsertBookOffer(input) {
     const db = await getDb();
     if (!db) return;
-    const existing = await db.select().from(bookOffers).where(and20(eq23(bookOffers.bookId, input.bookId), eq23(bookOffers.source, input.source))).limit(1);
+    const existing = await db.select().from(bookOffers).where(and21(eq24(bookOffers.bookId, input.bookId), eq24(bookOffers.source, input.source))).limit(1);
     const values = { price: input.price !== null ? String(input.price) : null, currency: input.currency, productUrl: input.productUrl, lastSyncedAt: /* @__PURE__ */ new Date() };
     if (existing[0]) {
-      await db.update(bookOffers).set(values).where(eq23(bookOffers.id, existing[0].id));
+      await db.update(bookOffers).set(values).where(eq24(bookOffers.id, existing[0].id));
     } else {
       await db.insert(bookOffers).values({ bookId: input.bookId, source: input.source, ...values });
     }
@@ -11344,10 +11514,10 @@ var catalogDb = {
   async upsertBookCurriculumMapping(input) {
     const db = await getDb();
     if (!db) return;
-    const existing = await db.select().from(bookCurriculumTopics).where(and20(eq23(bookCurriculumTopics.bookId, input.bookId), eq23(bookCurriculumTopics.topicId, input.topicId))).limit(1);
+    const existing = await db.select().from(bookCurriculumTopics).where(and21(eq24(bookCurriculumTopics.bookId, input.bookId), eq24(bookCurriculumTopics.topicId, input.topicId))).limit(1);
     if (existing[0]) {
       if (existing[0].isVerified === 1) return;
-      await db.update(bookCurriculumTopics).set({ confidence: String(input.confidence), mappingMethod: "rule" }).where(eq23(bookCurriculumTopics.id, existing[0].id));
+      await db.update(bookCurriculumTopics).set({ confidence: String(input.confidence), mappingMethod: "rule" }).where(eq24(bookCurriculumTopics.id, existing[0].id));
     } else {
       await db.insert(bookCurriculumTopics).values({ bookId: input.bookId, topicId: input.topicId, confidence: String(input.confidence), mappingMethod: "rule" });
     }
@@ -11372,7 +11542,7 @@ var catalogDb = {
       needsReview: patch.needsReview,
       statsJson: patch.statsJson,
       errorLog: patch.errorLog
-    }).where(eq23(resourceCatalogSyncLogs.id, id5));
+    }).where(eq24(resourceCatalogSyncLogs.id, id5));
   }
 };
 async function listResourceCatalogSyncLogs(limit = 20) {
@@ -11383,27 +11553,27 @@ async function listResourceCatalogSyncLogs(limit = 20) {
 async function listNeedsReviewBooks() {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(catalogBooks).where(eq23(catalogBooks.needsReview, 1));
+  return db.select().from(catalogBooks).where(eq24(catalogBooks.needsReview, 1));
 }
 async function setManualDifficulty(bookId, input) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(catalogBooks).set({ difficultyLabel: input.label, difficultyScore: input.score, difficultyConfidence: "1", classificationMethod: "manual", manualOverride: 1, needsReview: 0, classifiedAt: /* @__PURE__ */ new Date() }).where(eq23(catalogBooks.id, bookId));
+  await db.update(catalogBooks).set({ difficultyLabel: input.label, difficultyScore: input.score, difficultyConfidence: "1", classificationMethod: "manual", manualOverride: 1, needsReview: 0, classifiedAt: /* @__PURE__ */ new Date() }).where(eq24(catalogBooks.id, bookId));
 }
 async function approveCatalogBookClassification(bookId) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(catalogBooks).set({ needsReview: 0 }).where(eq23(catalogBooks.id, bookId));
+  await db.update(catalogBooks).set({ needsReview: 0 }).where(eq24(catalogBooks.id, bookId));
 }
 async function markCatalogBookNeedsReview(bookId, needsReview) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(catalogBooks).set({ needsReview: needsReview ? 1 : 0 }).where(eq23(catalogBooks.id, bookId));
+  await db.update(catalogBooks).set({ needsReview: needsReview ? 1 : 0 }).where(eq24(catalogBooks.id, bookId));
 }
 async function setCatalogBookActive(bookId, active) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(catalogBooks).set({ active: active ? 1 : 0 }).where(eq23(catalogBooks.id, bookId));
+  await db.update(catalogBooks).set({ active: active ? 1 : 0 }).where(eq24(catalogBooks.id, bookId));
 }
 async function resolveOrCreatePublisherByName(rawName) {
   const trimmed = rawName.trim();
@@ -11716,13 +11886,13 @@ function validateOnboardingStep(step, draft) {
 }
 
 // server/tracks/trackDb.ts
-import { and as and21, asc as asc5, eq as eq24 } from "drizzle-orm";
+import { and as and22, asc as asc5, eq as eq25 } from "drizzle-orm";
 var TrackError = class extends Error {
 };
 var TRACK_FIELDS = ["gradeLevel", "examYear", "targetScoreType", "currentTytNet", "currentAytNet", "currentNet", "targetUniversity", "targetDepartment", "targetRanking", "targetGoal", "targetScore", "selectedSubjectsJson"];
 var pick2 = (row) => Object.fromEntries(TRACK_FIELDS.map((key) => [key, row[key] ?? null]));
 var emptyFields = () => Object.fromEntries(TRACK_FIELDS.map((key) => [key, null]));
-async function requireDb7() {
+async function requireDb8() {
   const db = await getDb();
   if (!db) throw new Error("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
   return db;
@@ -11730,19 +11900,19 @@ async function requireDb7() {
 async function syncActiveTrack(userId) {
   const db = await getDb();
   if (!db) return;
-  const [profile] = await db.select().from(studentProfiles).where(eq24(studentProfiles.userId, userId)).limit(1);
+  const [profile] = await db.select().from(studentProfiles).where(eq25(studentProfiles.userId, userId)).limit(1);
   if (!profile) return;
   const fields2 = pick2(profile);
   await db.insert(studentExamTracks).values({ userId, track: profile.examTrack, ...fields2 }).onConflictDoUpdate({ target: [studentExamTracks.userId, studentExamTracks.track], set: fields2 });
 }
 async function listTracks(userId) {
-  const db = await requireDb7();
-  const [profile] = await db.select({ examTrack: studentProfiles.examTrack, onboardingCompleted: studentProfiles.onboardingCompleted }).from(studentProfiles).where(eq24(studentProfiles.userId, userId)).limit(1);
+  const db = await requireDb8();
+  const [profile] = await db.select({ examTrack: studentProfiles.examTrack, onboardingCompleted: studentProfiles.onboardingCompleted }).from(studentProfiles).where(eq25(studentProfiles.userId, userId)).limit(1);
   if (!profile) return [];
-  let rows = await db.select().from(studentExamTracks).where(eq24(studentExamTracks.userId, userId)).orderBy(asc5(studentExamTracks.createdAt));
+  let rows = await db.select().from(studentExamTracks).where(eq25(studentExamTracks.userId, userId)).orderBy(asc5(studentExamTracks.createdAt));
   if (!rows.some((row) => row.track === profile.examTrack) && profile.onboardingCompleted) {
     await syncActiveTrack(userId);
-    rows = await db.select().from(studentExamTracks).where(eq24(studentExamTracks.userId, userId)).orderBy(asc5(studentExamTracks.createdAt));
+    rows = await db.select().from(studentExamTracks).where(eq25(studentExamTracks.userId, userId)).orderBy(asc5(studentExamTracks.createdAt));
   }
   return rows.map((row) => ({ track: row.track, active: row.track === profile.examTrack, examYear: row.examYear, gradeLevel: row.gradeLevel, selectedSubjects: parseList(row.selectedSubjectsJson) })).sort((a, b) => Number(b.active) - Number(a.active));
 }
@@ -11756,30 +11926,30 @@ var parseList = (value) => {
   }
 };
 async function addTrack(userId, input) {
-  const db = await requireDb7();
+  const db = await requireDb8();
   const def = EXAM_TRACK_DEFS[input.track];
   if (!def.gradeLevels.includes(input.gradeLevel)) throw new TrackError("Bu s\u0131nav i\xE7in e\u011Fitim durumunu yeniden se\xE7.");
   const validSubjects = subjectNamesOf(defaultKindOf(input.track));
   const selected = (input.selectedSubjects ?? []).filter((subject2) => validSubjects.includes(subject2));
   if (def.chooseSubjects && selected.length === 0) throw new TrackError("Girece\u011Fin en az bir alan testini se\xE7.");
   await syncActiveTrack(userId);
-  const [existing] = await db.select({ id: studentExamTracks.id }).from(studentExamTracks).where(and21(eq24(studentExamTracks.userId, userId), eq24(studentExamTracks.track, input.track))).limit(1);
+  const [existing] = await db.select({ id: studentExamTracks.id }).from(studentExamTracks).where(and22(eq25(studentExamTracks.userId, userId), eq25(studentExamTracks.track, input.track))).limit(1);
   if (existing) throw new TrackError(`${def.label} zaten s\u0131navlar\u0131n aras\u0131nda.`);
   await db.insert(studentExamTracks).values({ userId, track: input.track, ...emptyFields(), gradeLevel: input.gradeLevel, examYear: input.examYear, selectedSubjectsJson: selected.length ? JSON.stringify(selected) : null });
   if (input.activate) await switchTrack(userId, input.track);
 }
 async function switchTrack(userId, track) {
-  const db = await requireDb7();
+  const db = await requireDb8();
   await syncActiveTrack(userId);
-  const [target] = await db.select().from(studentExamTracks).where(and21(eq24(studentExamTracks.userId, userId), eq24(studentExamTracks.track, track))).limit(1);
+  const [target] = await db.select().from(studentExamTracks).where(and22(eq25(studentExamTracks.userId, userId), eq25(studentExamTracks.track, track))).limit(1);
   if (!target) throw new TrackError("Bu s\u0131nav hen\xFCz eklenmemi\u015F.");
-  await db.update(studentProfiles).set({ examTrack: track, ...pick2(target) }).where(eq24(studentProfiles.userId, userId));
+  await db.update(studentProfiles).set({ examTrack: track, ...pick2(target) }).where(eq25(studentProfiles.userId, userId));
 }
 async function removeTrack(userId, track) {
-  const db = await requireDb7();
-  const [profile] = await db.select({ examTrack: studentProfiles.examTrack }).from(studentProfiles).where(eq24(studentProfiles.userId, userId)).limit(1);
+  const db = await requireDb8();
+  const [profile] = await db.select({ examTrack: studentProfiles.examTrack }).from(studentProfiles).where(eq25(studentProfiles.userId, userId)).limit(1);
   if (profile?.examTrack === track) throw new TrackError("Aktif s\u0131nav\u0131 \xE7\u0131karamazs\u0131n; \xF6nce ba\u015Fka bir s\u0131nava ge\xE7.");
-  await db.delete(studentExamTracks).where(and21(eq24(studentExamTracks.userId, userId), eq24(studentExamTracks.track, track)));
+  await db.delete(studentExamTracks).where(and22(eq25(studentExamTracks.userId, userId), eq25(studentExamTracks.track, track)));
 }
 
 // server/routers/onboarding.ts
@@ -12080,7 +12250,7 @@ var paymentRouter = router({
 });
 
 // server/admin/analyticsService.ts
-import { and as and22, count as count2, countDistinct, eq as eq25, gte as gte14, isNotNull as isNotNull7, lt as lt10, ne as ne4, sql as sql10 } from "drizzle-orm";
+import { and as and23, count as count2, countDistinct, eq as eq26, gte as gte14, isNotNull as isNotNull7, lt as lt10, ne as ne4, sql as sql11 } from "drizzle-orm";
 async function getAdminDashboardKpis() {
   const db = await getDb();
   const empty = {
@@ -12111,17 +12281,17 @@ async function getAdminDashboardKpis() {
   const [approvalCounts, accountStatusCounts, planStatusCounts, activeTodayRow, activeWeekRow, inactive7Row, inactive30Row, totalRow, trialStartedRow, stillTrialingRow, convertedRow, premiumUsersRow] = await Promise.all([
     db.select({ approvalStatus: users.approvalStatus, total: count2() }).from(users).groupBy(users.approvalStatus),
     db.select({ accountStatus: users.accountStatus, total: count2() }).from(users).groupBy(users.accountStatus),
-    db.select({ tier: subscriptionPlans.tier, billingPeriod: subscriptionPlans.billingPeriod, status: subscriptions.status, total: count2() }).from(subscriptions).innerJoin(subscriptionPlans, eq25(subscriptionPlans.id, subscriptions.planId)).groupBy(subscriptionPlans.tier, subscriptionPlans.billingPeriod, subscriptions.status),
+    db.select({ tier: subscriptionPlans.tier, billingPeriod: subscriptionPlans.billingPeriod, status: subscriptions.status, total: count2() }).from(subscriptions).innerJoin(subscriptionPlans, eq26(subscriptionPlans.id, subscriptions.planId)).groupBy(subscriptionPlans.tier, subscriptionPlans.billingPeriod, subscriptions.status),
     db.select({ total: count2() }).from(users).where(gte14(users.lastSignedIn, todayStart)),
     db.select({ total: count2() }).from(users).where(gte14(users.lastSignedIn, weekAgo)),
     db.select({ total: count2() }).from(users).where(lt10(users.lastSignedIn, weekAgo)),
     db.select({ total: count2() }).from(users).where(lt10(users.lastSignedIn, monthAgo)),
     db.select({ total: count2() }).from(users),
     db.select({ total: count2() }).from(subscriptions).where(isNotNull7(subscriptions.trialStartedAt)),
-    db.select({ total: count2() }).from(subscriptions).where(eq25(subscriptions.status, "trialing")),
-    db.select({ total: count2() }).from(subscriptions).where(and22(isNotNull7(subscriptions.trialStartedAt), sql10`${subscriptions.status} in ('active','past_due','grace_period')`)),
+    db.select({ total: count2() }).from(subscriptions).where(eq26(subscriptions.status, "trialing")),
+    db.select({ total: count2() }).from(subscriptions).where(and23(isNotNull7(subscriptions.trialStartedAt), sql11`${subscriptions.status} in ('active','past_due','grace_period')`)),
     // Üye sayıları kişi başına: her sınavın aboneliği ayrı satır, bir aday birden fazla sınava abone olabilir.
-    db.select({ total: countDistinct(subscriptions.userId) }).from(subscriptions).innerJoin(subscriptionPlans, eq25(subscriptionPlans.id, subscriptions.planId)).where(and22(ne4(subscriptionPlans.tier, "free"), sql10`${subscriptions.status} in ('active','trialing','grace_period')`))
+    db.select({ total: countDistinct(subscriptions.userId) }).from(subscriptions).innerJoin(subscriptionPlans, eq26(subscriptionPlans.id, subscriptions.planId)).where(and23(ne4(subscriptionPlans.tier, "free"), sql11`${subscriptions.status} in ('active','trialing','grace_period')`))
   ]);
   const kpis = { ...empty, totalUsers: totalRow[0]?.total ?? 0, activeToday: activeTodayRow[0]?.total ?? 0, activeThisWeek: activeWeekRow[0]?.total ?? 0, inactive7Plus: inactive7Row[0]?.total ?? 0, inactive30Plus: inactive30Row[0]?.total ?? 0 };
   for (const row of approvalCounts) {
@@ -12322,16 +12492,16 @@ var adminSystemRouter = router({
 import { z as z22 } from "zod";
 
 // server/testimonials/testimonials.ts
-import { desc as desc14, eq as eq26 } from "drizzle-orm";
+import { desc as desc15, eq as eq27 } from "drizzle-orm";
 async function listPublishedTestimonials(limit = 9) {
   const db = await getDb();
   if (!db) return [];
-  return db.select({ id: testimonials.id, displayName: testimonials.displayName, detail: testimonials.detail, rating: testimonials.rating, body: testimonials.body }).from(testimonials).where(eq26(testimonials.status, "approved")).orderBy(desc14(testimonials.reviewedAt)).limit(limit);
+  return db.select({ id: testimonials.id, displayName: testimonials.displayName, detail: testimonials.detail, rating: testimonials.rating, body: testimonials.body }).from(testimonials).where(eq27(testimonials.status, "approved")).orderBy(desc15(testimonials.reviewedAt)).limit(limit);
 }
 async function getMyTestimonial(userId) {
   const db = await getDb();
   if (!db) return null;
-  const [row] = await db.select().from(testimonials).where(eq26(testimonials.userId, userId)).limit(1);
+  const [row] = await db.select().from(testimonials).where(eq27(testimonials.userId, userId)).limit(1);
   return row ?? null;
 }
 async function saveMyTestimonial(userId, input) {
@@ -12344,17 +12514,17 @@ async function saveMyTestimonial(userId, input) {
 async function deleteMyTestimonial(userId) {
   const db = await getDb();
   if (!db) return;
-  await db.delete(testimonials).where(eq26(testimonials.userId, userId));
+  await db.delete(testimonials).where(eq27(testimonials.userId, userId));
 }
 async function listTestimonialsForAdmin(status) {
   const db = await getDb();
   if (!db) return [];
-  return db.select({ id: testimonials.id, displayName: testimonials.displayName, detail: testimonials.detail, rating: testimonials.rating, body: testimonials.body, status: testimonials.status, updatedAt: testimonials.updatedAt, userId: testimonials.userId, userName: users.name, userEmail: users.email }).from(testimonials).leftJoin(users, eq26(users.id, testimonials.userId)).where(eq26(testimonials.status, status)).orderBy(desc14(testimonials.updatedAt)).limit(200);
+  return db.select({ id: testimonials.id, displayName: testimonials.displayName, detail: testimonials.detail, rating: testimonials.rating, body: testimonials.body, status: testimonials.status, updatedAt: testimonials.updatedAt, userId: testimonials.userId, userName: users.name, userEmail: users.email }).from(testimonials).leftJoin(users, eq27(users.id, testimonials.userId)).where(eq27(testimonials.status, status)).orderBy(desc15(testimonials.updatedAt)).limit(200);
 }
 async function reviewTestimonial(id5, status, reviewerId) {
   const db = await getDb();
   if (!db) return;
-  await db.update(testimonials).set({ status, reviewedAt: /* @__PURE__ */ new Date(), reviewedBy: reviewerId }).where(eq26(testimonials.id, id5));
+  await db.update(testimonials).set({ status, reviewedAt: /* @__PURE__ */ new Date(), reviewedBy: reviewerId }).where(eq27(testimonials.id, id5));
 }
 
 // server/routers/admin/testimonials.ts
@@ -12377,10 +12547,10 @@ var adminUsageRouter = router({
 import { z as z24 } from "zod";
 
 // server/admin/adminUserDb.ts
-import { and as and24, count as count3, desc as desc15, eq as eq28, gte as gte16, inArray as inArray11, isNull as isNull13, ilike as ilike3, lt as lt11, or as or5, sql as sql11 } from "drizzle-orm";
+import { and as and25, count as count3, desc as desc16, eq as eq29, gte as gte16, inArray as inArray11, isNull as isNull14, ilike as ilike4, lt as lt11, or as or6, sql as sql12 } from "drizzle-orm";
 
 // server/admin/progressService.ts
-import { and as and23, eq as eq27, gte as gte15 } from "drizzle-orm";
+import { and as and24, eq as eq28, gte as gte15 } from "drizzle-orm";
 
 // shared/progressScore.ts
 var PROGRESS_SCORE_CONFIG = {
@@ -12419,14 +12589,14 @@ async function getStudyProgressScore(userId) {
   const db = await getDb();
   const generatedAt = (/* @__PURE__ */ new Date()).toISOString();
   if (!db) return { overallScore: null, insufficientData: true, components: emptyComponents(), generatedAt };
-  const [userRow] = await db.select({ createdAt: users.createdAt }).from(users).where(eq27(users.id, userId)).limit(1);
+  const [userRow] = await db.select({ createdAt: users.createdAt }).from(users).where(eq28(users.id, userId)).limit(1);
   const accountAgeDays = userRow ? Math.max(0, Math.floor((Date.now() - userRow.createdAt.getTime()) / 864e5)) : 0;
   const windowStart = new Date(Date.now() - CONSISTENCY_WINDOW_DAYS * 864e5);
   const [recentLogs, allLogs, topicRows, examRows] = await Promise.all([
-    db.select({ studyDate: topicStudyLogs.studyDate }).from(topicStudyLogs).where(and23(eq27(topicStudyLogs.userId, userId), gte15(topicStudyLogs.studyDate, windowStart))),
-    db.select({ questions: topicStudyLogs.questions, correct: topicStudyLogs.correct }).from(topicStudyLogs).where(eq27(topicStudyLogs.userId, userId)),
-    db.select({ progress: topicProgress.progress }).from(topicProgress).where(eq27(topicProgress.userId, userId)),
-    db.select({ net: userMockExams.net }).from(userMockExams).where(eq27(userMockExams.userId, userId))
+    db.select({ studyDate: topicStudyLogs.studyDate }).from(topicStudyLogs).where(and24(eq28(topicStudyLogs.userId, userId), gte15(topicStudyLogs.studyDate, windowStart))),
+    db.select({ questions: topicStudyLogs.questions, correct: topicStudyLogs.correct }).from(topicStudyLogs).where(eq28(topicStudyLogs.userId, userId)),
+    db.select({ progress: topicProgress.progress }).from(topicProgress).where(eq28(topicProgress.userId, userId)),
+    db.select({ net: userMockExams.net }).from(userMockExams).where(eq28(userMockExams.userId, userId))
   ]);
   const activeDaysInWindow = new Set(recentLogs.map((row) => toLocalDateKey(row.studyDate))).size;
   const totalQuestions = allLogs.reduce((sum, row) => sum + row.questions, 0);
@@ -12476,18 +12646,18 @@ async function listUsersForAdminPaginated(filters) {
   if (filters.search?.trim()) {
     const term = `%${filters.search.trim().replace(/[%_]/g, (char) => `\\${char}`)}%`;
     const digits = filters.search.replace(/\D/g, "").replace(/^0/, "");
-    conditions.push(or5(ilike3(users.name, term), ilike3(users.email, term), ...digits.length >= 4 ? [ilike3(users.openId, `dev_phone_%${digits}%`)] : []));
+    conditions.push(or6(ilike4(users.name, term), ilike4(users.email, term), ...digits.length >= 4 ? [ilike4(users.openId, `dev_phone_%${digits}%`)] : []));
   }
-  if (filters.approvalStatus) conditions.push(eq28(users.approvalStatus, filters.approvalStatus));
-  if (filters.accountStatus) conditions.push(eq28(users.accountStatus, filters.accountStatus));
-  if (filters.planCode) conditions.push(eq28(subscriptionPlans.code, filters.planCode));
-  if (filters.subscriptionStatus) conditions.push(eq28(subscriptions.status, filters.subscriptionStatus));
+  if (filters.approvalStatus) conditions.push(eq29(users.approvalStatus, filters.approvalStatus));
+  if (filters.accountStatus) conditions.push(eq29(users.accountStatus, filters.accountStatus));
+  if (filters.planCode) conditions.push(eq29(subscriptionPlans.code, filters.planCode));
+  if (filters.subscriptionStatus) conditions.push(eq29(subscriptions.status, filters.subscriptionStatus));
   if (filters.activity === "today") conditions.push(gte16(users.lastSignedIn, startOfToday2()));
   else if (filters.activity === "week") conditions.push(gte16(users.lastSignedIn, daysAgo(7)));
   else if (filters.activity === "inactive") conditions.push(lt11(users.lastSignedIn, daysAgo(7)));
-  const whereClause = conditions.length ? and24(...conditions) : void 0;
-  const activeSubscription = and24(eq28(subscriptions.userId, users.id), eq28(subscriptions.track, sql11`coalesce((select sp."examTrack" from student_profiles sp where sp."userId" = ${users.id}), 'YKS')`));
-  const countQuery = db.select({ total: count3() }).from(users).leftJoin(subscriptions, activeSubscription).leftJoin(subscriptionPlans, eq28(subscriptionPlans.id, subscriptions.planId));
+  const whereClause = conditions.length ? and25(...conditions) : void 0;
+  const activeSubscription = and25(eq29(subscriptions.userId, users.id), eq29(subscriptions.track, sql12`coalesce((select sp."examTrack" from student_profiles sp where sp."userId" = ${users.id}), 'YKS')`));
+  const countQuery = db.select({ total: count3() }).from(users).leftJoin(subscriptions, activeSubscription).leftJoin(subscriptionPlans, eq29(subscriptionPlans.id, subscriptions.planId));
   const [{ total }] = await (whereClause ? countQuery.where(whereClause) : countQuery);
   const pageQuery = db.select({
     id: users.id,
@@ -12506,13 +12676,13 @@ async function listUsersForAdminPaginated(filters) {
     subscriptionStatus: subscriptions.status,
     trialEndsAt: subscriptions.trialEndsAt,
     currentPeriodEnd: subscriptions.currentPeriodEnd
-  }).from(users).leftJoin(subscriptions, activeSubscription).leftJoin(subscriptionPlans, eq28(subscriptionPlans.id, subscriptions.planId)).orderBy(desc15(users.createdAt)).limit(pageSize).offset((page2 - 1) * pageSize);
+  }).from(users).leftJoin(subscriptions, activeSubscription).leftJoin(subscriptionPlans, eq29(subscriptionPlans.id, subscriptions.planId)).orderBy(desc16(users.createdAt)).limit(pageSize).offset((page2 - 1) * pageSize);
   const pageRows = await (whereClause ? pageQuery.where(whereClause) : pageQuery);
   const ids = pageRows.map((row) => row.id);
   const [topicAgg, examAgg, studyAgg] = ids.length ? await Promise.all([
-    db.select({ userId: topicProgress.userId, avgProgress: sql11`avg(${topicProgress.progress})`, topicCount: sql11`count(*)::int` }).from(topicProgress).where(inArray11(topicProgress.userId, ids)).groupBy(topicProgress.userId),
-    db.select({ userId: userMockExams.userId, examCount: sql11`count(*)::int`, latestNet: sql11`max(${userMockExams.net})` }).from(userMockExams).where(inArray11(userMockExams.userId, ids)).groupBy(userMockExams.userId),
-    db.select({ userId: topicStudyLogs.userId, totalMinutes: sql11`sum(${topicStudyLogs.minutes})` }).from(topicStudyLogs).where(inArray11(topicStudyLogs.userId, ids)).groupBy(topicStudyLogs.userId)
+    db.select({ userId: topicProgress.userId, avgProgress: sql12`avg(${topicProgress.progress})`, topicCount: sql12`count(*)::int` }).from(topicProgress).where(inArray11(topicProgress.userId, ids)).groupBy(topicProgress.userId),
+    db.select({ userId: userMockExams.userId, examCount: sql12`count(*)::int`, latestNet: sql12`max(${userMockExams.net})` }).from(userMockExams).where(inArray11(userMockExams.userId, ids)).groupBy(userMockExams.userId),
+    db.select({ userId: topicStudyLogs.userId, totalMinutes: sql12`sum(${topicStudyLogs.minutes})` }).from(topicStudyLogs).where(inArray11(topicStudyLogs.userId, ids)).groupBy(topicStudyLogs.userId)
   ]) : [[], [], []];
   const topicMap = new Map(topicAgg.map((row) => [row.userId, row]));
   const examMap = new Map(examAgg.map((row) => [row.userId, row]));
@@ -12546,19 +12716,19 @@ var daysAgo = (days) => new Date(Date.now() - days * 24 * 60 * 60 * 1e3);
 async function suspendUser(userId, adminId, reason) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ accountStatus: "suspended" }).where(eq28(users.id, userId));
+  await db.update(users).set({ accountStatus: "suspended" }).where(eq29(users.id, userId));
   await writeAuditLog({ userId, adminId, action: "user_suspended", newState: { accountStatus: "suspended" }, reason });
 }
 async function reactivateUser(userId, adminId) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ accountStatus: "active" }).where(eq28(users.id, userId));
+  await db.update(users).set({ accountStatus: "active" }).where(eq29(users.id, userId));
   await writeAuditLog({ userId, adminId, action: "user_reactivated", newState: { accountStatus: "active" } });
 }
 async function verifyUserEmailManually(userId, adminId) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ emailVerifiedAt: /* @__PURE__ */ new Date() }).where(and24(eq28(users.id, userId), isNull13(users.emailVerifiedAt)));
+  await db.update(users).set({ emailVerifiedAt: /* @__PURE__ */ new Date() }).where(and25(eq29(users.id, userId), isNull14(users.emailVerifiedAt)));
   await writeAuditLog({ userId, adminId, action: "email_verified_by_admin", newState: { emailVerified: true } });
 }
 function maskId2(value) {
@@ -12569,7 +12739,7 @@ function maskId2(value) {
 async function getUserDetailForAdmin(userId) {
   const db = await getDb();
   if (!db) return null;
-  const [userRow] = await db.select().from(users).where(eq28(users.id, userId)).limit(1);
+  const [userRow] = await db.select().from(users).where(eq29(users.id, userId)).limit(1);
   if (!userRow) return null;
   const activeTrack = await getStudentExamTrack(userId);
   const [entitlements, usage, progressScore, payments2, recentExams, topicRows, recentStudyLogs, auditLogs, profile, bookContentRows, notebook] = await Promise.all([
@@ -12577,12 +12747,12 @@ async function getUserDetailForAdmin(userId) {
     getUsageSummaryForUser(userId, activeTrack),
     getStudyProgressScore(userId),
     listPaymentsForUser(userId),
-    db.select().from(userMockExams).where(eq28(userMockExams.userId, userId)).orderBy(desc15(userMockExams.examDate)).limit(10),
-    db.select().from(topicProgress).where(eq28(topicProgress.userId, userId)),
-    db.select().from(topicStudyLogs).where(eq28(topicStudyLogs.userId, userId)).orderBy(desc15(topicStudyLogs.studyDate)).limit(20),
+    db.select().from(userMockExams).where(eq29(userMockExams.userId, userId)).orderBy(desc16(userMockExams.examDate)).limit(10),
+    db.select().from(topicProgress).where(eq29(topicProgress.userId, userId)),
+    db.select().from(topicStudyLogs).where(eq29(topicStudyLogs.userId, userId)).orderBy(desc16(topicStudyLogs.studyDate)).limit(20),
     listAuditLogsForUser(userId),
     getStudentProfile(userId),
-    db.select({ bookId: userBookContents.bookId, mappingStatus: userBookContents.mappingStatus, mappingMethod: userBookContents.mappingMethod, mappingConfidence: userBookContents.mappingConfidence, source: userBookContents.source, createdAt: userBookContents.createdAt }).from(userBookContents).where(eq28(userBookContents.userId, userId)),
+    db.select({ bookId: userBookContents.bookId, mappingStatus: userBookContents.mappingStatus, mappingMethod: userBookContents.mappingMethod, mappingConfidence: userBookContents.mappingConfidence, source: userBookContents.source, createdAt: userBookContents.createdAt }).from(userBookContents).where(eq29(userBookContents.userId, userId)),
     // Defter: yalnızca sayılar — öğrencinin not içeriği admin tarafından görülmez.
     getNoteStatsForAdmin(userId)
   ]);
@@ -12599,7 +12769,7 @@ async function getUserDetailForAdmin(userId) {
   const bookIds = bookContents.map((book) => book.bookId);
   const numericIds = bookIds.filter((id5) => /^\d+$/.test(id5)).map(Number);
   const [customTitles, catalogTitles] = bookIds.length ? await Promise.all([
-    db.select({ bookId: userResourceBooks.bookId, title: userResourceBooks.title }).from(userResourceBooks).where(and24(eq28(userResourceBooks.userId, userId), inArray11(userResourceBooks.bookId, bookIds))),
+    db.select({ bookId: userResourceBooks.bookId, title: userResourceBooks.title }).from(userResourceBooks).where(and25(eq29(userResourceBooks.userId, userId), inArray11(userResourceBooks.bookId, bookIds))),
     numericIds.length ? db.select({ id: catalogBooks.id, name: catalogBooks.name }).from(catalogBooks).where(inArray11(catalogBooks.id, numericIds)) : Promise.resolve([])
   ]) : [[], []];
   const titleById = new Map([...customTitles.map((row) => [row.bookId, row.title]), ...catalogTitles.map((row) => [String(row.id), row.name])]);
@@ -12901,6 +13071,15 @@ var appRouter = router({
     upsertMapping: protectedProcedure.input(z26.object({ bookId: z26.string().max(120), topic: z26.string().max(180), subject: z26.string().max(80), pageStart: z26.number().int().min(0).optional(), pageEnd: z26.number().int().min(0).optional(), testStart: z26.number().int().min(0).optional(), testEnd: z26.number().int().min(0).optional() })).mutation(({ ctx, input }) => upsertBookTopicMapping(ctx.user.id, input)),
     addSwitch: protectedProcedure.input(z26.object({ fromBookId: z26.string().max(120).optional(), toBookId: z26.string().max(120), reason: z26.string().max(300) })).mutation(({ ctx, input }) => addSourceSwitch(ctx.user.id, { ...input, switchedAt: /* @__PURE__ */ new Date() })),
     importBooks: protectedProcedure.input(z26.object({ books: z26.array(z26.object({ id: z26.string().max(120), title: z26.string().min(1).max(180), publisher: z26.string().max(120), subject: z26.string().max(80), exam: z26.enum(EXAM_KINDS), level: z26.enum(["Kolay", "Orta", "Zor"]), format: z26.string().max(120), reason: z26.string().max(1e3), sourceUrl: z26.string().max(500).optional(), pageCount: z26.number().int().min(0).optional(), tone: z26.string().max(20), authors: z26.string().max(300).optional(), isbn: z26.string().max(32).optional() })).min(1).max(500) })).mutation(({ ctx, input }) => addUserResourceBooks(ctx.user.id, input.books)),
+    // Ortak kitap kaydında ad/yayınevi/ISBN ile arama: kitap kayıtlıysa kapak fotoğrafı (OCR) gerekmez.
+    searchSharedBooks: protectedProcedure.input(z26.object({ q: z26.string().trim().min(2).max(120) })).query(({ input }) => searchSharedBooks(input.q)),
+    // Kitabı kütüphaneye ekler ve ortak kayda bağlar; öğrenci "Bu kitap" dediyse (sharedBookId)
+    // onaylanmış içindekiler de kopyalanır, içindekiler fotoğrafı okunmaz.
+    addBookFromCover: protectedProcedure.input(z26.object({
+      sharedBookId: z26.number().int().positive().nullable(),
+      useSharedContents: z26.boolean(),
+      draft: z26.object({ title: z26.string().trim().min(1).max(180), publisher: z26.string().max(120), subject: z26.string().max(80), exam: z26.enum(EXAM_KINDS), level: z26.enum(["Kolay", "Orta", "Zor"]), authors: z26.string().max(300).optional(), isbn: z26.string().max(32).optional(), edition: z26.string().max(120).optional() })
+    })).mutation(({ ctx, input }) => addBookToLibrary(ctx.user.id, input)),
     // Öğrenci elindeki fiziksel kitabın kapak fotoğrafını çeker (telefon
     // kamerası); LLM görselden kitap adı/yayınevi/ders tahmini çıkarır.
     // Sadece TAHMİN döner — hiçbir şeyi otomatik kütüphaneye eklemez, öğrenci
@@ -12922,7 +13101,7 @@ var appRouter = router({
         if (!jsonText) throw new Error("Foto\u011Fraftan yap\u0131land\u0131r\u0131lm\u0131\u015F veri al\u0131namad\u0131");
         const parsed = JSON.parse(jsonText);
         const isbn = normalizeIsbn(parsed.isbn);
-        return {
+        const result = {
           title: String(parsed.title ?? "").slice(0, 180),
           publisher: String(parsed.publisher ?? "").slice(0, 120),
           subject: String(parsed.subject ?? "").slice(0, 80),
@@ -12934,6 +13113,8 @@ var appRouter = router({
           imageKind: parsed.imageKind === "table_of_contents" || parsed.imageKind === "other" ? parsed.imageKind : "cover",
           fieldConfidence: { title: clamp013(parsed.fieldConfidence?.title), publisher: clamp013(parsed.fieldConfidence?.publisher), subject: clamp013(parsed.fieldConfidence?.subject), exam: clamp013(parsed.fieldConfidence?.exam), isbn: isbn ? clamp013(parsed.fieldConfidence?.isbn) : 0 }
         };
+        const matches = result.imageKind === "cover" && result.title ? await findSharedBookMatches({ title: result.title, publisher: result.publisher, isbn: result.isbn, authors: result.authors.join(", ") }).catch(() => []) : [];
+        return { ...result, matches };
       } catch (error) {
         console.warn("[Book Photo] Extraction failed:", error);
         throw new Error(llmUnavailableMessage(error) ?? "Foto\u011Fraf okunamad\u0131. Daha net, \u0131\u015F\u0131kl\u0131 bir kapak foto\u011Fraf\u0131 dener misin?");

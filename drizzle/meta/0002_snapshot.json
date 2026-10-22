@@ -4713,6 +4713,193 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.shared_books": {
+      "name": "shared_books",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "byDefault",
+            "name": "shared_books_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "2147483647",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "title": {
+          "name": "title",
+          "type": "varchar(180)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "publisher": {
+          "name": "publisher",
+          "type": "varchar(120)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subject": {
+          "name": "subject",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "exam": {
+          "name": "exam",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "authors": {
+          "name": "authors",
+          "type": "varchar(300)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "isbn": {
+          "name": "isbn",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "edition": {
+          "name": "edition",
+          "type": "varchar(120)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "titleKey": {
+          "name": "titleKey",
+          "type": "varchar(200)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "publisherKey": {
+          "name": "publisherKey",
+          "type": "varchar(140)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ownerCount": {
+          "name": "ownerCount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "createdByUserId": {
+          "name": "createdByUserId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "contentsJson": {
+          "name": "contentsJson",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "contentsItemCount": {
+          "name": "contentsItemCount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "contentsTopicCount": {
+          "name": "contentsTopicCount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "contentsSource": {
+          "name": "contentsSource",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "contentsByUserId": {
+          "name": "contentsByUserId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "contentsUpdatedAt": {
+          "name": "contentsUpdatedAt",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "contentsReuseCount": {
+          "name": "contentsReuseCount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "shared_books_isbn_idx": {
+          "name": "shared_books_isbn_idx",
+          "columns": [
+            {
+              "expression": "isbn",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "shared_books_title_key_idx": {
+          "name": "shared_books_title_key_idx",
+          "columns": [
+            {
+              "expression": "titleKey",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.source_switches": {
       "name": "source_switches",
       "schema": "",
@@ -6806,6 +6993,12 @@
         "isbn": {
           "name": "isbn",
           "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sharedBookId": {
+          "name": "sharedBookId",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },

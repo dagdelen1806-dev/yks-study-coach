@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq, inArray } from "drizzle-orm";
 import { classStudents, classTimetableSlots, organizationClasses, organizationMembers, organizations, users } from "../drizzle/schema";
-import { branchMismatch, findCrossClassConflicts, validateClassTimetable, weeklyHours, type TimetableSlot } from "../shared/orgTimetable";
+import { TIMETABLE_PERIOD_PRESETS, branchMismatch, buildPeriodCells, findCrossClassConflicts, generateClassTimetable, validateClassTimetable, weeklyHours, type TimetableSlot } from "../shared/orgTimetable";
 import { getDb } from "./db";
 
 const slot = (dayOfWeek: number, startTime: string, endTime: string, subject: string, teacherUserId: number | null = null, room: string | null = null): TimetableSlot => ({ dayOfWeek, startTime, endTime, subject, teacherUserId, room });
@@ -29,6 +29,36 @@ describe("ders programı kuralları", () => {
     expect(branchMismatch("Türkçe", "Rehberlik")).toBe(false);
     expect(branchMismatch("Kimya", null)).toBe(false);
     expect(branchMismatch("Tarih", "Matematik")).toBe(true);
+  });
+
+  it("otomatik dağıtım: tüm saatler yerleşir, ders günlere yayılır, diğer sınıftaki öğretmen ve derslik saati boş bırakılır", () => {
+    const evening = TIMETABLE_PERIOD_PRESETS[0].periods;
+    const cells = buildPeriodCells([1, 2, 3, 4, 5], evening, []);
+    const others = [{ ...slot(1, "16:30", "17:10", "Matematik", 7, "A-101"), classId: 2 }, { ...slot(2, "17:20", "18:00", "Fizik", 8, "B-203"), classId: 3 }];
+    const result = generateClassTimetable({ classId: 1, cells, others, room: "a-101", requirements: [{ subject: "Matematik", teacherUserId: 7, perWeek: 6 }, { subject: "Türkçe", teacherUserId: 9, perWeek: 4 }, { subject: "Fizik", teacherUserId: 8, perWeek: 3 }] });
+    expect(result.unplaced).toEqual([]);
+    expect(weeklyHours(result.slots)).toEqual([{ subject: "Matematik", count: 6, minutes: 240 }, { subject: "Türkçe", count: 4, minutes: 160 }, { subject: "Fizik", count: 3, minutes: 120 }]);
+    expect(validateClassTimetable(result.slots)).toBeNull();
+    expect(findCrossClassConflicts(1, result.slots, others)).toEqual([]);
+    // Pazartesi 16:30 hem öğretmen 7'nin hem A-101'in dolu saati: kimseye verilmez.
+    expect(result.slots.some((item) => item.dayOfWeek === 1 && item.startTime === "16:30")).toBe(false);
+    for (const subject of ["Matematik", "Türkçe", "Fizik"]) {
+      const days = result.slots.filter((item) => item.subject === subject).map((item) => item.dayOfWeek);
+      expect(Math.max(...[1, 2, 3, 4, 5].map((day) => days.filter((value) => value === day).length))).toBeLessThanOrEqual(2);
+    }
+    // 4 dersi olan Türkçe 4 farklı güne yayılır.
+    expect(new Set(result.slots.filter((item) => item.subject === "Türkçe").map((item) => item.dayOfWeek)).size).toBe(4);
+  });
+
+  it("otomatik dağıtım: yer yetmezse eksik kalan ders saati bildirilir", () => {
+    const cells = buildPeriodCells([6], [], TIMETABLE_PERIOD_PRESETS[1].periods);
+    const result = generateClassTimetable({ classId: 1, cells, others: [], requirements: [{ subject: "Matematik", teacherUserId: 7, perWeek: 5 }, { subject: "Türkçe", teacherUserId: 9, perWeek: 2 }] });
+    // Tek gün, günde en fazla 2 Matematik: 3'ü yerleşemez; Türkçe tam yerleşir.
+    expect(result.unplaced).toEqual([{ subject: "Matematik", missing: 3 }]);
+    expect(result.slots).toHaveLength(4);
+    // Aynı gündeki iki Matematik yan yana.
+    const math = result.slots.filter((item) => item.subject === "Matematik").map((item) => item.startTime);
+    expect(math).toEqual(["09:00", "09:50"]);
   });
 
   it("haftalık ders sayısı ve süresi derse göre", () => {

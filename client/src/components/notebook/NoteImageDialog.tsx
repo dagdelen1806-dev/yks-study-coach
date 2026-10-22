@@ -1,5 +1,5 @@
 import { trpc } from "@/lib/trpc";
-import { Camera, ImagePlus, Loader2, RotateCw, X } from "lucide-react";
+import { Camera, ImagePlus, Loader2, RotateCw, ScanLine, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { NO_CROP, compressImage, type CropInsets } from "../books/imageCompression";
 
@@ -8,15 +8,20 @@ type Rotation = 0 | 90 | 180 | 270;
 /**
  * 📷 Fotoğraf ekle: kamera/galeri → döndür / kırp / önizle → küçültülüp yüklenir.
  * (Küçültme kitap taramasıyla ortak yardımcıdan; yükleme sunucuda tür/boyut/kota doğrulanır.)
+ * Tarayıcı filtresi varsayılan açık: gölge ve karartı kalkar, kâğıt beyazlar; öğrenci kapatabilir.
  */
 export default function NoteImageDialog({ onDone, onClose, confirmLabel = "Nota ekle" }: { onDone: (attachmentId: number) => void; onClose: () => void; confirmLabel?: string }) {
   const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
+  const [original, setOriginal] = useState<string | null>(null);
+  const [scanned, setScanned] = useState<string | null>(null);
+  const [scan, setScan] = useState(true);
+  const preview = scan && scanned ? scanned : original;
   const [rotate, setRotate] = useState<Rotation>(0);
   const [crop, setCrop] = useState<CropInsets>(NO_CROP);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const cameraRef = useRef<HTMLInputElement>(null);
+  const latestFile = useRef<File | null>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
   const upload = trpc.notes.uploadImage.useMutation();
 
@@ -24,10 +29,14 @@ export default function NoteImageDialog({ onDone, onClose, confirmLabel = "Nota 
     if (!picked) return;
     if (!picked.type.startsWith("image/")) { setError("Yalnızca fotoğraf ekleyebilirsin."); return; }
     setFile(picked);
-    setPreview(URL.createObjectURL(picked));
+    setOriginal(URL.createObjectURL(picked));
+    setScanned(null);
     setRotate(0);
     setCrop(NO_CROP);
     setError("");
+    // Filtreli önizleme küçük boyutta hazırlanır; kayıtta tam boyutta yeniden uygulanır.
+    latestFile.current = picked;
+    compressImage(picked, { maxDimension: 900, maxBytes: 700 * 1024, enhance: "scan" }).then((image) => { if (latestFile.current === picked) setScanned(image.dataUrl); }).catch(() => undefined);
   };
 
   const save = async () => {
@@ -35,7 +44,7 @@ export default function NoteImageDialog({ onDone, onClose, confirmLabel = "Nota 
     setBusy(true);
     setError("");
     try {
-      const image = await compressImage(file, { maxDimension: 1600, maxBytes: 800 * 1024, rotate, crop });
+      const image = await compressImage(file, { maxDimension: 1600, maxBytes: 800 * 1024, rotate, crop, enhance: scan ? "scan" : "none" });
       const { id } = await upload.mutateAsync({ dataUrl: image.dataUrl });
       onDone(id);
     } catch (caught) {
@@ -67,6 +76,10 @@ export default function NoteImageDialog({ onDone, onClose, confirmLabel = "Nota 
               <img src={preview} alt="Önizleme" className="max-h-full max-w-full object-contain" style={{ transform: `rotate(${rotate}deg)`, clipPath: `inset(${crop.top * 100}% ${crop.right * 100}% ${crop.bottom * 100}% ${crop.left * 100}%)` }} />
             </div>
             <div className="space-y-2">
+              <label className="flex items-start gap-2 rounded-lg bg-paper px-3 py-2 text-[12px] text-ink-2">
+                <input type="checkbox" checked={scan} onChange={(event) => setScan(event.target.checked)} className="mt-0.5 accent-brand" />
+                <span><span className="flex items-center gap-1 font-semibold text-ink"><ScanLine size={13} /> Tarayıcı filtresi</span>Gölge ve karartı kalkar, kâğıt beyazlar.</span>
+              </label>
               <button onClick={() => setRotate((value) => (((value + 90) % 360) as Rotation))} className="flex h-9 items-center gap-1.5 rounded-lg border border-ink/10 px-3 text-[12px] font-semibold text-ink-2"><RotateCw size={14} /> Döndür</button>
               {sides.map(([side, label]) => (
                 <label key={side} className="block text-[12px] text-ink-2">
@@ -74,7 +87,7 @@ export default function NoteImageDialog({ onDone, onClose, confirmLabel = "Nota 
                   <input type="range" min={0} max={45} value={Math.round(crop[side] * 100)} onChange={(event) => setCrop({ ...crop, [side]: Number(event.target.value) / 100 })} className="w-full accent-brand" />
                 </label>
               ))}
-              <button onClick={() => { setFile(null); setPreview(null); }} className="text-[12px] font-semibold text-ink-3">Başka fotoğraf seç</button>
+              <button onClick={() => { setFile(null); setOriginal(null); setScanned(null); }} className="text-[12px] font-semibold text-ink-3">Başka fotoğraf seç</button>
             </div>
           </div>
         )}

@@ -313,6 +313,49 @@ test("kurum ders programı: öğretmen iki sınıfa aynı saatte verilemez, uygu
   await expect(page.getByText("12-B Eşit Ağırlık programı kaydedildi.")).toBeVisible();
 });
 
+test("kurum ders programı otomatik dağıtılır: haftalık saatler yerleşir, çakışma olmaz", async ({ page }) => {
+  await signIn(page, ORG_ADMIN);
+  await page.goto("/kurum/ders-programi");
+  await page.getByLabel("Sınıf", { exact: true }).selectOption({ label: "12-B Eşit Ağırlık" });
+  await page.getByRole("button", { name: "Otomatik dağıt" }).click();
+  // Satırlar kayıtlı programdan gelir; Türkçe'yi haftada 3 saate çıkar, Matematik ekle.
+  await page.getByLabel("Haftalık saat 1").fill("3");
+  await page.getByRole("button", { name: "Ders ekle", exact: true }).first().click();
+  const last = await page.getByLabel(/^Ders \d+$/).count();
+  await page.getByLabel(`Ders ${last}`).selectOption("Matematik");
+  await page.getByLabel(`Öğretmen ${last}`).selectOption({ label: "Murat Hoca · Matematik" });
+  await page.getByRole("button", { name: "Programı oluştur" }).click();
+  await expect(page.getByText(/ders yerleşti/)).toBeVisible();
+  await expect(page.getByText("Çakışan dersler var")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Programı kaydet" })).toBeEnabled();
+  await expect(page.locator("main table")).toContainText("Murat Hoca");
+});
+
+test("ortak kitap kaydı: ilk öğrencinin eklediği kitap ikinci öğrenciye 'Bu kitabı mı eklemek istiyorsun?' diye önerilir", async ({ page }) => {
+  const title = `E2E Problemler Soru Bankası ${Date.now() % 1_000_000}`;
+  await signIn(page, STUDENT);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Kaynak ekle" }).first().click();
+  await page.getByLabel("Kitabın adını yaz").fill(title);
+  await expect(page.getByText("Kayıtlı kitap bulunamadı")).toBeVisible();
+  await page.getByRole("button", { name: "Fotoğraf olmadan, bilgileri elle gir" }).click();
+  await expect(page.getByLabel("Kitap adı")).toHaveValue(title);
+  await page.getByLabel("Yayınevi").fill("Deneme Yayınları");
+  await page.getByRole("button", { name: /Kaydet ve içindekilere geç/ }).click();
+  await expect(page.getByText(`"${title}" kütüphanene eklendi`)).toBeVisible();
+
+  await page.context().clearCookies();
+  await signIn(page, "ogrenci2@test.local");
+  await page.goto("/");
+  await page.getByRole("button", { name: "Kaynak ekle" }).first().click();
+  await page.getByLabel("Kitabın adını yaz").fill(title.toLocaleLowerCase("tr"));
+  await expect(page.getByText("Bu kitabı mı eklemek istiyorsun?").last()).toBeVisible();
+  await expect(page.getByText("1 öğrencinin kütüphanesinde")).toBeVisible();
+  await page.getByRole("button", { name: "Evet, bu kitap" }).click();
+  // İçindekiler henüz paylaşılmadığı için tarama adımına geçilir.
+  await expect(page.getByText(`"${title}" kütüphanene eklendi`)).toBeVisible();
+});
+
 test("sınıfın sorumlu öğretmeni atama olmadan sınıfının öğrencilerini görür", async ({ page }) => {
   await signIn(page, "ogretmen3@test.local");
   await page.goto("/kurum/ogrenciler");

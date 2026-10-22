@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { BookContentBadge, BookDetailDialog, BookRecommendationsCard } from "@/components/books/BookLibrary";
 import type { ScannerBook } from "@/components/books/BookContentScanner";
-import type { CoverDraft } from "@/components/books/AddBookWizard";
+import type { CoverDraft, CreatedBook } from "@/components/books/AddBookWizard";
 import { isSameBook } from "@shared/bookIdentity";
 import ChangePasswordDialog from "@/components/auth/ChangePasswordDialog";
 import NotebookSection, { DayNotes, ReviewDueNotes } from "@/components/notebook/NotebookSection";
@@ -463,7 +463,7 @@ function Resources({ topics, exams, onSection, addBookRequest = 0, onAddBookHand
   useEffect(() => { if (addBookRequest > 0) { setShowAddBook(true); onAddBookHandled?.(); } }, [addBookRequest]);
   // Kitap detayı (içindekiler + zayıf konu eşleşmeleri) — bkz. components/books/BookLibrary.tsx.
   const [openBook, setOpenBook] = useState<ScannerBook | null>(null);
-  const savePhotoBookMutation = trpc.resources.importBooks.useMutation();
+  const addFromCoverMutation = trpc.resources.addBookFromCover.useMutation();
   const asScannerBook = (book: Pick<ResourceBook, "id" | "title" | "publisher" | "subject" | "exam">): ScannerBook => ({ id: book.id, title: book.title, publisher: book.publisher, subject: book.subject, exam: book.exam });
   // Aynı kitap (OCR'ın farklı yazımlarıyla bile) ikinci kez eklenmesin: ISBN varsa ona, yoksa
   // yayınevi + ad (+ yazar) ile bakılır; büyük/küçük harf ve Türkçe karakter farkı yok sayılır.
@@ -473,15 +473,15 @@ function Resources({ topics, exams, onSection, addBookRequest = 0, onAddBookHand
   };
   // Kitap sunucuya ve rafa KAYDEDİLDİKTEN sonra döner: içindekiler adımı kitabın
   // rafta olmasını (sunucudaki sahiplik kontrolü) şart koşar.
-  const createBookFromCover = async (draft: CoverDraft): Promise<ScannerBook> => {
-    const id = `photo-book-${Date.now()}`;
-    const book: ResourceBook = { id, title: draft.title, publisher: draft.publisher || "Yayınevi belirtilmemiş", subject: draft.subject || "Genel", exam: draft.exam, level: draft.level, format: "Kaynak", reason: `Öğrencinin kendi kütüphanesinden, fotoğrafla eklendi.${draft.edition.trim() ? ` Baskı: ${draft.edition.trim()}.` : ""}`, sourceUrl: "", tone: "blue", authors: draft.authors.trim() || undefined, isbn: draft.isbn.trim() || undefined };
-    await savePhotoBookMutation.mutateAsync({ books: [{ id: book.id, title: book.title, publisher: book.publisher, subject: book.subject, exam: book.exam, level: book.level, format: book.format, reason: book.reason, tone: book.tone, authors: book.authors, isbn: book.isbn }] });
-    await addBookMutation.mutateAsync({ bookId: id });
-    setImportedBooks((items) => [book, ...items]);
-    setInventory((items) => (items.includes(id) ? items : [...items, id]));
+  // Sunucu kitabı ortak kitap kaydına da bağlar; öğrenci ortak kayıttaki kitabı seçtiyse
+  // onaylı içindekiler kopyalanır (içindekiler fotoğrafı gerekmez).
+  const createBookFromCover = async (draft: CoverDraft, shared?: { id: number; useContents: boolean }): Promise<CreatedBook> => {
+    const result = await addFromCoverMutation.mutateAsync({ sharedBookId: shared?.id ?? null, useSharedContents: Boolean(shared?.useContents), draft: { title: draft.title, publisher: draft.publisher || "Yayınevi belirtilmemiş", subject: draft.subject || "Genel", exam: draft.exam, level: draft.level, authors: draft.authors.trim() || undefined, isbn: draft.isbn.trim() || undefined, edition: draft.edition.trim() || undefined } });
+    const book: ResourceBook = { ...result.book, tone: "blue" };
+    setImportedBooks((items) => (items.some((item) => item.id === book.id) ? items : [book, ...items]));
+    setInventory((items) => (items.includes(book.id) ? items : [...items, book.id]));
     void bookUtils.bookContent.summaries.invalidate();
-    return asScannerBook(book);
+    return { book: asScannerBook(book), contentsCopied: result.contentsCopied, topicCount: result.topicCount, alreadyOwned: result.alreadyOwned };
   };
 
   useEffect(() => { localStorage.setItem(localStorageKeys.bookInventory, JSON.stringify(inventory)); }, [inventory]);

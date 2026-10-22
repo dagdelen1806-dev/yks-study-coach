@@ -125,8 +125,43 @@ export const userResourceBooks = pgTable("user_resource_books", {
   // tespitinde en güçlü kimliktir; yoksa yayınevi + normalize ad + yazar.
   authors: varchar("authors", { length: 300 }),
   isbn: varchar("isbn", { length: 32 }),
+  // Ortak kitap kaydındaki karşılığı (shared_books); eski ve elle eklenmiş kitaplarda boş.
+  sharedBookId: integer("sharedBookId"),
   createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
 });
+
+// Öğrencilerin kütüphanesine eklediği kitapların ortak kaydı: aynı kitabı ekleyen sonraki öğrenciye
+// "Bu kitabı mı eklemek istiyorsun?" diye sorulur; onaylarsa kapak ve içindekiler yeniden okunmaz
+// (OCR maliyeti düşer). Kayıtta öğrenciye ait bilgi yok — yalnızca kitap kimliği ve bir öğrencinin
+// onayladığı içindekiler (ilk onaylanan içerik geçerli; sonraki öğrenci kendi kopyasını düzeltebilir).
+export const sharedBooks = pgTable("shared_books", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  title: varchar("title", { length: 180 }).notNull(),
+  publisher: varchar("publisher", { length: 120 }).notNull(),
+  subject: varchar("subject", { length: 80 }).notNull(),
+  exam: text("exam", { enum: EXAM_KINDS }).notNull(),
+  authors: varchar("authors", { length: 300 }),
+  isbn: varchar("isbn", { length: 32 }),
+  edition: varchar("edition", { length: 120 }),
+  /** normalizeBookText(title) / (publisher): arama ve eşleştirme anahtarı. */
+  titleKey: varchar("titleKey", { length: 200 }).notNull(),
+  publisherKey: varchar("publisherKey", { length: 140 }).notNull(),
+  ownerCount: integer("ownerCount").default(1).notNull(),
+  createdByUserId: integer("createdByUserId"),
+  /** Onaylanmış içindekiler (SaveContentInput[] JSON); yoksa null. */
+  contentsJson: text("contentsJson"),
+  contentsItemCount: integer("contentsItemCount").default(0).notNull(),
+  contentsTopicCount: integer("contentsTopicCount").default(0).notNull(),
+  contentsSource: text("contentsSource", { enum: ["ocr", "manual"] }),
+  contentsByUserId: integer("contentsByUserId"),
+  contentsUpdatedAt: timestamp("contentsUpdatedAt", { withTimezone: true }),
+  contentsReuseCount: integer("contentsReuseCount").default(0).notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => new Date()).notNull(),
+}, (table) => ({
+  isbnIdx: index("shared_books_isbn_idx").on(table.isbn),
+  titleKeyIdx: index("shared_books_title_key_idx").on(table.titleKey),
+}));
 
 export const bookInventory = pgTable("book_inventory", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),

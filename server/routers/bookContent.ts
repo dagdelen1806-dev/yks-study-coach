@@ -3,6 +3,7 @@ import { z } from "zod";
 import { validateDataUrl } from "../_core/fileValidation";
 import { metredFeatureProcedure, protectedProcedure, router } from "../_core/trpc";
 import { addRecommendationToPlan, getAutoSchedule, getBookContents, getBookContentSummaries, getMatchableTopicsFor, getWeakTopicBookRecommendations, replaceBookContents, runAutoSchedule, setAutoSchedule, userOwnsBook } from "../bookContent/bookContentDb";
+import { shareBookContents } from "../bookContent/sharedBooks";
 import { bookContentConfig } from "../bookContent/config";
 import { suggestTopicsWithAi } from "../bookContent/aiMapper";
 import { matchTopic, type MatchMethod, type MatchTier } from "../bookContent/curriculumMatcher";
@@ -226,7 +227,10 @@ export const bookContentRouter = router({
         if (item.pageStart !== null && item.pageEnd !== null && item.pageEnd < item.pageStart) throw new TRPCError({ code: "BAD_REQUEST", message: `"${item.label}" satırında bitiş sayfası başlangıçtan küçük.` });
       }
       try {
-        return await replaceBookContents(ctx.user.id, input.bookId, input.subject, input.items, input.source);
+        const saved = await replaceBookContents(ctx.user.id, input.bookId, input.subject, input.items, input.source);
+        // Kitabın ortak kaydında içindekiler yoksa bu onaylı liste oraya da yazılır (sonraki öğrenci OCR'sız alır).
+        await shareBookContents(ctx.user.id, input.bookId, input.subject, input.items, input.source).catch((error) => console.warn("[shared books] share failed:", error));
+        return saved;
       } catch (error) {
         throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "İçerik kaydedilemedi." });
       }

@@ -15,6 +15,7 @@ import { addBookStudyLog, addBookToInventory, addSourceSwitch, addTopicStudyLog,
 import { calculatePlanAdherence } from "../shared/planAdherence";
 import { topicsRouter } from "./routers/topics";
 import { bookContentRouter } from "./routers/bookContent";
+import { addBookToLibrary, findSharedBookMatches, searchSharedBooks } from "./bookContent/sharedBooks";
 import { notesRouter } from "./routers/notes";
 import { questionsRouter } from "./routers/questions";
 import { getNotebookPlanSignal } from "./notes/questionsDb";
@@ -251,6 +252,15 @@ export const appRouter = router({
     upsertMapping: protectedProcedure.input(z.object({ bookId: z.string().max(120), topic: z.string().max(180), subject: z.string().max(80), pageStart: z.number().int().min(0).optional(), pageEnd: z.number().int().min(0).optional(), testStart: z.number().int().min(0).optional(), testEnd: z.number().int().min(0).optional() })).mutation(({ ctx, input }) => upsertBookTopicMapping(ctx.user.id, input)),
     addSwitch: protectedProcedure.input(z.object({ fromBookId: z.string().max(120).optional(), toBookId: z.string().max(120), reason: z.string().max(300) })).mutation(({ ctx, input }) => addSourceSwitch(ctx.user.id, { ...input, switchedAt: new Date() })),
     importBooks: protectedProcedure.input(z.object({ books: z.array(z.object({ id: z.string().max(120), title: z.string().min(1).max(180), publisher: z.string().max(120), subject: z.string().max(80), exam: z.enum(EXAM_KINDS), level: z.enum(["Kolay", "Orta", "Zor"]), format: z.string().max(120), reason: z.string().max(1000), sourceUrl: z.string().max(500).optional(), pageCount: z.number().int().min(0).optional(), tone: z.string().max(20), authors: z.string().max(300).optional(), isbn: z.string().max(32).optional() })).min(1).max(500) })).mutation(({ ctx, input }) => addUserResourceBooks(ctx.user.id, input.books)),
+    // Ortak kitap kaydında ad/yayınevi/ISBN ile arama: kitap kayıtlıysa kapak fotoğrafı (OCR) gerekmez.
+    searchSharedBooks: protectedProcedure.input(z.object({ q: z.string().trim().min(2).max(120) })).query(({ input }) => searchSharedBooks(input.q)),
+    // Kitabı kütüphaneye ekler ve ortak kayda bağlar; öğrenci "Bu kitap" dediyse (sharedBookId)
+    // onaylanmış içindekiler de kopyalanır, içindekiler fotoğrafı okunmaz.
+    addBookFromCover: protectedProcedure.input(z.object({
+      sharedBookId: z.number().int().positive().nullable(),
+      useSharedContents: z.boolean(),
+      draft: z.object({ title: z.string().trim().min(1).max(180), publisher: z.string().max(120), subject: z.string().max(80), exam: z.enum(EXAM_KINDS), level: z.enum(["Kolay", "Orta", "Zor"]), authors: z.string().max(300).optional(), isbn: z.string().max(32).optional(), edition: z.string().max(120).optional() }),
+    })).mutation(({ ctx, input }) => addBookToLibrary(ctx.user.id, input)),
     // Öğrenci elindeki fiziksel kitabın kapak fotoğrafını çeker (telefon
     // kamerası); LLM görselden kitap adı/yayınevi/ders tahmini çıkarır.
     // Sadece TAHMİN döner — hiçbir şeyi otomatik kütüphaneye eklemez, öğrenci
@@ -275,7 +285,7 @@ export const appRouter = router({
         // OCR çıktısı olduğu gibi kabul edilmez: ISBN sağlama toplamıyla doğrulanır
         // (geçersizse boş + güven 0), güvenler 0-1'e sıkıştırılır.
         const isbn = normalizeIsbn(parsed.isbn);
-        return {
+        const result = {
           title: String(parsed.title ?? "").slice(0, 180),
           publisher: String(parsed.publisher ?? "").slice(0, 120),
           subject: String(parsed.subject ?? "").slice(0, 80),
@@ -287,6 +297,9 @@ export const appRouter = router({
           imageKind: parsed.imageKind === "table_of_contents" || parsed.imageKind === "other" ? parsed.imageKind : ("cover" as const),
           fieldConfidence: { title: clamp01(parsed.fieldConfidence?.title), publisher: clamp01(parsed.fieldConfidence?.publisher), subject: clamp01(parsed.fieldConfidence?.subject), exam: clamp01(parsed.fieldConfidence?.exam), isbn: isbn ? clamp01(parsed.fieldConfidence?.isbn) : 0 },
         };
+        // Ortak kitap kaydında benzeri varsa öğrenciye "Bu kitabı mı eklemek istiyorsun?" diye sorulur.
+        const matches = result.imageKind === "cover" && result.title ? await findSharedBookMatches({ title: result.title, publisher: result.publisher, isbn: result.isbn, authors: result.authors.join(", ") }).catch(() => []) : [];
+        return { ...result, matches };
       } catch (error) {
         console.warn("[Book Photo] Extraction failed:", error);
         throw new Error(llmUnavailableMessage(error) ?? "Fotoğraf okunamadı. Daha net, ışıklı bir kapak fotoğrafı dener misin?");
