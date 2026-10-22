@@ -5093,6 +5093,14 @@ async function getStudentCalendarReadOnly(studentUserId, since) {
   ]);
   return { sessions, logs };
 }
+async function listPlannedSessionsOn(studentUserId, day) {
+  const db = await requireDb4();
+  const start = new Date(day);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return db.select({ sessionDate: studyPlanSessions.sessionDate, plannedMinutes: studyPlanSessions.plannedMinutes, status: studyPlanSessions.status, title: studyPlanSessions.title }).from(studyPlanSessions).where(and6(eq8(studyPlanSessions.userId, studentUserId), eq8(studyPlanSessions.status, "planned"), gte5(studyPlanSessions.sessionDate, start), lt5(studyPlanSessions.sessionDate, end)));
+}
 async function insertAssignedTask(input) {
   const db = await requireDb4();
   const dayStart = new Date(input.sessionDate);
@@ -7659,11 +7667,16 @@ var sameToken = (a, b) => a === b || a.length >= 4 && b.length >= 4 && a.slice(0
 var covered = (tokens, pool) => tokens.filter((token) => pool.some((other) => sameToken(token, other))).length;
 var GENERIC_PUBLISHER_WORDS = /* @__PURE__ */ new Set(["yayin", "yayinlari", "yayinevi", "yayincilik", "yayinlar", "yay", "kitap", "kitaplari", "akademi"]);
 var publisherTokens = (value) => tokensOf(value).filter((token) => !GENERIC_PUBLISHER_WORDS.has(token));
+var numbersOf = (tokens) => tokens.filter((token) => /^\d+$/.test(token));
+var sameNumbers = (a, b) => {
+  const x = numbersOf(a), y = numbersOf(b);
+  return x.length === y.length && x.every((value) => y.includes(value));
+};
 function scoreSharedBook(draft, row) {
   const isbnA = normalizeIsbn(draft.isbn), isbnB = normalizeIsbn(row.isbn);
   if (isbnA && isbnB) return isbnA === isbnB ? 1 : 0;
   const a = tokensOf(draft.title), b = tokensOf(row.title);
-  if (!a.length || !b.length) return 0;
+  if (!a.length || !b.length || !sameNumbers(a, b)) return 0;
   const dice2 = (covered(a, b) + covered(b, a)) / (a.length + b.length);
   const publisherA = publisherTokens(draft.publisher), publisherB = publisherTokens(row.publisher);
   const publisher = !publisherA.length || !publisherB.length ? 0 : covered(publisherA, publisherB) > 0 ? 0.15 : -0.2;
@@ -7690,6 +7703,7 @@ async function searchSharedBooks(query, limit = 8) {
   return rows.map((row) => {
     if (isbn && row.isbn === isbn) return { row, score: 1 };
     const pool = [...tokensOf(row.title), ...tokensOf(row.publisher)];
+    if (numbersOf(queryTokens).some((value) => !pool.includes(value))) return { row, score: 0 };
     return { row, score: covered(queryTokens, pool) / queryTokens.length };
   }).filter((item) => item.score >= SEARCH_MIN_SCORE).sort((a, b) => b.score - a.score || b.row.ownerCount - a.row.ownerCount).slice(0, limit).map((item) => toMatch(item.row, item.score, item.score === 1));
 }
@@ -10438,10 +10452,6 @@ function computeFreeSlots(blocks, date, options) {
   return slots.filter((slot) => slot.end > slot.start);
 }
 var freeMinutes = (slots) => slots.reduce((sum, slot) => sum + slot.end - slot.start, 0);
-function findClassConflict(blocks, date, startMinutes, durationMinutes) {
-  const end = startMinutes + durationMinutes;
-  return blocksOn(blocks, date).find((block) => startMinutes < toMinutes(block.endTime) && end > toMinutes(block.startTime)) ?? null;
-}
 function describeWeekForPlan(blocks, weekStart, from) {
   if (blocks.length === 0) return null;
   const lines = [];
@@ -10805,6 +10815,34 @@ var readingRouter = router({
 import { TRPCError as TRPCError10 } from "@trpc/server";
 import { createHash as createHash4, randomInt } from "node:crypto";
 import { z as z12 } from "zod";
+
+// shared/planPlacement.ts
+var TASK_EARLIEST = "08:00";
+var TASK_GAP_MINUTES = 10;
+var sameLocalDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+function busyOn(date, input) {
+  const fromBlocks = (blocks, kind) => blocksOn(blocks, date).map((block) => ({ start: toMinutes(block.startTime), end: toMinutes(block.endTime), label: block.label, kind }));
+  const sessions = (input.sessions ?? []).filter((session) => (session.status ?? "planned") === "planned").map((session) => ({ session, at: new Date(session.sessionDate) })).filter(({ at }) => sameLocalDay(at, date)).map(({ session, at }) => {
+    const start = at.getHours() * 60 + at.getMinutes();
+    return { start, end: start + Math.max(0, session.plannedMinutes), label: session.title?.trim() || "Planl\u0131 \xE7al\u0131\u015Fma", kind: "session" };
+  });
+  return [...fromBlocks(input.blocks, "class"), ...fromBlocks(input.courseBlocks ?? [], "course"), ...sessions].sort((a, b) => a.start - b.start || a.end - b.end);
+}
+function findTaskConflict(busy, start, minutes) {
+  const end = start + minutes;
+  return busy.find((interval) => start < interval.end && end > interval.start) ?? null;
+}
+function suggestStart(busy, minutes, options = {}) {
+  const gap = options.gap ?? TASK_GAP_MINUTES;
+  const to = options.to ?? toMinutes(PLAN_DAY_END);
+  let cursor = options.from ?? toMinutes(TASK_EARLIEST);
+  for (const interval of busy) {
+    if (cursor + minutes + gap <= interval.start) break;
+    cursor = Math.max(cursor, interval.end + gap);
+  }
+  return cursor + minutes <= to ? cursor : null;
+}
+var describeInterval = (interval) => `${interval.label} (${fromMinutes(interval.start)}\u2013${fromMinutes(interval.end)})`;
 
 // shared/kvkk.ts
 var DEFAULT_KVKK_NOTICE = `K\u0130\u015E\u0130SEL VER\u0130LER\u0130N \u0130\u015ELENMES\u0130NE \u0130L\u0130\u015EK\u0130N AYDINLATMA METN\u0130
@@ -11225,9 +11263,15 @@ var orgRouter = router({
       await assertCanViewStudent(ctx, input.studentUserId);
       const start = toMinutes(input.time);
       if (start + input.minutes > 23 * 60 + 30) throw new TRPCError10({ code: "BAD_REQUEST", message: "G\xF6rev 23:30'dan \xF6nce bitmeli." });
-      const schedule = await getClassSchedule(input.studentUserId);
-      const conflict = findClassConflict(schedule.blocks, /* @__PURE__ */ new Date(`${input.date}T12:00:00`), start, input.minutes);
-      if (conflict) throw new TRPCError10({ code: "BAD_REQUEST", message: `\xD6\u011Frencinin ${conflict.label} dersiyle \xE7ak\u0131\u015F\u0131yor (${conflict.startTime}\u2013${conflict.endTime}).` });
+      const day = /* @__PURE__ */ new Date(`${input.date}T12:00:00`);
+      const [schedule, courseBlocks, sessions] = await Promise.all([getClassSchedule(input.studentUserId), getCourseBlocks(input.studentUserId), listPlannedSessionsOn(input.studentUserId, day)]);
+      const busy = busyOn(day, { blocks: schedule.blocks, courseBlocks, sessions });
+      const conflict = findTaskConflict(busy, start, input.minutes);
+      if (conflict) {
+        const suggestion = suggestStart(busy, input.minutes, { from: start });
+        const what = conflict.kind === "session" ? `planl\u0131 \xE7al\u0131\u015Fmas\u0131yla: ${describeInterval(conflict)}` : `${describeInterval(conflict)} dersiyle`;
+        throw new TRPCError10({ code: "BAD_REQUEST", message: `\xD6\u011Frencinin ${what} \xE7ak\u0131\u015F\u0131yor. ${suggestion !== null ? `Ayn\u0131 g\xFCn uygun ilk saat: ${fromMinutes(suggestion)}.` : "Bu g\xFCn uygun saat yok; ba\u015Fka bir g\xFCn se\xE7."}` });
+      }
       const sessionId = await insertAssignedTask({ orgId: ctx.membership.orgId, studentUserId: input.studentUserId, teacherUserId: ctx.user.id, sessionDate: /* @__PURE__ */ new Date(`${input.date}T${input.time}:00`), title: `${input.subject} \xB7 ${input.topic}`, subject: input.subject, topic: input.topic, kind: input.kind, plannedMinutes: input.minutes, targetQuestions: input.targetQuestions || null, summary: input.note || `${ctx.membership.orgName} \xF6\u011Fretmeninin atad\u0131\u011F\u0131 g\xF6rev.` });
       await audit(ctx, "task.assign", { type: "user", id: input.studentUserId }, { sessionId, subject: input.subject, topic: input.topic });
       return { sessionId };

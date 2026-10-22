@@ -36,12 +36,16 @@ const covered = (tokens: string[], pool: string[]) => tokens.filter((token) => p
 const GENERIC_PUBLISHER_WORDS = new Set(["yayin", "yayinlari", "yayinevi", "yayincilik", "yayinlar", "yay", "kitap", "kitaplari", "akademi"]);
 const publisherTokens = (value: string) => tokensOf(value).filter((token) => !GENERIC_PUBLISHER_WORDS.has(token));
 
+// Başlıktaki sayılar (cilt, yıl, deneme no: "TYT Deneme 10" / "Deneme 12") kitabı ayırır: tam eşleşmeli.
+const numbersOf = (tokens: string[]) => tokens.filter((token) => /^\d+$/.test(token));
+const sameNumbers = (a: string[], b: string[]) => { const x = numbersOf(a), y = numbersOf(b); return x.length === y.length && x.every((value) => y.includes(value)); };
+
 /** Kapaktan okunan kitaba benzerlik: ad tokenlarının Dice benzerliği + aynı yayınevi bonusu; ISBN eşitse kesin. */
 export function scoreSharedBook(draft: Pick<SharedBookDraft, "title" | "publisher" | "isbn">, row: { title: string; publisher: string; isbn: string | null }): number {
   const isbnA = normalizeIsbn(draft.isbn), isbnB = normalizeIsbn(row.isbn);
   if (isbnA && isbnB) return isbnA === isbnB ? 1 : 0;
   const a = tokensOf(draft.title), b = tokensOf(row.title);
-  if (!a.length || !b.length) return 0;
+  if (!a.length || !b.length || !sameNumbers(a, b)) return 0;
   const dice = (covered(a, b) + covered(b, a)) / (a.length + b.length);
   const publisherA = publisherTokens(draft.publisher), publisherB = publisherTokens(row.publisher);
   const publisher = !publisherA.length || !publisherB.length ? 0 : covered(publisherA, publisherB) > 0 ? 0.15 : -0.2;
@@ -81,6 +85,8 @@ export async function searchSharedBooks(query: string, limit = 8): Promise<Share
     .map((row) => {
       if (isbn && row.isbn === isbn) return { row, score: 1 };
       const pool = [...tokensOf(row.title), ...tokensOf(row.publisher)];
+      // Aramadaki sayı (ör. "deneme 10") kitapta birebir geçmeli; "deneme 12" önerilmez.
+      if (numbersOf(queryTokens).some((value) => !pool.includes(value))) return { row, score: 0 };
       return { row, score: covered(queryTokens, pool) / queryTokens.length };
     })
     .filter((item) => item.score >= SEARCH_MIN_SCORE)

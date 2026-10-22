@@ -11,6 +11,10 @@ describe("ortak kitap eşleştirmesi", () => {
     expect(scoreSharedBook({ title: "Paragraf Soru Bankasi", publisher: "" }, book)).toBeGreaterThanOrEqual(0.9);
     expect(scoreSharedBook({ title: "Paragraf Konu Anlatımı", publisher: "3D Yayınları" }, book)).toBeLessThan(0.6);
     expect(scoreSharedBook({ title: "Paragraf Soru Bankası", publisher: "Limit Yayınları" }, book)).toBeLessThan(0.9);
+    // Başlıktaki sayı kitabı ayırır: "TYT Deneme 10" ile "TYT Deneme 12" aynı kitap değil.
+    const deneme = { title: "TYT 10 Deneme", publisher: "3D Yayınları", isbn: null };
+    expect(scoreSharedBook({ title: "TYT 12 Deneme", publisher: "3D Yayınları" }, deneme)).toBe(0);
+    expect(scoreSharedBook({ title: "TYT 10 DENEME", publisher: "3D" }, deneme)).toBeGreaterThanOrEqual(0.9);
     // ISBN ikisinde de geçerliyse yalnız ona bakılır.
     expect(scoreSharedBook({ title: "Başka ad", publisher: "", isbn: "9786053551676" }, { ...book, isbn: "9786053551676" })).toBe(1);
   });
@@ -56,6 +60,9 @@ describe.skipIf(!hasDb)("ortak kitap kaydı (veritabanı)", () => {
     const [match] = await findSharedBookMatches({ title: title.toUpperCase().replace("ı", "i"), publisher: "KAREKÖK", isbn: "" });
     expect(match).toMatchObject({ id: first.book.sharedBookId, ownerCount: 1, contentsItemCount: 3, contentsTopicCount: new Set(items.map((item) => item.topicId)).size });
     expect((await searchSharedBooks(`problemler ${stamp}`)).map((item) => item.id)).toContain(match.id);
+    // Yalnızca sayısı farklı başlık başka kitaptır: ne aramada ne kapak eşleşmesinde önerilir.
+    expect((await searchSharedBooks(`problemler soru bankası ${stamp + 1}`)).map((item) => item.id)).not.toContain(match.id);
+    expect((await findSharedBookMatches({ title: `Problemler Soru Bankası ${stamp + 1}`, publisher: "Karekök Yayınları", isbn: "" })).map((item) => item.id)).not.toContain(match.id);
 
     const second = await addBookToLibrary(ids.second, { sharedBookId: match.id, draft: { ...draft, title: "OCR'dan gelen hatalı ad" }, useSharedContents: true });
     expect(second.book.title).toBe(title); // kimlik ortak kayıttan
