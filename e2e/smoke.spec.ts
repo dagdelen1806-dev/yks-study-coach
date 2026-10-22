@@ -392,6 +392,36 @@ test("Duvarım: yazı ve sonra okunacak bağlantı eklenir; başka öğrenci duv
   await expect(page.getByText(text)).toHaveCount(0);
 });
 
+test("akademik takip: sorumlu öğretmen öneriden dosya açar, mahrem not yazar, değerlendirir; yönetici yalnızca özeti görür", async ({ page }) => {
+  const note = `Görüşmede problemlerde zorlandığını söyledi ${Date.now() % 100000}`;
+  await signIn(page, "ogretmen3@test.local");
+  await page.goto("/kurum/akademik-takip");
+  await expect(page.getByRole("heading", { name: "Akademik takip" })).toBeVisible();
+  const row = page.locator("li", { hasText: "Zeynep" }).filter({ hasText: "82 → 76 → 69" });
+  await expect(row).toContainText("Orta güven");
+  await row.getByRole("button", { name: "İncele" }).click();
+  await expect(page.getByText("Akademik inceleme önerisi")).toBeVisible();
+  await page.getByRole("button", { name: "Takip dosyası aç" }).click();
+  await expect(page.getByText("Takip dosyası açıldı.")).toBeVisible();
+  await expect(page.locator("main table").first()).toContainText("82");
+  await page.getByRole("button", { name: "Çalışma kayıtlarını inceledim" }).click();
+  await expect(page.getByText("Devam ediyor").first()).toBeVisible();
+  await page.getByLabel("Dosya notu").fill(note);
+  await page.getByRole("button", { name: "Not ekle" }).click();
+  await expect(page.getByText(note)).toBeVisible();
+  await page.getByRole("radio", { name: "Devam ediyor" }).click();
+  await page.getByRole("button", { name: "Değerlendirmeyi kaydet" }).click();
+  await expect(page.getByText(/sınırlı kanıt/)).toBeVisible();
+
+  await page.context().clearCookies();
+  await signIn(page, ORG_ADMIN);
+  await page.goto("/kurum/akademik-takip");
+  await expect(page.getByText("Devam eden")).toBeVisible();
+  await page.locator("main table").getByRole("button", { name: /Zeynep/ }).click();
+  await expect(page.getByRole("heading", { name: "Mahrem notlar" })).toBeVisible();
+  await expect(page.getByText(note)).toHaveCount(0);
+});
+
 test("sınıfın sorumlu öğretmeni atama olmadan sınıfının öğrencilerini görür", async ({ page }) => {
   await signIn(page, "ogretmen3@test.local");
   await page.goto("/kurum/ogrenciler");

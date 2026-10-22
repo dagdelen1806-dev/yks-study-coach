@@ -10,10 +10,10 @@
  */
 import { execFileSync } from "node:child_process";
 import { randomBytes, scryptSync } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "../server/db";
 import { parseIdentifier } from "../server/_core/loginIdentifier";
-import { classStudents, classTimetableSlots, counselingNotes, featureUsageLogs, organizationCreditUsage, organizationAuditLogs, organizationClasses, organizationInvitations, organizationMembers, organizations, parentLinks, payments, studentExamTracks, studentProfiles, subscriptions, teacherAssignments, topicStudyLogs, userMockExams, users } from "../drizzle/schema";
+import { academicCases, caseActions, caseEvaluations, caseEvidence, classStudents, classTimetableSlots, counselingNotes, featureUsageLogs, organizationCreditUsage, organizationAuditLogs, organizationClasses, organizationInvitations, organizationMembers, organizations, parentLinks, payments, studentExamTracks, studentProfiles, subscriptions, teacherAssignments, topicStudyLogs, userMockExams, users } from "../drizzle/schema";
 
 const SLUG = "test-dershanesi";
 const PASSWORD = "test1234";
@@ -62,11 +62,11 @@ async function main() {
   if (old) {
     const classIds = (await db.select({ id: organizationClasses.id }).from(organizationClasses).where(eq(organizationClasses.orgId, old.id))).map((row) => row.id);
     if (classIds.length) await db.delete(classStudents).where(inArray(classStudents.classId, classIds));
-    for (const table of [classTimetableSlots, organizationClasses, teacherAssignments, counselingNotes, organizationInvitations, organizationAuditLogs, organizationMembers, organizationCreditUsage]) await db.delete(table).where(eq(table.orgId, old.id));
+    for (const table of [caseEvidence, caseActions, caseEvaluations, academicCases, classTimetableSlots, organizationClasses, teacherAssignments, counselingNotes, organizationInvitations, organizationAuditLogs, organizationMembers, organizationCreditUsage]) await db.delete(table).where(eq(table.orgId, old.id));
     await db.delete(organizations).where(eq(organizations.id, old.id));
   }
 
-  const orgResult = await db.insert(organizations).values({ name: "Test Dershanesi", slug: SLUG, plan: "standard", membershipStartsAt: new Date(), membershipEndsAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), aiCreditsMonthly: 5000, city: "Ankara", district: "Çankaya", contactEmail: "kvkk@test.local" }).returning({ id: organizations.id });
+  const orgResult = await db.insert(organizations).values({ name: "Test Dershanesi", slug: SLUG, plan: "standard", membershipStartsAt: new Date(), membershipEndsAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), aiCreditsMonthly: 5000, academicCasesEnabled: 1, city: "Ankara", district: "Çankaya", contactEmail: "kvkk@test.local" }).returning({ id: organizations.id });
   const orgId = Number(orgResult[0].id);
 
   const staffIds: Record<string, number> = {};
@@ -94,6 +94,15 @@ async function main() {
   const sayClass = (await db.insert(organizationClasses).values({ orgId, name: "12-A Sayısal", gradeLevel: "12" }).returning({ id: organizationClasses.id }))[0].id;
   const eaClass = (await db.insert(organizationClasses).values({ orgId, name: "12-B Eşit Ağırlık", gradeLevel: "12" }).returning({ id: organizationClasses.id }))[0].id;
   await db.insert(classStudents).values([...studentIds.slice(0, 3).map((id) => ({ classId: sayClass, studentUserId: id })), ...studentIds.slice(3).map((id) => ({ classId: eaClass, studentUserId: id }))]);
+
+  // Akademik takip örneği (Novara Rehber): Zeynep (12-A, sorumlusu Kenan Hoca) son üç TYT'de 82 → 76 → 69.
+  const zeynep = studentIds[2];
+  await db.delete(userMockExams).where(and(eq(userMockExams.userId, zeynep), eq(userMockExams.exam, "TYT")));
+  const tytDay = (daysAgo: number) => new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000);
+  await db.insert(userMockExams).values([[35, 82], [21, 76], [7, 69]].map(([daysAgo, net], index) => ({
+    userId: zeynep, title: `TYT Genel Deneme ${index + 4}`, exam: "TYT" as const, examDate: tytDay(daysAgo), net: net.toFixed(2), delta: index ? (net - [82, 76][index - 1]).toFixed(2) : "0",
+    subjectsJson: JSON.stringify({ Türkçe: [31, 30, 29][index], Matematik: [28, 25, 21][index], Fen: [11, 10, 9][index], Sosyal: [12, 11, 10][index] }), timeSpentJson: "{}", topicNetsJson: "{}", topicDetailsJson: "[]",
+  })));
 
   const murat = staffIds["ogretmen1@test.local"];
   const ayse = staffIds["ogretmen2@test.local"];

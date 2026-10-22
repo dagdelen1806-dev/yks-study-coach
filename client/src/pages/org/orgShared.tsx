@@ -5,6 +5,7 @@ import { RISK_LABELS, type RiskKey } from "@shared/org";
 export const ORG_PATHS = {
   dashboard: "/kurum",
   students: "/kurum/ogrenciler",
+  cases: "/kurum/akademik-takip",
   classes: "/kurum/siniflar",
   timetable: "/kurum/ders-programi",
   teachers: "/kurum/ogretmenler",

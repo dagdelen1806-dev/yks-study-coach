@@ -3,6 +3,7 @@ import { trpc } from "@/lib/trpc";
 import { useNotebook } from "@/components/notebook/NotebookProvider";
 import { ReviewDueNotes } from "@/components/notebook/NotebookSection";
 import { GettingStarted } from "./GettingStarted";
+import ThisWeekTasks from "@/components/app/ThisWeekTasks";
 import Illustration, { ILLUSTRATIONS, useIllustrationAvailable } from "@/components/app/Illustration";
 import { AvatarPicker, StudentAvatar } from "@/components/app/Avatar";
 import { Bar100, EmptyNote, LinkButton, Panel, Ring, Segmented, StatCard } from "@/components/app/kit";
@@ -275,6 +276,7 @@ export default function Overview({ topics, exams, onSection, onStartSession, onE
         </div>
 
         {user && <ReviewDueNotes />}
+        {user && <ThisWeekTasks />}
         {user && <TeacherFeedback />}
 
         {/* Grafikler. */}

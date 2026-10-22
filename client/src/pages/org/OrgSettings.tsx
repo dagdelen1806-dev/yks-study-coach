@@ -3,7 +3,7 @@ import { EmptyNote, PageHeader, Panel, Segmented, primaryButton, secondaryButton
 import { CLASS_GRADES, CLASS_TRACKS, CLASS_TRACK_LABELS, ORG_CREDIT_COSTS, ORG_CREDIT_FEATURE_LABELS, ORG_KINDS, ORG_KIND_LABELS, ORG_PLANS, ORG_PLAN_DEFAULT_CREDITS, ORG_PLAN_DESCRIPTIONS, ORG_PLAN_LABELS, ORG_PLAN_RANK, ROLE_LABELS, canRequestPlan, type MembershipState, type OrgPlan, ROLE_PERMISSIONS, TEACHER_SUBJECT_GROUPS, TEACHER_SUBJECTS, hasRole, isStaffRole, type OrgKind } from "@shared/org";
 import { DEFAULT_KVKK_CONSENT, DEFAULT_KVKK_NOTICE, KVKK_PLACEHOLDERS } from "@shared/kvkk";
 import type { FeatureKey } from "@shared/entitlements";
-import { Building2, Check, Copy, FileText, Pencil, Plus, Rocket, RotateCcw, School, ShieldCheck, Sparkles, Trash2, UserPlus, Users, Wallet, X } from "lucide-react";
+import { Building2, Check, ClipboardCheck, Copy, FileText, Pencil, Plus, Rocket, RotateCcw, School, ShieldCheck, Sparkles, Trash2, UserPlus, Users, Wallet, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import type { OrgScope } from "./OrgApp";
@@ -28,7 +28,7 @@ export default function OrgSettings({ scope }: { scope: OrgScope }) {
     <div className="space-y-5">
       <PageHeader eyebrow={scope.orgName} title="Ayarlar" description="Kurumun bilgilerini, öğretmenlerini ve sınıflarını buradan tanımla. Öğrenciler kuruma yalnızca kendi onaylarıyla, davet koduyla katılır." />
       <div className="overflow-x-auto"><Segmented value={tab} options={TABS} onChange={setTab} label="Ayar bölümleri" /></div>
-      {tab === "org" && <OrgProfileSettings scope={scope} />}
+      {tab === "org" && <><OrgProfileSettings scope={scope} /><CasesSetting scope={scope} /></>}
       {tab === "membership" && <MembershipSettings scope={scope} />}
       {tab === "kvkk" && <KvkkSettings scope={scope} />}
       {tab === "teachers" && <TeacherSettings scope={scope} />}
@@ -63,6 +63,27 @@ function OrgProfileSettings({ scope }: { scope: OrgScope }) {
       </div>
       <p className="mt-3 text-[12px] text-ink-4">Kurum kısa adı: {org.data.slug} · Oluşturulma: {new Date(org.data.createdAt).toLocaleDateString("tr-TR")}</p>
       {canEdit && <button onClick={() => save.mutate({ orgId: scope.orgId, ...form })} disabled={save.isPending || form.name.trim().length < 2} className={`${primaryButton} mt-4 self-start`}><Check size={16} /> {save.isPending ? "Kaydediliyor…" : "Kaydet"}</button>}
+    </Panel>
+  );
+}
+
+/** Akademik takip dosyaları (Novara Rehber): kurum bazında açılır; yalnızca kurum yöneticisi değiştirir. */
+function CasesSetting({ scope }: { scope: OrgScope }) {
+  const utils = trpc.useUtils();
+  const canEdit = hasRole(scope.role, "admin");
+  const status = trpc.org.cases.status.useQuery({ orgId: scope.orgId }, { retry: false });
+  const update = trpc.org.cases.setEnabled.useMutation({
+    onSuccess: (result) => { toast.success(result.enabled ? "Akademik takip açıldı." : "Akademik takip kapatıldı."); void utils.org.cases.invalidate(); },
+    onError: (error) => toast.error(error.message),
+  });
+  if (!status.data) return null;
+  return (
+    <Panel icon={<ClipboardCheck size={18} />} title="Akademik takip" subtitle="Karşılaştırılabilir denemelerde düşüş eğilimi görülen öğrenciler için öğretmene inceleme önerisi ve takip dosyası. Öneri teşhis değildir; notlar mahremdir.">
+      <label className={`flex items-center gap-2 text-[13.5px] ${canEdit ? "cursor-pointer text-ink-2" : "text-ink-3"}`}>
+        <input type="checkbox" checked={status.data.enabled} disabled={!canEdit || update.isPending} onChange={(event) => update.mutate({ orgId: scope.orgId, enabled: event.target.checked })} className="h-4 w-4 accent-brand" />
+        Akademik takip dosyalarını bu kurumda aç
+      </label>
+      {!canEdit && <p className="mt-2 text-[12px] text-ink-4">Yalnızca kurum yöneticisi değiştirebilir.</p>}
     </Panel>
   );
 }

@@ -11,13 +11,16 @@ import type { OrgScope } from "./OrgApp";
 import { ORG_PATHS, Initials, RiskBadges, deltaText, formatNet, relativeTime } from "./orgShared";
 
 const NetTrendChart = lazy(() => import("@/pages/overview/OverviewCharts").then((module) => ({ default: module.NetTrendChart })));
-type Tab = "summary" | "exams" | "topics" | "plan" | "notes";
+const CaseFile = lazy(() => import("./CaseFile"));
+type Tab = "summary" | "exams" | "topics" | "plan" | "notes" | "case";
 
 /** Personelin öğrenci görünümü (salt okunur veri) + görev atama ve görüşme notu. */
 export function StudentDetail({ scope, studentUserId, compact = false }: { scope: OrgScope; studentUserId: number; compact?: boolean }) {
   const utils = trpc.useUtils();
   const detail = trpc.org.student.useQuery({ orgId: scope.orgId, studentUserId }, { retry: false });
-  const [tab, setTab] = useState<Tab>("summary");
+  // Akademik takip listesinden gelindiyse (#takip) doğrudan takip dosyası açılır.
+  const [tab, setTab] = useState<Tab>(() => (typeof window !== "undefined" && window.location.hash === "#takip" ? "case" : "summary"));
+  const casesEnabled = Boolean(trpc.org.cases.status.useQuery({ orgId: scope.orgId }, { retry: false }).data?.enabled);
   const track: ExamTrack = detail.data?.profile.examTrack ?? "YKS";
   const kinds = kindsOf(track);
   const [chosenKind, setExamKind] = useState<ExamKind>("TYT");
@@ -75,7 +78,9 @@ export function StudentDetail({ scope, studentUserId, compact = false }: { scope
         <StatCard icon={<Clock3 size={18} />} label="Son 7 gün" value={`${summary.weekMinutes}`} unit="dk" foot={<span>Son etkinlik: {relativeTime(summary.lastActivityAt)}</span>} />
       </div>
 
-      <div className="overflow-x-auto pb-0.5"><Segmented value={tab} options={[{ value: "summary", label: "Özet" }, { value: "exams", label: "Denemeler" }, { value: "topics", label: "Konular" }, { value: "plan", label: "Plan" }, { value: "notes", label: `Notlar${notes.length ? ` (${notes.length})` : ""}` }]} onChange={setTab} label="Öğrenci bölümleri" /></div>
+      <div className="overflow-x-auto pb-0.5"><Segmented value={tab} options={[{ value: "summary", label: "Özet" }, { value: "exams", label: "Denemeler" }, { value: "topics", label: "Konular" }, { value: "plan", label: "Plan" }, { value: "notes", label: `Notlar${notes.length ? ` (${notes.length})` : ""}` }, ...(casesEnabled ? [{ value: "case" as const, label: "Takip dosyası" }] : [])]} onChange={setTab} label="Öğrenci bölümleri" /></div>
+
+      {tab === "case" && casesEnabled && <Suspense fallback={<EmptyNote>Yükleniyor…</EmptyNote>}><CaseFile scope={scope} studentUserId={studentUserId} /></Suspense>}
 
       {tab === "summary" && (
         <div className={`grid gap-5 ${compact ? "" : "xl:grid-cols-2"}`}>

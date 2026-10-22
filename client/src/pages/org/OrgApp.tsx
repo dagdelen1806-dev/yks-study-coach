@@ -1,7 +1,7 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { ROLE_LABELS, isStaffRole, type MembershipState, type OrgRole } from "@shared/org";
-import { Building2, CalendarRange, ClipboardList, GraduationCap, LayoutDashboard, LogOut, Mail, Menu, School, Settings, Users, X } from "lucide-react";
+import { Building2, CalendarRange, ClipboardCheck, ClipboardList, GraduationCap, LayoutDashboard, LogOut, Mail, Menu, School, Settings, Users, X } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
@@ -17,12 +17,14 @@ const OrgInvitations = lazy(() => import("./OrgManage").then((module) => ({ defa
 const OrgAudit = lazy(() => import("./OrgManage").then((module) => ({ default: module.OrgAudit })));
 const OrgSettings = lazy(() => import("./OrgSettings"));
 const OrgTimetable = lazy(() => import("./OrgTimetable"));
+const OrgCases = lazy(() => import("./OrgCases"));
 
 export type OrgScope = { orgId: number; orgName: string; role: OrgRole; state?: MembershipState };
 
 const NAV: Array<{ key: OrgSection; label: string; icon: typeof Users; minRole?: "coordinator" | "admin" }> = [
   { key: "dashboard", label: "Kurum Paneli", icon: LayoutDashboard },
   { key: "students", label: "Öğrenciler", icon: GraduationCap },
+  { key: "cases", label: "Akademik takip", icon: ClipboardCheck },
   { key: "classes", label: "Sınıflar", icon: School },
   { key: "timetable", label: "Ders programı", icon: CalendarRange },
   { key: "teachers", label: "Öğretmenler", icon: Users, minRole: "coordinator" },
@@ -146,6 +148,7 @@ export default function OrgApp() {
           <Suspense fallback={<div className="flex min-h-[40vh] items-center justify-center"><span className="h-7 w-7 animate-spin rounded-full border-2 border-brand border-t-transparent" /></div>}>
             {route.section === "dashboard" && <OrgDashboard scope={scope} />}
             {route.section === "students" && <OrgStudents scope={scope} />}
+            {route.section === "cases" && <OrgCases scope={scope} />}
             {route.section === "student" && route.studentId && <StudentDetailPage scope={scope} studentUserId={route.studentId} />}
             {route.section === "classes" && <OrgClasses scope={scope} />}
             {route.section === "timetable" && <OrgTimetable scope={scope} />}
