@@ -30,7 +30,7 @@ const getSpeechRecognition = (): (new () => SpeechRecognitionLike) | null => {
 /** Kayıt boyunca bu RMS seviyesinin hiç üstüne çıkılmadıysa kayıt "sessiz" sayılır (konuşma genelde 0,05+). */
 const SILENCE_LEVEL = 0.015;
 
-export default function VoiceRecorder({ onDone, onClose, offerKeepAudio = true }: { onDone: (result: { text: string; attachmentId: number | null; durationSec: number }) => void; onClose: () => void; /** false: yalnızca metin döner, ses kaydı saklanmaz. */ offerKeepAudio?: boolean }) {
+export default function VoiceRecorder({ onDone, onClose, offerKeepAudio = true, audioOnly = false }: { onDone: (result: { text: string; attachmentId: number | null; durationSec: number }) => void; onClose: () => void; /** false: yalnızca metin döner, ses kaydı saklanmaz. */ offerKeepAudio?: boolean; /** true: metne çevrilmez (AI kullanılmaz), yalnızca ses kaydı eklenir. */ audioOnly?: boolean }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [seconds, setSeconds] = useState(0);
   const [error, setError] = useState("");
@@ -44,6 +44,7 @@ export default function VoiceRecorder({ onDone, onClose, offerKeepAudio = true }
   const recognition = useRef<SpeechRecognitionLike | null>(null);
   const cancelled = useRef(false);
   const transcribe = trpc.notes.transcribe.useMutation();
+  const uploadAudio = trpc.notes.uploadAudio.useMutation();
   // Kayıt boyunca ölçülen en yüksek ses seviyesi: neredeyse sessiz bir kayıt AI'a gönderilmez
   // (model sessizlikte metin uydurabiliyor; ayrıca hak boşa harcanmasın).
   const peakLevel = useRef(0);
@@ -88,6 +89,11 @@ export default function VoiceRecorder({ onDone, onClose, offerKeepAudio = true }
     setSilent(false);
     try {
       const dataUrl = await blobToDataUrl(blob.current);
+      if (audioOnly) {
+        const { id } = await uploadAudio.mutateAsync({ dataUrl, durationSec: seconds });
+        onDone({ text: "", attachmentId: id, durationSec: seconds });
+        return;
+      }
       const result = await transcribe.mutateAsync({ dataUrl, durationSec: seconds, keepAudio });
       onDone(result);
     } catch (caught) {
@@ -169,8 +175,8 @@ export default function VoiceRecorder({ onDone, onClose, offerKeepAudio = true }
         {phase === "idle" && (
           <div className="py-6">
             <button onClick={start} className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-danger text-white shadow-lg transition hover:scale-105" aria-label="Kayda başla"><Mic size={32} /></button>
-            <p className="mt-4 text-[13px] leading-5 text-ink-3">Dokun ve konuş. Bitirince sesin Türkçe metne çevrilip notuna eklenecek; düzenleyebilirsin.</p>
-            {offerKeepAudio && <label className="mt-3 inline-flex items-center gap-2 text-[12px] text-ink-2"><input type="checkbox" checked={keepAudio} onChange={(event) => setKeepAudio(event.target.checked)} className="accent-brand" /> Ses kaydını da nota ekle</label>}
+            <p className="mt-4 text-[13px] leading-5 text-ink-3">{audioOnly ? "Dokun ve konuş. Bitirince ses kaydın eklenecek." : "Dokun ve konuş. Bitirince sesin Türkçe metne çevrilip notuna eklenecek; düzenleyebilirsin."}</p>
+            {offerKeepAudio && !audioOnly && <label className="mt-3 inline-flex items-center gap-2 text-[12px] text-ink-2"><input type="checkbox" checked={keepAudio} onChange={(event) => setKeepAudio(event.target.checked)} className="accent-brand" /> Ses kaydını da nota ekle</label>}
           </div>
         )}
 
@@ -200,7 +206,7 @@ export default function VoiceRecorder({ onDone, onClose, offerKeepAudio = true }
         {phase === "transcribing" && (
           <div className="py-10" aria-live="polite">
             <Loader2 className="mx-auto animate-spin text-brand" size={28} />
-            <p className="mt-3 text-[14px] font-semibold text-ink">Notuna dönüştürülüyor…</p>
+            <p className="mt-3 text-[14px] font-semibold text-ink">{audioOnly ? "Kayıt yükleniyor…" : "Notuna dönüştürülüyor…"}</p>
           </div>
         )}
 

@@ -42,4 +42,13 @@ export const ENV = {
   googlePlayServiceAccountJson: process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON ?? "",
   googlePlayPackageName: process.env.GOOGLE_PLAY_PACKAGE_NAME ?? "",
   webhookIngestSecret: process.env.WEBHOOK_INGEST_SECRET ?? "",
+
+  // Medya (defter ve Duvarım fotoğraf/ses dosyaları) — Supabase Storage (bkz. server/storage/supabaseStorage.ts).
+  //   SUPABASE_URL — https://<proje>.supabase.co
+  //   SUPABASE_SERVICE_ROLE_KEY — yalnızca sunucuda; tarayıcıya asla gönderilmez
+  //   SUPABASE_MEDIA_BUCKET — özel (public olmayan) bucket adı; varsayılan "pusula-media"
+  // İkisi de boşsa dosyalar eskisi gibi veritabanında tutulur (yerel geliştirme/test).
+  supabaseUrl: (process.env.SUPABASE_URL ?? "").replace(/\/+$/, ""),
+  supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
+  supabaseMediaBucket: process.env.SUPABASE_MEDIA_BUCKET || "pusula-media",
 };

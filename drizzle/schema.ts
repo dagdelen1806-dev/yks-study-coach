@@ -302,12 +302,48 @@ export const noteAttachments = pgTable("note_attachments", {
   kind: text("kind", { enum: ["image", "audio"] }).notNull(),
   mimeType: varchar("mimeType", { length: 60 }).notNull(),
   byteSize: integer("byteSize").notNull(),
-  data: mediumBlob("data").notNull(),
+  // Baytlar ya burada (Supabase ayarı yoksa) ya da Supabase Storage'da `storageKey` altında.
+  data: mediumBlob("data"),
+  storageKey: varchar("storageKey", { length: 200 }),
+  // Ek bir deftere notuna ya da bir Duvarım kaydına bağlıdır; ikisi de boşsa yetimdir (süre sonunda silinir).
+  wallPostId: integer("wallPostId"),
   durationSec: integer("durationSec"),
   ocrText: text("ocrText"),
   createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
   userNoteIdx: index("note_attachments_user_note_idx").on(table.userId, table.noteId),
+  userWallPostIdx: index("note_attachments_user_wall_post_idx").on(table.userId, table.wallPostId),
+}));
+
+// ---------------------------------------------------------------------------
+// Duvarım: öğrencinin kişisel, zaman sıralı akışı (yazı, bağlantı, alıntı). Yalnızca sahibi görür
+// (görünürlük şimdilik tek değer: private). İçerik defterle aynı blok tabanlı JSON belge; fotoğraf,
+// ses, formül, çizim blokları defterdeki gibi. "Sonra oku" işaretli kayıtlar okunana kadar üstte sayılır.
+// ---------------------------------------------------------------------------
+export const wallPosts = pgTable("wall_posts", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
+  kind: text("kind", { enum: ["note", "link", "quote"] }).default("note").notNull(),
+  title: varchar("title", { length: 200 }).notNull(),
+  content: text("content").notNull(),
+  plainText: text("plainText").notNull(),
+  sourceUrl: varchar("sourceUrl", { length: 1000 }),
+  sourceTitle: varchar("sourceTitle", { length: 300 }),
+  sourceDescription: varchar("sourceDescription", { length: 500 }),
+  sourceSite: varchar("sourceSite", { length: 120 }),
+  tags: varchar("tags", { length: 300 }).default("").notNull(),
+  subject: varchar("subject", { length: 80 }),
+  topicId: integer("topicId"),
+  readLater: integer("readLater").default(0).notNull(),
+  readAt: timestamp("readAt", { withTimezone: true }),
+  isPinned: integer("isPinned").default(0).notNull(),
+  visibility: text("visibility", { enum: ["private"] }).default("private").notNull(),
+  postedAt: timestamp("postedAt", { withTimezone: true }).defaultNow().notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => new Date()).notNull(),
+}, (table) => ({
+  userPostedIdx: index("wall_posts_user_posted_idx").on(table.userId, table.postedAt),
+  userTopicIdx: index("wall_posts_user_topic_idx").on(table.userId, table.topicId),
 }));
 
 // Soru Defterim: öğrencinin çözemediği soru kartı. Kart bir notun içinde yaşar

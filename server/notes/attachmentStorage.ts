@@ -1,24 +1,35 @@
-import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { and, eq, inArray, isNull, lt, sql, type SQL } from "drizzle-orm";
 import { noteAttachments } from "../../drizzle/schema";
 import { getDb } from "../db";
+import { getMediaBlobStore } from "../storage/supabaseStorage";
 import { notesConfig } from "./config";
 
 /**
- * Not eki depolaması. Şu anki uygulama: veritabanı (MEDIUMBLOB), kullanıcı
- * kotasıyla. Nesne depolamaya (S3/R2) geçmek için bu arayüzün yeni bir
- * uygulamasını yazmak yeterli; çağıranlar değişmez. Her işlem `userId` ile
- * kapsamlıdır — bir öğrenci başka öğrencinin ekini okuyamaz/silemez.
+ * Defter ve Duvarım eklerinin (fotoğraf/ses) depolaması. Ekin kaydı (sahip, tür, boyut, bağlı
+ * olduğu not/duvar kaydı) her zaman veritabanında; baytlar Supabase Storage ayarlıysa oradaki özel
+ * bucket'ta (`storageKey`), değilse veritabanında (`data`). Her işlem `userId` ile kapsamlıdır —
+ * bir öğrenci başka öğrencinin ekini okuyamaz/silemez. Kota iki modda da aynı.
  */
 export interface AttachmentStorage {
   put(userId: number, input: { kind: "image" | "audio"; mimeType: string; data: Buffer; durationSec?: number | null }): Promise<{ id: number }>;
+  /** Baytlarıyla (AI okuması, ses → metin için); Supabase'deyse indirilir. */
   get(userId: number, id: number): Promise<{ mimeType: string; data: Buffer; kind: "image" | "audio"; noteId: number | null } | null>;
+  /** Tarayıcıya sunmak için: Supabase'deyse kısa süreli imzalı bağlantı, değilse baytlar. */
+  locate(userId: number, id: number): Promise<{ mimeType: string; url: string } | { mimeType: string; data: Buffer } | null>;
   setOcrText(userId: number, id: number, text: string): Promise<void>;
   /** İçerikte hâlâ geçen ekleri nota bağlar, artık geçmeyenleri ayırır (sonra yetim temizliğiyle silinir). */
   syncNoteLinks(userId: number, noteId: number, referencedIds: number[]): Promise<void>;
   deleteForNote(userId: number, noteId: number): Promise<void>;
+  /** Duvarım kaydı için aynı bağlama/silme. */
+  syncWallPostLinks(userId: number, wallPostId: number, referencedIds: number[]): Promise<void>;
+  deleteForWallPost(userId: number, wallPostId: number): Promise<void>;
   usageBytes(userId: number): Promise<number>;
   cleanupOrphans(userId: number): Promise<void>;
 }
+
+/** İmzalı bağlantının ömrü (sn). Tarayıcı önbelleği bundan kısa tutulur. */
+export const SIGNED_URL_TTL_SEC = 600;
 
 export class AttachmentError extends Error {}
 
@@ -60,20 +71,55 @@ async function requireDb() {
   return db;
 }
 
+const EXTENSIONS: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "m4a", "audio/mpeg": "mp3", "audio/wav": "wav" };
+
+/** Satırları siler; Supabase'deki dosyaları da kaldırır (dosya silinemezse kayıt yine silinir, hata günlüğe düşer). */
+async function deleteRows(where: SQL | undefined) {
+  const db = await requireDb();
+  const removed = await db.delete(noteAttachments).where(where).returning({ storageKey: noteAttachments.storageKey });
+  const keys = removed.map((row) => row.storageKey).filter((key): key is string => Boolean(key));
+  const store = getMediaBlobStore();
+  if (keys.length && store) await store.remove(keys).catch((error) => console.error("[Attachments] storage delete failed:", error instanceof Error ? error.message : error));
+}
+
 export const databaseAttachmentStorage: AttachmentStorage = {
   async put(userId, input) {
     const db = await requireDb();
     const used = await this.usageBytes(userId);
     if (used + input.data.byteLength > notesConfig.attachments.perUserQuotaBytes) {
-      throw new AttachmentError("Defterindeki ek alanı doldu. Eski notlardaki bazı fotoğraf/ses kayıtlarını silip tekrar dener misin?");
+      throw new AttachmentError("Ek alanın doldu. Eski not ya da duvar kayıtlarındaki bazı fotoğraf/ses kayıtlarını silip tekrar dener misin?");
     }
-    const result = await db.insert(noteAttachments).values({ userId, kind: input.kind, mimeType: input.mimeType, byteSize: input.data.byteLength, data: input.data, durationSec: input.durationSec ?? null }).returning({ id: noteAttachments.id });
+    const store = getMediaBlobStore();
+    let storageKey: string | null = null;
+    if (store) {
+      storageKey = `u${userId}/${input.kind}/${randomUUID()}.${EXTENSIONS[input.mimeType] ?? "bin"}`;
+      try {
+        await store.put(storageKey, input.mimeType, input.data);
+      } catch (error) {
+        console.error("[Attachments] storage upload failed:", error instanceof Error ? error.message : error);
+        throw new AttachmentError("Dosya yüklenemedi. Biraz sonra tekrar dener misin?");
+      }
+    }
+    const result = await db.insert(noteAttachments).values({ userId, kind: input.kind, mimeType: input.mimeType, byteSize: input.data.byteLength, data: storageKey ? null : input.data, storageKey, durationSec: input.durationSec ?? null }).returning({ id: noteAttachments.id });
     return { id: Number(result[0].id) };
   },
   async get(userId, id) {
     const db = await requireDb();
-    const [row] = await db.select({ mimeType: noteAttachments.mimeType, data: noteAttachments.data, kind: noteAttachments.kind, noteId: noteAttachments.noteId }).from(noteAttachments).where(and(eq(noteAttachments.id, id), eq(noteAttachments.userId, userId))).limit(1);
-    return row ?? null;
+    const [row] = await db.select({ mimeType: noteAttachments.mimeType, data: noteAttachments.data, storageKey: noteAttachments.storageKey, kind: noteAttachments.kind, noteId: noteAttachments.noteId }).from(noteAttachments).where(and(eq(noteAttachments.id, id), eq(noteAttachments.userId, userId))).limit(1);
+    if (!row) return null;
+    const store = getMediaBlobStore();
+    const data = row.data ?? (row.storageKey && store ? await store.get(row.storageKey) : null);
+    if (!data) return null;
+    return { mimeType: row.mimeType, data, kind: row.kind, noteId: row.noteId };
+  },
+  async locate(userId, id) {
+    const db = await requireDb();
+    const [row] = await db.select({ mimeType: noteAttachments.mimeType, data: noteAttachments.data, storageKey: noteAttachments.storageKey }).from(noteAttachments).where(and(eq(noteAttachments.id, id), eq(noteAttachments.userId, userId))).limit(1);
+    if (!row) return null;
+    if (row.data) return { mimeType: row.mimeType, data: row.data };
+    const store = getMediaBlobStore();
+    if (!row.storageKey || !store) return null;
+    return { mimeType: row.mimeType, url: await store.signedUrl(row.storageKey, SIGNED_URL_TTL_SEC) };
   },
   async setOcrText(userId, id, text) {
     const db = await requireDb();
@@ -88,8 +134,20 @@ export const databaseAttachmentStorage: AttachmentStorage = {
     }
   },
   async deleteForNote(userId, noteId) {
+    await deleteRows(and(eq(noteAttachments.userId, userId), eq(noteAttachments.noteId, noteId)));
+  },
+  async syncWallPostLinks(userId, wallPostId, referencedIds) {
     const db = await requireDb();
-    await db.delete(noteAttachments).where(and(eq(noteAttachments.userId, userId), eq(noteAttachments.noteId, noteId)));
+    await db.update(noteAttachments).set({ wallPostId: null }).where(and(eq(noteAttachments.userId, userId), eq(noteAttachments.wallPostId, wallPostId)));
+    if (referencedIds.length) {
+      await db.update(noteAttachments).set({ wallPostId }).where(and(eq(noteAttachments.userId, userId), inArray(noteAttachments.id, referencedIds)));
+    }
+  },
+  async deleteForWallPost(userId, wallPostId) {
+    // Aynı ek bir deftere notunda da kullanılıyorsa silinmez, yalnızca duvardan ayrılır.
+    const db = await requireDb();
+    await db.update(noteAttachments).set({ wallPostId: null }).where(and(eq(noteAttachments.userId, userId), eq(noteAttachments.wallPostId, wallPostId), sql`${noteAttachments.noteId} IS NOT NULL`));
+    await deleteRows(and(eq(noteAttachments.userId, userId), eq(noteAttachments.wallPostId, wallPostId)));
   },
   async usageBytes(userId) {
     const db = await requireDb();
@@ -97,8 +155,7 @@ export const databaseAttachmentStorage: AttachmentStorage = {
     return Number(row?.total ?? 0);
   },
   async cleanupOrphans(userId) {
-    const db = await requireDb();
-    await db.delete(noteAttachments).where(and(eq(noteAttachments.userId, userId), isNull(noteAttachments.noteId), lt(noteAttachments.createdAt, new Date(Date.now() - notesConfig.attachments.orphanTtlMs))));
+    await deleteRows(and(eq(noteAttachments.userId, userId), isNull(noteAttachments.noteId), isNull(noteAttachments.wallPostId), lt(noteAttachments.createdAt, new Date(Date.now() - notesConfig.attachments.orphanTtlMs))));
   },
 };
 

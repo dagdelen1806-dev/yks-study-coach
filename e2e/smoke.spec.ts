@@ -362,6 +362,36 @@ test("ortak kitap kaydı: ilk öğrencinin eklediği kitap ikinci öğrenciye 'B
   await expect(page.getByText(`"${title}" kütüphanene eklendi`)).toBeVisible();
 });
 
+test("Duvarım: yazı ve sonra okunacak bağlantı eklenir; başka öğrenci duvarı göremez", async ({ page }) => {
+  const text = `E2E duvar yazısı ${Date.now() % 1_000_000}`;
+  await signIn(page, STUDENT);
+  await page.goto("/duvarim");
+  await expect(page.getByRole("heading", { name: "Duvarım" })).toBeVisible();
+  await page.getByRole("button", { name: "Yeni yazı" }).click();
+  await page.getByLabel("Kayıt içeriği").click();
+  await page.keyboard.type(text);
+  await page.getByLabel("Etiketler").fill("motivasyon");
+  await page.getByRole("button", { name: "Duvara ekle" }).click();
+  await expect(page.getByText("Duvarına eklendi.")).toBeVisible();
+  await expect(page.getByRole("article", { name: text })).toContainText("#motivasyon");
+
+  await page.getByRole("button", { name: "Bağlantı", exact: true }).click();
+  await page.getByLabel("Bağlantı", { exact: true }).fill("https://example.com/e2e-okuma");
+  await page.getByLabel("Kayıt başlığı").fill(`Okunacak ${text}`);
+  await page.getByRole("button", { name: "Duvara ekle" }).click();
+  const linkCard = page.getByRole("article", { name: `Okunacak ${text}` });
+  await expect(linkCard).toContainText("Okunacak");
+  await expect(page.getByText(/kayıt seni bekliyor/)).toBeVisible();
+  await linkCard.getByRole("button", { name: "Okundu işaretle" }).click();
+  await expect(linkCard).toContainText("Okundu");
+
+  await page.context().clearCookies();
+  await signIn(page, "ogrenci2@test.local");
+  await page.goto("/duvarim");
+  await expect(page.getByRole("heading", { name: "Duvarım" })).toBeVisible();
+  await expect(page.getByText(text)).toHaveCount(0);
+});
+
 test("sınıfın sorumlu öğretmeni atama olmadan sınıfının öğrencilerini görür", async ({ page }) => {
   await signIn(page, "ogretmen3@test.local");
   await page.goto("/kurum/ogrenciler");

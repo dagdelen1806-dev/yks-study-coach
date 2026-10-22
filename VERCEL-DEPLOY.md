@@ -64,6 +64,9 @@ Kendi `.env` dosyandaki (`env.template`'teki) isimlerle birebir aynı isimleri k
 | `LLM_MODEL` | İsteğe bağlı; görsel okuyabilen bir model. Varsayılan `gpt-4o-mini` (Gemini için ör. `gemini-2.5-flash`). |
 | `TRANSCRIBE_MODEL` | İsteğe bağlı; ses → metin modeli, varsayılan `whisper-1` (OpenAI). Gemini'de bu uç nokta yok — sesli notta tarayıcı diktesine düşülür. |
 | `PAYMENT_PROVIDER` | `mock` bırakabilirsin (sandbox); gerçek bir sağlayıcı bağlamadıysan `apple`/`google` değişkenlerini boş bırak. |
+| `SUPABASE_URL` | Defter ve Duvarım fotoğraf/ses dosyaları için Supabase Storage: `https://<proje>.supabase.co` (Project Settings → API). Boşsa dosyalar veritabanına yazılır. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Aynı sayfadaki **service_role** anahtarı. Yalnızca sunucuda kullanılır, tarayıcıya gitmez; asla `VITE_` önekiyle ekleme. |
+| `SUPABASE_MEDIA_BUCKET` | İsteğe bağlı, varsayılan `pusula-media`. Bucket yoksa ilk yüklemede **özel** (public değil) olarak oluşturulur; dosyalar yalnızca sahibine, 10 dakikalık imzalı bağlantıyla açılır. |
 | `CRON_SECRET` | Yeni: rastgele bir string üret (ör. `openssl rand -hex 32` ya da herhangi bir şifre üreticisi) ve buraya ekle. Kaynak kataloğu senkron uç noktasını (`/api/cron/resource-catalog-sync`) korur — Vercel Cron bunu otomatik `Authorization: Bearer $CRON_SECRET` başlığıyla gönderir. |
 
 `NODE_ENV`'i elle eklemene gerek yok — Vercel bunu production'da otomatik `production` yapar.

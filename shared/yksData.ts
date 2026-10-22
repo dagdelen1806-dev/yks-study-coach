@@ -301,6 +301,7 @@ export const sectionDescriptions = {
   plan: "Zayıf konularını ve deneme trendini analiz eden kişisel haftalık plan.",
   calendar: "Günlük oturumlarını tamamla, haftalık ritmini ve konu gelişimini izle.",
   notebook: "Ders çalışırken aldığın notlar: ses, yazı, fotoğraf, formül ve çizim; ders, konu ve kitaplarınla bağlantılı.",
+  wall: "Kişisel duvarın: yazıların, sonra okumak için kaydettiğin bağlantı ve alıntılar, zaman sırasıyla. Yalnızca sen görürsün.",
   premium: "Premium abonelik, deneme süresi ve fatura yönetimi.",
   admin: "Onay bekleyen kayıtlar ve abonelik yönetimi (yalnızca yöneticiler).",
 };
@@ -311,6 +312,7 @@ export const appNavSections = [
   { key: "catalog" as const, label: "Kaynak Kataloğu" },
   { key: "plan" as const, label: "AI Planım" }, { key: "calendar" as const, label: "Takvim" },
   { key: "notebook" as const, label: "Defter" },
+  { key: "wall" as const, label: "Duvarım" },
   { key: "premium" as const, label: "Premium" },
 ];
 // "admin" bilerek `appNavSections`'ta değil — yalnızca role==="admin" olan

@@ -13,6 +13,7 @@ export const SECTION_PATHS: Record<DashboardSection, string> = {
   plan: "/ai-planim",
   calendar: "/takvim",
   notebook: "/defter",
+  wall: "/duvarim",
   premium: "/premium",
   admin: "/yonetim",
 };

@@ -113,6 +113,16 @@ export const notesRouter = router({
       return storage.put(ctx.user.id, { kind: "image", mimeType, data });
     })),
 
+  // Yalnızca ses kaydı (metne çevirmeden, ücretsiz) — Duvarım'daki sesli kayıtlar için.
+  uploadAudio: protectedProcedure
+    .input(z.object({ dataUrl: z.string().min(20).max(Math.ceil(notesConfig.attachments.audioMaxBytes * 1.4)), durationSec: z.number().min(0).max(notesConfig.speech.maxAudioSeconds + 5) }))
+    .mutation(({ ctx, input }) => userFacing(async () => {
+      const storage = getAttachmentStorage();
+      await storage.cleanupOrphans(ctx.user.id);
+      const { mimeType, data } = decodeAttachment(input.dataUrl, "audio");
+      return storage.put(ctx.user.id, { kind: "audio", mimeType, data, durationSec: Math.round(input.durationSec) });
+    })),
+
   // Ses → metin. İsterse ses kaydı da nota eklenir (keepAudio).
   transcribe: metredFeatureProcedure("NOTE_VOICE", { maxRequests: 10, windowMs: 60_000 })
     .input(z.object({ dataUrl: z.string().min(20).max(Math.ceil(notesConfig.attachments.audioMaxBytes * 1.4)), durationSec: z.number().min(0).max(notesConfig.speech.maxAudioSeconds + 5), keepAudio: z.boolean() }))

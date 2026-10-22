@@ -26,6 +26,7 @@ vi.mock("./notes/attachmentStorage", async (importOriginal) => {
   const storage = {
     put: vi.fn(async (userId: number, input: { kind: "image" | "audio"; mimeType: string; data: Buffer; durationSec?: number | null }) => { const id = nextAttachmentId++; stored.set(id, { userId, ...input }); return { id }; }),
     get: vi.fn(async (userId: number, id: number) => { const row = stored.get(id); return row && row.userId === userId ? { mimeType: row.mimeType, data: row.data, kind: row.kind, noteId: null } : null; }),
+    locate: vi.fn(async (userId: number, id: number) => { const row = stored.get(id); return row && row.userId === userId ? { mimeType: row.mimeType, data: row.data } : null; }),
     setOcrText: vi.fn(async () => undefined),
     syncNoteLinks: vi.fn(async () => undefined),
     deleteForNote: vi.fn(async () => undefined),

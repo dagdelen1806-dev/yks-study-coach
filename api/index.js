@@ -636,12 +636,42 @@ var noteAttachments = pgTable("note_attachments", {
   kind: text("kind", { enum: ["image", "audio"] }).notNull(),
   mimeType: varchar("mimeType", { length: 60 }).notNull(),
   byteSize: integer("byteSize").notNull(),
-  data: mediumBlob("data").notNull(),
+  // Baytlar ya burada (Supabase ayarı yoksa) ya da Supabase Storage'da `storageKey` altında.
+  data: mediumBlob("data"),
+  storageKey: varchar("storageKey", { length: 200 }),
+  // Ek bir deftere notuna ya da bir Duvarım kaydına bağlıdır; ikisi de boşsa yetimdir (süre sonunda silinir).
+  wallPostId: integer("wallPostId"),
   durationSec: integer("durationSec"),
   ocrText: text("ocrText"),
   createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
 }, (table) => ({
-  userNoteIdx: index("note_attachments_user_note_idx").on(table.userId, table.noteId)
+  userNoteIdx: index("note_attachments_user_note_idx").on(table.userId, table.noteId),
+  userWallPostIdx: index("note_attachments_user_wall_post_idx").on(table.userId, table.wallPostId)
+}));
+var wallPosts = pgTable("wall_posts", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
+  kind: text("kind", { enum: ["note", "link", "quote"] }).default("note").notNull(),
+  title: varchar("title", { length: 200 }).notNull(),
+  content: text("content").notNull(),
+  plainText: text("plainText").notNull(),
+  sourceUrl: varchar("sourceUrl", { length: 1e3 }),
+  sourceTitle: varchar("sourceTitle", { length: 300 }),
+  sourceDescription: varchar("sourceDescription", { length: 500 }),
+  sourceSite: varchar("sourceSite", { length: 120 }),
+  tags: varchar("tags", { length: 300 }).default("").notNull(),
+  subject: varchar("subject", { length: 80 }),
+  topicId: integer("topicId"),
+  readLater: integer("readLater").default(0).notNull(),
+  readAt: timestamp("readAt", { withTimezone: true }),
+  isPinned: integer("isPinned").default(0).notNull(),
+  visibility: text("visibility", { enum: ["private"] }).default("private").notNull(),
+  postedAt: timestamp("postedAt", { withTimezone: true }).defaultNow().notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull()
+}, (table) => ({
+  userPostedIdx: index("wall_posts_user_posted_idx").on(table.userId, table.postedAt),
+  userTopicIdx: index("wall_posts_user_topic_idx").on(table.userId, table.topicId)
 }));
 var notebookQuestions = pgTable("notebook_questions", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
@@ -2977,7 +3007,15 @@ var ENV = {
   appleIapBundleId: process.env.APPLE_IAP_BUNDLE_ID ?? "",
   googlePlayServiceAccountJson: process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON ?? "",
   googlePlayPackageName: process.env.GOOGLE_PLAY_PACKAGE_NAME ?? "",
-  webhookIngestSecret: process.env.WEBHOOK_INGEST_SECRET ?? ""
+  webhookIngestSecret: process.env.WEBHOOK_INGEST_SECRET ?? "",
+  // Medya (defter ve Duvarım fotoğraf/ses dosyaları) — Supabase Storage (bkz. server/storage/supabaseStorage.ts).
+  //   SUPABASE_URL — https://<proje>.supabase.co
+  //   SUPABASE_SERVICE_ROLE_KEY — yalnızca sunucuda; tarayıcıya asla gönderilmez
+  //   SUPABASE_MEDIA_BUCKET — özel (public olmayan) bucket adı; varsayılan "pusula-media"
+  // İkisi de boşsa dosyalar eskisi gibi veritabanında tutulur (yerel geliştirme/test).
+  supabaseUrl: (process.env.SUPABASE_URL ?? "").replace(/\/+$/, ""),
+  supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
+  supabaseMediaBucket: process.env.SUPABASE_MEDIA_BUCKET || "pusula-media"
 };
 
 // server/_core/loginIdentifier.ts
@@ -3377,7 +3415,65 @@ function registerLocalAuthRoutes(app2) {
 }
 
 // server/notes/attachmentStorage.ts
+import { randomUUID } from "node:crypto";
 import { and as and2, eq as eq4, inArray as inArray2, isNull as isNull2, lt as lt2, sql as sql2 } from "drizzle-orm";
+
+// server/storage/supabaseStorage.ts
+var BlobStoreError = class extends Error {
+};
+function createSupabaseBlobStore(config, fetchImpl = fetch) {
+  const base = `${config.url}/storage/v1`;
+  const headers = { Authorization: `Bearer ${config.serviceRoleKey}`, apikey: config.serviceRoleKey };
+  const objectPath = (key) => `${encodeURIComponent(config.bucket)}/${key.split("/").map(encodeURIComponent).join("/")}`;
+  let bucketReady = null;
+  const fail = async (response, action) => {
+    const body = await response.text().catch(() => "");
+    throw new BlobStoreError(`Supabase Storage ${action} ${response.status}: ${body.slice(0, 200)}`);
+  };
+  const ensureBucket = () => {
+    bucketReady ??= (async () => {
+      const response = await fetchImpl(`${base}/bucket`, { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ id: config.bucket, name: config.bucket, public: false }) });
+      if (!response.ok && response.status !== 409) {
+        const body = await response.text().catch(() => "");
+        if (!/already exists|Duplicate/i.test(body)) {
+          bucketReady = null;
+          throw new BlobStoreError(`Supabase Storage bucket ${response.status}: ${body.slice(0, 200)}`);
+        }
+      }
+    })();
+    return bucketReady;
+  };
+  return {
+    async put(key, mimeType, data) {
+      await ensureBucket();
+      const response = await fetchImpl(`${base}/object/${objectPath(key)}`, { method: "POST", headers: { ...headers, "Content-Type": mimeType, "x-upsert": "false", "Cache-Control": "private, max-age=3600" }, body: new Uint8Array(data) });
+      if (!response.ok) await fail(response, "upload");
+    },
+    async signedUrl(key, expiresInSec) {
+      const response = await fetchImpl(`${base}/object/sign/${objectPath(key)}`, { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ expiresIn: expiresInSec }) });
+      if (!response.ok) await fail(response, "sign");
+      const { signedURL } = await response.json();
+      if (!signedURL) throw new BlobStoreError("Supabase Storage sign: yan\u0131tta ba\u011Flant\u0131 yok");
+      return signedURL.startsWith("http") ? signedURL : `${base}${signedURL.startsWith("/") ? "" : "/"}${signedURL}`;
+    },
+    async get(key) {
+      const response = await fetchImpl(`${base}/object/${objectPath(key)}`, { headers });
+      if (!response.ok) await fail(response, "download");
+      return Buffer.from(await response.arrayBuffer());
+    },
+    async remove(keys) {
+      if (!keys.length) return;
+      const response = await fetchImpl(`${base}/object/${encodeURIComponent(config.bucket)}`, { method: "DELETE", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ prefixes: keys }) });
+      if (!response.ok) await fail(response, "delete");
+    }
+  };
+}
+var cached;
+function getMediaBlobStore() {
+  if (cached !== void 0) return cached;
+  cached = ENV.supabaseUrl && ENV.supabaseServiceRoleKey ? createSupabaseBlobStore({ url: ENV.supabaseUrl, serviceRoleKey: ENV.supabaseServiceRoleKey, bucket: ENV.supabaseMediaBucket }) : null;
+  return cached;
+}
 
 // server/notes/config.ts
 var notesConfig = {
@@ -3424,6 +3520,7 @@ var notesConfig = {
 };
 
 // server/notes/attachmentStorage.ts
+var SIGNED_URL_TTL_SEC = 600;
 var AttachmentError = class extends Error {
 };
 var ascii = (bytes, start, end) => bytes.subarray(start, end).toString("ascii");
@@ -3456,20 +3553,52 @@ async function requireDb() {
   if (!db) throw new AttachmentError("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
   return db;
 }
+var EXTENSIONS = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "m4a", "audio/mpeg": "mp3", "audio/wav": "wav" };
+async function deleteRows(where) {
+  const db = await requireDb();
+  const removed = await db.delete(noteAttachments).where(where).returning({ storageKey: noteAttachments.storageKey });
+  const keys = removed.map((row) => row.storageKey).filter((key) => Boolean(key));
+  const store = getMediaBlobStore();
+  if (keys.length && store) await store.remove(keys).catch((error) => console.error("[Attachments] storage delete failed:", error instanceof Error ? error.message : error));
+}
 var databaseAttachmentStorage = {
   async put(userId, input) {
     const db = await requireDb();
     const used = await this.usageBytes(userId);
     if (used + input.data.byteLength > notesConfig.attachments.perUserQuotaBytes) {
-      throw new AttachmentError("Defterindeki ek alan\u0131 doldu. Eski notlardaki baz\u0131 foto\u011Fraf/ses kay\u0131tlar\u0131n\u0131 silip tekrar dener misin?");
+      throw new AttachmentError("Ek alan\u0131n doldu. Eski not ya da duvar kay\u0131tlar\u0131ndaki baz\u0131 foto\u011Fraf/ses kay\u0131tlar\u0131n\u0131 silip tekrar dener misin?");
     }
-    const result = await db.insert(noteAttachments).values({ userId, kind: input.kind, mimeType: input.mimeType, byteSize: input.data.byteLength, data: input.data, durationSec: input.durationSec ?? null }).returning({ id: noteAttachments.id });
+    const store = getMediaBlobStore();
+    let storageKey = null;
+    if (store) {
+      storageKey = `u${userId}/${input.kind}/${randomUUID()}.${EXTENSIONS[input.mimeType] ?? "bin"}`;
+      try {
+        await store.put(storageKey, input.mimeType, input.data);
+      } catch (error) {
+        console.error("[Attachments] storage upload failed:", error instanceof Error ? error.message : error);
+        throw new AttachmentError("Dosya y\xFCklenemedi. Biraz sonra tekrar dener misin?");
+      }
+    }
+    const result = await db.insert(noteAttachments).values({ userId, kind: input.kind, mimeType: input.mimeType, byteSize: input.data.byteLength, data: storageKey ? null : input.data, storageKey, durationSec: input.durationSec ?? null }).returning({ id: noteAttachments.id });
     return { id: Number(result[0].id) };
   },
   async get(userId, id5) {
     const db = await requireDb();
-    const [row] = await db.select({ mimeType: noteAttachments.mimeType, data: noteAttachments.data, kind: noteAttachments.kind, noteId: noteAttachments.noteId }).from(noteAttachments).where(and2(eq4(noteAttachments.id, id5), eq4(noteAttachments.userId, userId))).limit(1);
-    return row ?? null;
+    const [row] = await db.select({ mimeType: noteAttachments.mimeType, data: noteAttachments.data, storageKey: noteAttachments.storageKey, kind: noteAttachments.kind, noteId: noteAttachments.noteId }).from(noteAttachments).where(and2(eq4(noteAttachments.id, id5), eq4(noteAttachments.userId, userId))).limit(1);
+    if (!row) return null;
+    const store = getMediaBlobStore();
+    const data = row.data ?? (row.storageKey && store ? await store.get(row.storageKey) : null);
+    if (!data) return null;
+    return { mimeType: row.mimeType, data, kind: row.kind, noteId: row.noteId };
+  },
+  async locate(userId, id5) {
+    const db = await requireDb();
+    const [row] = await db.select({ mimeType: noteAttachments.mimeType, data: noteAttachments.data, storageKey: noteAttachments.storageKey }).from(noteAttachments).where(and2(eq4(noteAttachments.id, id5), eq4(noteAttachments.userId, userId))).limit(1);
+    if (!row) return null;
+    if (row.data) return { mimeType: row.mimeType, data: row.data };
+    const store = getMediaBlobStore();
+    if (!row.storageKey || !store) return null;
+    return { mimeType: row.mimeType, url: await store.signedUrl(row.storageKey, SIGNED_URL_TTL_SEC) };
   },
   async setOcrText(userId, id5, text3) {
     const db = await requireDb();
@@ -3483,8 +3612,19 @@ var databaseAttachmentStorage = {
     }
   },
   async deleteForNote(userId, noteId) {
+    await deleteRows(and2(eq4(noteAttachments.userId, userId), eq4(noteAttachments.noteId, noteId)));
+  },
+  async syncWallPostLinks(userId, wallPostId, referencedIds) {
     const db = await requireDb();
-    await db.delete(noteAttachments).where(and2(eq4(noteAttachments.userId, userId), eq4(noteAttachments.noteId, noteId)));
+    await db.update(noteAttachments).set({ wallPostId: null }).where(and2(eq4(noteAttachments.userId, userId), eq4(noteAttachments.wallPostId, wallPostId)));
+    if (referencedIds.length) {
+      await db.update(noteAttachments).set({ wallPostId }).where(and2(eq4(noteAttachments.userId, userId), inArray2(noteAttachments.id, referencedIds)));
+    }
+  },
+  async deleteForWallPost(userId, wallPostId) {
+    const db = await requireDb();
+    await db.update(noteAttachments).set({ wallPostId: null }).where(and2(eq4(noteAttachments.userId, userId), eq4(noteAttachments.wallPostId, wallPostId), sql2`${noteAttachments.noteId} IS NOT NULL`));
+    await deleteRows(and2(eq4(noteAttachments.userId, userId), eq4(noteAttachments.wallPostId, wallPostId)));
   },
   async usageBytes(userId) {
     const db = await requireDb();
@@ -3492,8 +3632,7 @@ var databaseAttachmentStorage = {
     return Number(row?.total ?? 0);
   },
   async cleanupOrphans(userId) {
-    const db = await requireDb();
-    await db.delete(noteAttachments).where(and2(eq4(noteAttachments.userId, userId), isNull2(noteAttachments.noteId), lt2(noteAttachments.createdAt, new Date(Date.now() - notesConfig.attachments.orphanTtlMs))));
+    await deleteRows(and2(eq4(noteAttachments.userId, userId), isNull2(noteAttachments.noteId), isNull2(noteAttachments.wallPostId), lt2(noteAttachments.createdAt, new Date(Date.now() - notesConfig.attachments.orphanTtlMs))));
   }
 };
 var getAttachmentStorage = () => databaseAttachmentStorage;
@@ -3514,9 +3653,14 @@ function registerNoteAttachmentRoutes(app2) {
       return;
     }
     try {
-      const attachment = await getAttachmentStorage().get(userId, id5);
+      const attachment = await getAttachmentStorage().locate(userId, id5);
       if (!attachment) {
         res.status(404).end();
+        return;
+      }
+      if ("url" in attachment) {
+        res.setHeader("Cache-Control", `private, max-age=${Math.floor(SIGNED_URL_TTL_SEC / 2)}`);
+        res.redirect(302, attachment.url);
         return;
       }
       res.setHeader("Content-Type", attachment.mimeType);
@@ -5809,7 +5953,7 @@ var GooglePlayProvider = class {
 };
 
 // server/subscriptions/paymentProviders/mockProvider.ts
-import { createHmac, randomUUID, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+import { createHmac, randomUUID as randomUUID2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
 function getMockSecret() {
   return ENV.paymentMockWebhookSecret || "mock-payment-secret-dev-only";
 }
@@ -5819,12 +5963,12 @@ function sign(payload) {
 var MockPaymentProvider = class {
   name = "web";
   async createCheckout(input) {
-    const providerSessionId = `mock_checkout_${randomUUID()}`;
+    const providerSessionId = `mock_checkout_${randomUUID2()}`;
     console.log(`[MockPaymentProvider] (SANDBOX, ger\xE7ek para YOK) checkout olu\u015Fturuldu: user=${input.userId} plan=${input.planCode} session=${providerSessionId}`);
     return { checkoutUrl: `${input.successUrl}?mock_session=${providerSessionId}`, providerSessionId };
   }
   async createSubscription(input) {
-    const providerSubscriptionId = `mock_sub_${randomUUID()}`;
+    const providerSubscriptionId = `mock_sub_${randomUUID2()}`;
     const now = /* @__PURE__ */ new Date();
     const periodEnd = new Date(now);
     periodEnd.setDate(periodEnd.getDate() + 30);
@@ -6401,7 +6545,7 @@ function registerWebhookRoutes(app2) {
 }
 
 // server/routers.ts
-import { TRPCError as TRPCError16 } from "@trpc/server";
+import { TRPCError as TRPCError17 } from "@trpc/server";
 
 // server/_core/systemRouter.ts
 import { z as z2 } from "zod";
@@ -7058,7 +7202,7 @@ function validateDataUrl(dataUrl, declaredMimeType) {
 }
 
 // server/routers.ts
-import { z as z26 } from "zod";
+import { z as z27 } from "zod";
 
 // server/routers/topics.ts
 import { z as z3 } from "zod";
@@ -9149,8 +9293,8 @@ var bookContentRouter = router({
     const maxPasses = input.images.length > bookContentConfig.ocr.manyPagesThreshold ? bookContentConfig.ocr.maxPassesWhenManyPages : void 0;
     const reports = await Promise.all(input.images.map(async (image, index2) => {
       const hash = imageHash(image.dataUrl);
-      const cached = await readOcrCache(userId, hash);
-      if (cached) return { ...cached, cached: true };
+      const cached2 = await readOcrCache(userId, hash);
+      if (cached2) return { ...cached2, cached: true };
       try {
         const report = await readTocImage(image.dataUrl, { provider, deadline, maxPasses });
         if (report.page.items.length) void writeOcrCache(userId, hash, report);
@@ -9298,7 +9442,7 @@ async function runNoteAi(action, plainText, invoke = invokeLLM, track = "YKS") {
 
 // server/_core/voiceTranscription.ts
 var MAX_AUDIO_BYTES = 16 * 1024 * 1024;
-var EXTENSIONS = {
+var EXTENSIONS2 = {
   "audio/webm": "webm",
   "audio/mp3": "mp3",
   "audio/mpeg": "mp3",
@@ -9357,7 +9501,7 @@ async function transcribeAudioBuffer(audio, mimeType, options = {}, fetchImpl = 
   try {
     const baseMime = mimeType.split(";")[0].trim();
     const formData = new FormData();
-    formData.append("file", new Blob([new Uint8Array(audio)], { type: baseMime }), `audio.${EXTENSIONS[baseMime] ?? "webm"}`);
+    formData.append("file", new Blob([new Uint8Array(audio)], { type: baseMime }), `audio.${EXTENSIONS2[baseMime] ?? "webm"}`);
     const model = ENV.transcribeModel || "whisper-1";
     formData.append("model", model);
     formData.append("response_format", model === "whisper-1" ? "verbose_json" : "json");
@@ -9472,6 +9616,13 @@ var notesRouter = router({
     const { mimeType, data } = decodeAttachment(input.dataUrl, "image");
     return storage.put(ctx.user.id, { kind: "image", mimeType, data });
   })),
+  // Yalnızca ses kaydı (metne çevirmeden, ücretsiz) — Duvarım'daki sesli kayıtlar için.
+  uploadAudio: protectedProcedure.input(z5.object({ dataUrl: z5.string().min(20).max(Math.ceil(notesConfig.attachments.audioMaxBytes * 1.4)), durationSec: z5.number().min(0).max(notesConfig.speech.maxAudioSeconds + 5) })).mutation(({ ctx, input }) => userFacing(async () => {
+    const storage = getAttachmentStorage();
+    await storage.cleanupOrphans(ctx.user.id);
+    const { mimeType, data } = decodeAttachment(input.dataUrl, "audio");
+    return storage.put(ctx.user.id, { kind: "audio", mimeType, data, durationSec: Math.round(input.durationSec) });
+  })),
   // Ses → metin. İsterse ses kaydı da nota eklenir (keepAudio).
   transcribe: metredFeatureProcedure("NOTE_VOICE", { maxRequests: 10, windowMs: 6e4 }).input(z5.object({ dataUrl: z5.string().min(20).max(Math.ceil(notesConfig.attachments.audioMaxBytes * 1.4)), durationSec: z5.number().min(0).max(notesConfig.speech.maxAudioSeconds + 5), keepAudio: z5.boolean() })).mutation(({ ctx, input }) => userFacing(async () => {
     const userId = requireUserId(ctx);
@@ -9522,9 +9673,333 @@ var notesRouter = router({
   }))
 });
 
-// server/routers/questions.ts
+// server/routers/wall.ts
 import { TRPCError as TRPCError4 } from "@trpc/server";
 import { z as z6 } from "zod";
+
+// server/wall/linkPreview.ts
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
+var linkPreviewConfig = { timeoutMs: 5e3, maxBytes: 512 * 1024, maxRedirects: 3 };
+var LinkPreviewError = class extends Error {
+};
+function isBlockedAddress(address) {
+  const version = isIP(address);
+  if (version === 4) {
+    const [a, b] = address.split(".").map(Number);
+    return a === 0 || a === 10 || a === 127 || a === 100 && b >= 64 && b <= 127 || a === 169 && b === 254 || a === 172 && b >= 16 && b <= 31 || a === 192 && b === 168 || a === 192 && b === 0 || a === 198 && (b === 18 || b === 19) || a >= 224;
+  }
+  if (version === 6) {
+    const lower = address.toLowerCase();
+    const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(lower);
+    if (mapped) return isBlockedAddress(mapped[1]);
+    return lower === "::" || lower === "::1" || /^f[cd]/.test(lower) || /^fe[89ab]/.test(lower) || lower.startsWith("ff") || lower.startsWith("64:ff9b") || lower.startsWith("2001:db8");
+  }
+  return true;
+}
+function parsePublicUrl(raw) {
+  let url;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    throw new LinkPreviewError("Ge\xE7erli bir ba\u011Flant\u0131 de\u011Fil.");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") throw new LinkPreviewError("Yaln\u0131zca http ve https ba\u011Flant\u0131lar\u0131 eklenebilir.");
+  if (url.username || url.password) throw new LinkPreviewError("Kullan\u0131c\u0131 ad\u0131 i\xE7eren ba\u011Flant\u0131 eklenemez.");
+  if (url.port && url.port !== "80" && url.port !== "443") throw new LinkPreviewError("Bu ba\u011Flant\u0131n\u0131n \xF6nizlemesi al\u0131nam\u0131yor.");
+  const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (!host || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal") || isIP(host) && isBlockedAddress(host)) throw new LinkPreviewError("Bu ba\u011Flant\u0131n\u0131n \xF6nizlemesi al\u0131nam\u0131yor.");
+  return url;
+}
+async function assertPublicHost(url, resolve) {
+  const host = url.hostname.replace(/^\[|\]$/g, "");
+  if (isIP(host)) return;
+  const addresses = await resolve(host, { all: true }).catch(() => []);
+  if (!addresses.length || addresses.some((entry) => isBlockedAddress(entry.address))) throw new LinkPreviewError("Bu ba\u011Flant\u0131n\u0131n \xF6nizlemesi al\u0131nam\u0131yor.");
+}
+var ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+var decode = (value) => value.replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code))).replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCodePoint(parseInt(code, 16))).replace(/&([a-z]+);/gi, (match, name) => ENTITIES[name.toLowerCase()] ?? match).replace(/\s+/g, " ").trim();
+function parseLinkMeta(html, url) {
+  const head = html.slice(0, 2e5);
+  const meta = (key) => {
+    for (const tag of head.match(/<meta\b[^>]*>/gi) ?? []) {
+      const name = /\b(?:property|name)\s*=\s*["']([^"']+)["']/i.exec(tag)?.[1]?.toLowerCase();
+      if (name !== key) continue;
+      const content = /\bcontent\s*=\s*"([^"]*)"|\bcontent\s*=\s*'([^']*)'/i.exec(tag);
+      const value = decode(content?.[1] ?? content?.[2] ?? "");
+      if (value) return value;
+    }
+    return null;
+  };
+  const titleTag = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(head)?.[1];
+  const clip2 = (value, max) => value ? value.slice(0, max) : null;
+  return {
+    title: clip2(meta("og:title") ?? meta("twitter:title") ?? (titleTag ? decode(titleTag) || null : null), 300),
+    description: clip2(meta("og:description") ?? meta("description") ?? meta("twitter:description"), 500),
+    site: clip2(meta("og:site_name") ?? url.hostname.replace(/^www\./, ""), 120)
+  };
+}
+async function fetchLinkPreview(raw, deps = {}) {
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  const resolve = deps.resolve ?? lookup;
+  let url = parsePublicUrl(raw);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), linkPreviewConfig.timeoutMs);
+  try {
+    for (let hop = 0; ; hop += 1) {
+      await assertPublicHost(url, resolve);
+      const response = await fetchImpl(url, { redirect: "manual", signal: controller.signal, headers: { "User-Agent": "PusulaBot/1.0 (+ba\u011Flant\u0131 \xF6nizlemesi)", Accept: "text/html,application/xhtml+xml" } });
+      if (response.status >= 300 && response.status < 400 && response.headers.get("location")) {
+        if (hop >= linkPreviewConfig.maxRedirects) throw new LinkPreviewError("Ba\u011Flant\u0131 \xE7ok fazla y\xF6nlendiriyor.");
+        url = parsePublicUrl(new URL(response.headers.get("location"), url).toString());
+        continue;
+      }
+      if (!response.ok || !/text\/html|application\/xhtml/i.test(response.headers.get("content-type") ?? "")) {
+        return { url: url.toString(), title: null, description: null, site: url.hostname.replace(/^www\./, "") };
+      }
+      const html = await readLimited(response, linkPreviewConfig.maxBytes);
+      return { url: url.toString(), ...parseLinkMeta(html, url) };
+    }
+  } catch (error) {
+    if (error instanceof LinkPreviewError) throw error;
+    throw new LinkPreviewError("Ba\u011Flant\u0131n\u0131n \xF6nizlemesi al\u0131namad\u0131; d\xFCz ba\u011Flant\u0131 olarak kaydedebilirsin.");
+  } finally {
+    clearTimeout(timer);
+  }
+}
+async function readLimited(response, maxBytes) {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  while (total < maxBytes) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    total += value.byteLength;
+  }
+  await reader.cancel().catch(() => void 0);
+  return new TextDecoder("utf-8", { fatal: false }).decode(Buffer.concat(chunks).subarray(0, maxBytes));
+}
+
+// server/wall/wallDb.ts
+import { and as and19, desc as desc13, eq as eq21, ilike as ilike3, inArray as inArray9, isNull as isNull13, lt as lt10, or as or6, sql as sql10 } from "drizzle-orm";
+var WallError = class extends Error {
+};
+var WALL_PAGE_SIZE = 20;
+var WALL_MAX_TAGS = 8;
+async function requireDb8() {
+  const db = await getDb();
+  if (!db) throw new WallError("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
+  return db;
+}
+var tagList = (tags) => tags.split(",").filter(Boolean);
+var toPost = (row, topic) => ({
+  id: row.id,
+  kind: row.kind,
+  title: row.title,
+  content: JSON.parse(row.content),
+  plainText: row.plainText,
+  sourceUrl: row.sourceUrl,
+  sourceTitle: row.sourceTitle,
+  sourceDescription: row.sourceDescription,
+  sourceSite: row.sourceSite,
+  tags: tagList(row.tags),
+  subject: row.subject,
+  topicId: row.topicId,
+  topic: topic?.topic ?? null,
+  readLater: row.readLater === 1,
+  readAt: row.readAt,
+  isPinned: row.isPinned === 1,
+  postedAt: row.postedAt,
+  updatedAt: row.updatedAt
+});
+function deriveWallTitle(input, plainText) {
+  const explicit = input.title.trim();
+  if (explicit) return explicit.slice(0, 200);
+  if (input.sourceTitle?.trim()) return input.sourceTitle.trim().slice(0, 200);
+  const firstLine = plainText.split("\n").map((line) => line.trim()).find(Boolean);
+  if (firstLine) return firstLine.length > 80 ? `${firstLine.slice(0, 77)}\u2026` : firstLine;
+  if (input.sourceUrl) {
+    try {
+      return new URL(input.sourceUrl).hostname.replace(/^www\./, "");
+    } catch {
+    }
+  }
+  return input.kind === "quote" ? "Al\u0131nt\u0131" : input.kind === "link" ? "Ba\u011Flant\u0131" : "Yaz\u0131";
+}
+async function prepare(db, input) {
+  if (!isValidNoteDoc(input.content)) throw new WallError("Kay\u0131t i\xE7eri\u011Fi okunamad\u0131.");
+  const contentJson = JSON.stringify(input.content);
+  if (Buffer.byteLength(contentJson) > notesConfig.content.maxContentBytes) throw new WallError("Kay\u0131t \xE7ok b\xFCy\xFCk. Baz\u0131 \xE7izim ya da g\xF6rselleri ayr\u0131 bir kayda ta\u015F\u0131r m\u0131s\u0131n?");
+  const plainText = extractPlainText(input.content);
+  if (input.kind === "link" && !input.sourceUrl) throw new WallError("Ba\u011Flant\u0131 kayd\u0131 i\xE7in adres gerekli.");
+  if (input.kind !== "link" && !plainText.trim() && !referencedAttachmentIds(input.content).length && !contentJson.includes('"formula"') && !contentJson.includes('"drawing"')) throw new WallError("Bo\u015F kay\u0131t eklenemez.");
+  let subject2 = null;
+  if (input.topicId) {
+    const [topic] = await db.select({ subject: yksTopics.subject }).from(yksTopics).where(eq21(yksTopics.id, input.topicId)).limit(1);
+    if (!topic) throw new WallError("Se\xE7ilen konu bulunamad\u0131.");
+    subject2 = topic.subject;
+  }
+  const tags = Array.from(new Set(input.tags.map(normalizeTag).filter((tag) => Boolean(tag) && !tag.includes(",")))).slice(0, WALL_MAX_TAGS);
+  return {
+    kind: input.kind,
+    title: deriveWallTitle(input, plainText),
+    content: contentJson,
+    plainText,
+    sourceUrl: input.sourceUrl?.slice(0, 1e3) || null,
+    sourceTitle: input.sourceTitle?.trim().slice(0, 300) || null,
+    sourceDescription: input.sourceDescription?.trim().slice(0, 500) || null,
+    sourceSite: input.sourceSite?.trim().slice(0, 120) || null,
+    tags: tags.join(",").slice(0, 300),
+    subject: subject2,
+    topicId: input.topicId ?? null,
+    readLater: input.readLater ? 1 : 0
+  };
+}
+async function withTopics(db, rows) {
+  const ids = Array.from(new Set(rows.map((row) => row.topicId).filter((id5) => id5 !== null)));
+  const topics = ids.length ? await db.select({ id: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject }).from(yksTopics).where(inArray9(yksTopics.id, ids)) : [];
+  const byId = new Map(topics.map((row) => [row.id, row]));
+  return rows.map((row) => toPost(row, row.topicId !== null ? byId.get(row.topicId) ?? null : null));
+}
+async function createWallPost(userId, input) {
+  const db = await requireDb8();
+  const values = await prepare(db, input);
+  const [row] = await db.insert(wallPosts).values({ userId, ...values }).returning();
+  await getAttachmentStorage().syncWallPostLinks(userId, row.id, referencedAttachmentIds(input.content));
+  return (await withTopics(db, [row]))[0];
+}
+async function updateWallPost(userId, id5, input) {
+  const db = await requireDb8();
+  const values = await prepare(db, input);
+  const [row] = await db.update(wallPosts).set({ ...values, ...values.readLater ? {} : { readAt: null } }).where(and19(eq21(wallPosts.id, id5), eq21(wallPosts.userId, userId))).returning();
+  if (!row) throw new WallError("Kay\u0131t bulunamad\u0131.");
+  await getAttachmentStorage().syncWallPostLinks(userId, row.id, referencedAttachmentIds(input.content));
+  return (await withTopics(db, [row]))[0];
+}
+async function deleteWallPost(userId, id5) {
+  const db = await requireDb8();
+  const [row] = await db.delete(wallPosts).where(and19(eq21(wallPosts.id, id5), eq21(wallPosts.userId, userId))).returning({ id: wallPosts.id });
+  if (!row) return false;
+  await getAttachmentStorage().deleteForWallPost(userId, id5);
+  return true;
+}
+async function setWallPostFlags(userId, id5, flags) {
+  const db = await requireDb8();
+  const set = {};
+  if (flags.read !== void 0) set.readAt = flags.read ? /* @__PURE__ */ new Date() : null;
+  if (flags.pinned !== void 0) set.isPinned = flags.pinned ? 1 : 0;
+  if (flags.readLater !== void 0) {
+    set.readLater = flags.readLater ? 1 : 0;
+    if (flags.readLater) set.readAt = null;
+  }
+  if (!Object.keys(set).length) return true;
+  const rows = await db.update(wallPosts).set(set).where(and19(eq21(wallPosts.id, id5), eq21(wallPosts.userId, userId))).returning({ id: wallPosts.id });
+  return rows.length > 0;
+}
+async function listWallPosts(userId, options = {}) {
+  const db = await requireDb8();
+  const limit = Math.min(50, options.limit ?? WALL_PAGE_SIZE);
+  const conditions = [eq21(wallPosts.userId, userId)];
+  if (options.filter === "unread") conditions.push(eq21(wallPosts.readLater, 1), isNull13(wallPosts.readAt));
+  if (options.filter === "pinned") conditions.push(eq21(wallPosts.isPinned, 1));
+  const tag = options.tag ? normalizeTag(options.tag) : null;
+  if (tag) conditions.push(sql10`(',' || ${wallPosts.tags} || ',') LIKE ${`%,${tag.replace(/[%_]/g, "")},%`}`);
+  if (options.topicId) conditions.push(eq21(wallPosts.topicId, options.topicId));
+  const q = options.q?.trim().replace(/[%_\\]/g, "").slice(0, 100);
+  if (q) conditions.push(or6(ilike3(wallPosts.title, `%${q}%`), ilike3(wallPosts.plainText, `%${q}%`), ilike3(wallPosts.sourceTitle, `%${q}%`), ilike3(wallPosts.sourceUrl, `%${q}%`)));
+  if (options.cursor) conditions.push(or6(lt10(wallPosts.postedAt, options.cursor.postedAt), and19(eq21(wallPosts.postedAt, options.cursor.postedAt), lt10(wallPosts.id, options.cursor.id))));
+  const rows = await db.select().from(wallPosts).where(and19(...conditions)).orderBy(desc13(wallPosts.postedAt), desc13(wallPosts.id)).limit(limit + 1);
+  const page2 = rows.slice(0, limit);
+  const last = page2.at(-1);
+  return { posts: await withTopics(db, page2), nextCursor: rows.length > limit && last ? { postedAt: last.postedAt, id: last.id } : null };
+}
+async function getWallPost(userId, id5) {
+  const db = await requireDb8();
+  const [row] = await db.select().from(wallPosts).where(and19(eq21(wallPosts.id, id5), eq21(wallPosts.userId, userId))).limit(1);
+  return row ? (await withTopics(db, [row]))[0] : null;
+}
+async function wallSummary(userId) {
+  const db = await requireDb8();
+  const [counts] = await db.select({
+    total: sql10`COUNT(*)`,
+    unread: sql10`COUNT(*) FILTER (WHERE ${wallPosts.readLater} = 1 AND ${wallPosts.readAt} IS NULL)`,
+    pinned: sql10`COUNT(*) FILTER (WHERE ${wallPosts.isPinned} = 1)`
+  }).from(wallPosts).where(eq21(wallPosts.userId, userId));
+  const tagRows = await db.select({ tags: wallPosts.tags }).from(wallPosts).where(and19(eq21(wallPosts.userId, userId), sql10`${wallPosts.tags} <> ''`)).orderBy(desc13(wallPosts.postedAt)).limit(300);
+  const tagCounts = /* @__PURE__ */ new Map();
+  for (const row of tagRows) for (const tag of tagList(row.tags)) tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
+  return {
+    total: Number(counts?.total ?? 0),
+    unread: Number(counts?.unread ?? 0),
+    pinned: Number(counts?.pinned ?? 0),
+    tags: Array.from(tagCounts, ([tag, count4]) => ({ tag, count: count4 })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag, "tr")).slice(0, 20)
+  };
+}
+
+// server/routers/wall.ts
+var postInput = z6.object({
+  kind: z6.enum(["note", "link", "quote"]),
+  title: z6.string().max(200),
+  content: z6.unknown(),
+  sourceUrl: z6.string().trim().max(1e3).nullable().optional(),
+  sourceTitle: z6.string().max(300).nullable().optional(),
+  sourceDescription: z6.string().max(500).nullable().optional(),
+  sourceSite: z6.string().max(120).nullable().optional(),
+  tags: z6.array(z6.string().max(40)).max(20),
+  topicId: z6.number().int().positive().nullable().optional(),
+  readLater: z6.boolean()
+});
+function toInput(input) {
+  let sourceUrl = null;
+  if (input.sourceUrl) {
+    try {
+      sourceUrl = parsePublicUrl(input.sourceUrl).toString();
+    } catch (error) {
+      throw new TRPCError4({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Ge\xE7erli bir ba\u011Flant\u0131 de\u011Fil." });
+    }
+  }
+  return { ...input, content: input.content, sourceUrl };
+}
+var wallCall = async (work) => {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof WallError) throw new TRPCError4({ code: error.message === "Kay\u0131t bulunamad\u0131." ? "NOT_FOUND" : "BAD_REQUEST", message: error.message });
+    throw error;
+  }
+};
+var wallRouter = router({
+  list: protectedProcedure.input(z6.object({ filter: z6.enum(["all", "unread", "pinned"]).default("all"), tag: z6.string().max(40).nullable().optional(), topicId: z6.number().int().positive().nullable().optional(), q: z6.string().max(100).nullable().optional(), cursor: z6.object({ postedAt: z6.coerce.date(), id: z6.number().int().positive() }).nullable().optional() })).query(({ ctx, input }) => listWallPosts(ctx.user.id, input)),
+  summary: protectedProcedure.query(({ ctx }) => wallSummary(ctx.user.id)),
+  get: protectedProcedure.input(z6.object({ id: z6.number().int().positive() })).query(async ({ ctx, input }) => {
+    const post = await getWallPost(ctx.user.id, input.id);
+    if (!post) throw new TRPCError4({ code: "NOT_FOUND", message: "Kay\u0131t bulunamad\u0131." });
+    return post;
+  }),
+  create: protectedProcedure.input(postInput).mutation(({ ctx, input }) => wallCall(() => createWallPost(ctx.user.id, toInput(input)))),
+  update: protectedProcedure.input(postInput.extend({ id: z6.number().int().positive() })).mutation(({ ctx, input }) => wallCall(() => updateWallPost(ctx.user.id, input.id, toInput(input)))),
+  delete: protectedProcedure.input(z6.object({ id: z6.number().int().positive() })).mutation(async ({ ctx, input }) => ({ ok: await deleteWallPost(ctx.user.id, input.id) })),
+  setFlags: protectedProcedure.input(z6.object({ id: z6.number().int().positive(), read: z6.boolean().optional(), pinned: z6.boolean().optional(), readLater: z6.boolean().optional() })).mutation(async ({ ctx, input }) => {
+    if (!await setWallPostFlags(ctx.user.id, input.id, input)) throw new TRPCError4({ code: "NOT_FOUND", message: "Kay\u0131t bulunamad\u0131." });
+    return { ok: true };
+  }),
+  // Bağlantı önizlemesi: dakikada 20 istek (sunucunun dışarıya istek atmasını kötüye kullanmayı sınırlar).
+  linkPreview: protectedProcedure.input(z6.object({ url: z6.string().trim().min(4).max(1e3) })).mutation(async ({ ctx, input }) => {
+    try {
+      checkRateLimit(`wall-link-preview:${ctx.user.id}`, 20, 6e4);
+      return await fetchLinkPreview(input.url);
+    } catch (error) {
+      if (error instanceof LinkPreviewError) throw new TRPCError4({ code: "BAD_REQUEST", message: error.message });
+      throw error;
+    }
+  })
+});
+
+// server/routers/questions.ts
+import { TRPCError as TRPCError5 } from "@trpc/server";
+import { z as z7 } from "zod";
 
 // server/notes/questionAi.ts
 async function suggestQuestionDetails(input, invoke = invokeLLM) {
@@ -9764,11 +10239,11 @@ async function userFacing2(work) {
   try {
     return await work();
   } catch (error) {
-    if (error instanceof NoteError || error instanceof AttachmentError || error instanceof PlanTaskError) throw new TRPCError4({ code: "BAD_REQUEST", message: error.message });
+    if (error instanceof NoteError || error instanceof AttachmentError || error instanceof PlanTaskError) throw new TRPCError5({ code: "BAD_REQUEST", message: error.message });
     throw error;
   }
 }
-var id = z6.number().int().positive();
+var id = z7.number().int().positive();
 async function loadQuestionForAi(userId, questionId) {
   const context = await getSolveContext(userId, questionId);
   let imageDataUrl = null;
@@ -9780,56 +10255,56 @@ async function loadQuestionForAi(userId, questionId) {
   const { examTrack: track } = await getStudentProfile(userId);
   return { context, imageDataUrl, track };
 }
-var subjectScope = z6.string().max(80).nullable().optional();
+var subjectScope = z7.string().max(80).nullable().optional();
 var optionalId2 = id.nullable().optional();
 var fields = {
-  subject: z6.string().max(80).nullable().optional(),
+  subject: z7.string().max(80).nullable().optional(),
   topicId: optionalId2,
-  stuckPoint: z6.string().max(4e3).nullable().optional(),
-  solutionText: z6.string().max(4e3).nullable().optional(),
+  stuckPoint: z7.string().max(4e3).nullable().optional(),
+  solutionText: z7.string().max(4e3).nullable().optional(),
   solutionImageId: optionalId2,
-  errorType: z6.enum(ERROR_TYPE_KEYS).nullable().optional(),
-  errorTypeSource: z6.enum(["student", "ai"]).nullable().optional(),
-  difficulty: z6.enum(DIFFICULTY_KEYS).nullable().optional()
+  errorType: z7.enum(ERROR_TYPE_KEYS).nullable().optional(),
+  errorTypeSource: z7.enum(["student", "ai"]).nullable().optional(),
+  difficulty: z7.enum(DIFFICULTY_KEYS).nullable().optional()
 };
 var questionsRouter = router({
-  list: protectedProcedure.input(z6.object({ status: z6.enum(["open", "mastered", "all"]).optional(), due: z6.boolean().optional(), subject: subjectScope, topicId: optionalId2, cursor: optionalId2, limit: z6.number().int().min(1).max(100).optional() })).query(({ ctx, input }) => userFacing2(() => listQuestions(ctx.user.id, input))),
-  get: protectedProcedure.input(z6.object({ id })).query(async ({ ctx, input }) => {
+  list: protectedProcedure.input(z7.object({ status: z7.enum(["open", "mastered", "all"]).optional(), due: z7.boolean().optional(), subject: subjectScope, topicId: optionalId2, cursor: optionalId2, limit: z7.number().int().min(1).max(100).optional() })).query(({ ctx, input }) => userFacing2(() => listQuestions(ctx.user.id, input))),
+  get: protectedProcedure.input(z7.object({ id })).query(async ({ ctx, input }) => {
     const question = await getQuestion(ctx.user.id, input.id);
-    if (!question) throw new TRPCError4({ code: "NOT_FOUND", message: "Soru bulunamad\u0131." });
+    if (!question) throw new TRPCError5({ code: "NOT_FOUND", message: "Soru bulunamad\u0131." });
     return question;
   }),
-  byNote: protectedProcedure.input(z6.object({ noteId: id })).query(({ ctx, input }) => userFacing2(async () => ({ id: await getQuestionIdByNote(ctx.user.id, input.noteId) }))),
-  create: protectedProcedure.input(z6.object({
-    clientId: z6.string().min(8).max(40).regex(/^[A-Za-z0-9_-]+$/),
+  byNote: protectedProcedure.input(z7.object({ noteId: id })).query(({ ctx, input }) => userFacing2(async () => ({ id: await getQuestionIdByNote(ctx.user.id, input.noteId) }))),
+  create: protectedProcedure.input(z7.object({
+    clientId: z7.string().min(8).max(40).regex(/^[A-Za-z0-9_-]+$/),
     questionImageId: optionalId2,
-    questionOcrText: z6.string().max(5e3).nullable().optional(),
+    questionOcrText: z7.string().max(5e3).nullable().optional(),
     voiceAttachmentId: optionalId2,
-    voiceDuration: z6.number().min(0).max(700).nullable().optional(),
+    voiceDuration: z7.number().min(0).max(700).nullable().optional(),
     aiTopicId: optionalId2,
-    bookId: z6.string().max(120).nullable().optional(),
+    bookId: z7.string().max(120).nullable().optional(),
     studySessionId: optionalId2,
     ...fields
   })).mutation(({ ctx, input }) => userFacing2(() => createQuestion(ctx.user.id, input))),
-  update: protectedProcedure.input(z6.object({ id, ...fields })).mutation(({ ctx, input }) => userFacing2(() => {
+  update: protectedProcedure.input(z7.object({ id, ...fields })).mutation(({ ctx, input }) => userFacing2(() => {
     const { id: questionId, ...patch } = input;
     return updateQuestion(ctx.user.id, questionId, patch);
   })),
-  delete: protectedProcedure.input(z6.object({ id })).mutation(({ ctx, input }) => userFacing2(() => deleteQuestion(ctx.user.id, input.id))),
-  attempt: protectedProcedure.input(z6.object({ id, result: z6.enum(ATTEMPT_RESULT_KEYS), sawSolution: z6.boolean(), hintLevel: z6.number().int().min(HINT_LEVELS.none).max(HINT_LEVELS.solution).optional(), seconds: z6.number().min(0).max(7200).nullable().optional() })).mutation(({ ctx, input }) => userFacing2(() => recordAttempt(ctx.user.id, input.id, input))),
+  delete: protectedProcedure.input(z7.object({ id })).mutation(({ ctx, input }) => userFacing2(() => deleteQuestion(ctx.user.id, input.id))),
+  attempt: protectedProcedure.input(z7.object({ id, result: z7.enum(ATTEMPT_RESULT_KEYS), sawSolution: z7.boolean(), hintLevel: z7.number().int().min(HINT_LEVELS.none).max(HINT_LEVELS.solution).optional(), seconds: z7.number().min(0).max(7200).nullable().optional() })).mutation(({ ctx, input }) => userFacing2(() => recordAttempt(ctx.user.id, input.id, input))),
   // subject: verilmezse tüm dersler, null ise derssiz ("Genel"), metinse o dersin defteri.
-  summary: protectedProcedure.input(z6.object({ subject: subjectScope }).optional()).query(({ ctx, input }) => userFacing2(() => getReviewSummary(ctx.user.id, input?.subject))),
-  errorMap: protectedProcedure.input(z6.object({ days: z6.number().int().min(1).max(365).nullable(), subject: subjectScope })).query(({ ctx, input }) => userFacing2(() => getErrorMap(ctx.user.id, input.days, input.subject))),
+  summary: protectedProcedure.input(z7.object({ subject: subjectScope }).optional()).query(({ ctx, input }) => userFacing2(() => getReviewSummary(ctx.user.id, input?.subject))),
+  errorMap: protectedProcedure.input(z7.object({ days: z7.number().int().min(1).max(365).nullable(), subject: subjectScope })).query(({ ctx, input }) => userFacing2(() => getErrorMap(ctx.user.id, input.days, input.subject))),
   /** Ders sekmeleri: ders başına not / soru / tekrar bekleyen sayısı. */
   subjectSummary: protectedProcedure.query(({ ctx }) => userFacing2(() => getSubjectSummary(ctx.user.id))),
   /** Notu ya da soru kartını bir ders defterine koy (null: "Genel"e döndür). */
-  moveToSubject: protectedProcedure.input(z6.object({ noteId: id, subject: z6.string().trim().min(1).max(80).nullable() })).mutation(({ ctx, input }) => userFacing2(() => moveNoteToSubject(ctx.user.id, input.noteId, input.subject))),
+  moveToSubject: protectedProcedure.input(z7.object({ noteId: id, subject: z7.string().trim().min(1).max(80).nullable() })).mutation(({ ctx, input }) => userFacing2(() => moveNoteToSubject(ctx.user.id, input.noteId, input.subject))),
   addReviewTask: protectedProcedure.mutation(({ ctx }) => userFacing2(() => addReviewTask(ctx.user.id))),
-  finishReview: protectedProcedure.input(z6.object({ minutes: z6.number().min(0).max(600), solved: z6.number().int().min(0).max(100), partial: z6.number().int().min(0).max(100), failed: z6.number().int().min(0).max(100) })).mutation(({ ctx, input }) => userFacing2(() => finishReviewSession(ctx.user.id, input))),
+  finishReview: protectedProcedure.input(z7.object({ minutes: z7.number().min(0).max(600), solved: z7.number().int().min(0).max(100), partial: z7.number().int().min(0).max(100), failed: z7.number().int().min(0).max(100) })).mutation(({ ctx, input }) => userFacing2(() => finishReviewSession(ctx.user.id, input))),
   // ✨ Adım adım çöz: kartı AI ile çözer ve karta kaydeder (AI not araçları kotasından sayılır).
   // İstemci kayıtlı çözümü `get` ile zaten alır; bu uç yalnızca ilk çözüm ya da "Yeniden çöz" için çağrılır.
   // Model kademesi kartın zorluk/ders/sınav sinyallerinden seçilir; `escalate` = öğrenci "daha güçlü modelle çöz" dedi.
-  solve: metredFeatureProcedure("NOTE_AI").input(z6.object({ id, escalate: z6.boolean().optional() })).mutation(({ ctx, input }) => userFacing2(async () => {
+  solve: metredFeatureProcedure("NOTE_AI").input(z7.object({ id, escalate: z7.boolean().optional() })).mutation(({ ctx, input }) => userFacing2(async () => {
     const { context, imageDataUrl, track } = await loadQuestionForAi(ctx.user.id, input.id);
     const tier = chooseSolveTier({ difficulty: context.difficulty, subject: context.subject, exam: context.exam, lastResult: context.lastResult, escalate: input.escalate });
     let routed;
@@ -9844,7 +10319,7 @@ var questionsRouter = router({
     return saveAiSolution(ctx.user.id, input.id, routed.solution, tag);
   })),
   // 🔁 Benzer soru: aynı yöntemi ölçen yeni alıştırma (YKS 5, LGS 4 şıklı); kaydedilmez, her üretim AI not hakkından sayılır.
-  similar: metredFeatureProcedure("NOTE_AI").input(z6.object({ id })).mutation(({ ctx, input }) => userFacing2(async () => {
+  similar: metredFeatureProcedure("NOTE_AI").input(z7.object({ id })).mutation(({ ctx, input }) => userFacing2(async () => {
     const { context, imageDataUrl, track } = await loadQuestionForAi(ctx.user.id, input.id);
     try {
       const tier = atLeastMedium(tierOfTag(context.aiSolutionModel) ?? chooseSolveTier({ difficulty: context.difficulty, subject: context.subject, exam: context.exam, lastResult: context.lastResult }));
@@ -9855,7 +10330,7 @@ var questionsRouter = router({
     }
   })),
   // ✨ Öner: fotoğrafı okur, müfredattan konu + zorluk + olası hata türü önerir (fotoğraf okuma kotasından sayılır).
-  suggest: metredFeatureProcedure("NOTE_OCR").input(z6.object({ attachmentId: optionalId2, stuckPoint: z6.string().max(4e3).nullable().optional() })).mutation(({ ctx, input }) => userFacing2(async () => {
+  suggest: metredFeatureProcedure("NOTE_OCR").input(z7.object({ attachmentId: optionalId2, stuckPoint: z7.string().max(4e3).nullable().optional() })).mutation(({ ctx, input }) => userFacing2(async () => {
     let imageDataUrl = null;
     if (input.attachmentId) {
       const attachment = await getAttachmentStorage().get(ctx.user.id, input.attachmentId);
@@ -9876,11 +10351,11 @@ var questionsRouter = router({
 });
 
 // server/routers/classSchedule.ts
-import { TRPCError as TRPCError5 } from "@trpc/server";
-import { z as z7 } from "zod";
+import { TRPCError as TRPCError6 } from "@trpc/server";
+import { z as z8 } from "zod";
 
 // server/schedule/classScheduleDb.ts
-import { asc as asc3, eq as eq21 } from "drizzle-orm";
+import { asc as asc3, eq as eq22 } from "drizzle-orm";
 
 // shared/classSchedule.ts
 var SCHEDULE_SOURCES = ["school", "course", "tutor", "other"];
@@ -9998,14 +10473,14 @@ function parsePeriods(raw) {
 async function getClassSchedule(userId) {
   const db = await getDb();
   if (!db) return { periods: DEFAULT_SCHOOL_PERIODS, blocks: [] };
-  const [profile] = await db.select({ schoolPeriodsJson: studentProfiles.schoolPeriodsJson }).from(studentProfiles).where(eq21(studentProfiles.userId, userId)).limit(1);
-  const rows = await db.select({ source: classScheduleBlocks.source, dayOfWeek: classScheduleBlocks.dayOfWeek, startTime: classScheduleBlocks.startTime, endTime: classScheduleBlocks.endTime, subject: classScheduleBlocks.subject, label: classScheduleBlocks.label }).from(classScheduleBlocks).where(eq21(classScheduleBlocks.userId, userId)).orderBy(asc3(classScheduleBlocks.dayOfWeek), asc3(classScheduleBlocks.startTime));
+  const [profile] = await db.select({ schoolPeriodsJson: studentProfiles.schoolPeriodsJson }).from(studentProfiles).where(eq22(studentProfiles.userId, userId)).limit(1);
+  const rows = await db.select({ source: classScheduleBlocks.source, dayOfWeek: classScheduleBlocks.dayOfWeek, startTime: classScheduleBlocks.startTime, endTime: classScheduleBlocks.endTime, subject: classScheduleBlocks.subject, label: classScheduleBlocks.label }).from(classScheduleBlocks).where(eq22(classScheduleBlocks.userId, userId)).orderBy(asc3(classScheduleBlocks.dayOfWeek), asc3(classScheduleBlocks.startTime));
   return { periods: parsePeriods(profile?.schoolPeriodsJson), blocks: rows };
 }
 async function getPlanScheduleContext(userId, startDate) {
   const db = await getDb();
   if (!db) return null;
-  const [profile] = await db.select({ start: studentProfiles.preferredStudyStartTime }).from(studentProfiles).where(eq21(studentProfiles.userId, userId)).limit(1);
+  const [profile] = await db.select({ start: studentProfiles.preferredStudyStartTime }).from(studentProfiles).where(eq22(studentProfiles.userId, userId)).limit(1);
   const { blocks } = await getClassSchedule(userId);
   return describeWeekForPlan([...blocks, ...await getCourseBlocks(userId)], startDate, profile?.start && isValidTime(profile.start) ? profile.start : "16:00");
 }
@@ -10021,7 +10496,7 @@ async function saveClassSchedule(userId, schedule) {
   const blocks = schedule.blocks.map((block) => ({ ...block, label: block.label.trim() || block.subject || "Ders" }));
   const periodsJson = JSON.stringify(schedule.periods);
   await db.transaction(async (tx) => {
-    await tx.delete(classScheduleBlocks).where(eq21(classScheduleBlocks.userId, userId));
+    await tx.delete(classScheduleBlocks).where(eq22(classScheduleBlocks.userId, userId));
     if (blocks.length) await tx.insert(classScheduleBlocks).values(blocks.map((block) => ({ ...block, userId })));
     await tx.insert(studentProfiles).values({ userId, schoolPeriodsJson: periodsJson }).onConflictDoUpdate({ target: studentProfiles.userId, set: { schoolPeriodsJson: periodsJson } });
   });
@@ -10177,78 +10652,78 @@ async function readScheduleFromImage(dataUrl, invoke = invokeLLM, track = "YKS")
 }
 
 // server/routers/classSchedule.ts
-var time = z7.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Saat SS:dd bi\xE7iminde olmal\u0131.");
+var time = z8.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Saat SS:dd bi\xE7iminde olmal\u0131.");
 var classScheduleRouter = router({
   // `courseBlocks`: kurumun (dershane) sınıf programı; salt okunur, kaydedilen programa girmez.
   get: protectedProcedure.query(async ({ ctx }) => {
     const [schedule, courseBlocks] = await Promise.all([getClassSchedule(ctx.user.id), getCourseBlocks(ctx.user.id)]);
     return { ...schedule, courseBlocks };
   }),
-  save: protectedProcedure.input(z7.object({
-    periods: z7.array(z7.object({ start: time, end: time })).max(MAX_SCHOOL_PERIODS),
-    blocks: z7.array(z7.object({
-      source: z7.enum(SCHEDULE_SOURCES),
-      dayOfWeek: z7.number().int().min(1).max(7),
+  save: protectedProcedure.input(z8.object({
+    periods: z8.array(z8.object({ start: time, end: time })).max(MAX_SCHOOL_PERIODS),
+    blocks: z8.array(z8.object({
+      source: z8.enum(SCHEDULE_SOURCES),
+      dayOfWeek: z8.number().int().min(1).max(7),
       startTime: time,
       endTime: time,
-      subject: z7.enum(SCHEDULE_SUBJECTS).nullable(),
-      label: z7.string().max(80)
+      subject: z8.enum(SCHEDULE_SUBJECTS).nullable(),
+      label: z8.string().max(80)
     })).max(MAX_SCHEDULE_BLOCKS)
   })).mutation(async ({ ctx, input }) => {
     try {
       return await saveClassSchedule(ctx.user.id, input);
     } catch (error) {
-      if (error instanceof ScheduleError) throw new TRPCError5({ code: "BAD_REQUEST", message: error.message });
+      if (error instanceof ScheduleError) throw new TRPCError6({ code: "BAD_REQUEST", message: error.message });
       throw error;
     }
   }),
   // 📷 Fotoğraftan aktar: program okunur ama KAYDEDİLMEZ; düzenleyiciye dolar, öğrenci kontrol edip kaydeder.
   // Kota: fotoğraf okuma (NOTE_OCR); yalnızca başarılı okumada sayılır.
-  importPhoto: metredFeatureProcedure("NOTE_OCR").input(z7.object({ dataUrl: z7.string().max(12e6).regex(/^data:image\/(jpeg|png|webp);base64,/, "Foto\u011Fraf JPEG, PNG ya da WEBP olmal\u0131.") })).mutation(async ({ ctx, input }) => {
+  importPhoto: metredFeatureProcedure("NOTE_OCR").input(z8.object({ dataUrl: z8.string().max(12e6).regex(/^data:image\/(jpeg|png|webp);base64,/, "Foto\u011Fraf JPEG, PNG ya da WEBP olmal\u0131.") })).mutation(async ({ ctx, input }) => {
     try {
       const examTrack = ctx.user ? (await getStudentProfile(ctx.user.id)).examTrack : "YKS";
       return await readScheduleFromImage(input.dataUrl, void 0, examTrack);
     } catch (error) {
       console.warn("[Class Schedule] Photo import failed:", error);
-      throw new TRPCError5({ code: "BAD_REQUEST", message: llmUnavailableMessage(error) ?? "Program\u0131 foto\u011Fraftan okuyamad\u0131m. Tablonun tamam\u0131 g\xF6r\xFCnecek \u015Fekilde, d\xFCz ve net bir foto\u011Frafla tekrar dener misin? \u0130stersen tabloya elle de girebilirsin." });
+      throw new TRPCError6({ code: "BAD_REQUEST", message: llmUnavailableMessage(error) ?? "Program\u0131 foto\u011Fraftan okuyamad\u0131m. Tablonun tamam\u0131 g\xF6r\xFCnecek \u015Fekilde, d\xFCz ve net bir foto\u011Frafla tekrar dener misin? \u0130stersen tabloya elle de girebilirsin." });
     }
   })
 });
 
 // server/routers/push.ts
-import { TRPCError as TRPCError6 } from "@trpc/server";
-import { z as z8 } from "zod";
-var subscriptionInput = z8.object({
-  endpoint: z8.string().url().max(600),
-  keys: z8.object({ p256dh: z8.string().min(1).max(200), auth: z8.string().min(1).max(100) })
+import { TRPCError as TRPCError7 } from "@trpc/server";
+import { z as z9 } from "zod";
+var subscriptionInput = z9.object({
+  endpoint: z9.string().url().max(600),
+  keys: z9.object({ p256dh: z9.string().min(1).max(200), auth: z9.string().min(1).max(100) })
 });
 var pushRouter = router({
   // VAPID anahtarı yoksa null: istemci hatırlatma seçeneğini hiç göstermez.
   config: publicProcedure.query(() => ({ publicKey: pushPublicKey() })),
   // Bu cihazın aboneliği sunucuda kayıtlı mı (tarayıcıda abonelik olup sunucuda silinmiş olabilir).
-  status: protectedProcedure.input(z8.object({ endpoint: z8.string().max(600) })).query(async ({ ctx, input }) => ({ subscribed: await hasSubscription(ctx.user.id, input.endpoint) })),
+  status: protectedProcedure.input(z9.object({ endpoint: z9.string().max(600) })).query(async ({ ctx, input }) => ({ subscribed: await hasSubscription(ctx.user.id, input.endpoint) })),
   subscribe: protectedProcedure.input(subscriptionInput).mutation(async ({ ctx, input }) => {
-    if (!pushPublicKey()) throw new TRPCError6({ code: "PRECONDITION_FAILED", message: "Bildirimler \u015Fu an kullan\u0131lam\u0131yor." });
+    if (!pushPublicKey()) throw new TRPCError7({ code: "PRECONDITION_FAILED", message: "Bildirimler \u015Fu an kullan\u0131lam\u0131yor." });
     await saveSubscription(ctx.user.id, input, ctx.req.headers["user-agent"] ?? null);
     return { subscribed: true };
   }),
-  unsubscribe: protectedProcedure.input(z8.object({ endpoint: z8.string().max(600) })).mutation(async ({ ctx, input }) => {
+  unsubscribe: protectedProcedure.input(z9.object({ endpoint: z9.string().max(600) })).mutation(async ({ ctx, input }) => {
     await removeSubscription(ctx.user.id, input.endpoint);
     return { subscribed: false };
   }),
   test: protectedProcedure.mutation(async ({ ctx }) => {
     const outcome = await sendToUser(ctx.user.id, { title: "Hat\u0131rlatmalar a\xE7\u0131k", body: "Plan\u0131ndaki her oturumdan birka\xE7 dakika \xF6nce burada haber verece\u011Fim.", url: "/takvim", tag: "test" });
-    if (!outcome.delivered) throw new TRPCError6({ code: "BAD_REQUEST", message: "Bildirim g\xF6nderilemedi. Bildirim iznini kontrol edip tekrar dener misin?" });
+    if (!outcome.delivered) throw new TRPCError7({ code: "BAD_REQUEST", message: "Bildirim g\xF6nderilemedi. Bildirim iznini kontrol edip tekrar dener misin?" });
     return outcome;
   })
 });
 
 // server/routers/reading.ts
-import { TRPCError as TRPCError7 } from "@trpc/server";
-import { z as z9 } from "zod";
+import { TRPCError as TRPCError8 } from "@trpc/server";
+import { z as z10 } from "zod";
 
 // server/reading/readingDb.ts
-import { and as and19, count, desc as desc13, eq as eq22 } from "drizzle-orm";
+import { and as and20, count, desc as desc14, eq as eq23 } from "drizzle-orm";
 
 // shared/reading.ts
 var MAX_READING_BOOKS = 50;
@@ -10267,16 +10742,16 @@ var columns = { id: readingBooks.id, title: readingBooks.title, author: readingB
 async function listReadingBooks(userId) {
   const db = await getDb();
   if (!db) return [];
-  const rows = await db.select(columns).from(readingBooks).where(eq22(readingBooks.userId, userId)).orderBy(desc13(readingBooks.updatedAt));
+  const rows = await db.select(columns).from(readingBooks).where(eq23(readingBooks.userId, userId)).orderBy(desc14(readingBooks.updatedAt));
   return [...rows.filter((row) => row.status === "reading"), ...rows.filter((row) => row.status === "finished")];
 }
 async function addReadingBook(userId, input) {
   const db = await getDb();
   if (!db) throw new ReadingError("Veritaban\u0131na ula\u015F\u0131lamad\u0131.");
-  const [{ total }] = await db.select({ total: count() }).from(readingBooks).where(eq22(readingBooks.userId, userId));
+  const [{ total }] = await db.select({ total: count() }).from(readingBooks).where(eq23(readingBooks.userId, userId));
   if (total >= MAX_READING_BOOKS) throw new ReadingError(`En fazla ${MAX_READING_BOOKS} okuma kitab\u0131 eklenebilir.`);
   const result = await db.insert(readingBooks).values({ userId, title: input.title.trim(), author: input.author?.trim() || null, totalPages: input.totalPages || null }).returning({ id: readingBooks.id });
-  const [row] = await db.select(columns).from(readingBooks).where(and19(eq22(readingBooks.id, Number(result[0].id)), eq22(readingBooks.userId, userId))).limit(1);
+  const [row] = await db.select(columns).from(readingBooks).where(and20(eq23(readingBooks.id, Number(result[0].id)), eq23(readingBooks.userId, userId))).limit(1);
   return row;
 }
 async function updateReadingBook(userId, id5, patch) {
@@ -10288,48 +10763,48 @@ async function updateReadingBook(userId, id5, patch) {
     values.status = patch.status;
     values.finishedAt = patch.status === "finished" ? /* @__PURE__ */ new Date() : null;
   }
-  if (Object.keys(values).length) await db.update(readingBooks).set(values).where(and19(eq22(readingBooks.id, id5), eq22(readingBooks.userId, userId)));
-  const [row] = await db.select(columns).from(readingBooks).where(and19(eq22(readingBooks.id, id5), eq22(readingBooks.userId, userId))).limit(1);
+  if (Object.keys(values).length) await db.update(readingBooks).set(values).where(and20(eq23(readingBooks.id, id5), eq23(readingBooks.userId, userId)));
+  const [row] = await db.select(columns).from(readingBooks).where(and20(eq23(readingBooks.id, id5), eq23(readingBooks.userId, userId))).limit(1);
   if (!row) throw new ReadingError("Kitap bulunamad\u0131.");
   return row;
 }
 async function removeReadingBook(userId, id5) {
   const db = await getDb();
   if (!db) return;
-  await db.delete(readingBooks).where(and19(eq22(readingBooks.id, id5), eq22(readingBooks.userId, userId)));
+  await db.delete(readingBooks).where(and20(eq23(readingBooks.id, id5), eq23(readingBooks.userId, userId)));
 }
 async function recordReadingPages(userId, id5, pages2) {
   const db = await getDb();
   if (!db) return null;
-  const [book] = await db.select(columns).from(readingBooks).where(and19(eq22(readingBooks.id, id5), eq22(readingBooks.userId, userId))).limit(1);
+  const [book] = await db.select(columns).from(readingBooks).where(and20(eq23(readingBooks.id, id5), eq23(readingBooks.userId, userId))).limit(1);
   if (!book) return null;
   const next = applyReadingProgress(book, pages2);
-  await db.update(readingBooks).set({ pagesRead: next.pagesRead, status: next.status, ...next.justFinished ? { finishedAt: /* @__PURE__ */ new Date() } : {} }).where(and19(eq22(readingBooks.id, id5), eq22(readingBooks.userId, userId)));
+  await db.update(readingBooks).set({ pagesRead: next.pagesRead, status: next.status, ...next.justFinished ? { finishedAt: /* @__PURE__ */ new Date() } : {} }).where(and20(eq23(readingBooks.id, id5), eq23(readingBooks.userId, userId)));
   return { ...book, pagesRead: next.pagesRead, status: next.status, justFinished: next.justFinished };
 }
 
 // server/routers/reading.ts
-var id2 = z9.number().int().positive();
-var pages = z9.number().int().min(1).max(1e4).nullable().optional();
+var id2 = z10.number().int().positive();
+var pages = z10.number().int().min(1).max(1e4).nullable().optional();
 async function userFacing3(work) {
   try {
     return await work();
   } catch (error) {
-    if (error instanceof ReadingError) throw new TRPCError7({ code: "BAD_REQUEST", message: error.message });
+    if (error instanceof ReadingError) throw new TRPCError8({ code: "BAD_REQUEST", message: error.message });
     throw error;
   }
 }
 var readingRouter = router({
   list: protectedProcedure.query(({ ctx }) => listReadingBooks(ctx.user.id)),
-  add: protectedProcedure.input(z9.object({ title: z9.string().trim().min(1, "Kitap ad\u0131n\u0131 yaz.").max(180), author: z9.string().trim().max(120).nullable().optional(), totalPages: pages })).mutation(({ ctx, input }) => userFacing3(() => addReadingBook(ctx.user.id, input))),
-  update: protectedProcedure.input(z9.object({ id: id2, status: z9.enum(["reading", "finished"]).optional(), totalPages: pages })).mutation(({ ctx, input }) => userFacing3(() => updateReadingBook(ctx.user.id, input.id, { status: input.status, totalPages: input.totalPages }))),
-  remove: protectedProcedure.input(z9.object({ id: id2 })).mutation(({ ctx, input }) => removeReadingBook(ctx.user.id, input.id))
+  add: protectedProcedure.input(z10.object({ title: z10.string().trim().min(1, "Kitap ad\u0131n\u0131 yaz.").max(180), author: z10.string().trim().max(120).nullable().optional(), totalPages: pages })).mutation(({ ctx, input }) => userFacing3(() => addReadingBook(ctx.user.id, input))),
+  update: protectedProcedure.input(z10.object({ id: id2, status: z10.enum(["reading", "finished"]).optional(), totalPages: pages })).mutation(({ ctx, input }) => userFacing3(() => updateReadingBook(ctx.user.id, input.id, { status: input.status, totalPages: input.totalPages }))),
+  remove: protectedProcedure.input(z10.object({ id: id2 })).mutation(({ ctx, input }) => removeReadingBook(ctx.user.id, input.id))
 });
 
 // server/routers/org.ts
-import { TRPCError as TRPCError9 } from "@trpc/server";
+import { TRPCError as TRPCError10 } from "@trpc/server";
 import { createHash as createHash4, randomInt } from "node:crypto";
-import { z as z11 } from "zod";
+import { z as z12 } from "zod";
 
 // shared/kvkk.ts
 var DEFAULT_KVKK_NOTICE = `K\u0130\u015E\u0130SEL VER\u0130LER\u0130N \u0130\u015ELENMES\u0130NE \u0130L\u0130\u015EK\u0130N AYDINLATMA METN\u0130
@@ -10427,15 +10902,15 @@ function sameBranch(subject2, branch) {
 var sortSlots = (slots) => slots.slice().sort((a, b) => a.dayOfWeek - b.dayOfWeek || toMinutes(a.startTime) - toMinutes(b.startTime));
 
 // server/org/orgAccess.ts
-import { TRPCError as TRPCError8 } from "@trpc/server";
-import { z as z10 } from "zod";
-var notFound = (message = "Bulunamad\u0131.") => new TRPCError8({ code: "NOT_FOUND", message });
+import { TRPCError as TRPCError9 } from "@trpc/server";
+import { z as z11 } from "zod";
+var notFound = (message = "Bulunamad\u0131.") => new TRPCError9({ code: "NOT_FOUND", message });
 function orgProcedure(minRole, options = {}) {
-  return protectedProcedure.input(z10.object({ orgId: z10.number().int().positive() })).use(async ({ ctx, input, next, type }) => {
+  return protectedProcedure.input(z11.object({ orgId: z11.number().int().positive() })).use(async ({ ctx, input, next, type }) => {
     const membership = await getActiveMembership(ctx.user.id, input.orgId);
     if (!membership || !hasRole(membership.role, minRole)) throw notFound("Kurum bulunamad\u0131.");
     if (type === "mutation" && !options.allowInactive && membership.state && membership.state !== "active") {
-      throw new TRPCError8({ code: "FORBIDDEN", message: membership.state === "expired" ? "Kurum \xFCyeli\u011Finin s\xFCresi doldu; panel salt okunur. Yenilemek i\xE7in platform y\xF6neticisiyle g\xF6r\xFC\u015F\xFCn." : "Kurum \xFCyeli\u011Fi hen\xFCz ba\u015Flamad\u0131." });
+      throw new TRPCError9({ code: "FORBIDDEN", message: membership.state === "expired" ? "Kurum \xFCyeli\u011Finin s\xFCresi doldu; panel salt okunur. Yenilemek i\xE7in platform y\xF6neticisiyle g\xF6r\xFC\u015F\xFCn." : "Kurum \xFCyeli\u011Fi hen\xFCz ba\u015Flamad\u0131." });
     }
     return next({ ctx: { ...ctx, membership } });
   });
@@ -10452,14 +10927,14 @@ function audit(ctx, action, target, metadata) {
 }
 
 // server/routers/org.ts
-var id3 = z11.number().int().positive();
+var id3 = z12.number().int().positive();
 var hashCode = (code) => createHash4("sha256").update(normalizeInviteCode(code)).digest("hex");
 var DAY2 = 24 * 60 * 60 * 1e3;
 async function userFacing4(work) {
   try {
     return await work();
   } catch (error) {
-    if (error instanceof OrgError) throw new TRPCError9({ code: "BAD_REQUEST", message: error.message });
+    if (error instanceof OrgError) throw new TRPCError10({ code: "BAD_REQUEST", message: error.message });
     throw error;
   }
 }
@@ -10478,42 +10953,42 @@ async function visibleStudentsWithSummary(ctx) {
   const signals = await loadStudentSignals(students.map((student) => student.userId), start, end, new Date(Date.now() - 30 * DAY2));
   return students.map((student) => ({ ...student, summary: summarizeStudent(signals.get(student.userId)) }));
 }
-var optionalText = (max) => z11.string().trim().max(max).optional().transform((value) => value || null);
-var classInput = z11.object({ name: z11.string().trim().min(1).max(80), gradeLevel: z11.enum(CLASS_GRADES).nullable().optional(), track: z11.enum(CLASS_TRACKS).nullable().optional(), advisorUserId: id3.nullable().optional() });
+var optionalText = (max) => z12.string().trim().max(max).optional().transform((value) => value || null);
+var classInput = z12.object({ name: z12.string().trim().min(1).max(80), gradeLevel: z12.enum(CLASS_GRADES).nullable().optional(), track: z12.enum(CLASS_TRACKS).nullable().optional(), advisorUserId: id3.nullable().optional() });
 async function classFields(orgId, input) {
   if (input.advisorUserId) {
     const role = await getMemberRole(orgId, input.advisorUserId);
-    if (!role || !isStaffRole(role)) throw new TRPCError9({ code: "NOT_FOUND", message: "Sorumlu \xF6\u011Fretmen bulunamad\u0131." });
+    if (!role || !isStaffRole(role)) throw new TRPCError10({ code: "NOT_FOUND", message: "Sorumlu \xF6\u011Fretmen bulunamad\u0131." });
   }
   return { name: input.name, gradeLevel: input.gradeLevel ?? null, track: input.track ?? null, advisorUserId: input.advisorUserId ?? null };
 }
-var timetableSlotInput = z11.object({
-  dayOfWeek: z11.number().int().min(1).max(7),
-  startTime: z11.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
-  endTime: z11.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
-  subject: z11.string().trim().min(1).max(60),
+var timetableSlotInput = z12.object({
+  dayOfWeek: z12.number().int().min(1).max(7),
+  startTime: z12.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  endTime: z12.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  subject: z12.string().trim().min(1).max(60),
   teacherUserId: id3.nullable(),
   room: optionalText(40)
 });
 async function saveTimetables(ctx, plans) {
   const orgId = ctx.membership.orgId;
   const prepared = plans.map((plan) => ({ classId: plan.classId, slots: sortSlots(plan.slots.map((slot) => ({ ...slot, room: slot.room ?? null }))) }));
-  if (new Set(prepared.map((plan) => plan.classId)).size !== prepared.length) throw new TRPCError9({ code: "BAD_REQUEST", message: "Bir s\u0131n\u0131f iki kez g\xF6nderildi." });
+  if (new Set(prepared.map((plan) => plan.classId)).size !== prepared.length) throw new TRPCError10({ code: "BAD_REQUEST", message: "Bir s\u0131n\u0131f iki kez g\xF6nderildi." });
   const [members, classes, current] = await Promise.all([listMembers(orgId), listClasses(orgId), listOrgTimetable(orgId)]);
   const staff = new Map(members.filter((member) => isStaffRole(member.role)).map((member) => [member.userId, member]));
   const className = (classId) => classes.find((item) => item.id === classId)?.name ?? "ba\u015Fka bir";
   for (const plan of prepared) {
-    if (!classes.some((item) => item.id === plan.classId)) throw new TRPCError9({ code: "NOT_FOUND", message: "S\u0131n\u0131f bulunamad\u0131." });
+    if (!classes.some((item) => item.id === plan.classId)) throw new TRPCError10({ code: "NOT_FOUND", message: "S\u0131n\u0131f bulunamad\u0131." });
     const problem = validateClassTimetable(plan.slots);
-    if (problem) throw new TRPCError9({ code: "BAD_REQUEST", message: prepared.length > 1 ? `${className(plan.classId)}: ${problem}` : problem });
-    if (plan.slots.some((slot) => slot.teacherUserId && !staff.has(slot.teacherUserId))) throw new TRPCError9({ code: "NOT_FOUND", message: "\xD6\u011Fretmen bulunamad\u0131." });
+    if (problem) throw new TRPCError10({ code: "BAD_REQUEST", message: prepared.length > 1 ? `${className(plan.classId)}: ${problem}` : problem });
+    if (plan.slots.some((slot) => slot.teacherUserId && !staff.has(slot.teacherUserId))) throw new TRPCError10({ code: "NOT_FOUND", message: "\xD6\u011Fretmen bulunamad\u0131." });
   }
   const replaced = new Set(prepared.map((plan) => plan.classId));
   const placed = [...current.filter((slot) => !replaced.has(slot.classId)).map((slot) => ({ ...slot, room: slot.room ?? null })), ...prepared.flatMap((plan) => plan.slots.map((slot) => ({ ...slot, classId: plan.classId })))];
   const conflicts = prepared.flatMap((plan) => findCrossClassConflicts(plan.classId, plan.slots, placed));
   if (conflicts.length) {
     const names = { teacher: (userId) => staff.get(userId)?.name ?? "\xD6\u011Fretmen", className };
-    throw new TRPCError9({ code: "CONFLICT", message: conflicts.slice(0, 3).map((conflict) => describeConflict(conflict, names)).join(" ") });
+    throw new TRPCError10({ code: "CONFLICT", message: conflicts.slice(0, 3).map((conflict) => describeConflict(conflict, names)).join(" ") });
   }
   await replaceClassTimetables(orgId, prepared);
   for (const plan of prepared) await audit(ctx, "timetable.update", { type: "class", id: plan.classId }, { slots: plan.slots.length, auto: prepared.length > 1 });
@@ -10526,7 +11001,7 @@ var orgRouter = router({
   mine: protectedProcedure.query(({ ctx }) => listMyMemberships(ctx.user.id)),
   /** Personelin pazar akşamı aldığı sınıf özeti (server/digest/teacherDigest.ts); üyelik başına. */
   myDigest: orgProcedure("teacher").query(async ({ ctx }) => ({ enabled: await getStaffDigestEnabled(ctx.user.id, ctx.membership.orgId) })),
-  setMyDigest: orgProcedure("teacher", { allowInactive: true }).input(z11.object({ enabled: z11.boolean() })).mutation(async ({ ctx, input }) => ({ enabled: await setStaffDigestEnabled(ctx.user.id, ctx.membership.orgId, input.enabled) })),
+  setMyDigest: orgProcedure("teacher", { allowInactive: true }).input(z12.object({ enabled: z12.boolean() })).mutation(async ({ ctx, input }) => ({ enabled: await setStaffDigestEnabled(ctx.user.id, ctx.membership.orgId, input.enabled) })),
   overview: orgProcedure("teacher").query(async ({ ctx }) => {
     const students = await visibleStudentsWithSummary(ctx);
     const classes = await listClasses(ctx.membership.orgId);
@@ -10555,7 +11030,7 @@ var orgRouter = router({
       })
     };
   }),
-  students: orgProcedure("teacher").input(z11.object({ classId: id3.optional(), teacherUserId: id3.optional(), risk: z11.enum(["inactive", "low_adherence", "net_drop", "any"]).optional(), q: z11.string().max(80).optional() })).query(async ({ ctx, input }) => {
+  students: orgProcedure("teacher").input(z12.object({ classId: id3.optional(), teacherUserId: id3.optional(), risk: z12.enum(["inactive", "low_adherence", "net_drop", "any"]).optional(), q: z12.string().max(80).optional() })).query(async ({ ctx, input }) => {
     const students = await visibleStudentsWithSummary(ctx);
     const [classes, assignments, teachers] = await Promise.all([listClasses(ctx.membership.orgId), listAssignments(ctx.membership.orgId), listMembers(ctx.membership.orgId, { role: "teacher" })]);
     const query = input.q?.trim().toLocaleLowerCase("tr") ?? "";
@@ -10568,7 +11043,7 @@ var orgRouter = router({
       summary: student.summary
     })).filter((student) => (!input.classId || student.classes.some((item) => item.id === input.classId)) && (!input.teacherUserId || student.teachers.some((teacher) => teacher.userId === input.teacherUserId)) && (!input.risk || (input.risk === "any" ? student.summary.risks.length > 0 : student.summary.risks.includes(input.risk))) && (!query || student.name.toLocaleLowerCase("tr").includes(query)));
   }),
-  student: orgProcedure("teacher").input(z11.object({ studentUserId: id3 })).query(async ({ ctx, input }) => {
+  student: orgProcedure("teacher").input(z12.object({ studentUserId: id3 })).query(async ({ ctx, input }) => {
     await assertCanViewStudent(ctx, input.studentUserId);
     const since = new Date(Date.now() - 42 * DAY2);
     const { start, end } = currentWeek();
@@ -10602,40 +11077,40 @@ var orgRouter = router({
   settings: router({
     get: orgProcedure("teacher").query(async ({ ctx }) => {
       const org = await getOrganization(ctx.membership.orgId);
-      if (!org) throw new TRPCError9({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+      if (!org) throw new TRPCError10({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
       return { ...org, membershipState: membershipState(org), kvkk: effectiveKvkk(org) };
     }),
     /** Kurum yöneticisi: öğrenci başına aylık AI kredi üst sınırı (null = sınırsız). */
-    setCreditCap: orgProcedure("admin").input(z11.object({ cap: z11.number().int().min(1).max(1e6).nullable() })).mutation(async ({ ctx, input }) => {
+    setCreditCap: orgProcedure("admin").input(z12.object({ cap: z12.number().int().min(1).max(1e6).nullable() })).mutation(async ({ ctx, input }) => {
       await setPerStudentCreditCap(ctx.membership.orgId, input.cap);
       await audit(ctx, "org.credit_cap", { type: "organization", id: ctx.membership.orgId }, { cap: input.cap });
       return { ok: true };
     }),
     credits: orgProcedure("coordinator").query(async ({ ctx }) => {
       const org = await getOrganization(ctx.membership.orgId);
-      if (!org) throw new TRPCError9({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+      if (!org) throw new TRPCError10({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
       const report = await orgCreditReport(ctx.membership.orgId);
       return { monthly: org.aiCreditsMonthly, cap: org.perStudentCreditCap, remaining: Math.max(0, org.aiCreditsMonthly - report.used), ...report };
     }),
     /** KVKK metinleri: boş gönderilen metin platform şablonuna döner. Her kayıtta sürüm artar. */
-    updateKvkk: orgProcedure("admin").input(z11.object({ notice: z11.string().trim().max(2e4).nullable(), consent: z11.string().trim().max(5e3).nullable() })).mutation(async ({ ctx, input }) => {
+    updateKvkk: orgProcedure("admin").input(z12.object({ notice: z12.string().trim().max(2e4).nullable(), consent: z12.string().trim().max(5e3).nullable() })).mutation(async ({ ctx, input }) => {
       await updateKvkk(ctx.membership.orgId, input.notice || null, input.consent || null);
       await audit(ctx, "org.kvkk", { type: "organization", id: ctx.membership.orgId }, { custom: Boolean(input.notice || input.consent) });
       return { ok: true };
     }),
     /** Paket yükseltme / süre uzatma talebi: kurum yöneticisi gönderir, platform yöneticisi onaylar. Süresi dolmuş kurumda da açık. */
     upgrades: orgProcedure("admin").query(({ ctx }) => listOrgUpgradeRequests(ctx.membership.orgId)),
-    requestUpgrade: orgProcedure("admin", { allowInactive: true }).input(z11.object({ plan: z11.enum(ORG_PLANS), note: z11.string().trim().max(300).optional() })).mutation(({ ctx, input }) => userFacing4(async () => {
+    requestUpgrade: orgProcedure("admin", { allowInactive: true }).input(z12.object({ plan: z12.enum(ORG_PLANS), note: z12.string().trim().max(300).optional() })).mutation(({ ctx, input }) => userFacing4(async () => {
       const org = await getOrganization(ctx.membership.orgId);
-      if (!org) throw new TRPCError9({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+      if (!org) throw new TRPCError10({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
       if (!canRequestPlan(org.plan, input.plan)) throw new OrgError("Bu pakete ge\xE7i\u015F talep edilemez; yaln\u0131zca \xFCst pakete y\xFCkseltme ya da s\xFCre uzatma istenebilir.");
       if ((await listOrgUpgradeRequests(ctx.membership.orgId)).some((row) => row.status === "pending")) throw new OrgError("Zaten bekleyen bir talebin var; sonu\xE7lanmas\u0131n\u0131 bekle ya da iptal et.");
       const requestId = await createUpgradeRequest({ orgId: ctx.membership.orgId, requestedBy: ctx.user.id, currentPlan: org.plan, requestedPlan: input.plan, note: input.note || null });
       await audit(ctx, "org.upgrade_request", { type: "upgrade", id: requestId }, { from: org.plan, to: input.plan });
       return { id: requestId };
     })),
-    cancelUpgrade: orgProcedure("admin", { allowInactive: true }).input(z11.object({ requestId: id3 })).mutation(async ({ ctx, input }) => {
-      if (!await cancelUpgradeRequest(ctx.membership.orgId, input.requestId)) throw new TRPCError9({ code: "NOT_FOUND", message: "Bekleyen talep bulunamad\u0131." });
+    cancelUpgrade: orgProcedure("admin", { allowInactive: true }).input(z12.object({ requestId: id3 })).mutation(async ({ ctx, input }) => {
+      if (!await cancelUpgradeRequest(ctx.membership.orgId, input.requestId)) throw new TRPCError10({ code: "NOT_FOUND", message: "Bekleyen talep bulunamad\u0131." });
       await audit(ctx, "org.upgrade_cancel", { type: "upgrade", id: input.requestId });
       return { ok: true };
     }),
@@ -10644,7 +11119,7 @@ var orgRouter = router({
       const current = org?.kvkkVersion ?? 1;
       return { current, students: versions.length, onCurrent: versions.filter((version) => version === current).length, onOlder: versions.filter((version) => version !== null && version !== current).length, missing: versions.filter((version) => version === null).length };
     }),
-    update: orgProcedure("admin").input(z11.object({ name: z11.string().trim().min(2).max(160), kind: z11.enum(ORG_KINDS), city: optionalText(80), district: optionalText(80), address: optionalText(300), phone: optionalText(40), contactEmail: z11.union([z11.literal(""), z11.string().trim().email("Ge\xE7erli bir e-posta yaz.").max(160)]).optional().transform((value) => value || null) })).mutation(async ({ ctx, input }) => {
+    update: orgProcedure("admin").input(z12.object({ name: z12.string().trim().min(2).max(160), kind: z12.enum(ORG_KINDS), city: optionalText(80), district: optionalText(80), address: optionalText(300), phone: optionalText(40), contactEmail: z12.union([z12.literal(""), z12.string().trim().email("Ge\xE7erli bir e-posta yaz.").max(160)]).optional().transform((value) => value || null) })).mutation(async ({ ctx, input }) => {
       await updateOrganization(ctx.membership.orgId, input);
       await audit(ctx, "org.update", { type: "organization", id: ctx.membership.orgId }, { name: input.name });
       return { ok: true };
@@ -10655,17 +11130,17 @@ var orgRouter = router({
       const rows = await listInvitations(ctx.membership.orgId);
       return hasRole(ctx.membership.role, "coordinator") ? rows : rows.filter((row) => row.role === "student");
     }),
-    create: orgProcedure("teacher").input(z11.object({ role: z11.enum(INVITABLE_ROLES), note: z11.string().trim().max(160).optional(), subject: z11.string().trim().max(60).optional(), days: z11.number().int().min(1).max(60).default(14), maxUses: z11.number().int().min(1).max(500).default(1) })).mutation(({ ctx, input }) => userFacing4(async () => {
-      if (!canInviteRole(ctx.membership.role, input.role)) throw new TRPCError9({ code: "FORBIDDEN", message: "Bu rol i\xE7in davet olu\u015Fturma yetkin yok." });
+    create: orgProcedure("teacher").input(z12.object({ role: z12.enum(INVITABLE_ROLES), note: z12.string().trim().max(160).optional(), subject: z12.string().trim().max(60).optional(), days: z12.number().int().min(1).max(60).default(14), maxUses: z12.number().int().min(1).max(500).default(1) })).mutation(({ ctx, input }) => userFacing4(async () => {
+      if (!canInviteRole(ctx.membership.role, input.role)) throw new TRPCError10({ code: "FORBIDDEN", message: "Bu rol i\xE7in davet olu\u015Fturma yetkin yok." });
       const code = generateInviteCode((max) => randomInt(max));
       const invitationId = await createInvitation({ orgId: ctx.membership.orgId, role: input.role, codeHash: hashCode(code), note: input.note || null, subject: input.role === "student" ? null : input.subject || null, expiresAt: new Date(Date.now() + input.days * DAY2), maxUses: input.maxUses, createdBy: ctx.user.id });
       await audit(ctx, "invitation.create", { type: "invitation", id: invitationId }, { role: input.role, maxUses: input.maxUses, days: input.days });
       return { id: invitationId, code };
     })),
-    revoke: orgProcedure("teacher").input(z11.object({ invitationId: id3 })).mutation(async ({ ctx, input }) => {
+    revoke: orgProcedure("teacher").input(z12.object({ invitationId: id3 })).mutation(async ({ ctx, input }) => {
       const rows = await listInvitations(ctx.membership.orgId);
       const target = rows.find((row) => row.id === input.invitationId);
-      if (!target || !hasRole(ctx.membership.role, "coordinator") && target.role !== "student") throw new TRPCError9({ code: "NOT_FOUND", message: "Davet bulunamad\u0131." });
+      if (!target || !hasRole(ctx.membership.role, "coordinator") && target.role !== "student") throw new TRPCError10({ code: "NOT_FOUND", message: "Davet bulunamad\u0131." });
       await revokeInvitation(ctx.membership.orgId, input.invitationId);
       await audit(ctx, "invitation.revoke", { type: "invitation", id: input.invitationId });
       return { ok: true };
@@ -10673,23 +11148,23 @@ var orgRouter = router({
   }),
   members: router({
     list: orgProcedure("coordinator").query(async ({ ctx }) => (await listMembers(ctx.membership.orgId)).filter((member) => isStaffRole(member.role))),
-    setRole: orgProcedure("admin").input(z11.object({ userId: id3, role: z11.enum(ORG_ROLES) })).mutation(async ({ ctx, input }) => {
+    setRole: orgProcedure("admin").input(z12.object({ userId: id3, role: z12.enum(ORG_ROLES) })).mutation(async ({ ctx, input }) => {
       const current = await getMemberRole(ctx.membership.orgId, input.userId);
-      if (!current || input.userId === ctx.user.id) throw new TRPCError9({ code: "NOT_FOUND", message: "\xDCye bulunamad\u0131." });
-      if (!canAssignRole(ctx.membership.role, current, input.role)) throw new TRPCError9({ code: "FORBIDDEN", message: "Bu rol de\u011Fi\u015Fikli\u011Fini yapma yetkin yok." });
-      if (current === "student" !== (input.role === "student")) throw new TRPCError9({ code: "BAD_REQUEST", message: "\xD6\u011Frenci ve personel rolleri birbirine \xE7evrilemez." });
+      if (!current || input.userId === ctx.user.id) throw new TRPCError10({ code: "NOT_FOUND", message: "\xDCye bulunamad\u0131." });
+      if (!canAssignRole(ctx.membership.role, current, input.role)) throw new TRPCError10({ code: "FORBIDDEN", message: "Bu rol de\u011Fi\u015Fikli\u011Fini yapma yetkin yok." });
+      if (current === "student" !== (input.role === "student")) throw new TRPCError10({ code: "BAD_REQUEST", message: "\xD6\u011Frenci ve personel rolleri birbirine \xE7evrilemez." });
       await setMemberRole(ctx.membership.orgId, input.userId, input.role);
       await audit(ctx, "member.role", { type: "user", id: input.userId }, { from: current, to: input.role });
       return { ok: true };
     }),
-    setSubject: orgProcedure("coordinator").input(z11.object({ userId: id3, subject: optionalText(60) })).mutation(async ({ ctx, input }) => {
-      if (!await setMemberSubject(ctx.membership.orgId, input.userId, input.subject)) throw new TRPCError9({ code: "NOT_FOUND", message: "Personel bulunamad\u0131." });
+    setSubject: orgProcedure("coordinator").input(z12.object({ userId: id3, subject: optionalText(60) })).mutation(async ({ ctx, input }) => {
+      if (!await setMemberSubject(ctx.membership.orgId, input.userId, input.subject)) throw new TRPCError10({ code: "NOT_FOUND", message: "Personel bulunamad\u0131." });
       await audit(ctx, "member.subject", { type: "user", id: input.userId }, { subject: input.subject });
       return { ok: true };
     }),
-    remove: orgProcedure("admin").input(z11.object({ userId: id3 })).mutation(async ({ ctx, input }) => {
+    remove: orgProcedure("admin").input(z12.object({ userId: id3 })).mutation(async ({ ctx, input }) => {
       const current = await getMemberRole(ctx.membership.orgId, input.userId);
-      if (!current || input.userId === ctx.user.id || !canAssignRole(ctx.membership.role, current, current === "student" ? "student" : "teacher")) throw new TRPCError9({ code: "NOT_FOUND", message: "\xDCye bulunamad\u0131." });
+      if (!current || input.userId === ctx.user.id || !canAssignRole(ctx.membership.role, current, current === "student" ? "student" : "teacher")) throw new TRPCError10({ code: "NOT_FOUND", message: "\xDCye bulunamad\u0131." });
       await endMembership(ctx.membership.orgId, input.userId, "removed");
       await audit(ctx, "member.remove", { type: "user", id: input.userId }, { role: current });
       return { ok: true };
@@ -10703,17 +11178,17 @@ var orgRouter = router({
       return { id: classId };
     }),
     update: orgProcedure("coordinator").input(classInput.extend({ classId: id3 })).mutation(async ({ ctx, input }) => {
-      if (!await updateClass(ctx.membership.orgId, input.classId, await classFields(ctx.membership.orgId, input))) throw new TRPCError9({ code: "NOT_FOUND", message: "S\u0131n\u0131f bulunamad\u0131." });
+      if (!await updateClass(ctx.membership.orgId, input.classId, await classFields(ctx.membership.orgId, input))) throw new TRPCError10({ code: "NOT_FOUND", message: "S\u0131n\u0131f bulunamad\u0131." });
       await audit(ctx, "class.update", { type: "class", id: input.classId }, { name: input.name });
       return { ok: true };
     }),
-    remove: orgProcedure("coordinator").input(z11.object({ classId: id3 })).mutation(async ({ ctx, input }) => {
-      if (!await deleteClass(ctx.membership.orgId, input.classId)) throw new TRPCError9({ code: "NOT_FOUND", message: "S\u0131n\u0131f bulunamad\u0131." });
+    remove: orgProcedure("coordinator").input(z12.object({ classId: id3 })).mutation(async ({ ctx, input }) => {
+      if (!await deleteClass(ctx.membership.orgId, input.classId)) throw new TRPCError10({ code: "NOT_FOUND", message: "S\u0131n\u0131f bulunamad\u0131." });
       await audit(ctx, "class.remove", { type: "class", id: input.classId });
       return { ok: true };
     }),
-    setStudents: orgProcedure("coordinator").input(z11.object({ classId: id3, studentUserIds: z11.array(id3).max(500) })).mutation(async ({ ctx, input }) => {
-      if (!await setClassStudents(ctx.membership.orgId, input.classId, input.studentUserIds)) throw new TRPCError9({ code: "NOT_FOUND", message: "S\u0131n\u0131f bulunamad\u0131." });
+    setStudents: orgProcedure("coordinator").input(z12.object({ classId: id3, studentUserIds: z12.array(id3).max(500) })).mutation(async ({ ctx, input }) => {
+      if (!await setClassStudents(ctx.membership.orgId, input.classId, input.studentUserIds)) throw new TRPCError10({ code: "NOT_FOUND", message: "S\u0131n\u0131f bulunamad\u0131." });
       await audit(ctx, "class.students", { type: "class", id: input.classId }, { count: input.studentUserIds.length });
       return { ok: true };
     })
@@ -10732,44 +11207,44 @@ var orgRouter = router({
         teachers: members.filter((member) => isStaffRole(member.role)).map((member) => ({ userId: member.userId, name: member.name, role: member.role, subject: member.subject }))
       };
     }),
-    saveClass: orgProcedure("coordinator").input(z11.object({ classId: id3, slots: z11.array(timetableSlotInput).max(MAX_TIMETABLE_SLOTS_PER_CLASS) })).mutation(({ ctx, input }) => saveTimetables(ctx, [input])),
+    saveClass: orgProcedure("coordinator").input(z12.object({ classId: id3, slots: z12.array(timetableSlotInput).max(MAX_TIMETABLE_SLOTS_PER_CLASS) })).mutation(({ ctx, input }) => saveTimetables(ctx, [input])),
     // Otomatik dağıtımın sonucu: seçilen sınıfların programı birlikte, tek işlemde kaydedilir.
-    saveClasses: orgProcedure("coordinator").input(z11.object({ classes: z11.array(z11.object({ classId: id3, slots: z11.array(timetableSlotInput).max(MAX_TIMETABLE_SLOTS_PER_CLASS) })).min(1).max(100) })).mutation(({ ctx, input }) => saveTimetables(ctx, input.classes))
+    saveClasses: orgProcedure("coordinator").input(z12.object({ classes: z12.array(z12.object({ classId: id3, slots: z12.array(timetableSlotInput).max(MAX_TIMETABLE_SLOTS_PER_CLASS) })).min(1).max(100) })).mutation(({ ctx, input }) => saveTimetables(ctx, input.classes))
   }),
   assignments: router({
     list: orgProcedure("coordinator").query(({ ctx }) => listAssignments(ctx.membership.orgId)),
-    setTeacherStudents: orgProcedure("coordinator").input(z11.object({ teacherUserId: id3, studentUserIds: z11.array(id3).max(500) })).mutation(async ({ ctx, input }) => {
-      if (await getMemberRole(ctx.membership.orgId, input.teacherUserId) !== "teacher") throw new TRPCError9({ code: "NOT_FOUND", message: "\xD6\u011Fretmen bulunamad\u0131." });
+    setTeacherStudents: orgProcedure("coordinator").input(z12.object({ teacherUserId: id3, studentUserIds: z12.array(id3).max(500) })).mutation(async ({ ctx, input }) => {
+      if (await getMemberRole(ctx.membership.orgId, input.teacherUserId) !== "teacher") throw new TRPCError10({ code: "NOT_FOUND", message: "\xD6\u011Fretmen bulunamad\u0131." });
       const assigned = await setTeacherStudents(ctx.membership.orgId, input.teacherUserId, input.studentUserIds);
       await audit(ctx, "assignment.set", { type: "user", id: input.teacherUserId }, { count: assigned.length });
       return { assigned: assigned.length };
     })
   }),
   tasks: router({
-    assign: orgProcedure("teacher").input(z11.object({ studentUserId: id3, date: z11.string().regex(/^\d{4}-\d{2}-\d{2}$/), time: z11.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), subject: z11.string().trim().min(1).max(80), topic: z11.string().trim().min(1).max(180), kind: z11.enum(["Soru \xE7\xF6z\xFCm\xFC", "Konu tekrar\u0131", "Konu \xE7al\u0131\u015Fmas\u0131"]), minutes: z11.number().int().min(10).max(240), targetQuestions: z11.number().int().min(0).max(300).optional(), note: z11.string().trim().max(300).optional() })).mutation(async ({ ctx, input }) => {
+    assign: orgProcedure("teacher").input(z12.object({ studentUserId: id3, date: z12.string().regex(/^\d{4}-\d{2}-\d{2}$/), time: z12.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), subject: z12.string().trim().min(1).max(80), topic: z12.string().trim().min(1).max(180), kind: z12.enum(["Soru \xE7\xF6z\xFCm\xFC", "Konu tekrar\u0131", "Konu \xE7al\u0131\u015Fmas\u0131"]), minutes: z12.number().int().min(10).max(240), targetQuestions: z12.number().int().min(0).max(300).optional(), note: z12.string().trim().max(300).optional() })).mutation(async ({ ctx, input }) => {
       await assertCanViewStudent(ctx, input.studentUserId);
       const start = toMinutes(input.time);
-      if (start + input.minutes > 23 * 60 + 30) throw new TRPCError9({ code: "BAD_REQUEST", message: "G\xF6rev 23:30'dan \xF6nce bitmeli." });
+      if (start + input.minutes > 23 * 60 + 30) throw new TRPCError10({ code: "BAD_REQUEST", message: "G\xF6rev 23:30'dan \xF6nce bitmeli." });
       const schedule = await getClassSchedule(input.studentUserId);
       const conflict = findClassConflict(schedule.blocks, /* @__PURE__ */ new Date(`${input.date}T12:00:00`), start, input.minutes);
-      if (conflict) throw new TRPCError9({ code: "BAD_REQUEST", message: `\xD6\u011Frencinin ${conflict.label} dersiyle \xE7ak\u0131\u015F\u0131yor (${conflict.startTime}\u2013${conflict.endTime}).` });
+      if (conflict) throw new TRPCError10({ code: "BAD_REQUEST", message: `\xD6\u011Frencinin ${conflict.label} dersiyle \xE7ak\u0131\u015F\u0131yor (${conflict.startTime}\u2013${conflict.endTime}).` });
       const sessionId = await insertAssignedTask({ orgId: ctx.membership.orgId, studentUserId: input.studentUserId, teacherUserId: ctx.user.id, sessionDate: /* @__PURE__ */ new Date(`${input.date}T${input.time}:00`), title: `${input.subject} \xB7 ${input.topic}`, subject: input.subject, topic: input.topic, kind: input.kind, plannedMinutes: input.minutes, targetQuestions: input.targetQuestions || null, summary: input.note || `${ctx.membership.orgName} \xF6\u011Fretmeninin atad\u0131\u011F\u0131 g\xF6rev.` });
       await audit(ctx, "task.assign", { type: "user", id: input.studentUserId }, { sessionId, subject: input.subject, topic: input.topic });
       return { sessionId };
     })
   }),
   notes: router({
-    create: orgProcedure("teacher").input(z11.object({ studentUserId: id3, body: z11.string().trim().min(1).max(4e3), visibility: z11.enum(["staff", "student"]) })).mutation(async ({ ctx, input }) => {
+    create: orgProcedure("teacher").input(z12.object({ studentUserId: id3, body: z12.string().trim().min(1).max(4e3), visibility: z12.enum(["staff", "student"]) })).mutation(async ({ ctx, input }) => {
       await assertCanViewStudent(ctx, input.studentUserId);
       const noteId = await createNote({ orgId: ctx.membership.orgId, studentUserId: input.studentUserId, authorUserId: ctx.user.id, body: input.body, visibility: input.visibility });
       await audit(ctx, "note.create", { type: "user", id: input.studentUserId }, { noteId, visibility: input.visibility });
       return { id: noteId };
     }),
-    remove: orgProcedure("teacher").input(z11.object({ noteId: id3 })).mutation(async ({ ctx, input }) => {
+    remove: orgProcedure("teacher").input(z12.object({ noteId: id3 })).mutation(async ({ ctx, input }) => {
       const note = await getNote2(ctx.membership.orgId, input.noteId);
-      if (!note) throw new TRPCError9({ code: "NOT_FOUND", message: "Not bulunamad\u0131." });
+      if (!note) throw new TRPCError10({ code: "NOT_FOUND", message: "Not bulunamad\u0131." });
       await assertCanViewStudent(ctx, note.studentUserId);
-      if (note.authorUserId !== ctx.user.id && !hasRole(ctx.membership.role, "admin")) throw new TRPCError9({ code: "FORBIDDEN", message: "Yaln\u0131zca notu yazan ya da kurum y\xF6neticisi silebilir." });
+      if (note.authorUserId !== ctx.user.id && !hasRole(ctx.membership.role, "admin")) throw new TRPCError10({ code: "FORBIDDEN", message: "Yaln\u0131zca notu yazan ya da kurum y\xF6neticisi silebilir." });
       await deleteNote2(ctx.membership.orgId, input.noteId);
       await audit(ctx, "note.remove", { type: "user", id: note.studentUserId }, { noteId: input.noteId });
       return { ok: true };
@@ -10778,15 +11253,15 @@ var orgRouter = router({
   audit: orgProcedure("admin").query(({ ctx }) => listAudit(ctx.membership.orgId)),
   // --- Öğrenci (ve personel) tarafı: davet kodu ile katılma, ayrılma ---------------
   /** Davet kodunu doğrular, kurum adını ve rolü gösterir (katılmadan önce). */
-  previewInvitation: protectedProcedure.input(z11.object({ code: z11.string().trim().min(4).max(20) })).mutation(async ({ input }) => {
+  previewInvitation: protectedProcedure.input(z12.object({ code: z12.string().trim().min(4).max(20) })).mutation(async ({ input }) => {
     const invitation = await findInvitationByHash(hashCode(input.code));
     const problem = !invitation || invitation.orgStatus !== "active" ? "Davet kodu bulunamad\u0131." : invitationProblem(invitation);
-    if (problem) throw new TRPCError9({ code: "BAD_REQUEST", message: problem });
-    if (membershipState(invitation) === "expired") throw new TRPCError9({ code: "BAD_REQUEST", message: "Bu kurumun \xFCyelik s\xFCresi dolmu\u015F; yeni kat\u0131l\u0131m al\u0131nm\u0131yor." });
+    if (problem) throw new TRPCError10({ code: "BAD_REQUEST", message: problem });
+    if (membershipState(invitation) === "expired") throw new TRPCError10({ code: "BAD_REQUEST", message: "Bu kurumun \xFCyelik s\xFCresi dolmu\u015F; yeni kat\u0131l\u0131m al\u0131nm\u0131yor." });
     const org = invitation.role === "student" ? await getOrganization(invitation.orgId) : null;
     return { orgName: invitation.orgName, role: invitation.role, kvkk: org ? effectiveKvkk(org) : null };
   }),
-  join: protectedProcedure.input(z11.object({ code: z11.string().trim().min(4).max(20), consent: z11.literal(true), kvkkVersion: z11.number().int().positive().optional() })).mutation(({ ctx, input }) => userFacing4(async () => {
+  join: protectedProcedure.input(z12.object({ code: z12.string().trim().min(4).max(20), consent: z12.literal(true), kvkkVersion: z12.number().int().positive().optional() })).mutation(({ ctx, input }) => userFacing4(async () => {
     const invitation = await findInvitationByHash(hashCode(input.code));
     const problem = !invitation || invitation.orgStatus !== "active" ? "Davet kodu bulunamad\u0131." : invitationProblem(invitation);
     if (problem) throw new OrgError(problem);
@@ -10804,11 +11279,11 @@ var orgRouter = router({
     await audit({ user: { id: ctx.user.id }, membership: { orgId: invitation.orgId, orgName: invitation.orgName, role: invitation.role } }, "member.join", { type: "user", id: ctx.user.id }, { role: invitation.role });
     return { orgId: invitation.orgId, orgName: invitation.orgName, role: invitation.role };
   })),
-  leave: protectedProcedure.input(z11.object({ orgId: id3 })).mutation(async ({ ctx, input }) => {
+  leave: protectedProcedure.input(z12.object({ orgId: id3 })).mutation(async ({ ctx, input }) => {
     const memberships = await listMyMemberships(ctx.user.id);
     const membership = memberships.find((row) => row.orgId === input.orgId);
-    if (!membership) throw new TRPCError9({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
-    if (membership.role === "owner") throw new TRPCError9({ code: "BAD_REQUEST", message: "Kurum sahibi kurumdan ayr\u0131lamaz." });
+    if (!membership) throw new TRPCError10({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+    if (membership.role === "owner") throw new TRPCError10({ code: "BAD_REQUEST", message: "Kurum sahibi kurumdan ayr\u0131lamaz." });
     await endMembership(input.orgId, ctx.user.id, "left");
     await audit({ user: { id: ctx.user.id }, membership }, "member.leave", { type: "user", id: ctx.user.id }, { role: membership.role });
     return { ok: true };
@@ -10817,10 +11292,10 @@ var orgRouter = router({
   /** Öğrencinin dershane programı (sınıflarının dersleri). */
   myTimetable: protectedProcedure.query(({ ctx }) => listStudentTimetable(ctx.user.id)),
   /** Üyenin bağlı olduğu kurumun KVKK metinleri ve kendi onayladığı sürüm ("Kurumum"). */
-  myKvkk: protectedProcedure.input(z11.object({ orgId: id3 })).query(async ({ ctx, input }) => {
+  myKvkk: protectedProcedure.input(z12.object({ orgId: id3 })).query(async ({ ctx, input }) => {
     const membership = (await listMyMemberships(ctx.user.id)).find((row) => row.orgId === input.orgId);
     const org = membership ? await getOrganization(input.orgId) : null;
-    if (!membership || !org) throw new TRPCError9({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+    if (!membership || !org) throw new TRPCError10({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
     return { ...effectiveKvkk(org), acceptedVersion: membership.kvkkVersion ?? null, consentAt: membership.consentAt ?? null };
   })
 });
@@ -10832,12 +11307,12 @@ var adminOrgsRouter = router({
   }),
   upgradeRequests: adminProcedure.query(() => listPendingUpgradeRequests()),
   /** Onay: paket talep edilene geçer, kredi en az paketin varsayılanı olur, süre 1 yıl uzar (bitmemişse üstüne). */
-  resolveUpgrade: adminProcedure.input(z11.object({ requestId: id3, approve: z11.boolean() })).mutation(async ({ ctx, input }) => {
+  resolveUpgrade: adminProcedure.input(z12.object({ requestId: id3, approve: z12.boolean() })).mutation(async ({ ctx, input }) => {
     const request = await getUpgradeRequest(input.requestId);
-    if (!request || request.status !== "pending") throw new TRPCError9({ code: "NOT_FOUND", message: "Bekleyen talep bulunamad\u0131." });
+    if (!request || request.status !== "pending") throw new TRPCError10({ code: "NOT_FOUND", message: "Bekleyen talep bulunamad\u0131." });
     const org = await getOrganization(request.orgId);
-    if (!org) throw new TRPCError9({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
-    if (!await resolveUpgradeRequest(input.requestId, input.approve ? "approved" : "rejected", ctx.user.id)) throw new TRPCError9({ code: "CONFLICT", message: "Talep az \xF6nce sonu\xE7land\u0131r\u0131ld\u0131." });
+    if (!org) throw new TRPCError10({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+    if (!await resolveUpgradeRequest(input.requestId, input.approve ? "approved" : "rejected", ctx.user.id)) throw new TRPCError10({ code: "CONFLICT", message: "Talep az \xF6nce sonu\xE7land\u0131r\u0131ld\u0131." });
     if (input.approve) {
       const now = /* @__PURE__ */ new Date();
       const expired = membershipState(org, now) !== "active";
@@ -10846,13 +11321,13 @@ var adminOrgsRouter = router({
     await writeAudit({ orgId: org.id, actorUserId: ctx.user.id, action: input.approve ? "org.upgrade_approved" : "org.upgrade_rejected", targetType: "upgrade", targetId: input.requestId, metadata: { plan: ORG_PLAN_LABELS[request.requestedPlan] } });
     return { ok: true };
   }),
-  setMembership: adminProcedure.input(z11.object({ orgId: id3, plan: z11.enum(ORG_PLANS), startsAt: z11.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), endsAt: z11.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), aiCreditsMonthly: z11.number().int().min(0).max(1e7) })).mutation(async ({ input }) => {
-    if (input.startsAt && input.endsAt && input.endsAt < input.startsAt) throw new TRPCError9({ code: "BAD_REQUEST", message: "Biti\u015F tarihi ba\u015Flang\u0131\xE7tan \xF6nce olamaz." });
+  setMembership: adminProcedure.input(z12.object({ orgId: id3, plan: z12.enum(ORG_PLANS), startsAt: z12.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), endsAt: z12.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), aiCreditsMonthly: z12.number().int().min(0).max(1e7) })).mutation(async ({ input }) => {
+    if (input.startsAt && input.endsAt && input.endsAt < input.startsAt) throw new TRPCError10({ code: "BAD_REQUEST", message: "Biti\u015F tarihi ba\u015Flang\u0131\xE7tan \xF6nce olamaz." });
     const day = (value) => value ? /* @__PURE__ */ new Date(`${value}T00:00:00`) : null;
     await updateOrgMembership(input.orgId, { plan: input.plan, membershipStartsAt: day(input.startsAt), membershipEndsAt: day(input.endsAt), aiCreditsMonthly: input.aiCreditsMonthly });
     return { ok: true };
   }),
-  create: adminProcedure.input(z11.object({ name: z11.string().trim().min(2).max(160), slug: z11.string().trim().regex(/^[a-z0-9-]{3,80}$/, "K\u0131sa ad k\xFC\xE7\xFCk harf, rakam ve tire i\xE7ermeli.") })).mutation(({ ctx, input }) => userFacing4(async () => {
+  create: adminProcedure.input(z12.object({ name: z12.string().trim().min(2).max(160), slug: z12.string().trim().regex(/^[a-z0-9-]{3,80}$/, "K\u0131sa ad k\xFC\xE7\xFCk harf, rakam ve tire i\xE7ermeli.") })).mutation(({ ctx, input }) => userFacing4(async () => {
     let orgId;
     try {
       orgId = await createOrganization(input.name, input.slug);
@@ -10865,29 +11340,29 @@ var adminOrgsRouter = router({
     await createInvitation({ orgId, role: "admin", codeHash: hashCode(code), note: "Kurum y\xF6neticisi daveti", expiresAt: new Date(Date.now() + 30 * DAY2), maxUses: 1, createdBy: ctx.user.id });
     return { orgId, adminCode: code };
   })),
-  inviteAdmin: adminProcedure.input(z11.object({ orgId: id3 })).mutation(async ({ ctx, input }) => {
+  inviteAdmin: adminProcedure.input(z12.object({ orgId: id3 })).mutation(async ({ ctx, input }) => {
     const code = generateInviteCode((max) => randomInt(max));
     await createInvitation({ orgId: input.orgId, role: "admin", codeHash: hashCode(code), note: "Kurum y\xF6neticisi daveti (platform)", expiresAt: new Date(Date.now() + 30 * DAY2), maxUses: 1, createdBy: ctx.user.id });
     return { adminCode: code };
   }),
-  setStatus: adminProcedure.input(z11.object({ orgId: id3, status: z11.enum(["active", "suspended"]) })).mutation(async ({ input }) => {
+  setStatus: adminProcedure.input(z12.object({ orgId: id3, status: z12.enum(["active", "suspended"]) })).mutation(async ({ input }) => {
     await setOrganizationStatus(input.orgId, input.status);
     return { ok: true };
   })
 });
 
 // server/routers/parent.ts
-import { TRPCError as TRPCError10 } from "@trpc/server";
+import { TRPCError as TRPCError11 } from "@trpc/server";
 import { createHash as createHash5, randomInt as randomInt2 } from "node:crypto";
-import { z as z12 } from "zod";
+import { z as z13 } from "zod";
 var DAY_MS9 = 24 * 60 * 60 * 1e3;
-var id4 = z12.number().int().positive();
+var id4 = z13.number().int().positive();
 var hashCode2 = (code) => createHash5("sha256").update(`parent:${normalizeInviteCode(code)}`).digest("hex");
 var userFacing5 = async (work) => {
   try {
     return await work();
   } catch (error) {
-    if (error instanceof ParentLinkError) throw new TRPCError10({ code: "BAD_REQUEST", message: error.message });
+    if (error instanceof ParentLinkError) throw new TRPCError11({ code: "BAD_REQUEST", message: error.message });
     throw error;
   }
 };
@@ -10903,7 +11378,7 @@ var parentRouter = router({
   consentText: protectedProcedure.query(() => ({ version: PARENT_CONSENT_VERSION, text: PARENT_CONSENT_TEXT })),
   // --- Öğrenci tarafı ---------------------------------------------------------
   myParents: protectedProcedure.query(({ ctx }) => listLinksForStudent(ctx.user.id)),
-  createInvite: protectedProcedure.input(z12.object({ parentEmail: z12.string().trim().email("Ge\xE7erli bir e-posta adresi yaz.").max(320).optional().or(z12.literal("")) }).optional()).mutation(({ ctx, input }) => userFacing5(async () => {
+  createInvite: protectedProcedure.input(z13.object({ parentEmail: z13.string().trim().email("Ge\xE7erli bir e-posta adresi yaz.").max(320).optional().or(z13.literal("")) }).optional()).mutation(({ ctx, input }) => userFacing5(async () => {
     const code = generateInviteCode((max) => randomInt2(max));
     const { expiresAt } = await createParentInvite(ctx.user.id, hashCode2(code));
     const joinUrl = `${appBaseUrl(ctx.req)}/veli?kod=${encodeURIComponent(code)}`;
@@ -10919,16 +11394,16 @@ var parentRouter = router({
     }
     return { code, expiresAt, joinUrl, emailed };
   })),
-  decide: protectedProcedure.input(z12.object({ linkId: id4, approve: z12.boolean() })).mutation(({ ctx, input }) => userFacing5(() => decideParentRequest(ctx.user.id, input.linkId, input.approve))),
-  removeParent: protectedProcedure.input(z12.object({ linkId: id4 })).mutation(({ ctx, input }) => userFacing5(() => revokeParentLink({ userId: ctx.user.id, side: "student" }, input.linkId))),
+  decide: protectedProcedure.input(z13.object({ linkId: id4, approve: z13.boolean() })).mutation(({ ctx, input }) => userFacing5(() => decideParentRequest(ctx.user.id, input.linkId, input.approve))),
+  removeParent: protectedProcedure.input(z13.object({ linkId: id4 })).mutation(({ ctx, input }) => userFacing5(() => revokeParentLink({ userId: ctx.user.id, side: "student" }, input.linkId))),
   // --- Veli tarafı ------------------------------------------------------------
   myStudents: protectedProcedure.query(({ ctx }) => listLinksForParent(ctx.user.id)),
-  redeem: protectedProcedure.input(z12.object({ code: z12.string().trim().min(4).max(20), consent: z12.literal(true, { message: "Devam etmek i\xE7in r\u0131za metnini onaylamal\u0131s\u0131n." }) })).mutation(({ ctx, input }) => userFacing5(() => redeemParentInvite(ctx.user.id, hashCode2(input.code)))),
-  unlink: protectedProcedure.input(z12.object({ linkId: id4 })).mutation(({ ctx, input }) => userFacing5(() => revokeParentLink({ userId: ctx.user.id, side: "parent" }, input.linkId))),
-  setDigest: protectedProcedure.input(z12.object({ linkId: id4, enabled: z12.boolean() })).mutation(({ ctx, input }) => userFacing5(async () => ({ enabled: await setParentDigestEnabled(ctx.user.id, input.linkId, input.enabled) }))),
+  redeem: protectedProcedure.input(z13.object({ code: z13.string().trim().min(4).max(20), consent: z13.literal(true, { message: "Devam etmek i\xE7in r\u0131za metnini onaylamal\u0131s\u0131n." }) })).mutation(({ ctx, input }) => userFacing5(() => redeemParentInvite(ctx.user.id, hashCode2(input.code)))),
+  unlink: protectedProcedure.input(z13.object({ linkId: id4 })).mutation(({ ctx, input }) => userFacing5(() => revokeParentLink({ userId: ctx.user.id, side: "parent" }, input.linkId))),
+  setDigest: protectedProcedure.input(z13.object({ linkId: id4, enabled: z13.boolean() })).mutation(({ ctx, input }) => userFacing5(async () => ({ enabled: await setParentDigestEnabled(ctx.user.id, input.linkId, input.enabled) }))),
   /** Velinin gördüğü öğrenci özeti: salt okunur; not, soru defteri, öğretmen notu, iletişim bilgisi yok. */
-  student: protectedProcedure.input(z12.object({ studentUserId: id4 })).query(async ({ ctx, input }) => {
-    if (!await findActiveLink(ctx.user.id, input.studentUserId)) throw new TRPCError10({ code: "FORBIDDEN", message: "Bu \xF6\u011Frencinin bilgilerini g\xF6rme iznin yok." });
+  student: protectedProcedure.input(z13.object({ studentUserId: id4 })).query(async ({ ctx, input }) => {
+    if (!await findActiveLink(ctx.user.id, input.studentUserId)) throw new TRPCError11({ code: "FORBIDDEN", message: "Bu \xF6\u011Frencinin bilgilerini g\xF6rme iznin yok." });
     const since = new Date(Date.now() - 42 * DAY_MS9);
     const { start, end } = currentWeek2();
     const [name, profile, exams, topics, calendar, signals] = await Promise.all([
@@ -11030,11 +11505,11 @@ function normalizeAiPlan(raw, fallback) {
 }
 
 // server/routers/resourceCatalog.ts
-import { TRPCError as TRPCError12 } from "@trpc/server";
-import { z as z14 } from "zod";
+import { TRPCError as TRPCError13 } from "@trpc/server";
+import { z as z15 } from "zod";
 
 // server/resourceCatalog/catalogQueries.ts
-import { and as and20, asc as asc4, desc as desc14, eq as eq23, inArray as inArray9, isNull as isNull13, ilike as ilike3, sql as sql10 } from "drizzle-orm";
+import { and as and21, asc as asc4, desc as desc15, eq as eq24, inArray as inArray10, isNull as isNull14, ilike as ilike4, sql as sql11 } from "drizzle-orm";
 var DEFAULT_PAGE_SIZE = 24;
 var MAX_PAGE_SIZE = 60;
 async function listCatalogBooks(filters, page2) {
@@ -11042,26 +11517,26 @@ async function listCatalogBooks(filters, page2) {
   if (!db) return { items: [], total: 0 };
   const pageSize = Math.max(1, Math.min(page2.pageSize || DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE));
   const offset = Math.max(0, (page2.page - 1) * pageSize);
-  const conditions = [eq23(catalogBooks.active, 1)];
-  if (filters.exam) conditions.push(eq23(catalogBooks.examScope, filters.exam));
-  if (filters.subject) conditions.push(eq23(catalogBooks.subject, filters.subject));
-  if (filters.publisherId) conditions.push(eq23(catalogBooks.publisherId, filters.publisherId));
-  if (filters.bookType) conditions.push(eq23(catalogBooks.bookType, filters.bookType));
-  if (filters.difficulty) conditions.push(eq23(catalogBooks.difficultyLabel, filters.difficulty));
-  if (filters.search) conditions.push(ilike3(catalogBooks.name, `%${filters.search}%`));
+  const conditions = [eq24(catalogBooks.active, 1)];
+  if (filters.exam) conditions.push(eq24(catalogBooks.examScope, filters.exam));
+  if (filters.subject) conditions.push(eq24(catalogBooks.subject, filters.subject));
+  if (filters.publisherId) conditions.push(eq24(catalogBooks.publisherId, filters.publisherId));
+  if (filters.bookType) conditions.push(eq24(catalogBooks.bookType, filters.bookType));
+  if (filters.difficulty) conditions.push(eq24(catalogBooks.difficultyLabel, filters.difficulty));
+  if (filters.search) conditions.push(ilike4(catalogBooks.name, `%${filters.search}%`));
   let bookIdsForTopic = null;
   if (filters.topic) {
-    const topicRows = await db.select({ bookId: bookCurriculumTopics.bookId }).from(bookCurriculumTopics).innerJoin(yksTopics, eq23(bookCurriculumTopics.topicId, yksTopics.id)).where(eq23(yksTopics.topic, filters.topic));
+    const topicRows = await db.select({ bookId: bookCurriculumTopics.bookId }).from(bookCurriculumTopics).innerJoin(yksTopics, eq24(bookCurriculumTopics.topicId, yksTopics.id)).where(eq24(yksTopics.topic, filters.topic));
     bookIdsForTopic = topicRows.map((r) => r.bookId);
     if (bookIdsForTopic.length === 0) return { items: [], total: 0 };
-    conditions.push(inArray9(catalogBooks.id, bookIdsForTopic));
+    conditions.push(inArray10(catalogBooks.id, bookIdsForTopic));
   }
-  const where = and20(...conditions);
-  const [{ count: count4 }] = await db.select({ count: sql10`count(*)::int` }).from(catalogBooks).where(where);
-  let rows = await db.select().from(catalogBooks).where(where).orderBy(desc14(catalogBooks.createdAt)).limit(pageSize).offset(offset);
+  const where = and21(...conditions);
+  const [{ count: count4 }] = await db.select({ count: sql11`count(*)::int` }).from(catalogBooks).where(where);
+  let rows = await db.select().from(catalogBooks).where(where).orderBy(desc15(catalogBooks.createdAt)).limit(pageSize).offset(offset);
   if (filters.minPrice !== void 0 || filters.maxPrice !== void 0) {
     const ids = rows.map((r) => r.id);
-    const offerRows2 = ids.length ? await db.select().from(bookOffers).where(inArray9(bookOffers.bookId, ids)) : [];
+    const offerRows2 = ids.length ? await db.select().from(bookOffers).where(inArray10(bookOffers.bookId, ids)) : [];
     const bestPriceByBook = /* @__PURE__ */ new Map();
     for (const offer of offerRows2) {
       if (offer.price === null) continue;
@@ -11078,10 +11553,10 @@ async function listCatalogBooks(filters, page2) {
     });
   }
   const publisherIds = Array.from(new Set(rows.map((r) => r.publisherId).filter((id5) => id5 !== null)));
-  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray9(publishers.id, publisherIds)) : [];
+  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray10(publishers.id, publisherIds)) : [];
   const publisherNameById = new Map(publisherRows.map((p) => [p.id, p.name]));
   const bookIds = rows.map((r) => r.id);
-  const offerRows = bookIds.length ? await db.select().from(bookOffers).where(inArray9(bookOffers.bookId, bookIds)) : [];
+  const offerRows = bookIds.length ? await db.select().from(bookOffers).where(inArray10(bookOffers.bookId, bookIds)) : [];
   const offerByBook = /* @__PURE__ */ new Map();
   for (const offer of offerRows) {
     if (!offerByBook.has(offer.bookId)) offerByBook.set(offer.bookId, { price: offer.price !== null ? Number(offer.price) : null, productUrl: offer.productUrl });
@@ -11109,16 +11584,16 @@ async function listCatalogBooksForAdmin(filters, page2) {
   const pageSize = Math.max(1, Math.min(page2.pageSize || DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE));
   const offset = Math.max(0, (page2.page - 1) * pageSize);
   const conditions = [];
-  if (filters.active !== void 0) conditions.push(eq23(catalogBooks.active, filters.active ? 1 : 0));
-  if (filters.subject) conditions.push(eq23(catalogBooks.subject, filters.subject));
-  if (filters.search) conditions.push(ilike3(catalogBooks.name, `%${filters.search}%`));
-  const where = conditions.length ? and20(...conditions) : void 0;
-  const countQuery = db.select({ count: sql10`count(*)::int` }).from(catalogBooks);
+  if (filters.active !== void 0) conditions.push(eq24(catalogBooks.active, filters.active ? 1 : 0));
+  if (filters.subject) conditions.push(eq24(catalogBooks.subject, filters.subject));
+  if (filters.search) conditions.push(ilike4(catalogBooks.name, `%${filters.search}%`));
+  const where = conditions.length ? and21(...conditions) : void 0;
+  const countQuery = db.select({ count: sql11`count(*)::int` }).from(catalogBooks);
   const [{ count: count4 }] = await (where ? countQuery.where(where) : countQuery);
-  const rowsQuery = db.select().from(catalogBooks).orderBy(desc14(catalogBooks.createdAt)).limit(pageSize).offset(offset);
+  const rowsQuery = db.select().from(catalogBooks).orderBy(desc15(catalogBooks.createdAt)).limit(pageSize).offset(offset);
   const rows = await (where ? rowsQuery.where(where) : rowsQuery);
   const publisherIds = Array.from(new Set(rows.map((r) => r.publisherId).filter((id5) => id5 !== null)));
-  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray9(publishers.id, publisherIds)) : [];
+  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray10(publishers.id, publisherIds)) : [];
   const publisherNameById = new Map(publisherRows.map((p) => [p.id, p.name]));
   const items = rows.map((row) => ({
     id: row.id,
@@ -11139,13 +11614,13 @@ async function listCatalogBooksForAdmin(filters, page2) {
 async function getCatalogBookBySlug(slug) {
   const db = await getDb();
   if (!db) return null;
-  const rows = await db.select().from(catalogBooks).where(eq23(catalogBooks.slug, slug)).limit(1);
+  const rows = await db.select().from(catalogBooks).where(eq24(catalogBooks.slug, slug)).limit(1);
   const book = rows[0];
   if (!book) return null;
   const [publisherRow, offerRows, topicRows] = await Promise.all([
-    book.publisherId ? db.select().from(publishers).where(eq23(publishers.id, book.publisherId)).limit(1) : Promise.resolve([]),
-    db.select().from(bookOffers).where(eq23(bookOffers.bookId, book.id)),
-    db.select({ topic: yksTopics.topic, subject: yksTopics.subject, confidence: bookCurriculumTopics.confidence, isVerified: bookCurriculumTopics.isVerified }).from(bookCurriculumTopics).innerJoin(yksTopics, eq23(bookCurriculumTopics.topicId, yksTopics.id)).where(eq23(bookCurriculumTopics.bookId, book.id))
+    book.publisherId ? db.select().from(publishers).where(eq24(publishers.id, book.publisherId)).limit(1) : Promise.resolve([]),
+    db.select().from(bookOffers).where(eq24(bookOffers.bookId, book.id)),
+    db.select({ topic: yksTopics.topic, subject: yksTopics.subject, confidence: bookCurriculumTopics.confidence, isVerified: bookCurriculumTopics.isVerified }).from(bookCurriculumTopics).innerJoin(yksTopics, eq24(bookCurriculumTopics.topicId, yksTopics.id)).where(eq24(bookCurriculumTopics.bookId, book.id))
   ]);
   return {
     id: book.id,
@@ -11165,16 +11640,16 @@ async function getCatalogBookBySlug(slug) {
 async function listPublishersForFilter() {
   const db = await getDb();
   if (!db) return [];
-  return db.select({ id: publishers.id, name: publishers.name }).from(publishers).where(eq23(publishers.isActive, 1)).orderBy(asc4(publishers.name));
+  return db.select({ id: publishers.id, name: publishers.name }).from(publishers).where(eq24(publishers.isActive, 1)).orderBy(asc4(publishers.name));
 }
 async function listCatalogBooksForRecommendation(subject2) {
   const db = await getDb();
   if (!db) return [];
-  const conditions = [eq23(catalogBooks.active, 1)];
-  if (subject2) conditions.push(eq23(catalogBooks.subject, subject2));
-  const rows = await db.select().from(catalogBooks).where(and20(...conditions));
+  const conditions = [eq24(catalogBooks.active, 1)];
+  if (subject2) conditions.push(eq24(catalogBooks.subject, subject2));
+  const rows = await db.select().from(catalogBooks).where(and21(...conditions));
   const bookIds = rows.map((r) => r.id);
-  const topicRows = bookIds.length ? await db.select({ bookId: bookCurriculumTopics.bookId, topic: yksTopics.topic }).from(bookCurriculumTopics).innerJoin(yksTopics, eq23(bookCurriculumTopics.topicId, yksTopics.id)).where(inArray9(bookCurriculumTopics.bookId, bookIds)) : [];
+  const topicRows = bookIds.length ? await db.select({ bookId: bookCurriculumTopics.bookId, topic: yksTopics.topic }).from(bookCurriculumTopics).innerJoin(yksTopics, eq24(bookCurriculumTopics.topicId, yksTopics.id)).where(inArray10(bookCurriculumTopics.bookId, bookIds)) : [];
   const topicsByBook = /* @__PURE__ */ new Map();
   for (const row of topicRows) {
     const list = topicsByBook.get(row.bookId) ?? [];
@@ -11197,15 +11672,15 @@ async function listCatalogBooksForRecommendation(subject2) {
 async function listMyLibraryCatalogBooks(userId) {
   const db = await getDb();
   if (!db) return [];
-  const inventoryRows = await db.select().from(bookInventory).where(and20(eq23(bookInventory.userId, userId), isNull13(bookInventory.removedAt)));
+  const inventoryRows = await db.select().from(bookInventory).where(and21(eq24(bookInventory.userId, userId), isNull14(bookInventory.removedAt)));
   const numericIds = Array.from(new Set(inventoryRows.map((row) => row.bookId).filter((id5) => /^\d+$/.test(id5)).map(Number)));
   if (numericIds.length === 0) return [];
   const [books, topicRows] = await Promise.all([
-    db.select().from(catalogBooks).where(inArray9(catalogBooks.id, numericIds)),
-    db.select({ bookId: bookCurriculumTopics.bookId, topicId: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject, isVerified: bookCurriculumTopics.isVerified, confidence: bookCurriculumTopics.confidence }).from(bookCurriculumTopics).innerJoin(yksTopics, eq23(bookCurriculumTopics.topicId, yksTopics.id)).where(inArray9(bookCurriculumTopics.bookId, numericIds))
+    db.select().from(catalogBooks).where(inArray10(catalogBooks.id, numericIds)),
+    db.select({ bookId: bookCurriculumTopics.bookId, topicId: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject, isVerified: bookCurriculumTopics.isVerified, confidence: bookCurriculumTopics.confidence }).from(bookCurriculumTopics).innerJoin(yksTopics, eq24(bookCurriculumTopics.topicId, yksTopics.id)).where(inArray10(bookCurriculumTopics.bookId, numericIds))
   ]);
   const publisherIds = Array.from(new Set(books.map((b) => b.publisherId).filter((id5) => id5 !== null)));
-  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray9(publishers.id, publisherIds)) : [];
+  const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray10(publishers.id, publisherIds)) : [];
   const publisherNameById = new Map(publisherRows.map((p) => [p.id, p.name]));
   const topicsByBook = /* @__PURE__ */ new Map();
   for (const row of topicRows) {
@@ -11359,11 +11834,11 @@ function recommendForStudent(topics, books, options = {}, config = resourceCatal
 }
 
 // server/routers/resourceCatalogAdmin.ts
-import { TRPCError as TRPCError11 } from "@trpc/server";
-import { z as z13 } from "zod";
+import { TRPCError as TRPCError12 } from "@trpc/server";
+import { z as z14 } from "zod";
 
 // server/resourceCatalog/catalogDb.ts
-import { and as and21, eq as eq24, inArray as inArray10 } from "drizzle-orm";
+import { and as and22, eq as eq25, inArray as inArray11 } from "drizzle-orm";
 var toCatalogBookRow = (row) => ({
   id: row.id,
   isbn: row.isbn,
@@ -11387,7 +11862,7 @@ var catalogDb = {
   async findPublisherByNormalizedName(normalizedName) {
     const db = await getDb();
     if (!db) return null;
-    const rows = await db.select().from(publishers).where(eq24(publishers.normalizedName, normalizedName)).limit(1);
+    const rows = await db.select().from(publishers).where(eq25(publishers.normalizedName, normalizedName)).limit(1);
     return rows[0] ? { id: rows[0].id, name: rows[0].name, slug: rows[0].slug, normalizedName: rows[0].normalizedName } : null;
   },
   async createPublisher(input) {
@@ -11400,13 +11875,13 @@ var catalogDb = {
   async findExternalSource(source, sourceProductId) {
     const db = await getDb();
     if (!db) return null;
-    const rows = await db.select().from(externalBookSources).where(and21(eq24(externalBookSources.source, source), eq24(externalBookSources.sourceProductId, sourceProductId))).limit(1);
+    const rows = await db.select().from(externalBookSources).where(and22(eq25(externalBookSources.source, source), eq25(externalBookSources.sourceProductId, sourceProductId))).limit(1);
     return rows[0] ? { id: rows[0].id, source: rows[0].source, sourceProductId: rows[0].sourceProductId, matchedBookId: rows[0].matchedBookId, syncStatus: rows[0].syncStatus } : null;
   },
   async upsertExternalSource(row) {
     const db = await getDb();
     if (!db) throw new Error("Database not available");
-    const existing = await db.select().from(externalBookSources).where(and21(eq24(externalBookSources.source, row.source), eq24(externalBookSources.sourceProductId, row.sourceProductId))).limit(1);
+    const existing = await db.select().from(externalBookSources).where(and22(eq25(externalBookSources.source, row.source), eq25(externalBookSources.sourceProductId, row.sourceProductId))).limit(1);
     const values = {
       source: row.source,
       sourceProductId: row.sourceProductId,
@@ -11422,7 +11897,7 @@ var catalogDb = {
       rawMetadata: row.rawMetadata ? JSON.stringify(row.rawMetadata) : null
     };
     if (existing[0]) {
-      await db.update(externalBookSources).set(values).where(eq24(externalBookSources.id, existing[0].id));
+      await db.update(externalBookSources).set(values).where(eq25(externalBookSources.id, existing[0].id));
       return { id: existing[0].id, source: row.source, sourceProductId: row.sourceProductId, matchedBookId: existing[0].matchedBookId, syncStatus: existing[0].syncStatus };
     }
     const result = await db.insert(externalBookSources).values(values).returning({ id: externalBookSources.id });
@@ -11432,24 +11907,24 @@ var catalogDb = {
   async markExternalSourceOutcome(id5, patch) {
     const db = await getDb();
     if (!db) return;
-    await db.update(externalBookSources).set({ matchedBookId: patch.matchedBookId, syncStatus: patch.syncStatus, lastSyncedAt: /* @__PURE__ */ new Date(), errorMessage: patch.errorMessage ?? null }).where(eq24(externalBookSources.id, id5));
+    await db.update(externalBookSources).set({ matchedBookId: patch.matchedBookId, syncStatus: patch.syncStatus, lastSyncedAt: /* @__PURE__ */ new Date(), errorMessage: patch.errorMessage ?? null }).where(eq25(externalBookSources.id, id5));
   },
   async findCatalogBookByIsbn(isbn) {
     const db = await getDb();
     if (!db) return null;
-    const rows = await db.select().from(catalogBooks).where(eq24(catalogBooks.isbn, isbn)).limit(1);
+    const rows = await db.select().from(catalogBooks).where(eq25(catalogBooks.isbn, isbn)).limit(1);
     return rows[0] ? toCatalogBookRow(rows[0]) : null;
   },
   async listCatalogBooksByPublisher(publisherId) {
     const db = await getDb();
     if (!db) return [];
-    const rows = await db.select().from(catalogBooks).where(eq24(catalogBooks.publisherId, publisherId));
+    const rows = await db.select().from(catalogBooks).where(eq25(catalogBooks.publisherId, publisherId));
     return rows.map((row) => ({ id: row.id, isbn: row.isbn, publisherId: row.publisherId, name: row.name, editionYear: row.editionYear }));
   },
   async getCatalogBookById(id5) {
     const db = await getDb();
     if (!db) return null;
-    const rows = await db.select().from(catalogBooks).where(eq24(catalogBooks.id, id5)).limit(1);
+    const rows = await db.select().from(catalogBooks).where(eq25(catalogBooks.id, id5)).limit(1);
     return rows[0] ? toCatalogBookRow(rows[0]) : null;
   },
   async createCatalogBook(input) {
@@ -11488,7 +11963,7 @@ var catalogDb = {
     if (patch.subject !== void 0) values.subject = patch.subject;
     if (patch.metadata !== void 0) values.metadata = patch.metadata ? JSON.stringify(patch.metadata) : null;
     if (Object.keys(values).length > 0) {
-      await db.update(catalogBooks).set(values).where(eq24(catalogBooks.id, id5));
+      await db.update(catalogBooks).set(values).where(eq25(catalogBooks.id, id5));
     }
     const row = await this.getCatalogBookById(id5);
     if (!row) throw new Error(`Catalog book ${id5} not found after update`);
@@ -11504,15 +11979,15 @@ var catalogDb = {
       classificationMethod: patch.classificationMethod,
       needsReview: patch.needsReview ? 1 : 0,
       classifiedAt: patch.classifiedAt
-    }).where(eq24(catalogBooks.id, id5));
+    }).where(eq25(catalogBooks.id, id5));
   },
   async upsertBookOffer(input) {
     const db = await getDb();
     if (!db) return;
-    const existing = await db.select().from(bookOffers).where(and21(eq24(bookOffers.bookId, input.bookId), eq24(bookOffers.source, input.source))).limit(1);
+    const existing = await db.select().from(bookOffers).where(and22(eq25(bookOffers.bookId, input.bookId), eq25(bookOffers.source, input.source))).limit(1);
     const values = { price: input.price !== null ? String(input.price) : null, currency: input.currency, productUrl: input.productUrl, lastSyncedAt: /* @__PURE__ */ new Date() };
     if (existing[0]) {
-      await db.update(bookOffers).set(values).where(eq24(bookOffers.id, existing[0].id));
+      await db.update(bookOffers).set(values).where(eq25(bookOffers.id, existing[0].id));
     } else {
       await db.insert(bookOffers).values({ bookId: input.bookId, source: input.source, ...values });
     }
@@ -11526,10 +12001,10 @@ var catalogDb = {
   async upsertBookCurriculumMapping(input) {
     const db = await getDb();
     if (!db) return;
-    const existing = await db.select().from(bookCurriculumTopics).where(and21(eq24(bookCurriculumTopics.bookId, input.bookId), eq24(bookCurriculumTopics.topicId, input.topicId))).limit(1);
+    const existing = await db.select().from(bookCurriculumTopics).where(and22(eq25(bookCurriculumTopics.bookId, input.bookId), eq25(bookCurriculumTopics.topicId, input.topicId))).limit(1);
     if (existing[0]) {
       if (existing[0].isVerified === 1) return;
-      await db.update(bookCurriculumTopics).set({ confidence: String(input.confidence), mappingMethod: "rule" }).where(eq24(bookCurriculumTopics.id, existing[0].id));
+      await db.update(bookCurriculumTopics).set({ confidence: String(input.confidence), mappingMethod: "rule" }).where(eq25(bookCurriculumTopics.id, existing[0].id));
     } else {
       await db.insert(bookCurriculumTopics).values({ bookId: input.bookId, topicId: input.topicId, confidence: String(input.confidence), mappingMethod: "rule" });
     }
@@ -11554,7 +12029,7 @@ var catalogDb = {
       needsReview: patch.needsReview,
       statsJson: patch.statsJson,
       errorLog: patch.errorLog
-    }).where(eq24(resourceCatalogSyncLogs.id, id5));
+    }).where(eq25(resourceCatalogSyncLogs.id, id5));
   }
 };
 async function listResourceCatalogSyncLogs(limit = 20) {
@@ -11565,27 +12040,27 @@ async function listResourceCatalogSyncLogs(limit = 20) {
 async function listNeedsReviewBooks() {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(catalogBooks).where(eq24(catalogBooks.needsReview, 1));
+  return db.select().from(catalogBooks).where(eq25(catalogBooks.needsReview, 1));
 }
 async function setManualDifficulty(bookId, input) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(catalogBooks).set({ difficultyLabel: input.label, difficultyScore: input.score, difficultyConfidence: "1", classificationMethod: "manual", manualOverride: 1, needsReview: 0, classifiedAt: /* @__PURE__ */ new Date() }).where(eq24(catalogBooks.id, bookId));
+  await db.update(catalogBooks).set({ difficultyLabel: input.label, difficultyScore: input.score, difficultyConfidence: "1", classificationMethod: "manual", manualOverride: 1, needsReview: 0, classifiedAt: /* @__PURE__ */ new Date() }).where(eq25(catalogBooks.id, bookId));
 }
 async function approveCatalogBookClassification(bookId) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(catalogBooks).set({ needsReview: 0 }).where(eq24(catalogBooks.id, bookId));
+  await db.update(catalogBooks).set({ needsReview: 0 }).where(eq25(catalogBooks.id, bookId));
 }
 async function markCatalogBookNeedsReview(bookId, needsReview) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(catalogBooks).set({ needsReview: needsReview ? 1 : 0 }).where(eq24(catalogBooks.id, bookId));
+  await db.update(catalogBooks).set({ needsReview: needsReview ? 1 : 0 }).where(eq25(catalogBooks.id, bookId));
 }
 async function setCatalogBookActive(bookId, active) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(catalogBooks).set({ active: active ? 1 : 0 }).where(eq24(catalogBooks.id, bookId));
+  await db.update(catalogBooks).set({ active: active ? 1 : 0 }).where(eq25(catalogBooks.id, bookId));
 }
 async function resolveOrCreatePublisherByName(rawName) {
   const trimmed = rawName.trim();
@@ -11663,26 +12138,26 @@ function slugForBook(name, publisherName) {
 }
 
 // server/routers/resourceCatalogAdmin.ts
-var bookTypeEnum = z13.enum(["question_bank", "topic_explanation", "topic_explanation_question_bank", "mock_exam", "fasikul", "past_questions", "camp", "test_book", "reference", "other"]);
-var examScopeEnum = z13.enum(CATALOG_EXAM_SCOPES);
-var catalogBookInput = z13.object({
-  name: z13.string().trim().min(1).max(300),
-  publisherName: z13.string().trim().max(120).optional(),
-  isbn: z13.string().trim().max(32).optional(),
-  editionYear: z13.number().int().min(1990).max(2100).optional(),
-  description: z13.string().trim().max(2e3).optional(),
-  imageUrl: z13.string().trim().max(500).optional(),
+var bookTypeEnum = z14.enum(["question_bank", "topic_explanation", "topic_explanation_question_bank", "mock_exam", "fasikul", "past_questions", "camp", "test_book", "reference", "other"]);
+var examScopeEnum = z14.enum(CATALOG_EXAM_SCOPES);
+var catalogBookInput = z14.object({
+  name: z14.string().trim().min(1).max(300),
+  publisherName: z14.string().trim().max(120).optional(),
+  isbn: z14.string().trim().max(32).optional(),
+  editionYear: z14.number().int().min(1990).max(2100).optional(),
+  description: z14.string().trim().max(2e3).optional(),
+  imageUrl: z14.string().trim().max(500).optional(),
   bookType: bookTypeEnum,
   examScope: examScopeEnum,
-  subject: z13.string().trim().max(80).optional()
+  subject: z14.string().trim().max(80).optional()
 });
 var resourceCatalogAdminRouter = router({
   needsReview: adminProcedure.query(() => listNeedsReviewBooks()),
-  syncLogs: adminProcedure.input(z13.object({ limit: z13.number().int().min(1).max(100).default(20) }).optional()).query(({ input }) => listResourceCatalogSyncLogs(input?.limit ?? 20)),
-  approve: adminProcedure.input(z13.object({ bookId: z13.number().int() })).mutation(({ input }) => approveCatalogBookClassification(input.bookId)),
-  setDifficulty: adminProcedure.input(z13.object({ bookId: z13.number().int(), label: z13.enum(["easy", "medium", "hard"]), score: z13.number().int().min(0).max(100) })).mutation(({ input }) => setManualDifficulty(input.bookId, { label: input.label, score: input.score })),
-  markNeedsReview: adminProcedure.input(z13.object({ bookId: z13.number().int(), needsReview: z13.boolean() })).mutation(({ input }) => markCatalogBookNeedsReview(input.bookId, input.needsReview)),
-  list: adminProcedure.input(z13.object({ page: z13.number().int().min(1).default(1), pageSize: z13.number().int().min(1).max(100).default(30), search: z13.string().max(120).optional(), subject: z13.string().max(80).optional(), active: z13.boolean().optional() })).query(async ({ input }) => {
+  syncLogs: adminProcedure.input(z14.object({ limit: z14.number().int().min(1).max(100).default(20) }).optional()).query(({ input }) => listResourceCatalogSyncLogs(input?.limit ?? 20)),
+  approve: adminProcedure.input(z14.object({ bookId: z14.number().int() })).mutation(({ input }) => approveCatalogBookClassification(input.bookId)),
+  setDifficulty: adminProcedure.input(z14.object({ bookId: z14.number().int(), label: z14.enum(["easy", "medium", "hard"]), score: z14.number().int().min(0).max(100) })).mutation(({ input }) => setManualDifficulty(input.bookId, { label: input.label, score: input.score })),
+  markNeedsReview: adminProcedure.input(z14.object({ bookId: z14.number().int(), needsReview: z14.boolean() })).mutation(({ input }) => markCatalogBookNeedsReview(input.bookId, input.needsReview)),
+  list: adminProcedure.input(z14.object({ page: z14.number().int().min(1).default(1), pageSize: z14.number().int().min(1).max(100).default(30), search: z14.string().max(120).optional(), subject: z14.string().max(80).optional(), active: z14.boolean().optional() })).query(async ({ input }) => {
     const { page: page2, pageSize, ...filters } = input;
     const { items, total } = await listCatalogBooksForAdmin(filters, { page: page2, pageSize });
     return { items, total, page: page2, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
@@ -11721,22 +12196,22 @@ var resourceCatalogAdminRouter = router({
           metadata: { source: "admin_manual" }
         });
       } catch {
-        throw new TRPCError11({ code: "CONFLICT", message: "Bu isim ve yay\u0131nevi ile bir kaynak zaten kay\u0131tl\u0131 olabilir. Farkl\u0131 bir isim dener misin?" });
+        throw new TRPCError12({ code: "CONFLICT", message: "Bu isim ve yay\u0131nevi ile bir kaynak zaten kay\u0131tl\u0131 olabilir. Farkl\u0131 bir isim dener misin?" });
       }
     }
   }),
   update: adminProcedure.input(
-    z13.object({
-      bookId: z13.number().int(),
-      name: z13.string().trim().min(1).max(300).optional(),
-      publisherName: z13.string().trim().max(120).optional(),
-      isbn: z13.string().trim().max(32).optional(),
-      editionYear: z13.number().int().min(1990).max(2100).optional(),
-      description: z13.string().trim().max(2e3).optional(),
-      imageUrl: z13.string().trim().max(500).optional(),
+    z14.object({
+      bookId: z14.number().int(),
+      name: z14.string().trim().min(1).max(300).optional(),
+      publisherName: z14.string().trim().max(120).optional(),
+      isbn: z14.string().trim().max(32).optional(),
+      editionYear: z14.number().int().min(1990).max(2100).optional(),
+      description: z14.string().trim().max(2e3).optional(),
+      imageUrl: z14.string().trim().max(500).optional(),
       bookType: bookTypeEnum.optional(),
       examScope: examScopeEnum.optional(),
-      subject: z13.string().trim().max(80).optional()
+      subject: z14.string().trim().max(80).optional()
     })
   ).mutation(async ({ input }) => {
     const { bookId, publisherName, ...rest } = input;
@@ -11746,25 +12221,25 @@ var resourceCatalogAdminRouter = router({
       ...publisherId !== void 0 ? { publisherId } : {}
     });
   }),
-  setActive: adminProcedure.input(z13.object({ bookId: z13.number().int(), active: z13.boolean() })).mutation(({ input }) => setCatalogBookActive(input.bookId, input.active))
+  setActive: adminProcedure.input(z14.object({ bookId: z14.number().int(), active: z14.boolean() })).mutation(({ input }) => setCatalogBookActive(input.bookId, input.active))
 });
 
 // server/routers/resourceCatalog.ts
-var bookTypeEnum2 = z14.enum(["question_bank", "topic_explanation", "topic_explanation_question_bank", "mock_exam", "fasikul", "past_questions", "camp", "test_book", "reference", "other"]);
-var examScopeEnum2 = z14.enum(CATALOG_EXAM_SCOPES);
-var difficultyEnum = z14.enum(["easy", "medium", "hard"]);
-var listInput = z14.object({
-  page: z14.number().int().min(1).default(1),
-  pageSize: z14.number().int().min(1).max(60).default(24),
+var bookTypeEnum2 = z15.enum(["question_bank", "topic_explanation", "topic_explanation_question_bank", "mock_exam", "fasikul", "past_questions", "camp", "test_book", "reference", "other"]);
+var examScopeEnum2 = z15.enum(CATALOG_EXAM_SCOPES);
+var difficultyEnum = z15.enum(["easy", "medium", "hard"]);
+var listInput = z15.object({
+  page: z15.number().int().min(1).default(1),
+  pageSize: z15.number().int().min(1).max(60).default(24),
   exam: examScopeEnum2.optional(),
-  subject: z14.string().max(80).optional(),
-  publisherId: z14.number().int().optional(),
+  subject: z15.string().max(80).optional(),
+  publisherId: z15.number().int().optional(),
   bookType: bookTypeEnum2.optional(),
   difficulty: difficultyEnum.optional(),
-  minPrice: z14.number().min(0).optional(),
-  maxPrice: z14.number().min(0).optional(),
-  search: z14.string().max(120).optional(),
-  topic: z14.string().max(180).optional()
+  minPrice: z15.number().min(0).optional(),
+  maxPrice: z15.number().min(0).optional(),
+  search: z15.string().max(120).optional(),
+  topic: z15.string().max(180).optional()
 });
 var resourceCatalogRouter = router({
   list: publicProcedure.input(listInput).query(async ({ input }) => {
@@ -11772,15 +12247,15 @@ var resourceCatalogRouter = router({
     const { items, total } = await listCatalogBooks(filters, { page: page2, pageSize });
     return { items, total, page: page2, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
   }),
-  get: publicProcedure.input(z14.object({ slug: z14.string().min(1).max(320) })).query(async ({ input }) => {
+  get: publicProcedure.input(z15.object({ slug: z15.string().min(1).max(320) })).query(async ({ input }) => {
     const book = await getCatalogBookBySlug(input.slug);
-    if (!book) throw new TRPCError12({ code: "NOT_FOUND", message: "Kaynak bulunamad\u0131" });
+    if (!book) throw new TRPCError13({ code: "NOT_FOUND", message: "Kaynak bulunamad\u0131" });
     return book;
   }),
   publishers: publicProcedure.query(() => listPublishersForFilter()),
   /** "Seviyene Uygun Kaynaklar" — deterministic, explainable per-topic
    * recommendations built from the student's own topic progress (spec §21/§34). */
-  recommendations: protectedProcedure.input(z14.object({ subject: z14.string().max(80).optional(), limit: z14.number().int().min(1).max(30).default(12) })).query(async ({ ctx, input }) => {
+  recommendations: protectedProcedure.input(z15.object({ subject: z15.string().max(80).optional(), limit: z15.number().int().min(1).max(30).default(12) })).query(async ({ ctx, input }) => {
     const progress = await getUserTopicProgress(ctx.user.id);
     const allTopics = progress.map((p) => ({ subject: p.subject, topic: p.topic, exam: p.exam, accuracy: p.progress, status: p.status }));
     const topics = input.subject ? allTopics.filter((t2) => t2.subject === input.subject) : allTopics;
@@ -11797,8 +12272,8 @@ var resourceCatalogRouter = router({
 });
 
 // server/routers/onboarding.ts
-import { TRPCError as TRPCError13 } from "@trpc/server";
-import { z as z15 } from "zod";
+import { TRPCError as TRPCError14 } from "@trpc/server";
+import { z as z16 } from "zod";
 
 // shared/onboarding.ts
 var AVATAR_STYLES = ["girl", "boy"];
@@ -11898,13 +12373,13 @@ function validateOnboardingStep(step, draft) {
 }
 
 // server/tracks/trackDb.ts
-import { and as and22, asc as asc5, eq as eq25 } from "drizzle-orm";
+import { and as and23, asc as asc5, eq as eq26 } from "drizzle-orm";
 var TrackError = class extends Error {
 };
 var TRACK_FIELDS = ["gradeLevel", "examYear", "targetScoreType", "currentTytNet", "currentAytNet", "currentNet", "targetUniversity", "targetDepartment", "targetRanking", "targetGoal", "targetScore", "selectedSubjectsJson"];
 var pick2 = (row) => Object.fromEntries(TRACK_FIELDS.map((key) => [key, row[key] ?? null]));
 var emptyFields = () => Object.fromEntries(TRACK_FIELDS.map((key) => [key, null]));
-async function requireDb8() {
+async function requireDb9() {
   const db = await getDb();
   if (!db) throw new Error("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
   return db;
@@ -11912,19 +12387,19 @@ async function requireDb8() {
 async function syncActiveTrack(userId) {
   const db = await getDb();
   if (!db) return;
-  const [profile] = await db.select().from(studentProfiles).where(eq25(studentProfiles.userId, userId)).limit(1);
+  const [profile] = await db.select().from(studentProfiles).where(eq26(studentProfiles.userId, userId)).limit(1);
   if (!profile) return;
   const fields2 = pick2(profile);
   await db.insert(studentExamTracks).values({ userId, track: profile.examTrack, ...fields2 }).onConflictDoUpdate({ target: [studentExamTracks.userId, studentExamTracks.track], set: fields2 });
 }
 async function listTracks(userId) {
-  const db = await requireDb8();
-  const [profile] = await db.select({ examTrack: studentProfiles.examTrack, onboardingCompleted: studentProfiles.onboardingCompleted }).from(studentProfiles).where(eq25(studentProfiles.userId, userId)).limit(1);
+  const db = await requireDb9();
+  const [profile] = await db.select({ examTrack: studentProfiles.examTrack, onboardingCompleted: studentProfiles.onboardingCompleted }).from(studentProfiles).where(eq26(studentProfiles.userId, userId)).limit(1);
   if (!profile) return [];
-  let rows = await db.select().from(studentExamTracks).where(eq25(studentExamTracks.userId, userId)).orderBy(asc5(studentExamTracks.createdAt));
+  let rows = await db.select().from(studentExamTracks).where(eq26(studentExamTracks.userId, userId)).orderBy(asc5(studentExamTracks.createdAt));
   if (!rows.some((row) => row.track === profile.examTrack) && profile.onboardingCompleted) {
     await syncActiveTrack(userId);
-    rows = await db.select().from(studentExamTracks).where(eq25(studentExamTracks.userId, userId)).orderBy(asc5(studentExamTracks.createdAt));
+    rows = await db.select().from(studentExamTracks).where(eq26(studentExamTracks.userId, userId)).orderBy(asc5(studentExamTracks.createdAt));
   }
   return rows.map((row) => ({ track: row.track, active: row.track === profile.examTrack, examYear: row.examYear, gradeLevel: row.gradeLevel, selectedSubjects: parseList(row.selectedSubjectsJson) })).sort((a, b) => Number(b.active) - Number(a.active));
 }
@@ -11938,30 +12413,30 @@ var parseList = (value) => {
   }
 };
 async function addTrack(userId, input) {
-  const db = await requireDb8();
+  const db = await requireDb9();
   const def = EXAM_TRACK_DEFS[input.track];
   if (!def.gradeLevels.includes(input.gradeLevel)) throw new TrackError("Bu s\u0131nav i\xE7in e\u011Fitim durumunu yeniden se\xE7.");
   const validSubjects = subjectNamesOf(defaultKindOf(input.track));
   const selected = (input.selectedSubjects ?? []).filter((subject2) => validSubjects.includes(subject2));
   if (def.chooseSubjects && selected.length === 0) throw new TrackError("Girece\u011Fin en az bir alan testini se\xE7.");
   await syncActiveTrack(userId);
-  const [existing] = await db.select({ id: studentExamTracks.id }).from(studentExamTracks).where(and22(eq25(studentExamTracks.userId, userId), eq25(studentExamTracks.track, input.track))).limit(1);
+  const [existing] = await db.select({ id: studentExamTracks.id }).from(studentExamTracks).where(and23(eq26(studentExamTracks.userId, userId), eq26(studentExamTracks.track, input.track))).limit(1);
   if (existing) throw new TrackError(`${def.label} zaten s\u0131navlar\u0131n aras\u0131nda.`);
   await db.insert(studentExamTracks).values({ userId, track: input.track, ...emptyFields(), gradeLevel: input.gradeLevel, examYear: input.examYear, selectedSubjectsJson: selected.length ? JSON.stringify(selected) : null });
   if (input.activate) await switchTrack(userId, input.track);
 }
 async function switchTrack(userId, track) {
-  const db = await requireDb8();
+  const db = await requireDb9();
   await syncActiveTrack(userId);
-  const [target] = await db.select().from(studentExamTracks).where(and22(eq25(studentExamTracks.userId, userId), eq25(studentExamTracks.track, track))).limit(1);
+  const [target] = await db.select().from(studentExamTracks).where(and23(eq26(studentExamTracks.userId, userId), eq26(studentExamTracks.track, track))).limit(1);
   if (!target) throw new TrackError("Bu s\u0131nav hen\xFCz eklenmemi\u015F.");
-  await db.update(studentProfiles).set({ examTrack: track, ...pick2(target) }).where(eq25(studentProfiles.userId, userId));
+  await db.update(studentProfiles).set({ examTrack: track, ...pick2(target) }).where(eq26(studentProfiles.userId, userId));
 }
 async function removeTrack(userId, track) {
-  const db = await requireDb8();
-  const [profile] = await db.select({ examTrack: studentProfiles.examTrack }).from(studentProfiles).where(eq25(studentProfiles.userId, userId)).limit(1);
+  const db = await requireDb9();
+  const [profile] = await db.select({ examTrack: studentProfiles.examTrack }).from(studentProfiles).where(eq26(studentProfiles.userId, userId)).limit(1);
   if (profile?.examTrack === track) throw new TrackError("Aktif s\u0131nav\u0131 \xE7\u0131karamazs\u0131n; \xF6nce ba\u015Fka bir s\u0131nava ge\xE7.");
-  await db.delete(studentExamTracks).where(and22(eq25(studentExamTracks.userId, userId), eq25(studentExamTracks.track, track)));
+  await db.delete(studentExamTracks).where(and23(eq26(studentExamTracks.userId, userId), eq26(studentExamTracks.track, track)));
 }
 
 // server/routers/onboarding.ts
@@ -11969,49 +12444,49 @@ var trackErrors = async (work) => {
   try {
     return await work();
   } catch (error) {
-    if (error instanceof TrackError) throw new TRPCError13({ code: "BAD_REQUEST", message: error.message });
+    if (error instanceof TrackError) throw new TRPCError14({ code: "BAD_REQUEST", message: error.message });
     throw error;
   }
 };
-var enumOrBlank = (values) => z15.union([z15.enum(values), z15.literal("")]);
-var draftSchema = z15.object({
-  preferredName: z15.string().trim().max(120).optional(),
+var enumOrBlank = (values) => z16.union([z16.enum(values), z16.literal("")]);
+var draftSchema = z16.object({
+  preferredName: z16.string().trim().max(120).optional(),
   avatarStyle: enumOrBlank(AVATAR_STYLES).optional(),
   examTrack: enumOrBlank(EXAM_TRACKS).optional(),
   gradeLevel: enumOrBlank(GRADE_LEVELS).optional(),
-  examYear: z15.string().max(4).optional(),
+  examYear: z16.string().max(4).optional(),
   targetScoreType: enumOrBlank(TARGET_SCORE_TYPES).optional(),
-  currentTytNet: z15.string().trim().max(40).optional(),
-  currentAytNet: z15.string().trim().max(40).optional(),
-  currentNet: z15.string().trim().max(40).optional(),
+  currentTytNet: z16.string().trim().max(40).optional(),
+  currentAytNet: z16.string().trim().max(40).optional(),
+  currentNet: z16.string().trim().max(40).optional(),
   mockExamFrequency: enumOrBlank(MOCK_EXAM_FREQUENCIES).optional(),
-  selectedSubjects: z15.array(z15.string().max(60)).max(15).optional(),
-  strongSubjects: z15.array(z15.string().max(40)).max(15).optional(),
-  weakSubjects: z15.array(z15.string().max(40)).max(15).optional(),
+  selectedSubjects: z16.array(z16.string().max(60)).max(15).optional(),
+  strongSubjects: z16.array(z16.string().max(40)).max(15).optional(),
+  weakSubjects: z16.array(z16.string().max(40)).max(15).optional(),
   hasPriorStudyPlan: enumOrBlank(["yes", "no"]).optional(),
-  targetUniversity: z15.string().trim().max(180).optional(),
-  targetDepartment: z15.string().trim().max(180).optional(),
-  targetRanking: z15.string().trim().max(60).optional(),
-  targetGoal: z15.string().trim().max(180).optional(),
-  targetScore: z15.string().trim().max(20).optional(),
-  mainGoal: z15.string().trim().max(500).optional(),
-  shortTermGoal: z15.string().trim().max(500).optional(),
-  longTermGoal: z15.string().trim().max(500).optional(),
-  dailyStudyDuration: z15.string().max(6).optional(),
-  preferredStudyStartTime: z15.string().max(5).optional(),
-  availableStudyDays: z15.array(z15.enum(STUDY_DAYS)).max(7).optional(),
-  preferredStudyTimes: z15.array(z15.enum(STUDY_TIMES)).max(4).optional(),
-  preferredStudyMethods: z15.array(z15.enum(STUDY_METHODS)).max(5).optional(),
-  studyObstacles: z15.string().trim().max(500).optional(),
-  coachingExpectations: z15.array(z15.enum(COACHING_EXPECTATIONS)).max(7).optional(),
+  targetUniversity: z16.string().trim().max(180).optional(),
+  targetDepartment: z16.string().trim().max(180).optional(),
+  targetRanking: z16.string().trim().max(60).optional(),
+  targetGoal: z16.string().trim().max(180).optional(),
+  targetScore: z16.string().trim().max(20).optional(),
+  mainGoal: z16.string().trim().max(500).optional(),
+  shortTermGoal: z16.string().trim().max(500).optional(),
+  longTermGoal: z16.string().trim().max(500).optional(),
+  dailyStudyDuration: z16.string().max(6).optional(),
+  preferredStudyStartTime: z16.string().max(5).optional(),
+  availableStudyDays: z16.array(z16.enum(STUDY_DAYS)).max(7).optional(),
+  preferredStudyTimes: z16.array(z16.enum(STUDY_TIMES)).max(4).optional(),
+  preferredStudyMethods: z16.array(z16.enum(STUDY_METHODS)).max(5).optional(),
+  studyObstacles: z16.string().trim().max(500).optional(),
+  coachingExpectations: z16.array(z16.enum(COACHING_EXPECTATIONS)).max(7).optional(),
   notificationPreference: enumOrBlank(NOTIFICATION_PREFERENCES).optional(),
   coachingStyle: enumOrBlank(COACHING_STYLES).optional(),
-  additionalNotes: z15.string().trim().max(1e3).optional()
+  additionalNotes: z16.string().trim().max(1e3).optional()
 });
-var saveStepInput = z15.object({
-  step: z15.number().int().min(0).max(TOTAL_ONBOARDING_STEPS - 1),
+var saveStepInput = z16.object({
+  step: z16.number().int().min(0).max(TOTAL_ONBOARDING_STEPS - 1),
   data: draftSchema,
-  complete: z15.boolean().optional()
+  complete: z16.boolean().optional()
 });
 function draftToPatch(data) {
   const patch = {};
@@ -12055,7 +12530,7 @@ var onboardingRouter = router({
     const draftForValidation = { ...emptyOnboardingDraft(), examTrack: "YKS", ...input.data };
     const errors = validateOnboardingStep(input.step, draftForValidation);
     if (Object.keys(errors).length > 0) {
-      throw new TRPCError13({ code: "BAD_REQUEST", message: Object.values(errors)[0] });
+      throw new TRPCError14({ code: "BAD_REQUEST", message: Object.values(errors)[0] });
     }
     const saved = await upsertStudentProfileStep(ctx.user.id, input.step, draftToPatch(input.data));
     if (input.complete) await completeOnboarding(ctx.user.id);
@@ -12069,30 +12544,30 @@ var onboardingRouter = router({
   }),
   // Birden çok sınav: liste, ekleme, aktif sınavı değiştirme, çıkarma (bkz. server/tracks/trackDb.ts).
   tracks: protectedProcedure.query(({ ctx }) => listTracks(ctx.user.id)),
-  addTrack: protectedProcedure.input(z15.object({ track: z15.enum(EXAM_TRACKS), gradeLevel: z15.enum(GRADE_LEVELS), examYear: z15.number().int().min(2020).max(2040), selectedSubjects: z15.array(z15.string().max(60)).max(15).optional(), activate: z15.boolean().optional() })).mutation(({ ctx, input }) => trackErrors(async () => {
+  addTrack: protectedProcedure.input(z16.object({ track: z16.enum(EXAM_TRACKS), gradeLevel: z16.enum(GRADE_LEVELS), examYear: z16.number().int().min(2020).max(2040), selectedSubjects: z16.array(z16.string().max(60)).max(15).optional(), activate: z16.boolean().optional() })).mutation(({ ctx, input }) => trackErrors(async () => {
     await addTrack(ctx.user.id, input);
     return listTracks(ctx.user.id);
   })),
-  switchTrack: protectedProcedure.input(z15.object({ track: z15.enum(EXAM_TRACKS) })).mutation(({ ctx, input }) => trackErrors(async () => {
+  switchTrack: protectedProcedure.input(z16.object({ track: z16.enum(EXAM_TRACKS) })).mutation(({ ctx, input }) => trackErrors(async () => {
     await switchTrack(ctx.user.id, input.track);
     return getStudentProfile(ctx.user.id);
   })),
-  removeTrack: protectedProcedure.input(z15.object({ track: z15.enum(EXAM_TRACKS) })).mutation(({ ctx, input }) => trackErrors(async () => {
+  removeTrack: protectedProcedure.input(z16.object({ track: z16.enum(EXAM_TRACKS) })).mutation(({ ctx, input }) => trackErrors(async () => {
     await removeTrack(ctx.user.id, input.track);
     return listTracks(ctx.user.id);
   })),
   // Genel Bakış'taki tek tıkla avatar seçimi (null = nötr tasarım).
-  setAvatar: protectedProcedure.input(z15.object({ avatarStyle: z15.enum(AVATAR_STYLES).nullable() })).mutation(({ ctx, input }) => setStudentAvatarStyle(ctx.user.id, input.avatarStyle)),
+  setAvatar: protectedProcedure.input(z16.object({ avatarStyle: z16.enum(AVATAR_STYLES).nullable() })).mutation(({ ctx, input }) => setStudentAvatarStyle(ctx.user.id, input.avatarStyle)),
   // Pazar akşamı giden haftalık ilerleme e-postası (profil menüsündeki seçenek).
   weeklyDigest: protectedProcedure.query(async ({ ctx }) => ({ enabled: await getWeeklyDigestEnabled(ctx.user.id) })),
-  setWeeklyDigest: protectedProcedure.input(z15.object({ enabled: z15.boolean() })).mutation(async ({ ctx, input }) => ({ enabled: await setWeeklyDigestEnabled(ctx.user.id, input.enabled) }))
+  setWeeklyDigest: protectedProcedure.input(z16.object({ enabled: z16.boolean() })).mutation(async ({ ctx, input }) => ({ enabled: await setWeeklyDigestEnabled(ctx.user.id, input.enabled) }))
 });
 
 // server/routers/subscription.ts
-import { z as z16 } from "zod";
+import { z as z17 } from "zod";
 
 // server/subscriptions/checkout.ts
-import { randomUUID as randomUUID2 } from "node:crypto";
+import { randomUUID as randomUUID3 } from "node:crypto";
 
 // shared/checkoutQuote.ts
 var BUNDLE_DISCOUNT = 0.2;
@@ -12154,7 +12629,7 @@ async function itemFromPlanCode(planCode) {
 }
 async function completeMockCheckoutForUser(userId, items) {
   const quote = await quoteForUser(userId, items);
-  const checkoutId = randomUUID2();
+  const checkoutId = randomUUID3();
   for (const line of quote.lines) {
     const result = await processWebhookEvent({
       provider: "mock",
@@ -12169,10 +12644,10 @@ async function completeMockCheckoutForUser(userId, items) {
 }
 
 // server/routers/subscription.ts
-import { TRPCError as TRPCError14 } from "@trpc/server";
-var trackInput = z16.object({ track: z16.enum(EXAM_TRACKS).optional() }).optional();
+import { TRPCError as TRPCError15 } from "@trpc/server";
+var trackInput = z17.object({ track: z17.enum(EXAM_TRACKS).optional() }).optional();
 var resolveTrack = async (userId, track) => track ?? await getStudentExamTrack(userId);
-var quoteItemsInput = z16.array(z16.object({ track: z16.enum(EXAM_TRACKS), tier: z16.enum(PAID_TIERS), period: z16.enum(["monthly", "yearly"]) })).min(1).max(EXAM_TRACKS.length);
+var quoteItemsInput = z17.array(z17.object({ track: z17.enum(EXAM_TRACKS), tier: z17.enum(PAID_TIERS), period: z17.enum(["monthly", "yearly"]) })).min(1).max(EXAM_TRACKS.length);
 var subscriptionRouter = router({
   getPlans: publicProcedure.query(() => listActivePlans()),
   // Client'ın useEntitlement() hook'unun okuduğu tek snapshot (spec §8) — bir sınavın aboneliği.
@@ -12186,15 +12661,15 @@ var subscriptionRouter = router({
     return Promise.all(tracks.map((track) => getEntitlements(ctx.user.id, track)));
   }),
   /** Sepet tutarı: paket (2+ sınav) ya da branş (KPSS aboneliği varken MEB-AGS / A grubu) indirimiyle. */
-  quote: protectedProcedure.input(z16.object({ items: quoteItemsInput })).query(async ({ ctx, input }) => {
+  quote: protectedProcedure.input(z17.object({ items: quoteItemsInput })).query(async ({ ctx, input }) => {
     try {
       return await quoteForUser(ctx.user.id, input.items);
     } catch (error) {
-      if (error instanceof QuoteError) throw new TRPCError14({ code: "BAD_REQUEST", message: error.message });
+      if (error instanceof QuoteError) throw new TRPCError15({ code: "BAD_REQUEST", message: error.message });
       throw error;
     }
   }),
-  cancel: protectedProcedure.input(z16.object({ immediate: z16.boolean().optional(), track: z16.enum(EXAM_TRACKS).optional() })).mutation(async ({ ctx, input }) => {
+  cancel: protectedProcedure.input(z17.object({ immediate: z17.boolean().optional(), track: z17.enum(EXAM_TRACKS).optional() })).mutation(async ({ ctx, input }) => {
     const track = await resolveTrack(ctx.user.id, input.track);
     const current = await getCurrentSubscription(ctx.user.id, track);
     const nextStatus = input.immediate ? "canceled" : current.status;
@@ -12212,7 +12687,7 @@ var subscriptionRouter = router({
     await writeAuditLog({ userId: ctx.user.id, action: "user_resumed", oldState: { status: current.status }, newState: { status: "active", track } });
     return getEntitlements(ctx.user.id, track);
   }),
-  restore: protectedProcedure.input(z16.object({ providerToken: z16.string().min(1) })).mutation(async ({ ctx, input }) => {
+  restore: protectedProcedure.input(z17.object({ providerToken: z17.string().min(1) })).mutation(async ({ ctx, input }) => {
     const provider = paymentProviderFactory();
     const result = await provider.restorePurchase({ userId: ctx.user.id, providerToken: input.providerToken });
     if (!result.valid) throw new Error(result.reason ?? "Sat\u0131n alma do\u011Frulanamad\u0131");
@@ -12222,10 +12697,10 @@ var subscriptionRouter = router({
 });
 
 // server/routers/payment.ts
-import { z as z17 } from "zod";
-import { TRPCError as TRPCError15 } from "@trpc/server";
+import { z as z18 } from "zod";
+import { TRPCError as TRPCError16 } from "@trpc/server";
 var paymentRouter = router({
-  createCheckout: protectedProcedure.input(z17.object({ planCode: z17.string().min(1), successUrl: z17.string().url(), cancelUrl: z17.string().url() })).mutation(async ({ ctx, input }) => {
+  createCheckout: protectedProcedure.input(z18.object({ planCode: z18.string().min(1), successUrl: z18.string().url(), cancelUrl: z18.string().url() })).mutation(async ({ ctx, input }) => {
     const plan = await getPlanByCode(input.planCode);
     if (!plan || !plan.isActive) throw new Error("Ge\xE7ersiz veya pasif plan.");
     const provider = paymentProviderFactory();
@@ -12245,7 +12720,7 @@ var paymentRouter = router({
    */
   // Sepet (`items`: bir ya da birden çok sınav) ya da eski istemciler için tek `planCode`.
   // Tutar sunucuda hesaplanır: paket (2+ sınav) ve branş indirimi (shared/checkoutQuote.ts).
-  completeMockCheckout: protectedProcedure.input(z17.object({ planCode: z17.string().min(1).optional(), items: quoteItemsInput.optional() })).mutation(async ({ ctx, input }) => {
+  completeMockCheckout: protectedProcedure.input(z18.object({ planCode: z18.string().min(1).optional(), items: quoteItemsInput.optional() })).mutation(async ({ ctx, input }) => {
     if (ENV.paymentProvider !== "mock") {
       throw new Error("Bu u\xE7 nokta yaln\u0131zca PAYMENT_PROVIDER=mock iken kullan\u0131labilir.");
     }
@@ -12255,14 +12730,14 @@ var paymentRouter = router({
       const { quote, checkoutId } = await completeMockCheckoutForUser(ctx.user.id, items);
       return { status: "processed", checkoutId, total: quote.total, lines: quote.lines };
     } catch (error) {
-      if (error instanceof QuoteError) throw new TRPCError15({ code: "BAD_REQUEST", message: error.message });
+      if (error instanceof QuoteError) throw new TRPCError16({ code: "BAD_REQUEST", message: error.message });
       throw error;
     }
   })
 });
 
 // server/admin/analyticsService.ts
-import { and as and23, count as count2, countDistinct, eq as eq26, gte as gte14, isNotNull as isNotNull7, lt as lt10, ne as ne4, sql as sql11 } from "drizzle-orm";
+import { and as and24, count as count2, countDistinct, eq as eq27, gte as gte14, isNotNull as isNotNull7, lt as lt11, ne as ne4, sql as sql12 } from "drizzle-orm";
 async function getAdminDashboardKpis() {
   const db = await getDb();
   const empty = {
@@ -12293,17 +12768,17 @@ async function getAdminDashboardKpis() {
   const [approvalCounts, accountStatusCounts, planStatusCounts, activeTodayRow, activeWeekRow, inactive7Row, inactive30Row, totalRow, trialStartedRow, stillTrialingRow, convertedRow, premiumUsersRow] = await Promise.all([
     db.select({ approvalStatus: users.approvalStatus, total: count2() }).from(users).groupBy(users.approvalStatus),
     db.select({ accountStatus: users.accountStatus, total: count2() }).from(users).groupBy(users.accountStatus),
-    db.select({ tier: subscriptionPlans.tier, billingPeriod: subscriptionPlans.billingPeriod, status: subscriptions.status, total: count2() }).from(subscriptions).innerJoin(subscriptionPlans, eq26(subscriptionPlans.id, subscriptions.planId)).groupBy(subscriptionPlans.tier, subscriptionPlans.billingPeriod, subscriptions.status),
+    db.select({ tier: subscriptionPlans.tier, billingPeriod: subscriptionPlans.billingPeriod, status: subscriptions.status, total: count2() }).from(subscriptions).innerJoin(subscriptionPlans, eq27(subscriptionPlans.id, subscriptions.planId)).groupBy(subscriptionPlans.tier, subscriptionPlans.billingPeriod, subscriptions.status),
     db.select({ total: count2() }).from(users).where(gte14(users.lastSignedIn, todayStart)),
     db.select({ total: count2() }).from(users).where(gte14(users.lastSignedIn, weekAgo)),
-    db.select({ total: count2() }).from(users).where(lt10(users.lastSignedIn, weekAgo)),
-    db.select({ total: count2() }).from(users).where(lt10(users.lastSignedIn, monthAgo)),
+    db.select({ total: count2() }).from(users).where(lt11(users.lastSignedIn, weekAgo)),
+    db.select({ total: count2() }).from(users).where(lt11(users.lastSignedIn, monthAgo)),
     db.select({ total: count2() }).from(users),
     db.select({ total: count2() }).from(subscriptions).where(isNotNull7(subscriptions.trialStartedAt)),
-    db.select({ total: count2() }).from(subscriptions).where(eq26(subscriptions.status, "trialing")),
-    db.select({ total: count2() }).from(subscriptions).where(and23(isNotNull7(subscriptions.trialStartedAt), sql11`${subscriptions.status} in ('active','past_due','grace_period')`)),
+    db.select({ total: count2() }).from(subscriptions).where(eq27(subscriptions.status, "trialing")),
+    db.select({ total: count2() }).from(subscriptions).where(and24(isNotNull7(subscriptions.trialStartedAt), sql12`${subscriptions.status} in ('active','past_due','grace_period')`)),
     // Üye sayıları kişi başına: her sınavın aboneliği ayrı satır, bir aday birden fazla sınava abone olabilir.
-    db.select({ total: countDistinct(subscriptions.userId) }).from(subscriptions).innerJoin(subscriptionPlans, eq26(subscriptionPlans.id, subscriptions.planId)).where(and23(ne4(subscriptionPlans.tier, "free"), sql11`${subscriptions.status} in ('active','trialing','grace_period')`))
+    db.select({ total: countDistinct(subscriptions.userId) }).from(subscriptions).innerJoin(subscriptionPlans, eq27(subscriptionPlans.id, subscriptions.planId)).where(and24(ne4(subscriptionPlans.tier, "free"), sql12`${subscriptions.status} in ('active','trialing','grace_period')`))
   ]);
   const kpis = { ...empty, totalUsers: totalRow[0]?.total ?? 0, activeToday: activeTodayRow[0]?.total ?? 0, activeThisWeek: activeWeekRow[0]?.total ?? 0, inactive7Plus: inactive7Row[0]?.total ?? 0, inactive30Plus: inactive30Row[0]?.total ?? 0 };
   for (const row of approvalCounts) {
@@ -12338,35 +12813,35 @@ var adminAnalyticsRouter = router({
 });
 
 // server/routers/admin/audit.ts
-import { z as z18 } from "zod";
+import { z as z19 } from "zod";
 var adminAuditRouter = router({
-  list: adminProcedure.input(z18.object({ userId: z18.number().int().optional(), limit: z18.number().int().min(1).max(500).default(100) })).query(({ input }) => input.userId ? listAuditLogsForUser(input.userId) : listAllAuditLogs(input.limit))
+  list: adminProcedure.input(z19.object({ userId: z19.number().int().optional(), limit: z19.number().int().min(1).max(500).default(100) })).query(({ input }) => input.userId ? listAuditLogsForUser(input.userId) : listAllAuditLogs(input.limit))
 });
 
 // server/routers/admin/errors.ts
-import { z as z19 } from "zod";
+import { z as z20 } from "zod";
 var adminErrorsRouter = router({
-  list: adminProcedure.input(z19.object({ status: z19.enum(["open", "resolved"]).default("open") })).query(({ input }) => listAppErrors(input.status)),
-  resolve: adminProcedure.input(z19.object({ id: z19.number().int().positive() })).mutation(({ input }) => resolveAppError(input.id))
+  list: adminProcedure.input(z20.object({ status: z20.enum(["open", "resolved"]).default("open") })).query(({ input }) => listAppErrors(input.status)),
+  resolve: adminProcedure.input(z20.object({ id: z20.number().int().positive() })).mutation(({ input }) => resolveAppError(input.id))
 });
 
 // server/routers/admin/payments.ts
-import { z as z20 } from "zod";
+import { z as z21 } from "zod";
 var maskId = (value) => !value ? value : value.length <= 8 ? `${value.slice(0, 2)}\u2022\u2022\u2022\u2022` : `${value.slice(0, 4)}\u2022\u2022\u2022\u2022${value.slice(-4)}`;
 var adminPaymentsRouter = router({
   // Kart numarası/CVV gibi bir alan şemada zaten hiç yok (spec §27/§37 — "ASLA saklanmamalı"); providerPaymentId yine de maskelenir.
-  list: adminProcedure.input(z20.object({ limit: z20.number().int().min(1).max(500).default(100) })).query(async ({ input }) => {
+  list: adminProcedure.input(z21.object({ limit: z21.number().int().min(1).max(500).default(100) })).query(async ({ input }) => {
     const rows = await listAllPaymentsForAdmin(input.limit);
     return rows.map((row) => ({ ...row, providerPaymentId: maskId(row.providerPaymentId) }));
   })
 });
 
 // server/routers/admin/subscriptions.ts
-import { z as z21 } from "zod";
-var trackField = z21.enum(EXAM_TRACKS).default("YKS");
+import { z as z22 } from "zod";
+var trackField = z22.enum(EXAM_TRACKS).default("YKS");
 var adminSubscriptionsRouter = router({
   list: adminProcedure.query(() => listAllSubscriptionsForAdmin()),
-  get: adminProcedure.input(z21.object({ userId: z21.number().int() })).query(async ({ input }) => {
+  get: adminProcedure.input(z22.object({ userId: z22.number().int() })).query(async ({ input }) => {
     const [subscriptions2, payments2, auditLogs] = await Promise.all([listSubscriptionsForUser(input.userId), listPaymentsForUser(input.userId), listAuditLogsForUser(input.userId)]);
     const subscription = subscriptions2.find((row) => row.track === "YKS") ?? subscriptions2[0];
     return { subscription, subscriptions: subscriptions2, payments: payments2, auditLogs };
@@ -12382,7 +12857,7 @@ var adminSubscriptionsRouter = router({
    * schema'yı yeniden tasarlama, duplicate logic oluşturma" ile tutarlı;
    * bkz. docs/admin/ADMIN-COMMAND-CENTER.md "Known limitations".)
    */
-  grant: adminProcedure.input(z21.object({ userId: z21.number().int(), planCode: z21.string().min(1), days: z21.number().int().min(1).max(3650), reason: z21.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
+  grant: adminProcedure.input(z22.object({ userId: z22.number().int(), planCode: z22.string().min(1), days: z22.number().int().min(1).max(3650), reason: z22.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
     const plan = await getPlanByCode(input.planCode);
     if (!plan) throw new Error(`Plan bulunamad\u0131: ${input.planCode}`);
     const track = plan.track ?? "YKS";
@@ -12395,7 +12870,7 @@ var adminSubscriptionsRouter = router({
     await writeAuditLog({ userId: input.userId, adminId: ctx.user.id, action: "manual_grant", oldState: existing ? { status: existing.status } : null, newState: { status: "active", planCode: plan.code, track, until: periodEnd.toISOString() }, reason: input.reason });
     return getSubscriptionByUserId(input.userId, track);
   }),
-  revoke: adminProcedure.input(z21.object({ userId: z21.number().int(), track: trackField, reason: z21.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
+  revoke: adminProcedure.input(z22.object({ userId: z22.number().int(), track: trackField, reason: z22.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
     const existing = await getSubscriptionByUserId(input.userId, input.track);
     if (!existing) throw new Error("Abonelik bulunamad\u0131");
     const freePlan = await getPlanByCode("FREE");
@@ -12405,7 +12880,7 @@ var adminSubscriptionsRouter = router({
     await writeAuditLog({ userId: input.userId, adminId: ctx.user.id, action: "manual_revoke", oldState: { status: existing.status }, newState: { status: "canceled", planCode: "FREE", track: input.track }, reason: input.reason });
     return getSubscriptionByUserId(input.userId, input.track);
   }),
-  cancel: adminProcedure.input(z21.object({ userId: z21.number().int(), track: trackField, reason: z21.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
+  cancel: adminProcedure.input(z22.object({ userId: z22.number().int(), track: trackField, reason: z22.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
     const existing = await getSubscriptionByUserId(input.userId, input.track);
     if (!existing) throw new Error("Abonelik bulunamad\u0131");
     assertValidSubscriptionTransition(existing.status, "canceled");
@@ -12413,7 +12888,7 @@ var adminSubscriptionsRouter = router({
     await writeAuditLog({ userId: input.userId, adminId: ctx.user.id, action: "admin_canceled", oldState: { status: existing.status }, newState: { status: "canceled", track: input.track }, reason: input.reason });
     return getSubscriptionByUserId(input.userId, input.track);
   }),
-  resume: adminProcedure.input(z21.object({ userId: z21.number().int(), track: trackField })).mutation(async ({ ctx, input }) => {
+  resume: adminProcedure.input(z22.object({ userId: z22.number().int(), track: trackField })).mutation(async ({ ctx, input }) => {
     const existing = await getSubscriptionByUserId(input.userId, input.track);
     if (!existing) throw new Error("Abonelik bulunamad\u0131");
     assertValidSubscriptionTransition(existing.status, "active");
@@ -12423,7 +12898,7 @@ var adminSubscriptionsRouter = router({
   }),
   // Fiyatlar: her sınavın planları (satışta olmayanlar dahil) ve fiyat/deneme/satış durumu düzenleme.
   plans: adminProcedure.query(() => listAllPlans()),
-  updatePlan: adminProcedure.input(z21.object({ planId: z21.number().int().positive(), price: z21.number().int().min(0).max(1e8).optional(), trialDays: z21.number().int().min(0).max(60).optional(), isActive: z21.boolean().optional() })).mutation(async ({ ctx, input }) => {
+  updatePlan: adminProcedure.input(z22.object({ planId: z22.number().int().positive(), price: z22.number().int().min(0).max(1e8).optional(), trialDays: z22.number().int().min(0).max(60).optional(), isActive: z22.boolean().optional() })).mutation(async ({ ctx, input }) => {
     const plan = await updatePlanPricing(input.planId, { price: input.price, trialDays: input.trialDays, isActive: input.isActive });
     if (!plan) throw new Error("Plan bulunamad\u0131");
     await writeAuditLog({ userId: ctx.user.id, adminId: ctx.user.id, action: "plan_pricing_updated", newState: { planCode: plan.code, price: plan.price, trialDays: plan.trialDays, isActive: plan.isActive } });
@@ -12501,19 +12976,19 @@ var adminSystemRouter = router({
 });
 
 // server/routers/admin/testimonials.ts
-import { z as z22 } from "zod";
+import { z as z23 } from "zod";
 
 // server/testimonials/testimonials.ts
-import { desc as desc15, eq as eq27 } from "drizzle-orm";
+import { desc as desc16, eq as eq28 } from "drizzle-orm";
 async function listPublishedTestimonials(limit = 9) {
   const db = await getDb();
   if (!db) return [];
-  return db.select({ id: testimonials.id, displayName: testimonials.displayName, detail: testimonials.detail, rating: testimonials.rating, body: testimonials.body }).from(testimonials).where(eq27(testimonials.status, "approved")).orderBy(desc15(testimonials.reviewedAt)).limit(limit);
+  return db.select({ id: testimonials.id, displayName: testimonials.displayName, detail: testimonials.detail, rating: testimonials.rating, body: testimonials.body }).from(testimonials).where(eq28(testimonials.status, "approved")).orderBy(desc16(testimonials.reviewedAt)).limit(limit);
 }
 async function getMyTestimonial(userId) {
   const db = await getDb();
   if (!db) return null;
-  const [row] = await db.select().from(testimonials).where(eq27(testimonials.userId, userId)).limit(1);
+  const [row] = await db.select().from(testimonials).where(eq28(testimonials.userId, userId)).limit(1);
   return row ?? null;
 }
 async function saveMyTestimonial(userId, input) {
@@ -12526,43 +13001,43 @@ async function saveMyTestimonial(userId, input) {
 async function deleteMyTestimonial(userId) {
   const db = await getDb();
   if (!db) return;
-  await db.delete(testimonials).where(eq27(testimonials.userId, userId));
+  await db.delete(testimonials).where(eq28(testimonials.userId, userId));
 }
 async function listTestimonialsForAdmin(status) {
   const db = await getDb();
   if (!db) return [];
-  return db.select({ id: testimonials.id, displayName: testimonials.displayName, detail: testimonials.detail, rating: testimonials.rating, body: testimonials.body, status: testimonials.status, updatedAt: testimonials.updatedAt, userId: testimonials.userId, userName: users.name, userEmail: users.email }).from(testimonials).leftJoin(users, eq27(users.id, testimonials.userId)).where(eq27(testimonials.status, status)).orderBy(desc15(testimonials.updatedAt)).limit(200);
+  return db.select({ id: testimonials.id, displayName: testimonials.displayName, detail: testimonials.detail, rating: testimonials.rating, body: testimonials.body, status: testimonials.status, updatedAt: testimonials.updatedAt, userId: testimonials.userId, userName: users.name, userEmail: users.email }).from(testimonials).leftJoin(users, eq28(users.id, testimonials.userId)).where(eq28(testimonials.status, status)).orderBy(desc16(testimonials.updatedAt)).limit(200);
 }
 async function reviewTestimonial(id5, status, reviewerId) {
   const db = await getDb();
   if (!db) return;
-  await db.update(testimonials).set({ status, reviewedAt: /* @__PURE__ */ new Date(), reviewedBy: reviewerId }).where(eq27(testimonials.id, id5));
+  await db.update(testimonials).set({ status, reviewedAt: /* @__PURE__ */ new Date(), reviewedBy: reviewerId }).where(eq28(testimonials.id, id5));
 }
 
 // server/routers/admin/testimonials.ts
 var adminTestimonialsRouter = router({
-  list: adminProcedure.input(z22.object({ status: z22.enum(["pending", "approved", "rejected"]).default("pending") })).query(({ input }) => listTestimonialsForAdmin(input.status)),
-  review: adminProcedure.input(z22.object({ id: z22.number().int().positive(), status: z22.enum(["approved", "rejected"]) })).mutation(async ({ ctx, input }) => {
+  list: adminProcedure.input(z23.object({ status: z23.enum(["pending", "approved", "rejected"]).default("pending") })).query(({ input }) => listTestimonialsForAdmin(input.status)),
+  review: adminProcedure.input(z23.object({ id: z23.number().int().positive(), status: z23.enum(["approved", "rejected"]) })).mutation(async ({ ctx, input }) => {
     await reviewTestimonial(input.id, input.status, ctx.user.id);
     return { ok: true };
   })
 });
 
 // server/routers/admin/usage.ts
-import { z as z23 } from "zod";
+import { z as z24 } from "zod";
 var adminUsageRouter = router({
-  get: adminProcedure.input(z23.object({ userId: z23.number().int(), track: z23.enum(EXAM_TRACKS).default("YKS") })).query(({ input }) => getUsageSummaryForUser(input.userId, input.track)),
-  reset: adminProcedure.input(z23.object({ userId: z23.number().int(), featureKey: z23.enum(FEATURE_KEYS) })).mutation(({ ctx, input }) => resetFeatureUsage(input.userId, input.featureKey, USAGE_WINDOW_DAYS, ctx.user.id))
+  get: adminProcedure.input(z24.object({ userId: z24.number().int(), track: z24.enum(EXAM_TRACKS).default("YKS") })).query(({ input }) => getUsageSummaryForUser(input.userId, input.track)),
+  reset: adminProcedure.input(z24.object({ userId: z24.number().int(), featureKey: z24.enum(FEATURE_KEYS) })).mutation(({ ctx, input }) => resetFeatureUsage(input.userId, input.featureKey, USAGE_WINDOW_DAYS, ctx.user.id))
 });
 
 // server/routers/admin/users.ts
-import { z as z24 } from "zod";
+import { z as z25 } from "zod";
 
 // server/admin/adminUserDb.ts
-import { and as and25, count as count3, desc as desc16, eq as eq29, gte as gte16, inArray as inArray11, isNull as isNull14, ilike as ilike4, lt as lt11, or as or6, sql as sql12 } from "drizzle-orm";
+import { and as and26, count as count3, desc as desc17, eq as eq30, gte as gte16, inArray as inArray12, isNull as isNull15, ilike as ilike5, lt as lt12, or as or7, sql as sql13 } from "drizzle-orm";
 
 // server/admin/progressService.ts
-import { and as and24, eq as eq28, gte as gte15 } from "drizzle-orm";
+import { and as and25, eq as eq29, gte as gte15 } from "drizzle-orm";
 
 // shared/progressScore.ts
 var PROGRESS_SCORE_CONFIG = {
@@ -12601,14 +13076,14 @@ async function getStudyProgressScore(userId) {
   const db = await getDb();
   const generatedAt = (/* @__PURE__ */ new Date()).toISOString();
   if (!db) return { overallScore: null, insufficientData: true, components: emptyComponents(), generatedAt };
-  const [userRow] = await db.select({ createdAt: users.createdAt }).from(users).where(eq28(users.id, userId)).limit(1);
+  const [userRow] = await db.select({ createdAt: users.createdAt }).from(users).where(eq29(users.id, userId)).limit(1);
   const accountAgeDays = userRow ? Math.max(0, Math.floor((Date.now() - userRow.createdAt.getTime()) / 864e5)) : 0;
   const windowStart = new Date(Date.now() - CONSISTENCY_WINDOW_DAYS * 864e5);
   const [recentLogs, allLogs, topicRows, examRows] = await Promise.all([
-    db.select({ studyDate: topicStudyLogs.studyDate }).from(topicStudyLogs).where(and24(eq28(topicStudyLogs.userId, userId), gte15(topicStudyLogs.studyDate, windowStart))),
-    db.select({ questions: topicStudyLogs.questions, correct: topicStudyLogs.correct }).from(topicStudyLogs).where(eq28(topicStudyLogs.userId, userId)),
-    db.select({ progress: topicProgress.progress }).from(topicProgress).where(eq28(topicProgress.userId, userId)),
-    db.select({ net: userMockExams.net }).from(userMockExams).where(eq28(userMockExams.userId, userId))
+    db.select({ studyDate: topicStudyLogs.studyDate }).from(topicStudyLogs).where(and25(eq29(topicStudyLogs.userId, userId), gte15(topicStudyLogs.studyDate, windowStart))),
+    db.select({ questions: topicStudyLogs.questions, correct: topicStudyLogs.correct }).from(topicStudyLogs).where(eq29(topicStudyLogs.userId, userId)),
+    db.select({ progress: topicProgress.progress }).from(topicProgress).where(eq29(topicProgress.userId, userId)),
+    db.select({ net: userMockExams.net }).from(userMockExams).where(eq29(userMockExams.userId, userId))
   ]);
   const activeDaysInWindow = new Set(recentLogs.map((row) => toLocalDateKey(row.studyDate))).size;
   const totalQuestions = allLogs.reduce((sum, row) => sum + row.questions, 0);
@@ -12658,18 +13133,18 @@ async function listUsersForAdminPaginated(filters) {
   if (filters.search?.trim()) {
     const term = `%${filters.search.trim().replace(/[%_]/g, (char) => `\\${char}`)}%`;
     const digits = filters.search.replace(/\D/g, "").replace(/^0/, "");
-    conditions.push(or6(ilike4(users.name, term), ilike4(users.email, term), ...digits.length >= 4 ? [ilike4(users.openId, `dev_phone_%${digits}%`)] : []));
+    conditions.push(or7(ilike5(users.name, term), ilike5(users.email, term), ...digits.length >= 4 ? [ilike5(users.openId, `dev_phone_%${digits}%`)] : []));
   }
-  if (filters.approvalStatus) conditions.push(eq29(users.approvalStatus, filters.approvalStatus));
-  if (filters.accountStatus) conditions.push(eq29(users.accountStatus, filters.accountStatus));
-  if (filters.planCode) conditions.push(eq29(subscriptionPlans.code, filters.planCode));
-  if (filters.subscriptionStatus) conditions.push(eq29(subscriptions.status, filters.subscriptionStatus));
+  if (filters.approvalStatus) conditions.push(eq30(users.approvalStatus, filters.approvalStatus));
+  if (filters.accountStatus) conditions.push(eq30(users.accountStatus, filters.accountStatus));
+  if (filters.planCode) conditions.push(eq30(subscriptionPlans.code, filters.planCode));
+  if (filters.subscriptionStatus) conditions.push(eq30(subscriptions.status, filters.subscriptionStatus));
   if (filters.activity === "today") conditions.push(gte16(users.lastSignedIn, startOfToday2()));
   else if (filters.activity === "week") conditions.push(gte16(users.lastSignedIn, daysAgo(7)));
-  else if (filters.activity === "inactive") conditions.push(lt11(users.lastSignedIn, daysAgo(7)));
-  const whereClause = conditions.length ? and25(...conditions) : void 0;
-  const activeSubscription = and25(eq29(subscriptions.userId, users.id), eq29(subscriptions.track, sql12`coalesce((select sp."examTrack" from student_profiles sp where sp."userId" = ${users.id}), 'YKS')`));
-  const countQuery = db.select({ total: count3() }).from(users).leftJoin(subscriptions, activeSubscription).leftJoin(subscriptionPlans, eq29(subscriptionPlans.id, subscriptions.planId));
+  else if (filters.activity === "inactive") conditions.push(lt12(users.lastSignedIn, daysAgo(7)));
+  const whereClause = conditions.length ? and26(...conditions) : void 0;
+  const activeSubscription = and26(eq30(subscriptions.userId, users.id), eq30(subscriptions.track, sql13`coalesce((select sp."examTrack" from student_profiles sp where sp."userId" = ${users.id}), 'YKS')`));
+  const countQuery = db.select({ total: count3() }).from(users).leftJoin(subscriptions, activeSubscription).leftJoin(subscriptionPlans, eq30(subscriptionPlans.id, subscriptions.planId));
   const [{ total }] = await (whereClause ? countQuery.where(whereClause) : countQuery);
   const pageQuery = db.select({
     id: users.id,
@@ -12688,13 +13163,13 @@ async function listUsersForAdminPaginated(filters) {
     subscriptionStatus: subscriptions.status,
     trialEndsAt: subscriptions.trialEndsAt,
     currentPeriodEnd: subscriptions.currentPeriodEnd
-  }).from(users).leftJoin(subscriptions, activeSubscription).leftJoin(subscriptionPlans, eq29(subscriptionPlans.id, subscriptions.planId)).orderBy(desc16(users.createdAt)).limit(pageSize).offset((page2 - 1) * pageSize);
+  }).from(users).leftJoin(subscriptions, activeSubscription).leftJoin(subscriptionPlans, eq30(subscriptionPlans.id, subscriptions.planId)).orderBy(desc17(users.createdAt)).limit(pageSize).offset((page2 - 1) * pageSize);
   const pageRows = await (whereClause ? pageQuery.where(whereClause) : pageQuery);
   const ids = pageRows.map((row) => row.id);
   const [topicAgg, examAgg, studyAgg] = ids.length ? await Promise.all([
-    db.select({ userId: topicProgress.userId, avgProgress: sql12`avg(${topicProgress.progress})`, topicCount: sql12`count(*)::int` }).from(topicProgress).where(inArray11(topicProgress.userId, ids)).groupBy(topicProgress.userId),
-    db.select({ userId: userMockExams.userId, examCount: sql12`count(*)::int`, latestNet: sql12`max(${userMockExams.net})` }).from(userMockExams).where(inArray11(userMockExams.userId, ids)).groupBy(userMockExams.userId),
-    db.select({ userId: topicStudyLogs.userId, totalMinutes: sql12`sum(${topicStudyLogs.minutes})` }).from(topicStudyLogs).where(inArray11(topicStudyLogs.userId, ids)).groupBy(topicStudyLogs.userId)
+    db.select({ userId: topicProgress.userId, avgProgress: sql13`avg(${topicProgress.progress})`, topicCount: sql13`count(*)::int` }).from(topicProgress).where(inArray12(topicProgress.userId, ids)).groupBy(topicProgress.userId),
+    db.select({ userId: userMockExams.userId, examCount: sql13`count(*)::int`, latestNet: sql13`max(${userMockExams.net})` }).from(userMockExams).where(inArray12(userMockExams.userId, ids)).groupBy(userMockExams.userId),
+    db.select({ userId: topicStudyLogs.userId, totalMinutes: sql13`sum(${topicStudyLogs.minutes})` }).from(topicStudyLogs).where(inArray12(topicStudyLogs.userId, ids)).groupBy(topicStudyLogs.userId)
   ]) : [[], [], []];
   const topicMap = new Map(topicAgg.map((row) => [row.userId, row]));
   const examMap = new Map(examAgg.map((row) => [row.userId, row]));
@@ -12728,19 +13203,19 @@ var daysAgo = (days) => new Date(Date.now() - days * 24 * 60 * 60 * 1e3);
 async function suspendUser(userId, adminId, reason) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ accountStatus: "suspended" }).where(eq29(users.id, userId));
+  await db.update(users).set({ accountStatus: "suspended" }).where(eq30(users.id, userId));
   await writeAuditLog({ userId, adminId, action: "user_suspended", newState: { accountStatus: "suspended" }, reason });
 }
 async function reactivateUser(userId, adminId) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ accountStatus: "active" }).where(eq29(users.id, userId));
+  await db.update(users).set({ accountStatus: "active" }).where(eq30(users.id, userId));
   await writeAuditLog({ userId, adminId, action: "user_reactivated", newState: { accountStatus: "active" } });
 }
 async function verifyUserEmailManually(userId, adminId) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ emailVerifiedAt: /* @__PURE__ */ new Date() }).where(and25(eq29(users.id, userId), isNull14(users.emailVerifiedAt)));
+  await db.update(users).set({ emailVerifiedAt: /* @__PURE__ */ new Date() }).where(and26(eq30(users.id, userId), isNull15(users.emailVerifiedAt)));
   await writeAuditLog({ userId, adminId, action: "email_verified_by_admin", newState: { emailVerified: true } });
 }
 function maskId2(value) {
@@ -12751,7 +13226,7 @@ function maskId2(value) {
 async function getUserDetailForAdmin(userId) {
   const db = await getDb();
   if (!db) return null;
-  const [userRow] = await db.select().from(users).where(eq29(users.id, userId)).limit(1);
+  const [userRow] = await db.select().from(users).where(eq30(users.id, userId)).limit(1);
   if (!userRow) return null;
   const activeTrack = await getStudentExamTrack(userId);
   const [entitlements, usage, progressScore, payments2, recentExams, topicRows, recentStudyLogs, auditLogs, profile, bookContentRows, notebook] = await Promise.all([
@@ -12759,12 +13234,12 @@ async function getUserDetailForAdmin(userId) {
     getUsageSummaryForUser(userId, activeTrack),
     getStudyProgressScore(userId),
     listPaymentsForUser(userId),
-    db.select().from(userMockExams).where(eq29(userMockExams.userId, userId)).orderBy(desc16(userMockExams.examDate)).limit(10),
-    db.select().from(topicProgress).where(eq29(topicProgress.userId, userId)),
-    db.select().from(topicStudyLogs).where(eq29(topicStudyLogs.userId, userId)).orderBy(desc16(topicStudyLogs.studyDate)).limit(20),
+    db.select().from(userMockExams).where(eq30(userMockExams.userId, userId)).orderBy(desc17(userMockExams.examDate)).limit(10),
+    db.select().from(topicProgress).where(eq30(topicProgress.userId, userId)),
+    db.select().from(topicStudyLogs).where(eq30(topicStudyLogs.userId, userId)).orderBy(desc17(topicStudyLogs.studyDate)).limit(20),
     listAuditLogsForUser(userId),
     getStudentProfile(userId),
-    db.select({ bookId: userBookContents.bookId, mappingStatus: userBookContents.mappingStatus, mappingMethod: userBookContents.mappingMethod, mappingConfidence: userBookContents.mappingConfidence, source: userBookContents.source, createdAt: userBookContents.createdAt }).from(userBookContents).where(eq29(userBookContents.userId, userId)),
+    db.select({ bookId: userBookContents.bookId, mappingStatus: userBookContents.mappingStatus, mappingMethod: userBookContents.mappingMethod, mappingConfidence: userBookContents.mappingConfidence, source: userBookContents.source, createdAt: userBookContents.createdAt }).from(userBookContents).where(eq30(userBookContents.userId, userId)),
     // Defter: yalnızca sayılar — öğrencinin not içeriği admin tarafından görülmez.
     getNoteStatsForAdmin(userId)
   ]);
@@ -12781,8 +13256,8 @@ async function getUserDetailForAdmin(userId) {
   const bookIds = bookContents.map((book) => book.bookId);
   const numericIds = bookIds.filter((id5) => /^\d+$/.test(id5)).map(Number);
   const [customTitles, catalogTitles] = bookIds.length ? await Promise.all([
-    db.select({ bookId: userResourceBooks.bookId, title: userResourceBooks.title }).from(userResourceBooks).where(and25(eq29(userResourceBooks.userId, userId), inArray11(userResourceBooks.bookId, bookIds))),
-    numericIds.length ? db.select({ id: catalogBooks.id, name: catalogBooks.name }).from(catalogBooks).where(inArray11(catalogBooks.id, numericIds)) : Promise.resolve([])
+    db.select({ bookId: userResourceBooks.bookId, title: userResourceBooks.title }).from(userResourceBooks).where(and26(eq30(userResourceBooks.userId, userId), inArray12(userResourceBooks.bookId, bookIds))),
+    numericIds.length ? db.select({ id: catalogBooks.id, name: catalogBooks.name }).from(catalogBooks).where(inArray12(catalogBooks.id, numericIds)) : Promise.resolve([])
   ]) : [[], []];
   const titleById = new Map([...customTitles.map((row) => [row.bookId, row.title]), ...catalogTitles.map((row) => [String(row.id), row.name])]);
   const bookContentsWithTitles = bookContents.map((book) => ({ ...book, title: titleById.get(book.bookId) ?? null }));
@@ -12813,25 +13288,25 @@ async function getUserDetailForAdmin(userId) {
 // server/routers/admin/users.ts
 var adminUsersRouter = router({
   list: adminProcedure.input(
-    z24.object({
-      search: z24.string().max(120).optional(),
-      approvalStatus: z24.enum(["pending", "approved", "rejected"]).optional(),
-      accountStatus: z24.enum(["active", "suspended", "deleted"]).optional(),
-      planCode: z24.string().max(40).optional(),
-      subscriptionStatus: z24.string().max(40).optional(),
-      activity: z24.enum(["today", "week", "inactive"]).optional(),
-      page: z24.number().int().min(1).default(1),
-      pageSize: z24.number().int().min(1).max(100).default(20)
+    z25.object({
+      search: z25.string().max(120).optional(),
+      approvalStatus: z25.enum(["pending", "approved", "rejected"]).optional(),
+      accountStatus: z25.enum(["active", "suspended", "deleted"]).optional(),
+      planCode: z25.string().max(40).optional(),
+      subscriptionStatus: z25.string().max(40).optional(),
+      activity: z25.enum(["today", "week", "inactive"]).optional(),
+      page: z25.number().int().min(1).default(1),
+      pageSize: z25.number().int().min(1).max(100).default(20)
     })
   ).query(({ input }) => listUsersForAdminPaginated(input)),
-  get: adminProcedure.input(z24.object({ userId: z24.number().int() })).query(({ input }) => getUserDetailForAdmin(input.userId)),
+  get: adminProcedure.input(z25.object({ userId: z25.number().int() })).query(({ input }) => getUserDetailForAdmin(input.userId)),
   listPending: adminProcedure.query(() => listPendingUsers()),
-  approve: adminProcedure.input(z24.object({ userId: z24.number().int() })).mutation(({ ctx, input }) => approveUser(input.userId, ctx.user.id)),
-  reject: adminProcedure.input(z24.object({ userId: z24.number().int(), reason: z24.string().max(300).optional() })).mutation(({ ctx, input }) => rejectUser(input.userId, ctx.user.id, input.reason)),
+  approve: adminProcedure.input(z25.object({ userId: z25.number().int() })).mutation(({ ctx, input }) => approveUser(input.userId, ctx.user.id)),
+  reject: adminProcedure.input(z25.object({ userId: z25.number().int(), reason: z25.string().max(300).optional() })).mutation(({ ctx, input }) => rejectUser(input.userId, ctx.user.id, input.reason)),
   // Hesap yaşam döngüsü — subscription iptaliyle KARIŞTIRILMAZ (spec §5/§23): bir kullanıcı aboneliğini iptal edince hesabı askıya alınmaz.
-  suspend: adminProcedure.input(z24.object({ userId: z24.number().int(), reason: z24.string().max(300).optional() })).mutation(({ ctx, input }) => suspendUser(input.userId, ctx.user.id, input.reason)),
-  reactivate: adminProcedure.input(z24.object({ userId: z24.number().int() })).mutation(({ ctx, input }) => reactivateUser(input.userId, ctx.user.id)),
-  verifyEmail: adminProcedure.input(z24.object({ userId: z24.number().int() })).mutation(({ ctx, input }) => verifyUserEmailManually(input.userId, ctx.user.id))
+  suspend: adminProcedure.input(z25.object({ userId: z25.number().int(), reason: z25.string().max(300).optional() })).mutation(({ ctx, input }) => suspendUser(input.userId, ctx.user.id, input.reason)),
+  reactivate: adminProcedure.input(z25.object({ userId: z25.number().int() })).mutation(({ ctx, input }) => reactivateUser(input.userId, ctx.user.id)),
+  verifyEmail: adminProcedure.input(z25.object({ userId: z25.number().int() })).mutation(({ ctx, input }) => verifyUserEmailManually(input.userId, ctx.user.id))
 });
 
 // server/routers/admin/index.ts
@@ -12849,17 +13324,17 @@ var adminRouter = router({
 });
 
 // server/routers/testimonials.ts
-import { z as z25 } from "zod";
+import { z as z26 } from "zod";
 
 // shared/testimonials.ts
 var TESTIMONIAL_LIMITS = { displayName: 60, detail: 80, bodyMin: 20, body: 600 };
 
 // server/routers/testimonials.ts
-var testimonialInput = z25.object({
-  displayName: z25.string().trim().min(2, "G\xF6r\xFCnecek ad\u0131n\u0131 yaz.").max(TESTIMONIAL_LIMITS.displayName),
-  detail: z25.string().trim().max(TESTIMONIAL_LIMITS.detail).optional(),
-  rating: z25.number().int().min(1).max(5),
-  body: z25.string().trim().min(TESTIMONIAL_LIMITS.bodyMin, `Yorumun en az ${TESTIMONIAL_LIMITS.bodyMin} karakter olmal\u0131.`).max(TESTIMONIAL_LIMITS.body)
+var testimonialInput = z26.object({
+  displayName: z26.string().trim().min(2, "G\xF6r\xFCnecek ad\u0131n\u0131 yaz.").max(TESTIMONIAL_LIMITS.displayName),
+  detail: z26.string().trim().max(TESTIMONIAL_LIMITS.detail).optional(),
+  rating: z26.number().int().min(1).max(5),
+  body: z26.string().trim().min(TESTIMONIAL_LIMITS.bodyMin, `Yorumun en az ${TESTIMONIAL_LIMITS.bodyMin} karakter olmal\u0131.`).max(TESTIMONIAL_LIMITS.body)
 });
 var testimonialsRouter = router({
   published: publicProcedure.query(() => listPublishedTestimonials()),
@@ -12872,73 +13347,73 @@ var testimonialsRouter = router({
 });
 
 // server/routers.ts
-var planInput = z26.object({
-  topics: z26.array(z26.object({
-    topic: z26.string(),
-    subject: z26.string(),
-    exam: z26.enum(EXAM_KINDS),
-    progress: z26.number(),
-    status: z26.enum(["Zay\u0131f", "Orta", "\u0130yi"])
+var planInput = z27.object({
+  topics: z27.array(z27.object({
+    topic: z27.string(),
+    subject: z27.string(),
+    exam: z27.enum(EXAM_KINDS),
+    progress: z27.number(),
+    status: z27.enum(["Zay\u0131f", "Orta", "\u0130yi"])
   })).max(50),
-  exams: z26.array(z26.object({
-    title: z26.string(),
-    date: z26.string(),
-    net: z26.number(),
-    subjects: z26.record(z26.string(), z26.number()),
-    topicDetails: z26.array(z26.object({
-      subject: z26.string(),
-      topic: z26.string(),
-      questionCount: z26.number(),
-      correct: z26.number(),
-      wrong: z26.number(),
-      blank: z26.number(),
-      accuracy: z26.number(),
-      net: z26.number()
+  exams: z27.array(z27.object({
+    title: z27.string(),
+    date: z27.string(),
+    net: z27.number(),
+    subjects: z27.record(z27.string(), z27.number()),
+    topicDetails: z27.array(z27.object({
+      subject: z27.string(),
+      topic: z27.string(),
+      questionCount: z27.number(),
+      correct: z27.number(),
+      wrong: z27.number(),
+      blank: z27.number(),
+      accuracy: z27.number(),
+      net: z27.number()
     })).optional()
   })).max(10),
-  books: z26.array(z26.object({
-    id: z26.string(),
-    title: z26.string(),
-    subject: z26.string(),
-    exam: z26.enum(EXAM_KINDS),
-    level: z26.enum(["Kolay", "Orta", "Zor"]),
-    pageCount: z26.number().optional(),
-    totalQuestions: z26.number().optional(),
-    accuracy: z26.number().optional(),
-    activeDays: z26.number().optional(),
-    mappings: z26.array(z26.object({ topic: z26.string(), pageStart: z26.number().optional(), pageEnd: z26.number().optional(), testStart: z26.number().optional(), testEnd: z26.number().optional() })).max(50).optional()
+  books: z27.array(z27.object({
+    id: z27.string(),
+    title: z27.string(),
+    subject: z27.string(),
+    exam: z27.enum(EXAM_KINDS),
+    level: z27.enum(["Kolay", "Orta", "Zor"]),
+    pageCount: z27.number().optional(),
+    totalQuestions: z27.number().optional(),
+    accuracy: z27.number().optional(),
+    activeDays: z27.number().optional(),
+    mappings: z27.array(z27.object({ topic: z27.string(), pageStart: z27.number().optional(), pageEnd: z27.number().optional(), testStart: z27.number().optional(), testEnd: z27.number().optional() })).max(50).optional()
   })).max(30).default([]),
-  availableMinutes: z26.number().min(120).max(2400).default(600),
+  availableMinutes: z27.number().min(120).max(2400).default(600),
   // Öğrencinin yerel "bugün"ü (YYYY-MM-DD): plan bugünden başlayan 7 günü kapsar.
-  startDate: z26.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  goal: z26.string().max(120).default("YKS 2027"),
+  startDate: z27.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  goal: z27.string().max(120).default("YKS 2027"),
   // Onboarding'den gelen koçluk bağlamı — tamamen isteğe bağlı, eski
   // istemciler (veya onboarding'i henüz tamamlamamış kullanıcılar) bu alanı
   // hiç göndermeyebilir.
-  studentProfile: z26.object({
+  studentProfile: z27.object({
     // Hedef bilgileri — onboarding'in "Kullanıcı tanımlama" ve "Hedefler"
     // adımlarından. AI planı önceliklendirirken (örn. hedef net/sıralamaya
     // göre tempo) ve dilini kişiselleştirirken kullanır.
-    targetScoreType: z26.string().max(20).optional(),
-    examYear: z26.number().int().optional(),
-    targetUniversity: z26.string().max(180).optional(),
-    targetDepartment: z26.string().max(180).optional(),
-    targetRanking: z26.string().max(60).optional(),
-    dailyStudyDuration: z26.number().int().min(0).max(960).optional(),
-    preferredStudyMethods: z26.array(z26.string().max(40)).max(5).optional(),
-    studyObstacles: z26.string().max(500).optional(),
-    coachingStyle: z26.string().max(40).optional(),
-    mainGoal: z26.string().max(500).optional()
+    targetScoreType: z27.string().max(20).optional(),
+    examYear: z27.number().int().optional(),
+    targetUniversity: z27.string().max(180).optional(),
+    targetDepartment: z27.string().max(180).optional(),
+    targetRanking: z27.string().max(60).optional(),
+    dailyStudyDuration: z27.number().int().min(0).max(960).optional(),
+    preferredStudyMethods: z27.array(z27.string().max(40)).max(5).optional(),
+    studyObstacles: z27.string().max(500).optional(),
+    coachingStyle: z27.string().max(40).optional(),
+    mainGoal: z27.string().max(500).optional()
   }).optional()
 });
-var documentExtractionInput = z26.object({
-  dataUrl: z26.string().min(20).max(12e6),
-  mimeType: z26.enum(["application/pdf", "image/png", "image/jpeg", "image/webp"]),
-  fileName: z26.string().max(180).optional()
+var documentExtractionInput = z27.object({
+  dataUrl: z27.string().min(20).max(12e6),
+  mimeType: z27.enum(["application/pdf", "image/png", "image/jpeg", "image/webp"]),
+  fileName: z27.string().max(180).optional()
 });
-var bookPhotoInput = z26.object({
-  dataUrl: z26.string().min(20).max(12e6),
-  mimeType: z26.enum(["image/png", "image/jpeg", "image/webp"])
+var bookPhotoInput = z27.object({
+  dataUrl: z27.string().min(20).max(12e6),
+  mimeType: z27.enum(["image/png", "image/jpeg", "image/webp"])
 });
 var bookPhotoSchema = {
   type: "object",
@@ -12964,18 +13439,18 @@ var bookPhotoSchema = {
   additionalProperties: false
 };
 var clamp013 = (value) => typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
-var userExamInput = z26.object({
-  title: z26.string().min(1).max(180),
-  exam: z26.enum(EXAM_KINDS),
-  date: z26.string().min(8).max(30),
-  net: z26.number().min(-100).max(200),
-  delta: z26.number().min(-200).max(200),
-  subjects: z26.record(z26.string(), z26.number().min(-50).max(100)),
-  timeSpent: z26.record(z26.string(), z26.number().int().min(0).max(1e3)),
-  topicNets: z26.record(z26.string(), z26.number().min(-50).max(100)),
-  topicDetails: z26.array(z26.object({ subject: z26.string(), topic: z26.string(), questionCount: z26.number().int().min(0), correct: z26.number().int().min(0), wrong: z26.number().int().min(0), blank: z26.number().int().min(0), accuracy: z26.number().min(0).max(100), net: z26.number().min(-50).max(100) })).max(300),
-  importedFrom: z26.enum(["manual", "ocr", "pdf", "csv", "xlsx"]),
-  notes: z26.string().max(5e3).optional()
+var userExamInput = z27.object({
+  title: z27.string().min(1).max(180),
+  exam: z27.enum(EXAM_KINDS),
+  date: z27.string().min(8).max(30),
+  net: z27.number().min(-100).max(200),
+  delta: z27.number().min(-200).max(200),
+  subjects: z27.record(z27.string(), z27.number().min(-50).max(100)),
+  timeSpent: z27.record(z27.string(), z27.number().int().min(0).max(1e3)),
+  topicNets: z27.record(z27.string(), z27.number().min(-50).max(100)),
+  topicDetails: z27.array(z27.object({ subject: z27.string(), topic: z27.string(), questionCount: z27.number().int().min(0), correct: z27.number().int().min(0), wrong: z27.number().int().min(0), blank: z27.number().int().min(0), accuracy: z27.number().min(0).max(100), net: z27.number().min(-50).max(100) })).max(300),
+  importedFrom: z27.enum(["manual", "ocr", "pdf", "csv", "xlsx"]),
+  notes: z27.string().max(5e3).optional()
 });
 var documentExtractionSchema = {
   type: "object",
@@ -13041,17 +13516,17 @@ var appRouter = router({
     }),
     // Profil menüsündeki "Şifre değiştir". Tahmin denemelerine karşı kullanıcı
     // başına 15 dakikada 5 deneme.
-    changePassword: protectedProcedure.input(z26.object({ currentPassword: z26.string().min(1).max(200), newPassword: z26.string().min(1).max(200) })).mutation(async ({ ctx, input }) => {
+    changePassword: protectedProcedure.input(z27.object({ currentPassword: z27.string().min(1).max(200), newPassword: z27.string().min(1).max(200) })).mutation(async ({ ctx, input }) => {
       try {
         checkRateLimit(`change-password:${ctx.user.id}`, 5, 15 * 6e4);
       } catch {
-        throw new TRPCError16({ code: "TOO_MANY_REQUESTS", message: "\xC7ok fazla deneme yapt\u0131n. 15 dakika sonra tekrar dener misin?" });
+        throw new TRPCError17({ code: "TOO_MANY_REQUESTS", message: "\xC7ok fazla deneme yapt\u0131n. 15 dakika sonra tekrar dener misin?" });
       }
       try {
         await changeLocalPassword(ctx.user.id, input.currentPassword, input.newPassword);
         return { success: true };
       } catch (error) {
-        if (error instanceof PasswordChangeError) throw new TRPCError16({ code: "BAD_REQUEST", message: error.message });
+        if (error instanceof PasswordChangeError) throw new TRPCError17({ code: "BAD_REQUEST", message: error.message });
         throw error;
       }
     }),
@@ -13062,7 +13537,7 @@ var appRouter = router({
         return await sendVerificationEmail(ctx.user, ctx.req);
       } catch (error) {
         console.error("[EmailVerification] resend failed:", error instanceof Error ? error.message : error);
-        throw new TRPCError16({ code: "INTERNAL_SERVER_ERROR", message: "Do\u011Frulama maili \u015Fu an g\xF6nderilemedi. Birka\xE7 dakika sonra tekrar dener misin?" });
+        throw new TRPCError17({ code: "INTERNAL_SERVER_ERROR", message: "Do\u011Frulama maili \u015Fu an g\xF6nderilemedi. Birka\xE7 dakika sonra tekrar dener misin?" });
       }
     })
   }),
@@ -13077,20 +13552,20 @@ var appRouter = router({
       ]);
       return { inventory, logs, mappings, switches, customBooks };
     }),
-    addBook: protectedProcedure.input(z26.object({ bookId: z26.string().max(120) })).mutation(({ ctx, input }) => addBookToInventory(ctx.user.id, input.bookId)),
-    removeBook: protectedProcedure.input(z26.object({ bookId: z26.string().max(120) })).mutation(({ ctx, input }) => removeBookFromInventory(ctx.user.id, input.bookId)),
-    addLog: protectedProcedure.input(z26.object({ bookId: z26.string().max(120), topic: z26.string().max(180).optional(), sessionDate: z26.string(), minutes: z26.number().int().min(0).max(1440), questions: z26.number().int().min(0).max(2e3), correct: z26.number().int().min(0).max(2e3), wrong: z26.number().int().min(0).max(2e3), blank: z26.number().int().min(0).max(2e3), pageStart: z26.number().int().min(0).optional(), pageEnd: z26.number().int().min(0).optional(), testStart: z26.number().int().min(0).optional(), testEnd: z26.number().int().min(0).optional() })).mutation(({ ctx, input }) => addBookStudyLog(ctx.user.id, { ...input, sessionDate: new Date(input.sessionDate) })),
-    upsertMapping: protectedProcedure.input(z26.object({ bookId: z26.string().max(120), topic: z26.string().max(180), subject: z26.string().max(80), pageStart: z26.number().int().min(0).optional(), pageEnd: z26.number().int().min(0).optional(), testStart: z26.number().int().min(0).optional(), testEnd: z26.number().int().min(0).optional() })).mutation(({ ctx, input }) => upsertBookTopicMapping(ctx.user.id, input)),
-    addSwitch: protectedProcedure.input(z26.object({ fromBookId: z26.string().max(120).optional(), toBookId: z26.string().max(120), reason: z26.string().max(300) })).mutation(({ ctx, input }) => addSourceSwitch(ctx.user.id, { ...input, switchedAt: /* @__PURE__ */ new Date() })),
-    importBooks: protectedProcedure.input(z26.object({ books: z26.array(z26.object({ id: z26.string().max(120), title: z26.string().min(1).max(180), publisher: z26.string().max(120), subject: z26.string().max(80), exam: z26.enum(EXAM_KINDS), level: z26.enum(["Kolay", "Orta", "Zor"]), format: z26.string().max(120), reason: z26.string().max(1e3), sourceUrl: z26.string().max(500).optional(), pageCount: z26.number().int().min(0).optional(), tone: z26.string().max(20), authors: z26.string().max(300).optional(), isbn: z26.string().max(32).optional() })).min(1).max(500) })).mutation(({ ctx, input }) => addUserResourceBooks(ctx.user.id, input.books)),
+    addBook: protectedProcedure.input(z27.object({ bookId: z27.string().max(120) })).mutation(({ ctx, input }) => addBookToInventory(ctx.user.id, input.bookId)),
+    removeBook: protectedProcedure.input(z27.object({ bookId: z27.string().max(120) })).mutation(({ ctx, input }) => removeBookFromInventory(ctx.user.id, input.bookId)),
+    addLog: protectedProcedure.input(z27.object({ bookId: z27.string().max(120), topic: z27.string().max(180).optional(), sessionDate: z27.string(), minutes: z27.number().int().min(0).max(1440), questions: z27.number().int().min(0).max(2e3), correct: z27.number().int().min(0).max(2e3), wrong: z27.number().int().min(0).max(2e3), blank: z27.number().int().min(0).max(2e3), pageStart: z27.number().int().min(0).optional(), pageEnd: z27.number().int().min(0).optional(), testStart: z27.number().int().min(0).optional(), testEnd: z27.number().int().min(0).optional() })).mutation(({ ctx, input }) => addBookStudyLog(ctx.user.id, { ...input, sessionDate: new Date(input.sessionDate) })),
+    upsertMapping: protectedProcedure.input(z27.object({ bookId: z27.string().max(120), topic: z27.string().max(180), subject: z27.string().max(80), pageStart: z27.number().int().min(0).optional(), pageEnd: z27.number().int().min(0).optional(), testStart: z27.number().int().min(0).optional(), testEnd: z27.number().int().min(0).optional() })).mutation(({ ctx, input }) => upsertBookTopicMapping(ctx.user.id, input)),
+    addSwitch: protectedProcedure.input(z27.object({ fromBookId: z27.string().max(120).optional(), toBookId: z27.string().max(120), reason: z27.string().max(300) })).mutation(({ ctx, input }) => addSourceSwitch(ctx.user.id, { ...input, switchedAt: /* @__PURE__ */ new Date() })),
+    importBooks: protectedProcedure.input(z27.object({ books: z27.array(z27.object({ id: z27.string().max(120), title: z27.string().min(1).max(180), publisher: z27.string().max(120), subject: z27.string().max(80), exam: z27.enum(EXAM_KINDS), level: z27.enum(["Kolay", "Orta", "Zor"]), format: z27.string().max(120), reason: z27.string().max(1e3), sourceUrl: z27.string().max(500).optional(), pageCount: z27.number().int().min(0).optional(), tone: z27.string().max(20), authors: z27.string().max(300).optional(), isbn: z27.string().max(32).optional() })).min(1).max(500) })).mutation(({ ctx, input }) => addUserResourceBooks(ctx.user.id, input.books)),
     // Ortak kitap kaydında ad/yayınevi/ISBN ile arama: kitap kayıtlıysa kapak fotoğrafı (OCR) gerekmez.
-    searchSharedBooks: protectedProcedure.input(z26.object({ q: z26.string().trim().min(2).max(120) })).query(({ input }) => searchSharedBooks(input.q)),
+    searchSharedBooks: protectedProcedure.input(z27.object({ q: z27.string().trim().min(2).max(120) })).query(({ input }) => searchSharedBooks(input.q)),
     // Kitabı kütüphaneye ekler ve ortak kayda bağlar; öğrenci "Bu kitap" dediyse (sharedBookId)
     // onaylanmış içindekiler de kopyalanır, içindekiler fotoğrafı okunmaz.
-    addBookFromCover: protectedProcedure.input(z26.object({
-      sharedBookId: z26.number().int().positive().nullable(),
-      useSharedContents: z26.boolean(),
-      draft: z26.object({ title: z26.string().trim().min(1).max(180), publisher: z26.string().max(120), subject: z26.string().max(80), exam: z26.enum(EXAM_KINDS), level: z26.enum(["Kolay", "Orta", "Zor"]), authors: z26.string().max(300).optional(), isbn: z26.string().max(32).optional(), edition: z26.string().max(120).optional() })
+    addBookFromCover: protectedProcedure.input(z27.object({
+      sharedBookId: z27.number().int().positive().nullable(),
+      useSharedContents: z27.boolean(),
+      draft: z27.object({ title: z27.string().trim().min(1).max(180), publisher: z27.string().max(120), subject: z27.string().max(80), exam: z27.enum(EXAM_KINDS), level: z27.enum(["Kolay", "Orta", "Zor"]), authors: z27.string().max(300).optional(), isbn: z27.string().max(32).optional(), edition: z27.string().max(120).optional() })
     })).mutation(({ ctx, input }) => addBookToLibrary(ctx.user.id, input)),
     // Öğrenci elindeki fiziksel kitabın kapak fotoğrafını çeker (telefon
     // kamerası); LLM görselden kitap adı/yayınevi/ders tahmini çıkarır.
@@ -13135,23 +13610,23 @@ var appRouter = router({
   }),
   exams: router({
     snapshot: protectedProcedure.query(({ ctx }) => getUserMockExams(ctx.user.id)),
-    importMany: protectedProcedure.input(z26.object({ exams: z26.array(userExamInput).min(1).max(200) })).mutation(({ ctx, input }) => addUserMockExams(ctx.user.id, input.exams.map((exam) => ({ ...exam, examDate: new Date(exam.date) }))))
+    importMany: protectedProcedure.input(z27.object({ exams: z27.array(userExamInput).min(1).max(200) })).mutation(({ ctx, input }) => addUserMockExams(ctx.user.id, input.exams.map((exam) => ({ ...exam, examDate: new Date(exam.date) }))))
   }),
   calendar: router({
     snapshot: protectedProcedure.query(({ ctx }) => getStudyCalendar(ctx.user.id)),
-    savePlan: protectedProcedure.input(z26.object({ title: z26.string().max(180), weekStart: z26.string(), weekEnd: z26.string(), summary: z26.string().max(2e3), source: z26.enum(["ai", "manual"]).optional(), replacePrevious: z26.boolean().optional(), sessions: z26.array(z26.object({ sessionDate: z26.string(), title: z26.string().max(180), subject: z26.string().max(80), topic: z26.string().max(180), kind: z26.string().max(40), plannedMinutes: z26.number().int().min(0).max(1440), targetQuestions: z26.number().int().min(0).optional(), targetPages: z26.string().max(80).nullable().optional(), targetTests: z26.string().max(80).nullable().optional() })).max(100) })).mutation(({ ctx, input }) => saveStudyPlan(ctx.user.id, { ...input, weekStart: new Date(input.weekStart), weekEnd: new Date(input.weekEnd), sessions: input.sessions.map((session) => ({ ...session, sessionDate: new Date(session.sessionDate) })) })),
-    completeSession: protectedProcedure.input(z26.object({ sessionId: z26.number().int(), actualMinutes: z26.number().int().min(0).max(1440), actualQuestions: z26.number().int().min(0).max(5e3), correct: z26.number().int().min(0).max(5e3), wrong: z26.number().int().min(0).max(5e3), blank: z26.number().int().min(0).max(5e3), actualPages: z26.number().int().min(0).max(5e3).optional(), note: z26.string().max(1e3).optional() })).mutation(({ ctx, input }) => completeStudySession(ctx.user.id, input)),
-    coachSnapshot: protectedProcedure.input(z26.object({ periodStart: z26.string(), periodEnd: z26.string() })).query(async ({ ctx, input }) => {
+    savePlan: protectedProcedure.input(z27.object({ title: z27.string().max(180), weekStart: z27.string(), weekEnd: z27.string(), summary: z27.string().max(2e3), source: z27.enum(["ai", "manual"]).optional(), replacePrevious: z27.boolean().optional(), sessions: z27.array(z27.object({ sessionDate: z27.string(), title: z27.string().max(180), subject: z27.string().max(80), topic: z27.string().max(180), kind: z27.string().max(40), plannedMinutes: z27.number().int().min(0).max(1440), targetQuestions: z27.number().int().min(0).optional(), targetPages: z27.string().max(80).nullable().optional(), targetTests: z27.string().max(80).nullable().optional() })).max(100) })).mutation(({ ctx, input }) => saveStudyPlan(ctx.user.id, { ...input, weekStart: new Date(input.weekStart), weekEnd: new Date(input.weekEnd), sessions: input.sessions.map((session) => ({ ...session, sessionDate: new Date(session.sessionDate) })) })),
+    completeSession: protectedProcedure.input(z27.object({ sessionId: z27.number().int(), actualMinutes: z27.number().int().min(0).max(1440), actualQuestions: z27.number().int().min(0).max(5e3), correct: z27.number().int().min(0).max(5e3), wrong: z27.number().int().min(0).max(5e3), blank: z27.number().int().min(0).max(5e3), actualPages: z27.number().int().min(0).max(5e3).optional(), note: z27.string().max(1e3).optional() })).mutation(({ ctx, input }) => completeStudySession(ctx.user.id, input)),
+    coachSnapshot: protectedProcedure.input(z27.object({ periodStart: z27.string(), periodEnd: z27.string() })).query(async ({ ctx, input }) => {
       const { sessions, averageAccuracy } = await getPlanAdherenceInputs(ctx.user.id, new Date(input.periodStart), new Date(input.periodEnd));
       return { ...calculatePlanAdherence(sessions, averageAccuracy), averageAccuracy, alerts: await getCoachAlerts(ctx.user.id) };
     }),
-    refreshCoach: protectedProcedure.input(z26.object({ periodStart: z26.string(), periodEnd: z26.string() })).mutation(({ ctx, input }) => savePlanAdherence(ctx.user.id, new Date(input.periodStart), new Date(input.periodEnd))),
+    refreshCoach: protectedProcedure.input(z27.object({ periodStart: z27.string(), periodEnd: z27.string() })).mutation(({ ctx, input }) => savePlanAdherence(ctx.user.id, new Date(input.periodStart), new Date(input.periodEnd))),
     // Üst çubuktaki bildirim zili: okunmamış koç uyarıları (yalnızca okuma; uyarıları refreshCoach üretir).
     alerts: protectedProcedure.query(({ ctx }) => getCoachAlerts(ctx.user.id)),
-    readCoachAlert: protectedProcedure.input(z26.object({ alertId: z26.number().int() })).mutation(({ ctx, input }) => markCoachAlertRead(ctx.user.id, input.alertId)),
-    addFocusLog: protectedProcedure.input(z26.object({ subject: z26.string().max(80), topic: z26.string().max(180), studyDate: z26.string(), minutes: z26.number().int().min(1).max(1440), questions: z26.number().int().min(0).max(5e3), correct: z26.number().int().min(0).max(5e3), wrong: z26.number().int().min(0).max(5e3), blank: z26.number().int().min(0).max(5e3), note: z26.string().max(1e3).optional() })).mutation(({ ctx, input }) => addTopicStudyLog(ctx.user.id, { ...input, studyDate: new Date(input.studyDate), note: input.note ?? null, sessionId: null })),
+    readCoachAlert: protectedProcedure.input(z27.object({ alertId: z27.number().int() })).mutation(({ ctx, input }) => markCoachAlertRead(ctx.user.id, input.alertId)),
+    addFocusLog: protectedProcedure.input(z27.object({ subject: z27.string().max(80), topic: z27.string().max(180), studyDate: z27.string(), minutes: z27.number().int().min(1).max(1440), questions: z27.number().int().min(0).max(5e3), correct: z27.number().int().min(0).max(5e3), wrong: z27.number().int().min(0).max(5e3), blank: z27.number().int().min(0).max(5e3), note: z27.string().max(1e3).optional() })).mutation(({ ctx, input }) => addTopicStudyLog(ctx.user.id, { ...input, studyDate: new Date(input.studyDate), note: input.note ?? null, sessionId: null })),
     // Paragraf pratiği / gece okuması gibi "şimdi yaptım" alışkanlık kayıtları.
-    logRoutine: protectedProcedure.input(z26.object({ title: z26.string().max(180), subject: z26.string().max(80), topic: z26.string().max(180), kind: z26.string().max(40), plannedMinutes: z26.number().int().min(0).max(1440), actualMinutes: z26.number().int().min(0).max(1440), actualPages: z26.number().int().min(0).max(5e3).optional(), note: z26.string().max(1e3).optional(), readingBookId: z26.number().int().positive().optional() })).mutation(async ({ ctx, input }) => {
+    logRoutine: protectedProcedure.input(z27.object({ title: z27.string().max(180), subject: z27.string().max(80), topic: z27.string().max(180), kind: z27.string().max(40), plannedMinutes: z27.number().int().min(0).max(1440), actualMinutes: z27.number().int().min(0).max(1440), actualPages: z27.number().int().min(0).max(5e3).optional(), note: z27.string().max(1e3).optional(), readingBookId: z27.number().int().positive().optional() })).mutation(async ({ ctx, input }) => {
       const { readingBookId, ...routine } = input;
       const calendar = await logCompletedRoutineSession(ctx.user.id, routine);
       const readingBook = readingBookId && input.actualPages ? await recordReadingPages(ctx.user.id, readingBookId, input.actualPages) : null;
@@ -13244,14 +13719,14 @@ ${JSON.stringify(input.books)}${targetContext}${chosenSubjectsContext}${coaching
         const normalized = normalizeAiPlan(parsed, fallbackPlan);
         if (normalized === fallbackPlan) {
           console.warn("[AI Plan] Unusable AI response; keys:", parsed && typeof parsed === "object" ? Object.keys(parsed).join(",") : typeof parsed);
-          throw new TRPCError16({ code: "INTERNAL_SERVER_ERROR", message: "AI plan\u0131 okunamad\u0131. Tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi." });
+          throw new TRPCError17({ code: "INTERNAL_SERVER_ERROR", message: "AI plan\u0131 okunamad\u0131. Tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi." });
         }
         return normalized;
       } catch (error) {
-        if (error instanceof TRPCError16) throw error;
+        if (error instanceof TRPCError17) throw error;
         console.warn("[AI Plan] LLM failed:", error);
         const quota = error instanceof LlmUnavailableError && error.reason === "quota";
-        throw new TRPCError16({
+        throw new TRPCError17({
           code: quota ? "TOO_MANY_REQUESTS" : "INTERNAL_SERVER_ERROR",
           message: quota ? "Yapay zek\xE2 servisinin kotas\u0131 \u015Fu an dolu; AI plan\u0131n\u0131 birka\xE7 saat sonra tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi." : "AI plan\u0131 \u015Fu an haz\u0131rlanamad\u0131; biraz sonra tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi."
         });
@@ -13292,6 +13767,7 @@ ${JSON.stringify(input.books)}${targetContext}${chosenSubjectsContext}${coaching
   topics: topicsRouter,
   bookContent: bookContentRouter,
   notes: notesRouter,
+  wall: wallRouter,
   questions: questionsRouter,
   classSchedule: classScheduleRouter,
   push: pushRouter,

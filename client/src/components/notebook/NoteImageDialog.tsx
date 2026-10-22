@@ -10,11 +10,11 @@ type Rotation = 0 | 90 | 180 | 270;
  * (Küçültme kitap taramasıyla ortak yardımcıdan; yükleme sunucuda tür/boyut/kota doğrulanır.)
  * Tarayıcı filtresi varsayılan açık: gölge ve karartı kalkar, kâğıt beyazlar; öğrenci kapatabilir.
  */
-export default function NoteImageDialog({ onDone, onClose, confirmLabel = "Nota ekle" }: { onDone: (attachmentId: number) => void; onClose: () => void; confirmLabel?: string }) {
+export default function NoteImageDialog({ onDone, onClose, confirmLabel = "Nota ekle", defaultScan = true }: { onDone: (attachmentId: number) => void; onClose: () => void; confirmLabel?: string; /** Duvarım'daki genel fotoğraflarda kapalı başlar. */ defaultScan?: boolean }) {
   const [file, setFile] = useState<File | null>(null);
   const [original, setOriginal] = useState<string | null>(null);
   const [scanned, setScanned] = useState<string | null>(null);
-  const [scan, setScan] = useState(true);
+  const [scan, setScan] = useState(defaultScan);
   const preview = scan && scanned ? scanned : original;
   const [rotate, setRotate] = useState<Rotation>(0);
   const [crop, setCrop] = useState<CropInsets>(NO_CROP);
