@@ -375,6 +375,17 @@ export async function getStudentCalendarReadOnly(studentUserId: number, since: D
   return { sessions, logs };
 }
 
+/** Öğrencinin o günkü planlı oturumları (görev atarken çakışma denetimi için; tamamlanan/atlanan yer tutmaz). */
+export async function listPlannedSessionsOn(studentUserId: number, day: Date) {
+  const db = await requireDb();
+  const start = new Date(day);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return db.select({ sessionDate: studyPlanSessions.sessionDate, plannedMinutes: studyPlanSessions.plannedMinutes, status: studyPlanSessions.status, title: studyPlanSessions.title }).from(studyPlanSessions)
+    .where(and(eq(studyPlanSessions.userId, studentUserId), eq(studyPlanSessions.status, "planned"), gte(studyPlanSessions.sessionDate, start), lt(studyPlanSessions.sessionDate, end)));
+}
+
 /** Öğretmenin öğrenciye atadığı görev: öğrencinin takvimine "kim atadı" bilgisiyle tek oturum ekler. */
 export async function insertAssignedTask(input: { orgId: number; studentUserId: number; teacherUserId: number; sessionDate: Date; title: string; subject: string; topic: string; kind: string; plannedMinutes: number; targetQuestions: number | null; summary: string }) {
   const db = await requireDb();

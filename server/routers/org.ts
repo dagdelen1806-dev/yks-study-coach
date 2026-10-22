@@ -2,7 +2,8 @@ import { TRPCError } from "@trpc/server";
 import { createHash, randomInt } from "node:crypto";
 import { z } from "zod";
 import { getStaffDigestEnabled, setStaffDigestEnabled } from "../digest/teacherDigest";
-import { findClassConflict, toMinutes } from "../../shared/classSchedule";
+import { fromMinutes, toMinutes } from "../../shared/classSchedule";
+import { busyOn, describeInterval, findTaskConflict, suggestStart } from "../../shared/planPlacement";
 import { effectiveKvkk } from "../../shared/kvkk";
 import { MAX_TIMETABLE_SLOTS_PER_CLASS, branchMismatch, describeConflict, findCrossClassConflicts, sortSlots, validateClassTimetable } from "../../shared/orgTimetable";
 import { EXAM_KINDS, type ExamKind } from "../../shared/exams";
@@ -35,6 +36,7 @@ import {
   listNotes,
   listOrganizations,
   listOrgTimetable,
+  listPlannedSessionsOn,
   listStudentTimetable,
   replaceClassTimetables,
   listStudentFeedback,
@@ -59,7 +61,7 @@ import {
   updateClass,
   updateOrganization,
 } from "../org/orgDb";
-import { getClassSchedule } from "../schedule/classScheduleDb";
+import { getClassSchedule, getCourseBlocks } from "../schedule/classScheduleDb";
 import { creditsUsedThisMonth, orgCreditReport } from "../org/orgCredits";
 
 const id = z.number().int().positive();
@@ -406,9 +408,17 @@ export const orgRouter = router({
         await assertCanViewStudent(ctx, input.studentUserId);
         const start = toMinutes(input.time);
         if (start + input.minutes > 23 * 60 + 30) throw new TRPCError({ code: "BAD_REQUEST", message: "Görev 23:30'dan önce bitmeli." });
-        const schedule = await getClassSchedule(input.studentUserId);
-        const conflict = findClassConflict(schedule.blocks, new Date(`${input.date}T12:00:00`), start, input.minutes);
-        if (conflict) throw new TRPCError({ code: "BAD_REQUEST", message: `Öğrencinin ${conflict.label} dersiyle çakışıyor (${conflict.startTime}–${conflict.endTime}).` });
+        // Dolu saatler: öğrencinin okul/dershane blokları, kurumun ders programı ve o günkü planlı oturumları.
+        // Çakışan saate görev yazılmaz; hata mesajı aynı gün uygun ilk saati önerir.
+        const day = new Date(`${input.date}T12:00:00`);
+        const [schedule, courseBlocks, sessions] = await Promise.all([getClassSchedule(input.studentUserId), getCourseBlocks(input.studentUserId), listPlannedSessionsOn(input.studentUserId, day)]);
+        const busy = busyOn(day, { blocks: schedule.blocks, courseBlocks, sessions });
+        const conflict = findTaskConflict(busy, start, input.minutes);
+        if (conflict) {
+          const suggestion = suggestStart(busy, input.minutes, { from: start });
+          const what = conflict.kind === "session" ? `planlı çalışmasıyla: ${describeInterval(conflict)}` : `${describeInterval(conflict)} dersiyle`;
+          throw new TRPCError({ code: "BAD_REQUEST", message: `Öğrencinin ${what} çakışıyor. ${suggestion !== null ? `Aynı gün uygun ilk saat: ${fromMinutes(suggestion)}.` : "Bu gün uygun saat yok; başka bir gün seç."}` });
+        }
         const sessionId = await insertAssignedTask({ orgId: ctx.membership.orgId, studentUserId: input.studentUserId, teacherUserId: ctx.user.id, sessionDate: new Date(`${input.date}T${input.time}:00`), title: `${input.subject} · ${input.topic}`, subject: input.subject, topic: input.topic, kind: input.kind, plannedMinutes: input.minutes, targetQuestions: input.targetQuestions || null, summary: input.note || `${ctx.membership.orgName} öğretmeninin atadığı görev.` });
         await audit(ctx, "task.assign", { type: "user", id: input.studentUserId }, { sessionId, subject: input.subject, topic: input.topic });
         return { sessionId };

@@ -17,6 +17,9 @@ const store = {
   upgrades: [] as Array<{ id: number; orgId: number; requestedBy: number; currentPlan: "trial" | "standard" | "pro"; requestedPlan: "trial" | "standard" | "pro"; note: string | null; status: "pending" | "approved" | "rejected" | "canceled" }>,
 };
 const reads: string[] = [];
+// Görev çakışması: öğrencinin kurum ders programı ve o günkü planlı oturumları (test başına ayarlanır).
+let courseBlocks: Array<{ source: "course"; dayOfWeek: number; startTime: string; endTime: string; subject: string | null; label: string; orgName: string; teacherName: string | null; room: string | null }> = [];
+let plannedSessions: Array<{ sessionDate: Date; plannedMinutes: number; status: "planned"; title: string }> = [];
 const active = (orgId: number, userId: number) => store.members.find((m) => m.orgId === orgId && m.userId === userId && m.status === "active" && store.orgs.find((o) => o.id === orgId)?.status === "active");
 
 vi.mock("./org/orgDb", async (importOriginal) => {
@@ -59,6 +62,7 @@ vi.mock("./org/orgDb", async (importOriginal) => {
     deleteNote: vi.fn(async () => undefined),
     listStudentFeedback: vi.fn(async (studentUserId: number) => store.notes.filter((n) => n.studentUserId === studentUserId && n.visibility === "student" && active(n.orgId, studentUserId)).map((n) => ({ id: n.id, body: n.body, orgName: "", authorName: "", createdAt: new Date() }))),
     insertAssignedTask: vi.fn(async (input: { orgId: number; studentUserId: number; teacherUserId: number }) => { store.tasks.push(input); return store.tasks.length; }),
+    listPlannedSessionsOn: vi.fn(async () => plannedSessions),
     writeAudit: vi.fn(async (input: { orgId: number; actorUserId: number; action: string }) => { store.audit.push(input); }),
     listAudit: vi.fn(async (orgId: number) => store.audit.filter((a) => a.orgId === orgId)),
   };
@@ -71,7 +75,7 @@ vi.mock("./db", async (importOriginal) => ({
   getUserMockExams: vi.fn(async () => []),
   getUserTopicProgress: vi.fn(async () => []),
 }));
-vi.mock("./schedule/classScheduleDb", async (importOriginal) => ({ ...(await importOriginal<typeof import("./schedule/classScheduleDb")>()), getClassSchedule: vi.fn(async () => ({ periods: [], blocks: [] })) }));
+vi.mock("./schedule/classScheduleDb", async (importOriginal) => ({ ...(await importOriginal<typeof import("./schedule/classScheduleDb")>()), getClassSchedule: vi.fn(async () => ({ periods: [], blocks: [] })), getCourseBlocks: vi.fn(async () => courseBlocks) }));
 
 const { appRouter } = await import("./routers");
 const { acceptInvitation, createInvitation, updateOrganization, updateOrgMembership } = await import("./org/orgDb");
@@ -85,6 +89,8 @@ const hash = (code: string) => createHash("sha256").update(normalizeInviteCode(c
 // Kurum A (1): yönetici 10, öğretmen 11 (öğrenci 20'ye atanmış), öğretmen 12 (atamasız), öğrenciler 20, 21.
 // Kurum B (2): yönetici 30, öğrenci 40.
 beforeEach(() => {
+  courseBlocks = [];
+  plannedSessions = [];
   store.orgs = [{ id: 1, name: "A Dershanesi", status: "active" }, { id: 2, name: "B Dershanesi", status: "active" }];
   store.members = [
     { orgId: 1, userId: 10, role: "admin", status: "active" }, { orgId: 1, userId: 11, role: "teacher", status: "active" }, { orgId: 1, userId: 12, role: "teacher", status: "active" },
@@ -171,6 +177,19 @@ describe("kurum izolasyonu (docs/kurumsal.md §5)", () => {
     await as(60).org.leave({ orgId: 1 });
     expect(store.audit.map((a) => a.action)).toEqual(["invitation.create", "member.join", "task.assign", "note.create", "member.leave"]);
     expect(store.tasks).toEqual([expect.objectContaining({ orgId: 1, studentUserId: 20, teacherUserId: 11 })]);
+  });
+
+  it("10) görev kurum ders programına ya da öğrencinin planlı çalışmasına yazılmaz; uygun ilk saat önerilir", async () => {
+    // 20 Ekim 2026 Salı: dershanede 16:30–18:00 Matematik, takvimde 19:00 Paragraf (40 dk).
+    courseBlocks = [{ source: "course", dayOfWeek: 2, startTime: "16:30", endTime: "18:00", subject: "Matematik", label: "12-A · Matematik", orgName: "A Dershanesi", teacherName: null, room: null }];
+    plannedSessions = [{ sessionDate: new Date("2026-10-20T19:00:00"), plannedMinutes: 40, status: "planned", title: "Paragraf" }];
+    const task = (time: string) => as(11).org.tasks.assign({ orgId: 1, studentUserId: 20, date: "2026-10-20", time, subject: "Matematik", topic: "Problemler", kind: "Soru çözümü", minutes: 40 });
+    await expect(task("17:00")).rejects.toMatchObject({ code: "BAD_REQUEST", message: expect.stringMatching(/12-A · Matematik \(16:30–18:00\) dersiyle çakışıyor\. Aynı gün uygun ilk saat: 18:10\./) });
+    await expect(task("18:40")).rejects.toMatchObject({ message: expect.stringMatching(/planlı çalışmasıyla: Paragraf \(19:00–19:40\) çakışıyor\. Aynı gün uygun ilk saat: 19:50\./) });
+    expect(store.tasks).toEqual([]);
+    await expect(task("18:10")).resolves.toMatchObject({ sessionId: 1 });
+    plannedSessions = [{ sessionDate: new Date("2026-10-20T18:10:00"), plannedMinutes: 320, status: "planned", title: "Kamp" }];
+    await expect(task("18:20")).rejects.toMatchObject({ message: expect.stringMatching(/Bu gün uygun saat yok/) });
   });
 });
 
