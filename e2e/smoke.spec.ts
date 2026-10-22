@@ -313,22 +313,28 @@ test("kurum ders programı: öğretmen iki sınıfa aynı saatte verilemez, uygu
   await expect(page.getByText("12-B Eşit Ağırlık programı kaydedildi.")).toBeVisible();
 });
 
-test("kurum ders programı otomatik dağıtılır: haftalık saatler yerleşir, çakışma olmaz", async ({ page }) => {
+test("kurum ders programı tüm sınıflar için birlikte otomatik dağıtılır ve kaydedilir", async ({ page }) => {
   await signIn(page, ORG_ADMIN);
   await page.goto("/kurum/ders-programi");
-  await page.getByLabel("Sınıf", { exact: true }).selectOption({ label: "12-B Eşit Ağırlık" });
   await page.getByRole("button", { name: "Otomatik dağıt" }).click();
-  // Satırlar kayıtlı programdan gelir; Türkçe'yi haftada 3 saate çıkar, Matematik ekle.
-  await page.getByLabel("Haftalık saat 1").fill("3");
-  await page.getByRole("button", { name: "Ders ekle", exact: true }).first().click();
+  // 12-B'ye Murat Hoca'yla haftada 3 Matematik ekle, aynı dersleri diğer sınıflara da kopyala.
+  const classPicker = page.getByLabel("Dersleri düzenlenen sınıf");
+  await classPicker.selectOption((await classPicker.locator("option", { hasText: "12-B Eşit Ağırlık" }).getAttribute("value"))!);
+  await page.getByRole("button", { name: "Ders ekle", exact: true }).click();
   const last = await page.getByLabel(/^Ders \d+$/).count();
   await page.getByLabel(`Ders ${last}`).selectOption("Matematik");
+  await page.getByLabel(`Haftalık saat ${last}`).fill("3");
   await page.getByLabel(`Öğretmen ${last}`).selectOption({ label: "Murat Hoca · Matematik" });
+  await page.getByRole("button", { name: "Diğer sınıflara kopyala" }).click();
   await page.getByRole("button", { name: "Programı oluştur" }).click();
-  await expect(page.getByText(/ders yerleşti/)).toBeVisible();
-  await expect(page.getByText("Çakışan dersler var")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Programı kaydet" })).toBeEnabled();
+  await expect(page.getByText(/ders \d+ sınıfa yerleşti/)).toBeVisible();
   await expect(page.locator("main table")).toContainText("Murat Hoca");
+  await page.getByRole("button", { name: "Tümünü kaydet" }).click();
+  await expect(page.getByText(/sınıfın programı kaydedildi/)).toBeVisible();
+  // Kayıttan sonra sınıf programı sekmesine dönülür; Murat Hoca'nın haftası çakışmasız dolu.
+  await page.getByRole("button", { name: "Öğretmen programı" }).click();
+  await page.getByLabel("Öğretmen seç").selectOption({ label: "Murat Hoca · Matematik" });
+  await expect(page.getByText(/Haftada \d+ ders/)).toBeVisible();
 });
 
 test("ortak kitap kaydı: ilk öğrencinin eklediği kitap ikinci öğrenciye 'Bu kitabı mı eklemek istiyorsun?' diye önerilir", async ({ page }) => {

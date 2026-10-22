@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq, inArray } from "drizzle-orm";
 import { classStudents, classTimetableSlots, organizationClasses, organizationMembers, organizations, users } from "../drizzle/schema";
-import { TIMETABLE_PERIOD_PRESETS, branchMismatch, buildPeriodCells, findCrossClassConflicts, generateClassTimetable, validateClassTimetable, weeklyHours, type TimetableSlot } from "../shared/orgTimetable";
+import { TIMETABLE_PERIOD_PRESETS, branchMismatch, buildPeriodCells, findCrossClassConflicts, generateClassTimetable, generateTimetables, validateClassTimetable, weeklyHours, type TimetableSlot } from "../shared/orgTimetable";
 import { getDb } from "./db";
 
 const slot = (dayOfWeek: number, startTime: string, endTime: string, subject: string, teacherUserId: number | null = null, room: string | null = null): TimetableSlot => ({ dayOfWeek, startTime, endTime, subject, teacherUserId, room });
@@ -59,6 +59,19 @@ describe("ders programı kuralları", () => {
     // Aynı gündeki iki Matematik yan yana.
     const math = result.slots.filter((item) => item.subject === "Matematik").map((item) => item.startTime);
     expect(math).toEqual(["09:00", "09:50"]);
+  });
+
+  it("tüm sınıflar birlikte: ortak öğretmen iki sınıfa aynı saatte düşmez, seçilmeyen sınıfın dersi sabit kalır", () => {
+    const cells = buildPeriodCells([6, 7], [], TIMETABLE_PERIOD_PRESETS[1].periods.slice(0, 2));
+    // 2 gün × 2 saat = 4 hücre; her sınıfa 2 Matematik (7) + 2 Türkçe (9): ancak birlikte kurulursa sığar.
+    const requirements = [{ subject: "Matematik", teacherUserId: 7, perWeek: 2 }, { subject: "Türkçe", teacherUserId: 9, perWeek: 2 }];
+    const fixedOther = { ...slot(7, "09:00", "09:40", "Fizik", 8, "C-1"), classId: 3 };
+    const results = generateTimetables({ classes: [{ classId: 1, requirements, room: "A-101" }, { classId: 2, requirements, room: "B-203" }, { classId: 4, requirements: [{ subject: "Fizik", teacherUserId: 8, perWeek: 1 }], room: "c-1" }], cells, others: [fixedOther] });
+    expect(results.map((item) => [item.classId, item.slots.length, item.unplaced])).toEqual([[1, 4, []], [2, 4, []], [4, 1, []]]);
+    const placed = results.flatMap((item) => item.slots.map((value) => ({ ...value, classId: item.classId })));
+    for (const item of results) expect(findCrossClassConflicts(item.classId, item.slots, [...placed, fixedOther])).toEqual([]);
+    // Fizik öğretmeni ve C-1 pazar 09:00'da sabit derste: 4. sınıfın Fiziği başka saate gider.
+    expect(results[2].slots[0]).not.toMatchObject({ dayOfWeek: 7, startTime: "09:00" });
   });
 
   it("haftalık ders sayısı ve süresi derse göre", () => {

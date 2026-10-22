@@ -255,12 +255,20 @@ export async function listOrgTimetable(orgId: number) {
 
 /** Sınıfın programını tümüyle değiştirir (denetim çağıran tarafta). */
 export async function replaceClassTimetable(orgId: number, classId: number, slots: TimetableSlot[]): Promise<boolean> {
+  return replaceClassTimetables(orgId, [{ classId, slots }]);
+}
+
+/** Birden çok sınıfın programı tek işlemde değişir (otomatik dağıtım: ya hepsi ya hiçbiri). */
+export async function replaceClassTimetables(orgId: number, plans: Array<{ classId: number; slots: TimetableSlot[] }>): Promise<boolean> {
   const db = await requireDb();
-  const [row] = await db.select({ id: organizationClasses.id }).from(organizationClasses).where(and(eq(organizationClasses.orgId, orgId), eq(organizationClasses.id, classId))).limit(1);
-  if (!row) return false;
+  const classIds = plans.map((plan) => plan.classId);
+  if (!classIds.length) return true;
+  const rows = await db.select({ id: organizationClasses.id }).from(organizationClasses).where(and(eq(organizationClasses.orgId, orgId), inArray(organizationClasses.id, classIds)));
+  if (rows.length !== new Set(classIds).size) return false;
   await db.transaction(async (tx) => {
-    await tx.delete(classTimetableSlots).where(and(eq(classTimetableSlots.orgId, orgId), eq(classTimetableSlots.classId, classId)));
-    if (slots.length) await tx.insert(classTimetableSlots).values(slots.map((slot) => ({ ...slot, orgId, classId })));
+    await tx.delete(classTimetableSlots).where(and(eq(classTimetableSlots.orgId, orgId), inArray(classTimetableSlots.classId, classIds)));
+    const values = plans.flatMap((plan) => plan.slots.map((slot) => ({ ...slot, orgId, classId: plan.classId })));
+    if (values.length) await tx.insert(classTimetableSlots).values(values);
   });
   return true;
 }

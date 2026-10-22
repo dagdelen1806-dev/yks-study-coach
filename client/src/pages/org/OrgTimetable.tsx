@@ -5,7 +5,7 @@ import { trpc } from "@/lib/trpc";
 import { EmptyNote, PageHeader, Panel, primaryButton, secondaryButton } from "@/components/app/kit";
 import { DAY_LABELS, DAY_SHORT_LABELS } from "@shared/classSchedule";
 import { TEACHER_SUBJECT_GROUPS, TEACHER_SUBJECTS, hasRole } from "@shared/org";
-import { TIMETABLE_PERIOD_PRESETS, branchMismatch, buildPeriodCells, findCrossClassConflicts, generateClassTimetable, sortSlots, validateClassTimetable, weeklyHours, type TimetableSlot } from "@shared/orgTimetable";
+import { TIMETABLE_PERIOD_PRESETS, branchMismatch, buildPeriodCells, findCrossClassConflicts, generateTimetables, sortSlots, validateClassTimetable, weeklyHours, type TimetableSlot } from "@shared/orgTimetable";
 import { AlertTriangle, CalendarRange, Check, Plus, Trash2, UserRound, Wand2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -57,7 +57,7 @@ export default function OrgTimetable({ scope }: { scope: OrgScope }) {
   const utils = trpc.useUtils();
   const canManage = hasRole(scope.role, "coordinator");
   const data = trpc.org.timetable.get.useQuery({ orgId: scope.orgId }, { retry: false });
-  const [tab, setTab] = useState<"class" | "teacher">(canManage ? "class" : "teacher");
+  const [tab, setTab] = useState<"class" | "teacher" | "auto">(canManage ? "class" : "teacher");
   const [classId, setClassId] = useState<number | null>(null);
 
   if (!data.data) return <div className="space-y-5"><PageHeader eyebrow={scope.orgName} title="Ders programı" /><EmptyNote>{data.isError ? "Program yüklenemedi." : "Yükleniyor…"}</EmptyNote></div>;
@@ -70,8 +70,9 @@ export default function OrgTimetable({ scope }: { scope: OrgScope }) {
       <div className="flex w-fit gap-1 rounded-2xl bg-paper p-1">
         <button onClick={() => setTab("class")} className={`rounded-xl px-4 py-2 text-[13px] font-semibold ${tab === "class" ? "bg-white text-ink shadow-sm" : "text-ink-3"}`}>Sınıf programı</button>
         <button onClick={() => setTab("teacher")} className={`rounded-xl px-4 py-2 text-[13px] font-semibold ${tab === "teacher" ? "bg-white text-ink shadow-sm" : "text-ink-3"}`}>Öğretmen programı</button>
+        {canManage && <button onClick={() => setTab("auto")} className={`flex items-center gap-1.5 rounded-xl px-4 py-2 text-[13px] font-semibold ${tab === "auto" ? "bg-white text-ink shadow-sm" : "text-ink-3"}`}><Wand2 size={14} /> Otomatik dağıt</button>}
       </div>
-      {tab === "class" ? (
+      {tab === "auto" && canManage ? <AutoTimetable scope={scope} data={data.data} onSaved={() => { utils.org.timetable.get.invalidate(); setTab("class"); }} /> : tab === "class" ? (
         classes.length === 0 ? <EmptyNote>Önce Sınıflar sayfasından sınıf oluştur.</EmptyNote> : (
           <>
             <label className="block max-w-xs"><span className="form-label">Sınıf</span>
@@ -165,8 +166,6 @@ function ClassTimetable({ scope, data, classId, canManage, onSaved }: { scope: O
         {canManage && dirty && <p className="mt-3 text-[12px] text-ink-3">Kaydedilmemiş değişiklik var.</p>}
       </Panel>
 
-      {canManage && <AutoTimetablePanel data={data} classId={classId} current={current} onGenerated={(generated) => { setSlots(generated); setEditing(null); }} />}
-
       {canManage && (
         <Panel icon={<Plus size={18} />} title={editing === null ? "Ders ekle" : "Dersi düzenle"} subtitle="Tablodaki bir derse tıklayınca burada düzenlenir.">
           <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
@@ -208,6 +207,7 @@ function ClassTimetable({ scope, data, classId, canManage, onSaved }: { scope: O
 }
 
 type RequirementRow = { subject: string; teacherUserId: string; perWeek: number };
+type AutoResult = ReturnType<typeof generateTimetables>;
 
 /** Kayıtlı programdan haftalık ders saatleri: ders başına sayı ve en çok giren öğretmen. */
 function requirementsFrom(slots: TimetableSlot[]): RequirementRow[] {
@@ -220,88 +220,141 @@ function requirementsFrom(slots: TimetableSlot[]): RequirementRow[] {
 }
 
 /**
- * Otomatik dağıt: haftalık ders saatleri + öğretmenler + kullanılabilir saatler verilir, program
- * diğer sınıfların kayıtlı dersleri sabit tutularak kurulur. Sonuç tabloya gelir; kaydetmek yine
- * koordinatörün elindedir (gerekirse hücreye tıklayıp düzeltir).
+ * Otomatik dağıt: seçilen sınıfların haftalık ders saatleri + öğretmenleri + kullanılabilir saatler
+ * verilir; programlar BİRLİKTE kurulur (ortak öğretmen/derslik iki sınıfa aynı saatte düşmez),
+ * seçilmeyen sınıfların kayıtlı programı sabit kalır. Sonuç önizlenir; "Tümünü kaydet" seçilen
+ * sınıfların programını tek işlemde değiştirir.
  */
-function AutoTimetablePanel({ data, classId, current, onGenerated }: { data: Data; classId: number; current: TimetableSlot[]; onGenerated: (slots: TimetableSlot[]) => void }) {
-  const [open, setOpen] = useState(false);
-  const [rows, setRows] = useState<RequirementRow[]>(() => requirementsFrom(current));
+function AutoTimetable({ scope, data, onSaved }: { scope: OrgScope; data: Data; onSaved: () => void }) {
+  const slotsOf = (classId: number) => data.slots.filter((slot) => slot.classId === classId).map(({ dayOfWeek, startTime, endTime, subject, teacherUserId, room }) => ({ dayOfWeek, startTime, endTime, subject, teacherUserId, room: room ?? null }));
+  const [selected, setSelected] = useState<number[]>(() => data.classes.map((item) => item.id));
+  const [editingClass, setEditingClass] = useState<number | null>(data.classes[0]?.id ?? null);
+  const [rowsByClass, setRowsByClass] = useState<Record<number, RequirementRow[]>>(() => Object.fromEntries(data.classes.map((item) => [item.id, requirementsFrom(slotsOf(item.id))])));
+  const [roomByClass, setRoomByClass] = useState<Record<number, string>>(() => Object.fromEntries(data.classes.map((item) => [item.id, slotsOf(item.id).find((slot) => slot.room)?.room ?? ""])));
   const [days, setDays] = useState<number[]>([1, 2, 3, 4, 5]);
   const [weekdayPreset, setWeekdayPreset] = useState(0);
   const [weekendPreset, setWeekendPreset] = useState(1);
-  const [room, setRoom] = useState(() => current.find((slot) => slot.room)?.room ?? "");
+  const [result, setResult] = useState<AutoResult | null>(null);
+  const [previewClass, setPreviewClass] = useState<number | null>(null);
+  const save = trpc.org.timetable.saveClasses.useMutation({
+    onSuccess: (response) => { toast.success(`${result?.length ?? 0} sınıfın programı kaydedildi.`); response.warnings.forEach((warning) => toast.warning(`Branş dışı: ${warning}`)); setResult(null); onSaved(); },
+    onError: (error) => toast.error(error.message),
+  });
+
+  const className = (classId: number) => data.classes.find((item) => item.id === classId)?.name ?? "Sınıf";
+  const teacherName = (userId: number | null) => data.teachers.find((teacher) => teacher.userId === userId)?.name;
   const cells = buildPeriodCells(days, TIMETABLE_PERIOD_PRESETS[weekdayPreset]?.periods ?? [], TIMETABLE_PERIOD_PRESETS[weekendPreset]?.periods ?? []);
-  const total = rows.reduce((sum, row) => sum + (row.subject ? row.perWeek : 0), 0);
+  const activeClass = editingClass !== null && selected.includes(editingClass) ? editingClass : selected[0] ?? null;
+  const rows = activeClass !== null ? rowsByClass[activeClass] ?? [] : [];
+  const setRows = (next: RequirementRow[]) => activeClass !== null && setRowsByClass({ ...rowsByClass, [activeClass]: next });
   const update = (index: number, patch: Partial<RequirementRow>) => setRows(rows.map((row, at) => (at === index ? { ...row, ...patch } : row)));
-  const toggleDay = (day: number) => setDays(days.includes(day) ? days.filter((item) => item !== day) : [...days, day].sort());
+  const totalOf = (classId: number) => (rowsByClass[classId] ?? []).reduce((sum, row) => sum + (row.subject ? row.perWeek : 0), 0);
+  const toggle = <T,>(list: T[], value: T) => (list.includes(value) ? list.filter((item) => item !== value) : [...list, value]);
+  const busiest = selected.reduce((max, classId) => Math.max(max, totalOf(classId)), 0);
 
   const generate = () => {
-    const requirements = rows.filter((row) => row.subject && row.perWeek > 0).map((row) => ({ subject: row.subject, teacherUserId: row.teacherUserId ? Number(row.teacherUserId) : null, perWeek: row.perWeek }));
-    if (!requirements.length) { toast.error("En az bir ders ve haftalık saat gir."); return; }
+    if (!selected.length) { toast.error("En az bir sınıf seç."); return; }
     if (!cells.length) { toast.error("En az bir gün ve saat şablonu seç."); return; }
-    const result = generateClassTimetable({ classId, requirements, cells, others: data.slots.map((slot) => ({ ...slot, room: slot.room ?? null })), room });
-    onGenerated(result.slots);
-    if (result.unplaced.length) toast.warning(`Yerleşmeyen: ${result.unplaced.map((item) => `${item.subject} ${item.missing} saat`).join(", ")}. Gün ya da saat ekleyip tekrar dene; öğretmen o saatlerde başka sınıfta olabilir.`, { duration: 8000 });
-    else toast.success(`${result.slots.length} ders yerleşti. Kontrol edip "Programı kaydet"e bas.`);
+    const classes = selected.map((classId) => ({ classId, room: roomByClass[classId] || null, requirements: (rowsByClass[classId] ?? []).filter((row) => row.subject && row.perWeek > 0).map((row) => ({ subject: row.subject, teacherUserId: row.teacherUserId ? Number(row.teacherUserId) : null, perWeek: row.perWeek })) }));
+    if (classes.every((item) => !item.requirements.length)) { toast.error("En az bir sınıfa ders ve haftalık saat gir."); return; }
+    const generated = generateTimetables({ classes, cells, others: data.slots.map((slot) => ({ ...slot, room: slot.room ?? null })) });
+    setResult(generated);
+    setPreviewClass(generated[0]?.classId ?? null);
+    const missing = generated.filter((item) => item.unplaced.length);
+    if (missing.length) toast.warning(`Yerleşmeyen dersler var: ${missing.map((item) => `${className(item.classId)} (${item.unplaced.map((value) => `${value.subject} ${value.missing}`).join(", ")})`).join("; ")}. Gün ya da saat ekleyip tekrar dene.`, { duration: 9000 });
+    else toast.success(`${generated.reduce((sum, item) => sum + item.slots.length, 0)} ders ${generated.length} sınıfa yerleşti. Önizleyip "Tümünü kaydet"e bas.`);
   };
 
-  if (!open) {
-    return (
-      <div className="flex flex-col gap-3 rounded-2xl border border-dashed border-brand/30 bg-brand-soft/40 p-4 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-[13px] text-ink-2"><strong className="font-semibold text-ink">Otomatik dağıt:</strong> haftalık ders saatlerini ve öğretmenleri ver, program çakışmasız kurulsun.</p>
-        <button onClick={() => setOpen(true)} className={secondaryButton}><Wand2 size={15} /> Otomatik dağıt</button>
-      </div>
-    );
-  }
+  if (!data.classes.length) return <EmptyNote>Önce Sınıflar sayfasından sınıf oluştur.</EmptyNote>;
+  const preview = result?.find((item) => item.classId === previewClass) ?? null;
 
   return (
-    <Panel icon={<Wand2 size={18} />} title="Otomatik dağıt" subtitle="Diğer sınıfların kayıtlı programı sabit kalır; öğretmen ve derslik çakışmaz, bir ders bir güne en fazla 2 kez düşer.">
-      <div className="space-y-2">
-        {rows.map((row, index) => {
-          const matching = data.teachers.filter((teacher) => !row.subject || !branchMismatch(row.subject, teacher.subject));
-          const rest = data.teachers.filter((teacher) => !matching.includes(teacher));
-          return (
-            <div key={index} className="grid grid-cols-[1fr_76px_auto] gap-2 sm:grid-cols-[1.2fr_90px_1.4fr_auto]">
-              <select value={row.subject} onChange={(event) => update(index, { subject: event.target.value, teacherUserId: "" })} className="form-input" aria-label={`Ders ${index + 1}`}>
-                <option value="">Ders seç</option>
-                {TEACHER_SUBJECT_GROUPS.map((group) => <optgroup key={group.label} label={group.label}>{group.subjects.map((subject) => <option key={subject} value={subject}>{subject}</option>)}</optgroup>)}
-                {row.subject && !TEACHER_SUBJECTS.includes(row.subject) && <option value={row.subject}>{row.subject}</option>}
-              </select>
-              <input type="number" min={1} max={20} value={row.perWeek} onChange={(event) => update(index, { perWeek: Math.max(1, Math.min(20, Number(event.target.value) || 1)) })} className="form-input" aria-label={`Haftalık saat ${index + 1}`} title="Haftalık ders saati" />
-              <select value={row.teacherUserId} onChange={(event) => update(index, { teacherUserId: event.target.value })} className="form-input col-span-2 sm:col-span-1" aria-label={`Öğretmen ${index + 1}`}>
-                <option value="">Sonra atanacak</option>
-                {matching.length > 0 && <optgroup label={row.subject ? `${row.subject} branşı` : "Öğretmenler"}>{matching.map((teacher) => <option key={teacher.userId} value={teacher.userId}>{teacher.name}{teacher.subject ? ` · ${teacher.subject}` : ""}</option>)}</optgroup>}
-                {rest.length > 0 && <optgroup label="Diğer branşlar">{rest.map((teacher) => <option key={teacher.userId} value={teacher.userId}>{teacher.name}{teacher.subject ? ` · ${teacher.subject}` : ""}</option>)}</optgroup>}
-              </select>
-              <button onClick={() => setRows(rows.length > 1 ? rows.filter((_, at) => at !== index) : rows)} className="row-start-1 col-start-3 flex h-10 w-10 items-center justify-center rounded-xl text-ink-3 hover:bg-paper sm:col-start-4" aria-label="Satırı sil"><Trash2 size={15} /></button>
+    <div className="space-y-5">
+      <Panel icon={<Wand2 size={18} />} title="1. Sınıflar ve haftalık dersler" subtitle="Seçilen sınıfların programı birlikte kurulur; seçilmeyen sınıfların kayıtlı programı sabit kalır.">
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Dağıtılacak sınıflar">
+          {data.classes.map((item) => (
+            <button key={item.id} type="button" onClick={() => setSelected(toggle(selected, item.id))} aria-pressed={selected.includes(item.id)} className={`rounded-full px-3 py-1.5 text-[12px] font-semibold ${selected.includes(item.id) ? "bg-brand text-white" : "bg-paper text-ink-3"}`}>{item.name}</button>
+          ))}
+        </div>
+        {activeClass !== null && (
+          <div className="mt-4">
+            <div className="flex flex-wrap items-end gap-3">
+              <label className="block min-w-[180px]"><span className="form-label">Dersleri düzenlenen sınıf</span>
+                <select value={activeClass} onChange={(event) => setEditingClass(Number(event.target.value))} className="form-input" aria-label="Dersleri düzenlenen sınıf">{selected.map((classId) => <option key={classId} value={classId}>{className(classId)} · {totalOf(classId)} ders</option>)}</select>
+              </label>
+              <label className="block w-36"><span className="form-label">Derslik</span><input value={roomByClass[activeClass] ?? ""} onChange={(event) => setRoomByClass({ ...roomByClass, [activeClass]: event.target.value })} maxLength={40} placeholder="Ör. B-203" className="form-input" aria-label="Sınıfın dersliği" /></label>
+              {selected.length > 1 && <button type="button" onClick={() => { setRowsByClass({ ...rowsByClass, ...Object.fromEntries(selected.filter((classId) => classId !== activeClass).map((classId) => [classId, rows.map((row) => ({ ...row }))])) }); toast.success("Dersler diğer seçili sınıflara kopyalandı."); }} className={secondaryButton}>Diğer sınıflara kopyala</button>}
             </div>
-          );
-        })}
-        <button onClick={() => setRows([...rows, { subject: "", teacherUserId: "", perWeek: 2 }])} className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-brand"><Plus size={14} /> Ders ekle</button>
-      </div>
+            <div className="mt-3 space-y-2">
+              {rows.map((row, index) => {
+                const matching = data.teachers.filter((teacher) => !row.subject || !branchMismatch(row.subject, teacher.subject));
+                const rest = data.teachers.filter((teacher) => !matching.includes(teacher));
+                return (
+                  <div key={index} className="grid grid-cols-[1fr_76px_auto] gap-2 sm:grid-cols-[1.2fr_90px_1.4fr_auto]">
+                    <select value={row.subject} onChange={(event) => update(index, { subject: event.target.value, teacherUserId: "" })} className="form-input" aria-label={`Ders ${index + 1}`}>
+                      <option value="">Ders seç</option>
+                      {TEACHER_SUBJECT_GROUPS.map((group) => <optgroup key={group.label} label={group.label}>{group.subjects.map((subject) => <option key={subject} value={subject}>{subject}</option>)}</optgroup>)}
+                      {row.subject && !TEACHER_SUBJECTS.includes(row.subject) && <option value={row.subject}>{row.subject}</option>}
+                    </select>
+                    <input type="number" min={1} max={20} value={row.perWeek} onChange={(event) => update(index, { perWeek: Math.max(1, Math.min(20, Number(event.target.value) || 1)) })} className="form-input" aria-label={`Haftalık saat ${index + 1}`} title="Haftalık ders saati" />
+                    <select value={row.teacherUserId} onChange={(event) => update(index, { teacherUserId: event.target.value })} className="form-input col-span-2 sm:col-span-1" aria-label={`Öğretmen ${index + 1}`}>
+                      <option value="">Sonra atanacak</option>
+                      {matching.length > 0 && <optgroup label={row.subject ? `${row.subject} branşı` : "Öğretmenler"}>{matching.map((teacher) => <option key={teacher.userId} value={teacher.userId}>{teacher.name}{teacher.subject ? ` · ${teacher.subject}` : ""}</option>)}</optgroup>}
+                      {rest.length > 0 && <optgroup label="Diğer branşlar">{rest.map((teacher) => <option key={teacher.userId} value={teacher.userId}>{teacher.name}{teacher.subject ? ` · ${teacher.subject}` : ""}</option>)}</optgroup>}
+                    </select>
+                    <button onClick={() => setRows(rows.length > 1 ? rows.filter((_, at) => at !== index) : rows)} className="row-start-1 col-start-3 flex h-10 w-10 items-center justify-center rounded-xl text-ink-3 hover:bg-paper sm:col-start-4" aria-label="Satırı sil"><Trash2 size={15} /></button>
+                  </div>
+                );
+              })}
+              <button onClick={() => setRows([...rows, { subject: "", teacherUserId: "", perWeek: 2 }])} className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-brand"><Plus size={14} /> Ders ekle</button>
+            </div>
+          </div>
+        )}
+      </Panel>
 
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">
-        <label className="block"><span className="form-label">Hafta içi saatleri</span>
-          <select value={weekdayPreset} onChange={(event) => setWeekdayPreset(Number(event.target.value))} className="form-input" aria-label="Hafta içi saatleri">{TIMETABLE_PERIOD_PRESETS.map((preset, index) => <option key={preset.label} value={index}>{preset.label}</option>)}</select>
-        </label>
-        <label className="block"><span className="form-label">Hafta sonu saatleri</span>
-          <select value={weekendPreset} onChange={(event) => setWeekendPreset(Number(event.target.value))} className="form-input" aria-label="Hafta sonu saatleri">{TIMETABLE_PERIOD_PRESETS.map((preset, index) => <option key={preset.label} value={index}>{preset.label}</option>)}</select>
-        </label>
-        <label className="block"><span className="form-label">Derslik (isteğe bağlı)</span><input value={room} onChange={(event) => setRoom(event.target.value)} maxLength={40} placeholder="Ör. B-203" className="form-input" aria-label="Sınıfın dersliği" /></label>
-      </div>
-      <div className="mt-3 flex flex-wrap gap-1.5" role="group" aria-label="Ders günleri">
-        {DAY_LABELS.map((label, index) => (
-          <button key={label} type="button" onClick={() => toggleDay(index + 1)} aria-pressed={days.includes(index + 1)} className={`rounded-full px-3 py-1.5 text-[12px] font-semibold ${days.includes(index + 1) ? "bg-brand text-white" : "bg-paper text-ink-3"}`}>{label}</button>
-        ))}
-      </div>
-      <p className={`mt-3 text-[12.5px] ${total > cells.length ? "text-warn" : "text-ink-3"}`}>Haftalık {total} ders · seçilen günlerde {cells.length} ders saati{total > cells.length ? " — saat yetmiyor, gün ekle." : "."}</p>
-      <div className="mt-4 flex flex-wrap gap-2">
-        <button onClick={generate} className={primaryButton}><Wand2 size={16} /> Programı oluştur</button>
-        <button onClick={() => setOpen(false)} className={secondaryButton}>Kapat</button>
-      </div>
-      <p className="mt-2 text-[12px] text-ink-4">Oluşan program tablodaki kaydedilmemiş programın yerine geçer; beğenmezsen yeniden oluştur ya da sayfayı yenile.</p>
-    </Panel>
+      <Panel icon={<CalendarRange size={18} />} title="2. Günler ve saatler" subtitle="Bir ders bir güne en fazla 2 kez düşer; aynı güne düşen iki ders yan yana konur.">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block"><span className="form-label">Hafta içi saatleri</span>
+            <select value={weekdayPreset} onChange={(event) => setWeekdayPreset(Number(event.target.value))} className="form-input" aria-label="Hafta içi saatleri">{TIMETABLE_PERIOD_PRESETS.map((preset, index) => <option key={preset.label} value={index}>{preset.label}</option>)}</select>
+          </label>
+          <label className="block"><span className="form-label">Hafta sonu saatleri</span>
+            <select value={weekendPreset} onChange={(event) => setWeekendPreset(Number(event.target.value))} className="form-input" aria-label="Hafta sonu saatleri">{TIMETABLE_PERIOD_PRESETS.map((preset, index) => <option key={preset.label} value={index}>{preset.label}</option>)}</select>
+          </label>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-1.5" role="group" aria-label="Ders günleri">
+          {DAY_LABELS.map((label, index) => (
+            <button key={label} type="button" onClick={() => setDays(toggle(days, index + 1).sort())} aria-pressed={days.includes(index + 1)} className={`rounded-full px-3 py-1.5 text-[12px] font-semibold ${days.includes(index + 1) ? "bg-brand text-white" : "bg-paper text-ink-3"}`}>{label}</button>
+          ))}
+        </div>
+        <p className={`mt-3 text-[12.5px] ${busiest > cells.length ? "text-warn" : "text-ink-3"}`}>Haftada {cells.length} ders saati · en yoğun sınıf {busiest} ders{busiest > cells.length ? " — saat yetmiyor, gün ekle." : "."}</p>
+        <div className="mt-4"><button onClick={generate} className={primaryButton}><Wand2 size={16} /> Programı oluştur</button></div>
+      </Panel>
+
+      {result && (
+        <Panel icon={<Check size={18} />} title="3. Önizle ve kaydet" subtitle="Kaydedince seçilen sınıfların kayıtlı programı bu programla değişir."
+          action={<button onClick={() => save.mutate({ orgId: scope.orgId, classes: result.map((item) => ({ classId: item.classId, slots: item.slots.map((slot) => ({ ...slot, room: slot.room ?? undefined })) })) })} disabled={save.isPending} className={primaryButton}><Check size={16} /> {save.isPending ? "Kaydediliyor…" : "Tümünü kaydet"}</button>}>
+          <div className="flex flex-wrap gap-1.5">
+            {result.map((item) => (
+              <button key={item.classId} type="button" onClick={() => setPreviewClass(item.classId)} className={`rounded-xl px-3 py-1.5 text-left text-[12px] font-semibold ${previewClass === item.classId ? "bg-ink text-white" : "bg-paper text-ink-2"}`}>
+                {className(item.classId)} · {item.slots.length} ders{item.unplaced.length ? <span className="ml-1 text-warn">· {item.unplaced.reduce((sum, value) => sum + value.missing, 0)} eksik</span> : ""}
+              </button>
+            ))}
+          </div>
+          {preview && (
+            <div className="mt-4">
+              {preview.unplaced.length > 0 && <p className="mb-3 rounded-xl bg-warn-soft/60 px-3 py-2 text-[12.5px] text-warn">Yerleşmedi: {preview.unplaced.map((value) => `${value.subject} ${value.missing} saat`).join(", ")}.</p>}
+              <WeekGrid slots={preview.slots} render={(slot) => (
+                <>
+                  <span className="block truncate font-semibold text-ink">{slot.subject}</span>
+                  <span className={`block truncate text-[11.5px] ${slot.teacherUserId ? "text-ink-3" : "text-warn"}`}>{teacherName(slot.teacherUserId) ?? "Öğretmen yok"}</span>
+                  {slot.room && <span className="block truncate text-[11px] text-ink-4">{slot.room}</span>}
+                </>
+              )} />
+            </div>
+          )}
+        </Panel>
+      )}
+    </div>
   );
 }
 

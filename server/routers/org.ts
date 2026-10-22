@@ -36,7 +36,7 @@ import {
   listOrganizations,
   listOrgTimetable,
   listStudentTimetable,
-  replaceClassTimetable,
+  replaceClassTimetables,
   listStudentFeedback,
   loadStudentSignals,
   revokeInvitation,
@@ -112,6 +112,37 @@ const timetableSlotInput = z.object({
   teacherUserId: id.nullable(),
   room: optionalText(40),
 });
+
+/**
+ * Sınıf programlarını doğrulayıp kaydeder. Gönderilen sınıflar birbirleriyle ve kurumdaki diğer
+ * sınıfların kayıtlı programıyla çakışamaz (öğretmen/derslik). Branş dışı atama yalnızca uyarıdır.
+ */
+async function saveTimetables(ctx: OrgContext, plans: Array<{ classId: number; slots: z.infer<typeof timetableSlotInput>[] }>) {
+  const orgId = ctx.membership.orgId;
+  const prepared = plans.map((plan) => ({ classId: plan.classId, slots: sortSlots(plan.slots.map((slot) => ({ ...slot, room: slot.room ?? null }))) }));
+  if (new Set(prepared.map((plan) => plan.classId)).size !== prepared.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Bir sınıf iki kez gönderildi." });
+  const [members, classes, current] = await Promise.all([listMembers(orgId), listClasses(orgId), listOrgTimetable(orgId)]);
+  const staff = new Map(members.filter((member) => isStaffRole(member.role)).map((member) => [member.userId, member]));
+  const className = (classId: number) => classes.find((item) => item.id === classId)?.name ?? "başka bir";
+  for (const plan of prepared) {
+    if (!classes.some((item) => item.id === plan.classId)) throw new TRPCError({ code: "NOT_FOUND", message: "Sınıf bulunamadı." });
+    const problem = validateClassTimetable(plan.slots);
+    if (problem) throw new TRPCError({ code: "BAD_REQUEST", message: prepared.length > 1 ? `${className(plan.classId)}: ${problem}` : problem });
+    if (plan.slots.some((slot) => slot.teacherUserId && !staff.has(slot.teacherUserId))) throw new TRPCError({ code: "NOT_FOUND", message: "Öğretmen bulunamadı." });
+  }
+  const replaced = new Set(prepared.map((plan) => plan.classId));
+  const placed = [...current.filter((slot) => !replaced.has(slot.classId)).map((slot) => ({ ...slot, room: slot.room ?? null })), ...prepared.flatMap((plan) => plan.slots.map((slot) => ({ ...slot, classId: plan.classId })))];
+  const conflicts = prepared.flatMap((plan) => findCrossClassConflicts(plan.classId, plan.slots, placed));
+  if (conflicts.length) {
+    const names = { teacher: (userId: number) => staff.get(userId)?.name ?? "Öğretmen", className };
+    throw new TRPCError({ code: "CONFLICT", message: conflicts.slice(0, 3).map((conflict) => describeConflict(conflict, names)).join(" ") });
+  }
+  await replaceClassTimetables(orgId, prepared);
+  for (const plan of prepared) await audit(ctx, "timetable.update", { type: "class", id: plan.classId }, { slots: plan.slots.length, auto: prepared.length > 1 });
+  const warnings = prepared.flatMap((plan) => plan.slots).filter((slot) => slot.teacherUserId && branchMismatch(slot.subject, staff.get(slot.teacherUserId)?.subject ?? null))
+    .map((slot) => `${staff.get(slot.teacherUserId!)?.name} (${staff.get(slot.teacherUserId!)?.subject}) ${slot.subject} dersine atandı.`);
+  return { ok: true, warnings: Array.from(new Set(warnings)) };
+}
 
 const average = (values: number[]) => (values.length ? Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 10) / 10 : null);
 
@@ -351,26 +382,11 @@ export const orgRouter = router({
     }),
     saveClass: orgProcedure("coordinator")
       .input(z.object({ classId: id, slots: z.array(timetableSlotInput).max(MAX_TIMETABLE_SLOTS_PER_CLASS) }))
-      .mutation(async ({ ctx, input }) => {
-        const orgId = ctx.membership.orgId;
-        const slots = sortSlots(input.slots.map((slot) => ({ ...slot, room: slot.room ?? null })));
-        const problem = validateClassTimetable(slots);
-        if (problem) throw new TRPCError({ code: "BAD_REQUEST", message: problem });
-        const [members, classes, current] = await Promise.all([listMembers(orgId), listClasses(orgId), listOrgTimetable(orgId)]);
-        const staff = new Map(members.filter((member) => isStaffRole(member.role)).map((member) => [member.userId, member]));
-        if (!classes.some((item) => item.id === input.classId)) throw new TRPCError({ code: "NOT_FOUND", message: "Sınıf bulunamadı." });
-        if (slots.some((slot) => slot.teacherUserId && !staff.has(slot.teacherUserId))) throw new TRPCError({ code: "NOT_FOUND", message: "Öğretmen bulunamadı." });
-        const conflicts = findCrossClassConflicts(input.classId, slots, current.map((slot) => ({ ...slot, room: slot.room ?? null })));
-        if (conflicts.length) {
-          const names = { teacher: (userId: number) => staff.get(userId)?.name ?? "Öğretmen", className: (classId: number) => classes.find((item) => item.id === classId)?.name ?? "başka bir" };
-          throw new TRPCError({ code: "CONFLICT", message: conflicts.slice(0, 3).map((conflict) => describeConflict(conflict, names)).join(" ") });
-        }
-        await replaceClassTimetable(orgId, input.classId, slots);
-        await audit(ctx, "timetable.update", { type: "class", id: input.classId }, { slots: slots.length });
-        const warnings = slots.filter((slot) => slot.teacherUserId && branchMismatch(slot.subject, staff.get(slot.teacherUserId)?.subject ?? null))
-          .map((slot) => `${staff.get(slot.teacherUserId!)?.name} (${staff.get(slot.teacherUserId!)?.subject}) ${slot.subject} dersine atandı.`);
-        return { ok: true, warnings: Array.from(new Set(warnings)) };
-      }),
+      .mutation(({ ctx, input }) => saveTimetables(ctx, [input])),
+    // Otomatik dağıtımın sonucu: seçilen sınıfların programı birlikte, tek işlemde kaydedilir.
+    saveClasses: orgProcedure("coordinator")
+      .input(z.object({ classes: z.array(z.object({ classId: id, slots: z.array(timetableSlotInput).max(MAX_TIMETABLE_SLOTS_PER_CLASS) })).min(1).max(100) }))
+      .mutation(({ ctx, input }) => saveTimetables(ctx, input.classes)),
   }),
 
   assignments: router({

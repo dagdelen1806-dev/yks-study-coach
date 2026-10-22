@@ -92,36 +92,51 @@ export function weeklyHours(slots: TimetableSlot[]): Array<{ subject: string; co
 export const sortSlots = <T extends Pick<TimetableSlot, "dayOfWeek" | "startTime">>(slots: T[]) => slots.slice().sort((a, b) => a.dayOfWeek - b.dayOfWeek || toMinutes(a.startTime) - toMinutes(b.startTime));
 
 // ---------------------------------------------------------------------------
-// Otomatik dağıtım: koordinatör sınıfın haftalık ders saatlerini (ders × saat × öğretmen) ve
-// kullanılabilir ders saatlerini verir; program diğer sınıfların kayıtlı dersleri sabit kabul
-// edilerek kurulur. Kurallar: öğretmen ve derslik başka sınıfta aynı saatte olamaz, bir ders bir
-// güne en fazla `maxPerDay` kez düşer; dersler günlere yayılır, günlük yük dengelenir.
+// Otomatik dağıtım: koordinatör sınıfların haftalık ders saatlerini (ders × saat × öğretmen) ve
+// kullanılabilir ders saatlerini verir; seçilen sınıfların programı BİRLİKTE kurulur, seçilmeyen
+// sınıfların kayıtlı dersleri sabit kabul edilir. Kurallar: öğretmen ve derslik aynı saatte iki
+// sınıfta olamaz, bir ders bir güne en fazla `maxPerDay` kez düşer; dersler günlere yayılır,
+// günlük yük dengelenir, aynı güne düşen iki ders yan yana konur.
 
 export type LessonRequirement = { subject: string; teacherUserId: number | null; perWeek: number };
 export type PeriodCell = { dayOfWeek: number; startTime: string; endTime: string };
 export type GenerateResult = { slots: TimetableSlot[]; unplaced: Array<{ subject: string; missing: number }> };
+export type ClassPlanInput = { classId: number; requirements: LessonRequirement[]; room?: string | null };
 
 export const AUTO_TIMETABLE_MAX_PER_DAY = 2;
-const SEARCH_BUDGET = 20_000;
+const SEARCH_BUDGET = 60_000;
 
-export function generateClassTimetable(input: { classId: number; requirements: LessonRequirement[]; cells: PeriodCell[]; others: PlacedSlot[]; room?: string | null; maxPerDay?: number }): GenerateResult {
+const roomKeyOf = (room: string | null | undefined) => room?.trim().toLocaleLowerCase("tr") || null;
+
+export function generateTimetables(input: { classes: ClassPlanInput[]; cells: PeriodCell[]; others: PlacedSlot[]; maxPerDay?: number }): Array<GenerateResult & { classId: number }> {
   const maxPerDay = input.maxPerDay ?? AUTO_TIMETABLE_MAX_PER_DAY;
-  const room = input.room?.trim() || null;
-  const roomKey = room?.toLocaleLowerCase("tr") ?? null;
-  // Aynı ders saati iki kez verilirse bir kez sayılır; sınıfın iki hücresi çakışmasın diye çakışan hücre elenir.
+  const classIds = new Set(input.classes.map((item) => item.classId));
+  // Aynı ders saati iki kez verilirse bir kez sayılır; birbiriyle çakışan hücreden ilki kalır.
   const cells = sortSlots(input.cells.filter((cell, index, all) => isValidTime(cell.startTime) && isValidTime(cell.endTime) && toMinutes(cell.endTime) > toMinutes(cell.startTime) && all.findIndex((other) => overlaps(other, cell)) === index));
-  const others = input.others.filter((slot) => slot.classId !== input.classId);
-  const blocked = (cell: PeriodCell, teacherUserId: number | null) => others.some((slot) => overlaps(slot, cell) && ((teacherUserId !== null && slot.teacherUserId === teacherUserId) || (roomKey !== null && slot.room?.trim().toLocaleLowerCase("tr") === roomKey)));
-  const requirements = input.requirements.filter((item) => item.subject.trim() && item.perWeek > 0).map((item) => ({ ...item, remaining: Math.floor(item.perWeek) }));
-  // Ders başına uygun hücreler bir kez hesaplanır (yalnızca diğer sınıflara bağlı).
-  const allowed = requirements.map((item) => cells.map((cell) => !blocked(cell, item.teacherUserId)));
-  const taken: Array<number | null> = cells.map(() => null);
-  const perDay = requirements.map(() => new Map<number, number>());
-  const dayLoad = new Map<number, number>();
+  const fixed = input.others.filter((slot) => !classIds.has(slot.classId));
+  const rooms = input.classes.map((item) => item.room?.trim() || null);
+  const items = input.classes.flatMap((plan, classIndex) => plan.requirements.filter((item) => item.subject.trim() && item.perWeek > 0).map((item) => ({ ...item, classIndex, roomKey: roomKeyOf(rooms[classIndex]), remaining: Math.floor(item.perWeek) })));
+  // Sabit (seçilmeyen sınıflardaki) derslerle çakışmayan hücreler bir kez hesaplanır.
+  const allowed = items.map((item) => cells.map((cell) => !fixed.some((slot) => overlaps(slot, cell) && ((item.teacherUserId !== null && slot.teacherUserId === item.teacherUserId) || (item.roomKey !== null && roomKeyOf(slot.room) === item.roomKey)))));
+  const taken: Array<Array<number | null>> = input.classes.map(() => cells.map(() => null));
+  const teacherAt = new Map<number, Set<number>>();
+  const roomAt = new Map<string, Set<number>>();
+  const perDay = items.map(() => new Map<number, number>());
+  const dayLoad = input.classes.map(() => new Map<number, number>());
+  const busy = <K,>(map: Map<K, Set<number>>, key: K | null, cell: number) => key !== null && Boolean(map.get(key)?.has(cell));
+  const mark = <K,>(map: Map<K, Set<number>>, key: K | null, cell: number, on: boolean) => {
+    if (key === null) return;
+    const set = map.get(key) ?? new Set<number>();
+    if (on) set.add(cell); else set.delete(cell);
+    map.set(key, set);
+  };
+
   const candidates = (index: number) => {
+    const item = items[index];
+    const own = taken[item.classIndex];
     const list: number[] = [];
     for (let cell = 0; cell < cells.length; cell += 1) {
-      if (taken[cell] !== null || !allowed[index][cell]) continue;
+      if (own[cell] !== null || !allowed[index][cell] || busy(teacherAt, item.teacherUserId, cell) || busy(roomAt, item.roomKey, cell)) continue;
       if ((perDay[index].get(cells[cell].dayOfWeek) ?? 0) >= maxPerDay) continue;
       list.push(cell);
     }
@@ -129,25 +144,28 @@ export function generateClassTimetable(input: { classId: number; requirements: L
     const score = (cell: number) => {
       const day = cells[cell].dayOfWeek;
       const sameDay = perDay[index].get(day) ?? 0;
-      const adjacent = sameDay > 0 && [cell - 1, cell + 1].some((other) => taken[other] === index && cells[other].dayOfWeek === day);
-      return sameDay * 100 + (adjacent ? -50 : 0) + (dayLoad.get(day) ?? 0) * 10 + cell * 0.01;
+      const adjacent = sameDay > 0 && [cell - 1, cell + 1].some((other) => own[other] === index && cells[other].dayOfWeek === day);
+      return sameDay * 100 + (adjacent ? -50 : 0) + (dayLoad[item.classIndex].get(day) ?? 0) * 10 + cell * 0.01;
     };
     return list.sort((a, b) => score(a) - score(b));
   };
   const place = (index: number, cell: number, delta: 1 | -1) => {
+    const item = items[index];
     const day = cells[cell].dayOfWeek;
-    taken[cell] = delta === 1 ? index : null;
-    requirements[index].remaining -= delta;
+    taken[item.classIndex][cell] = delta === 1 ? index : null;
+    mark(teacherAt, item.teacherUserId, cell, delta === 1);
+    mark(roomAt, item.roomKey, cell, delta === 1);
+    item.remaining -= delta;
     perDay[index].set(day, (perDay[index].get(day) ?? 0) + delta);
-    dayLoad.set(day, (dayLoad.get(day) ?? 0) + delta);
+    dayLoad[item.classIndex].set(day, (dayLoad[item.classIndex].get(day) ?? 0) + delta);
   };
   let budget = SEARCH_BUDGET;
-  // En az seçeneği kalan ders önce (MRV); yer kalmazsa geri al. Bütçe biterse en iyi kısmi sonuç kalır.
+  // En az seçeneği kalan ders önce (MRV); yer kalmazsa geri al. Bütçe biterse kısmi sonuca düşülür.
   const solve = (): boolean => {
     let pick = -1;
     let options: number[] = [];
-    for (let index = 0; index < requirements.length; index += 1) {
-      if (requirements[index].remaining <= 0) continue;
+    for (let index = 0; index < items.length; index += 1) {
+      if (items[index].remaining <= 0) continue;
       const list = candidates(index);
       if (pick === -1 || list.length < options.length) { pick = index; options = list; }
       if (!list.length) break;
@@ -163,21 +181,31 @@ export function generateClassTimetable(input: { classId: number; requirements: L
   };
   if (!solve()) {
     // Tam çözüm yok: geri izlemesiz, seçeneği az olan dersten başlayarak yerleşebilenler yerleşir.
-    taken.fill(null);
-    requirements.forEach((item, index) => { item.remaining = Math.floor(item.perWeek); perDay[index].clear(); });
-    dayLoad.clear();
-    const order = requirements.map((_, index) => index).sort((a, b) => allowed[a].filter(Boolean).length - allowed[b].filter(Boolean).length);
+    taken.forEach((row) => row.fill(null));
+    teacherAt.clear();
+    roomAt.clear();
+    items.forEach((item, index) => { item.remaining = Math.floor(item.perWeek); perDay[index].clear(); });
+    dayLoad.forEach((map) => map.clear());
+    const order = items.map((_, index) => index).sort((a, b) => allowed[a].filter(Boolean).length - allowed[b].filter(Boolean).length);
     for (const index of order) {
-      while (requirements[index].remaining > 0) {
+      while (items[index].remaining > 0) {
         const [cell] = candidates(index);
         if (cell === undefined) break;
         place(index, cell, 1);
       }
     }
   }
-  const slots = sortSlots(taken.flatMap((owner, cell) => owner === null ? [] : [{ ...cells[cell], subject: requirements[owner].subject.trim(), teacherUserId: requirements[owner].teacherUserId, room }]));
-  const unplaced = requirements.filter((item) => item.remaining > 0).map((item) => ({ subject: item.subject.trim(), missing: item.remaining }));
-  return { slots, unplaced };
+  return input.classes.map((plan, classIndex) => ({
+    classId: plan.classId,
+    slots: sortSlots(taken[classIndex].flatMap((owner, cell) => owner === null ? [] : [{ ...cells[cell], subject: items[owner].subject.trim(), teacherUserId: items[owner].teacherUserId, room: rooms[classIndex] }])),
+    unplaced: items.filter((item) => item.classIndex === classIndex && item.remaining > 0).map((item) => ({ subject: item.subject.trim(), missing: item.remaining })),
+  }));
+}
+
+/** Tek sınıf: diğer sınıfların kayıtlı programı sabit. */
+export function generateClassTimetable(input: { classId: number; requirements: LessonRequirement[]; cells: PeriodCell[]; others: PlacedSlot[]; room?: string | null; maxPerDay?: number }): GenerateResult {
+  const [result] = generateTimetables({ classes: [{ classId: input.classId, requirements: input.requirements, room: input.room }], cells: input.cells, others: input.others, maxPerDay: input.maxPerDay });
+  return { slots: result.slots, unplaced: result.unplaced };
 }
 
 /** Seçilen günlere şablon saatlerini yayar (hafta içi ve hafta sonu ayrı şablon alabilir). */
