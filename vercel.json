@@ -1,7 +1,7 @@
 {
   "buildCommand": "npm run build:vercel",
   "outputDirectory": "dist/public",
-  "regions": ["fra1"],
+  "regions": ["dub1"],
   "functions": {
     "api/index.js": { "maxDuration": 300 }
   },

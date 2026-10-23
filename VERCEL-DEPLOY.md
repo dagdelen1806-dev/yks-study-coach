@@ -80,8 +80,9 @@ Ekim 2026'ya kadar Railway MySQL kullanıldı; o döneme ait migration'lar
 `drizzle/mysql-legacy/` altında arşivde, aşağıdaki MySQL migration notları da
 yalnızca geçmiş içindir. Taşıma betikleri: `scripts/pg-migration/`.
 
-Supabase projesi (Pro plan, bölge **Frankfurt / eu-central-1**; Vercel
-fonksiyonları da `fra1`'de) → **Connect** → iki adres:
+Supabase projesi **pusulastudy** (`znxtmqppfokarcabprwj`, bölge **İrlanda / eu-west-1**;
+Vercel fonksiyonları da aynı bölgede, `dub1` — `vercel.json`) → **Connect** → iki adres
+(havuzlayıcı sunucusu `aws-0-eu-west-1.pooler.supabase.com`):
 
 - **Transaction pooler** (port **6543**): uygulamanın `DATABASE_URL`'i, Vercel'e bu girer.
   Sunucusuz fonksiyonlar çok sayıda kısa bağlantı açar; havuzlayıcı bunları toplar.
