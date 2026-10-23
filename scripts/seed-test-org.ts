@@ -16,7 +16,11 @@ import { parseIdentifier } from "../server/_core/loginIdentifier";
 import { academicCases, caseActions, caseEvaluations, caseEvidence, classStudents, classTimetableSlots, counselingNotes, featureUsageLogs, organizationCreditUsage, organizationAuditLogs, organizationClasses, organizationInvitations, organizationMembers, organizations, parentLinks, payments, studentExamTracks, studentProfiles, subscriptions, teacherAssignments, topicStudyLogs, userMockExams, users } from "../drizzle/schema";
 
 const SLUG = "test-dershanesi";
-const PASSWORD = "test1234";
+// Tanıtım (canlı veritabanı) için: SEED_PASSWORD güçlü bir şifre, SEED_ORG_NAME kurum adı, SEED_NO_EMAIL=1
+// bu hesaplara hiçbir özet e-postası gitmesin (adresler @test.local, var olmayan alan adı).
+const PASSWORD = process.env.SEED_PASSWORD || "test1234";
+const ORG_NAME = process.env.SEED_ORG_NAME || "Test Dershanesi";
+if (/supabase\.(co|com)/.test(process.env.DATABASE_URL ?? "") && PASSWORD.length < 12) throw new Error("Canlı veritabanında en az 12 karakterlik SEED_PASSWORD gerekli (test1234 kullanılamaz).");
 const staff = [
   { email: "kurum.admin@test.local", name: "Selin Yönetici", role: "admin" as const, subject: null },
   { email: "ogretmen1@test.local", name: "Murat Hoca", role: "teacher" as const, subject: "Matematik" },
@@ -66,7 +70,7 @@ async function main() {
     await db.delete(organizations).where(eq(organizations.id, old.id));
   }
 
-  const orgResult = await db.insert(organizations).values({ name: "Test Dershanesi", slug: SLUG, plan: "standard", membershipStartsAt: new Date(), membershipEndsAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), aiCreditsMonthly: 5000, academicCasesEnabled: 1, city: "Ankara", district: "Çankaya", contactEmail: "kvkk@test.local" }).returning({ id: organizations.id });
+  const orgResult = await db.insert(organizations).values({ name: ORG_NAME, slug: SLUG, plan: "standard", membershipStartsAt: new Date(), membershipEndsAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), aiCreditsMonthly: 5000, academicCasesEnabled: 1, city: "Ankara", district: "Çankaya", contactEmail: "kvkk@test.local" }).returning({ id: organizations.id });
   const orgId = Number(orgResult[0].id);
 
   const staffIds: Record<string, number> = {};
@@ -151,7 +155,15 @@ async function main() {
     { userId: agsId, track: "MEB_AGS", gradeLevel: "lisans_mezun", examYear: agsYear },
   ]);
 
-  console.log(`\nKurum hazır (id ${orgId}). Şifre: ${PASSWORD}`);
+  if (process.env.SEED_NO_EMAIL === "1") {
+    // Deneme hesapları @test.local: hiçbir haftalık özet e-postası denenmesin (geri dönen mail gönderici itibarını bozar).
+    const seededIds = [...Object.values(staffIds), ...studentIds, lgsId, parentId, kpssId, agsId];
+    await db.update(organizationMembers).set({ weeklyDigestOptOut: 1 }).where(eq(organizationMembers.orgId, orgId));
+    await db.update(studentProfiles).set({ weeklyDigestOptOut: 1 }).where(inArray(studentProfiles.userId, seededIds));
+    await db.update(parentLinks).set({ weeklyDigestOptOut: 1 }).where(inArray(parentLinks.parentUserId, seededIds));
+    console.log("E-posta: bu hesapların tüm haftalık özetleri kapatıldı.");
+  }
+  console.log(`\nKurum hazır (id ${orgId}). Şifre: ${process.env.SEED_PASSWORD ? "(SEED_PASSWORD)" : PASSWORD}`);
   console.log(`  LGS öğrencisi: ${LGS_STUDENT.email} · Veli: ${PARENT.email} · KPSS + MEB-AGS adayı: ${AGS_CANDIDATE.email}`);
   console.log(`  Yönetici: ${staff[0].email}\n  Öğretmenler: ${staff[1].email} (Matematik), ${staff[2].email} (Türkçe, 12-B sorumlusu), ${staff[3].email} (Fizik, 12-A sorumlusu)\n  Öğrenciler: ${students.map((student) => student.email).join(", ")}`);
   process.exit(0);
