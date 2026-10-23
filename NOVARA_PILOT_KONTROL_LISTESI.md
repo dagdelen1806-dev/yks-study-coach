@@ -12,9 +12,9 @@ Her madde ya ✅ (yapıldı ve doğrulandı) ya da ☐ (pilottan önce yapılmal
 
 | # | Madde | Kim | Durum |
 |---|---|---|---|
-| 1.1 | **Supabase geçişi:** veritabanı (`DATABASE_URL`, havuzlayıcı 6543) ve migration'lar `0000 → 0002` sırayla | Kurucu + Claude | ☐ |
-| 1.2 | **Supabase Storage:** Vercel'e `SUPABASE_URL` ve `SUPABASE_SERVICE_ROLE_KEY`; ilk fotoğraf yüklenip açılarak denenmeli (bucket kendiliğinden özel oluşur) | Kurucu | ☐ |
-| 1.3 | **Saat dilimi:** ✅ sunucu açılışta Türkiye saatine sabitleniyor (`server/_core/timezone.ts`, isteğe bağlı `APP_TIMEZONE`); UTC'de derlenmiş paketle doğrulandı. ☐ Kalan: canlıda bir görev atayıp öğrencide aynı saatte göründüğünü görmek | Kurucu + Claude | ☐ (yalnızca canlı doğrulama) |
+| 1.1 | **Supabase geçişi** (23.10.2026): proje `pusulastudy` (eu-west-1), 61 tablo, tümünde RLS; Vercel `DATABASE_URL` = havuzlayıcı 6543, fonksiyonlar `dub1`; canlıda giriş ve veri doğrulandı | Kurucu + Claude | ✅ |
+| 1.2 | **Supabase Storage:** Vercel'de `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`; canlıda fotoğraf yüklendi, `pusula-media` özel bucket'ından imzalı bağlantıyla sunuldu | Kurucu + Claude | ✅ |
+| 1.3 | **Saat dilimi:** sunucu Türkiye saatine sabit (`server/_core/timezone.ts`); canlıda öğretmen görevi 18:40 → öğrencide 18:40 (UTC 15:40), bildirimde de 18:40 | Claude | ✅ |
 | 1.4 | **Hukuk:** KVKK aydınlatma ve veli rıza metinleri (taslak: `shared/parent.ts`, kurum KVKK şablonu). Akademik takip ve **mahrem not kuralı** aydınlatma metnine eklenmeli: "Öğretmen notlarını yalnızca yazan ve öğrencinin sorumlu öğretmenleri görür; kurum yöneticisi ve veli görmez." | Kurucu + hukuk | ☐ |
 | 1.5 | **E-posta sağlayıcısı:** `BREVO_API_KEY` (ya da `RESEND_API_KEY`) ve doğrulanmış `MAIL_FROM`; öğretmen özetinin pazar gönderimi için şart | Kurucu | ☐ |
 | 1.6 | **Marka:** uygulama ve e-postalar hâlâ "Pusula YKS". Pilotta hangi ad görünecek? | Kurucu | ☐ |
