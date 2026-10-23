@@ -47,6 +47,22 @@ describe("buildTeacherDigestEmail", () => {
     expect(mail.html).not.toContain("<Ali");
     expect(mail.html).toContain("https://pusula.example/kurum");
     expect(mail.text).toContain("<Ali & Veli>: Net düşüşü");
+    // Akademik takip kapalı kurumda bölüm hiç yok.
+    expect(digest.academic).toBeNull();
+    expect(mail.text).not.toContain("Akademik takip");
+  });
+
+  it("akademik takip açıksa: yeni inceleme önerileri ve açık dosya sayıları; boşsa bölüm yok", () => {
+    const academic = { suggestions: [{ name: "Zeynep", description: "TYT: 82 → 76 → 69 (−13 net)" }], openCases: 2, staleCases: 1 };
+    const students = [{ name: "Zeynep", summary: summary({ weekMinutes: 120, adherence: 70 }) }];
+    const digest = buildTeacherDigest(students, academic);
+    const mail = buildTeacherDigestEmail({ to: "hoca@ornek.com", name: "Kenan", orgName: "Test Dershanesi", digest, rangeLabel: "19 – 25 Ekim", panelUrl: "https://pusula.example/kurum", unsubscribeUrl: "https://pusula.example/u", casesUrl: "https://pusula.example/kurum/akademik-takip" });
+    expect(mail.text).toContain("1 yeni inceleme önerisi:");
+    expect(mail.text).toContain("• Zeynep: TYT: 82 → 76 → 69 (−13 net)");
+    expect(mail.text).toContain("Açık takip dosyaların: 2 (1 dosya 7 günden uzun süredir işlem bekliyor)");
+    expect(mail.html).toContain("teşhis değildir");
+    expect(mail.html).toContain("https://pusula.example/kurum/akademik-takip");
+    expect(buildTeacherDigest(students, { suggestions: [], openCases: 0, staleCases: 0 }).academic).toBeNull();
   });
 });
 

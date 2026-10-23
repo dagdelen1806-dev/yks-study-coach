@@ -62,7 +62,7 @@ import {
   updateOrganization,
 } from "../org/orgDb";
 import { getClassSchedule, getCourseBlocks } from "../schedule/classScheduleDb";
-import { canReadNotes, filterPrivateNotes } from "../org/caseDb";
+import { canReadNotes, filterPrivateNotes, notifyStudentOfTasks } from "../org/caseDb";
 import { orgCasesRouter } from "./orgCases";
 import { creditsUsedThisMonth, orgCreditReport } from "../org/orgCredits";
 
@@ -424,6 +424,8 @@ export const orgRouter = router({
         }
         const sessionId = await insertAssignedTask({ orgId: ctx.membership.orgId, studentUserId: input.studentUserId, teacherUserId: ctx.user.id, sessionDate: new Date(`${input.date}T${input.time}:00`), title: `${input.subject} · ${input.topic}`, subject: input.subject, topic: input.topic, kind: input.kind, plannedMinutes: input.minutes, targetQuestions: input.targetQuestions || null, summary: input.note || `${ctx.membership.orgName} öğretmeninin atadığı görev.` });
         await audit(ctx, "task.assign", { type: "user", id: input.studentUserId }, { sessionId, subject: input.subject, topic: input.topic });
+        const teacherName = (await listMembers(ctx.membership.orgId)).find((member) => member.userId === ctx.user.id)?.name ?? null;
+        await notifyStudentOfTasks({ studentUserId: input.studentUserId, teacherName, sessionDates: [new Date(`${input.date}T${input.time}:00`)] }).catch(() => undefined);
         return { sessionId };
       }),
   }),

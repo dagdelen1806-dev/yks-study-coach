@@ -1,10 +1,12 @@
 import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
-import { academicCases, bookCurriculumTopics, bookInventory, caseActions, caseEvaluations, caseEvidence, catalogBooks, classStudents, counselingNotes, organizationClasses, organizations, studyPlanSessions, teacherAssignments, topicStudyLogs, userBookContents, userMockExams, userResourceBooks, users, yksTopics } from "../../drizzle/schema";
+import { academicCases, bookCurriculumTopics, bookInventory, caseActions, caseEvaluations, caseEvidence, catalogBooks, classStudents, coachAlerts, counselingNotes, organizationClasses, organizations, studyPlanSessions, teacherAssignments, topicStudyLogs, userBookContents, userMockExams, userResourceBooks, users, yksTopics } from "../../drizzle/schema";
 import { comparabilityKey, describeTrend, trendDecline, trendSignals, type ComparableExam, type TrendResult } from "../../shared/academicCase";
 import type { ClassBlock } from "../../shared/classSchedule";
 import type { ExamKind } from "../../shared/exams";
 import { busyOn, placePlanItems, type Placement } from "../../shared/planPlacement";
+import type { AcademicDigest } from "../../shared/teacherDigest";
 import { getDb, getUserTopicProgress } from "../db";
+import { pushConfigured, sendToUser } from "../push/push";
 import { getClassSchedule, getCourseBlocks } from "../schedule/classScheduleDb";
 import { insertAssignedTask } from "./orgDb";
 
@@ -289,13 +291,17 @@ export async function assignCasePlan(input: { orgId: number; caseId: number; act
   }
   const sessionIds: number[] = [];
   const skipped: Array<{ itemIndex: number; reason: "no_slot" }> = [];
+  const placedDates: Date[] = [];
   for (const placement of placements) {
     const item = input.items[placement.index];
     if (!placement.date) { skipped.push({ itemIndex: placement.index, reason: "no_slot" }); continue; }
     const at = new Date(placement.date);
     at.setHours(Math.floor(placement.start / 60), placement.start % 60, 0, 0);
     sessionIds.push(await insertAssignedTask({ orgId: input.orgId, studentUserId: row.studentUserId, teacherUserId: input.actorUserId, sessionDate: at, title: `${item.subject} · ${item.topic}`, subject: item.subject, topic: item.topic, kind: "Konu tekrarı", plannedMinutes: item.minutes, targetQuestions: item.targetQuestions ?? null, summary: "Akademik takip dosyasından öğretmenin önerdiği çalışma.", caseActionId: actionId, targetPages: item.pages ?? null, sourceBookId: item.bookId ?? null }));
+    placedDates.push(at);
   }
+  const [teacher] = await db.select({ name: users.name }).from(users).where(eq(users.id, input.actorUserId)).limit(1);
+  await notifyStudentOfTasks({ studentUserId: row.studentUserId, teacherName: teacher?.name ?? null, sessionDates: placedDates }).catch((error) => console.warn("[cases] notify failed:", error instanceof Error ? error.message : error));
   return { actionId, sessionIds, skipped, duplicate: false };
 }
 
@@ -374,6 +380,42 @@ export async function setStudentFeedback(studentUserId: number, sessionId: numbe
   const rows = await db.update(studyPlanSessions).set({ studentFeedback: feedback, studentFeedbackAt: now, ...(feedback === "done" ? { status: "completed" as const, completedAt: now } : {}) })
     .where(and(eq(studyPlanSessions.id, sessionId), eq(studyPlanSessions.userId, studentUserId), sql`${studyPlanSessions.assignedByUserId} IS NOT NULL`)).returning({ id: studyPlanSessions.id });
   return rows.length > 0;
+}
+
+/**
+ * Öğretmenin haftalık özeti için akademik takip bölümü (kurumda kapalıysa null): dosyası açılmamış
+ * inceleme önerileri ve verilen öğrencilerin açık / 7 günden uzun süredir işlemsiz dosyaları.
+ */
+export async function academicDigestFor(orgId: number, students: Array<{ userId: number; name: string }>, now = new Date()): Promise<AcademicDigest | null> {
+  if (!students.length || !(await isCasesEnabled(orgId))) return null;
+  const ids = students.map((student) => student.userId);
+  const names = new Map(students.map((student) => [student.userId, student.name]));
+  const signals = await listSignals(orgId, ids);
+  const cases = (await listCases(orgId, { studentUserIds: ids })).filter((row) => row.status !== "closed");
+  return {
+    suggestions: signals.filter((signal) => signal.status === "signal" && !signal.openCaseId).map((signal) => ({ name: names.get(signal.studentUserId) ?? "Öğrenci", description: signal.description })),
+    openCases: cases.length,
+    staleCases: cases.filter((row) => now.getTime() - new Date(row.lastActionAt ?? row.openedAt).getTime() > 7 * DAY).length,
+  };
+}
+
+/**
+ * Öğretmen görev verdiğinde öğrenciye bildirim: uygulama içi (zil) ve, öğrenci açtıysa, telefon
+ * bildirimi. Bildirim dilinde risk ya da dosya geçmez; yalnızca görevin kendisi.
+ */
+export async function notifyStudentOfTasks(input: { studentUserId: number; teacherName: string | null; sessionDates: Date[] }): Promise<void> {
+  if (!input.sessionDates.length) return;
+  const db = await requireDb();
+  const first = [...input.sessionDates].sort((a, b) => a.getTime() - b.getTime())[0];
+  // Sunucu UTC'de çalışabilir (Vercel): saat her zaman Türkiye saatiyle yazılır.
+  const when = first.toLocaleString("tr-TR", { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Istanbul" });
+  const who = input.teacherName?.trim() || "Öğretmenin";
+  const count = input.sessionDates.length;
+  const title = count > 1 ? `${who} ${count} çalışma önerdi` : `${who} bir çalışma önerdi`;
+  const message = `Takvimine eklendi; ilki ${when}. Genel Bakış'taki "Bu haftaki çalışmalar"dan durumunu bildirebilirsin.`;
+  await db.insert(coachAlerts).values({ userId: input.studentUserId, level: "action", ruleKey: "teacher_tasks", title, message });
+  // Telefon bildirimi isteğe bağlı: anahtar yoksa ya da abonelik yoksa sessizce geçilir.
+  if (pushConfigured()) await sendToUser(input.studentUserId, { title, body: message, url: "/", tag: "teacher-tasks" }).catch(() => undefined);
 }
 
 /** Konu adı → kimlik (plan maddeleri için). */

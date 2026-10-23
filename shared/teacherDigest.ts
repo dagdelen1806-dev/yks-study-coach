@@ -6,6 +6,17 @@ import { RISK_LABELS, type StudentSummary } from "./org";
 
 export type TeacherDigestStudent = { name: string; summary: StudentSummary };
 
+/**
+ * Akademik takip (Novara Rehber; yalnızca kurumda açıksa): dosyası henüz açılmamış inceleme
+ * önerileri ve öğretmenin açık dosyaları. Not içeriği asla e-postaya girmez.
+ */
+export type AcademicDigest = {
+  suggestions: Array<{ name: string; description: string }>;
+  openCases: number;
+  /** 7 günden uzun süredir işlem görmeyen açık dosya. */
+  staleCases: number;
+};
+
 export type TeacherDigest = {
   total: number;
   activeCount: number;
@@ -14,11 +25,13 @@ export type TeacherDigest = {
   followUps: Array<{ name: string; reasons: string[] }>;
   topStudents: Array<{ name: string; minutes: number }>;
   headline: string;
+  academic: AcademicDigest | null;
 };
 
 const MAX_FOLLOW_UPS = 10;
+const MAX_SUGGESTIONS = 10;
 
-export function buildTeacherDigest(students: TeacherDigestStudent[]): TeacherDigest {
+export function buildTeacherDigest(students: TeacherDigestStudent[], academic: AcademicDigest | null = null): TeacherDigest {
   const total = students.length;
   const activeCount = students.filter((student) => student.summary.weekMinutes > 0).length;
   const totalMinutes = students.reduce((sum, student) => sum + student.summary.weekMinutes, 0);
@@ -43,5 +56,8 @@ export function buildTeacherDigest(students: TeacherDigestStudent[]): TeacherDig
       ? `Bu hafta ${total} öğrencinin ${activeCount}'i çalıştı; takip gerektiren öğrenci yok.`
       : `Bu hafta ${total} öğrencinin ${activeCount}'i çalıştı; ${followUpCount} öğrenci takip bekliyor.`;
 
-  return { total, activeCount, totalMinutes, averageAdherence, followUps, topStudents, headline };
+  const academicPart = academic && (academic.suggestions.length || academic.openCases)
+    ? { ...academic, suggestions: academic.suggestions.slice(0, MAX_SUGGESTIONS) }
+    : null;
+  return { total, activeCount, totalMinutes, averageAdherence, followUps, topStudents, headline, academic: academicPart };
 }

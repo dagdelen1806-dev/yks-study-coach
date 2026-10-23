@@ -79,6 +79,7 @@ vi.mock("./db", async (importOriginal) => ({
 vi.mock("./org/caseDb", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./org/caseDb")>()),
   canReadNotes: vi.fn(async (orgId: number, viewerUserId: number, studentUserId: number) => store.assignments.some((a) => a.orgId === orgId && a.teacherUserId === viewerUserId && a.studentUserId === studentUserId && a.active === 1)),
+  notifyStudentOfTasks: vi.fn(async () => undefined),
 }));
 vi.mock("./schedule/classScheduleDb", async (importOriginal) => ({ ...(await importOriginal<typeof import("./schedule/classScheduleDb")>()), getClassSchedule: vi.fn(async () => ({ periods: [], blocks: [] })), getCourseBlocks: vi.fn(async () => courseBlocks) }));
 

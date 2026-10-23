@@ -3757,7 +3757,7 @@ function registerNoteAttachmentRoutes(app2) {
 }
 
 // server/digest/weeklyDigest.ts
-import { and as and10, asc as asc2, desc as desc8, eq as eq12, gte as gte8, isNotNull as isNotNull5, isNull as isNull8, lt as lt8, or as or4 } from "drizzle-orm";
+import { and as and12, asc as asc3, desc as desc9, eq as eq15, gte as gte9, isNotNull as isNotNull5, isNull as isNull9, lt as lt9, or as or4 } from "drizzle-orm";
 
 // shared/weeklyDigest.ts
 var DAY_MS2 = 24 * 60 * 60 * 1e3;
@@ -4743,7 +4743,7 @@ async function moveNoteToSubject(userId, noteId, subject2) {
 }
 
 // server/digest/teacherDigest.ts
-import { and as and7, desc as desc5, eq as eq9, inArray as inArray5, isNotNull as isNotNull3, isNull as isNull6, lt as lt6, or as or2 } from "drizzle-orm";
+import { and as and9, desc as desc6, eq as eq12, inArray as inArray7, isNotNull as isNotNull3, isNull as isNull7, lt as lt7, or as or2 } from "drizzle-orm";
 
 // shared/org.ts
 var ORG_ROLES = ["owner", "admin", "coordinator", "teacher", "student"];
@@ -4858,7 +4858,8 @@ function summarizeStudent(signals, now = /* @__PURE__ */ new Date()) {
 
 // shared/teacherDigest.ts
 var MAX_FOLLOW_UPS = 10;
-function buildTeacherDigest(students) {
+var MAX_SUGGESTIONS = 10;
+function buildTeacherDigest(students, academic = null) {
   const total = students.length;
   const activeCount = students.filter((student) => student.summary.weekMinutes > 0).length;
   const totalMinutes = students.reduce((sum, student) => sum + student.summary.weekMinutes, 0);
@@ -4868,12 +4869,21 @@ function buildTeacherDigest(students) {
   const topStudents = students.filter((student) => student.summary.weekMinutes > 0).sort((a, b) => b.summary.weekMinutes - a.summary.weekMinutes).slice(0, 3).map((student) => ({ name: student.name, minutes: student.summary.weekMinutes }));
   const followUpCount = students.filter((student) => student.summary.risks.length > 0).length;
   const headline = total === 0 ? "Hen\xFCz takip etti\u011Fin \xF6\u011Frenci yok." : followUpCount === 0 ? `Bu hafta ${total} \xF6\u011Frencinin ${activeCount}'i \xE7al\u0131\u015Ft\u0131; takip gerektiren \xF6\u011Frenci yok.` : `Bu hafta ${total} \xF6\u011Frencinin ${activeCount}'i \xE7al\u0131\u015Ft\u0131; ${followUpCount} \xF6\u011Frenci takip bekliyor.`;
-  return { total, activeCount, totalMinutes, averageAdherence, followUps, topStudents, headline };
+  const academicPart = academic && (academic.suggestions.length || academic.openCases) ? { ...academic, suggestions: academic.suggestions.slice(0, MAX_SUGGESTIONS) } : null;
+  return { total, activeCount, totalMinutes, averageAdherence, followUps, topStudents, headline, academic: academicPart };
 }
 
 // server/_core/emails/teacherDigestEmail.ts
 var escapeHtml3 = (value) => value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
-function buildTeacherDigestEmail({ to, name, orgName, digest, rangeLabel: rangeLabel2, panelUrl, unsubscribeUrl }) {
+function buildTeacherDigestEmail({ to, name, orgName, digest, rangeLabel: rangeLabel2, panelUrl, unsubscribeUrl, casesUrl }) {
+  const academic = digest.academic;
+  const academicLines = academic ? [
+    "",
+    "Akademik takip:",
+    ...academic.suggestions.length ? [`${academic.suggestions.length} yeni inceleme \xF6nerisi:`, ...academic.suggestions.map((item) => `\u2022 ${item.name}: ${item.description}`)] : [],
+    `A\xE7\u0131k takip dosyalar\u0131n: ${academic.openCases}${academic.staleCases ? ` (${academic.staleCases} dosya 7 g\xFCnden uzun s\xFCredir i\u015Flem bekliyor)` : ""}`,
+    ...casesUrl ? [`Akademik takip: ${casesUrl}`] : []
+  ] : [];
   const greeting = name ? `Merhaba ${name},` : "Merhaba,";
   const subject2 = `${orgName} \xB7 haftal\u0131k s\u0131n\u0131f \xF6zeti \xB7 ${rangeLabel2}`;
   const stats = [
@@ -4890,6 +4900,7 @@ function buildTeacherDigestEmail({ to, name, orgName, digest, rangeLabel: rangeL
     ...stats.map(([label, value]) => `\u2022 ${label}: ${value}`),
     ...digest.followUps.length ? ["", "Takip bekleyen \xF6\u011Frenciler:", ...digest.followUps.map((student) => `\u2022 ${student.name}: ${student.reasons.join(", ")}`)] : [],
     ...digest.topStudents.length ? ["", "Haftan\u0131n en \xE7ok \xE7al\u0131\u015Fanlar\u0131:", ...digest.topStudents.map((student) => `\u2022 ${student.name} (${formatMinutes(student.minutes)})`)] : [],
+    ...academicLines,
     "",
     `Kurum Paneli: ${panelUrl}`,
     "",
@@ -4899,6 +4910,9 @@ function buildTeacherDigestEmail({ to, name, orgName, digest, rangeLabel: rangeL
   const statCell = ([label, value]) => `<td width="50%" valign="top" style="background:#f3f6f5;border-radius:12px;padding:12px 14px;"><div style="font-size:12px;color:#5d6670;">${escapeHtml3(label)}</div><div style="margin-top:4px;font-size:18px;font-weight:700;color:#18202a;">${escapeHtml3(value)}</div></td>`;
   const followRows = digest.followUps.map((student) => `<tr><td style="padding:8px 0;border-top:1px solid #e6ebe9;font-size:14px;font-weight:600;color:#18202a;">${escapeHtml3(student.name)}</td><td align="right" style="padding:8px 0;border-top:1px solid #e6ebe9;font-size:12px;color:#b42318;">${escapeHtml3(student.reasons.join(" \xB7 "))}</td></tr>`).join("");
   const topRows = digest.topStudents.map((student) => `<tr><td style="padding:6px 0;font-size:14px;color:#18202a;">${escapeHtml3(student.name)}</td><td align="right" style="padding:6px 0;font-size:13px;font-weight:700;color:#17625f;">${escapeHtml3(formatMinutes(student.minutes))}</td></tr>`).join("");
+  const academicHtml = academic ? `<div style="margin:22px 0 4px 0;font-size:14px;font-weight:700;color:#18202a;">Akademik takip</div>
+        ${academic.suggestions.length ? `<p style="margin:0 0 6px 0;font-size:13px;color:#3f4852;">${academic.suggestions.length} yeni inceleme \xF6nerisi (te\u015Fhis de\u011Fildir; incelemek sana kalm\u0131\u015F):</p><table role="presentation" width="100%" cellpadding="0" cellspacing="0">${academic.suggestions.map((item) => `<tr><td style="padding:8px 0;border-top:1px solid #e6ebe9;font-size:14px;font-weight:600;color:#18202a;">${escapeHtml3(item.name)}</td><td align="right" style="padding:8px 0;border-top:1px solid #e6ebe9;font-size:12px;color:#9a6400;">${escapeHtml3(item.description)}</td></tr>`).join("")}</table>` : ""}
+        <p style="margin:10px 0 0 0;font-size:13px;color:#3f4852;">A\xE7\u0131k takip dosyalar\u0131n: <b>${academic.openCases}</b>${academic.staleCases ? ` \xB7 7 g\xFCnden uzun s\xFCredir i\u015Flem bekleyen: <b>${academic.staleCases}</b>` : ""}${casesUrl ? ` \xB7 <a href="${escapeHtml3(casesUrl)}" style="color:#17625f;">Akademik takibi a\xE7</a>` : ""}</p>` : "";
   const html = `<!doctype html>
 <html lang="tr">
 <head>
@@ -4927,6 +4941,7 @@ function buildTeacherDigestEmail({ to, name, orgName, digest, rangeLabel: rangeL
         </table>
         ${followRows ? `<div style="margin:22px 0 4px 0;font-size:14px;font-weight:700;color:#18202a;">Takip bekleyen \xF6\u011Frenciler</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0">${followRows}</table>` : ""}
         ${topRows ? `<div style="margin:22px 0 4px 0;font-size:14px;font-weight:700;color:#18202a;">Haftan\u0131n en \xE7ok \xE7al\u0131\u015Fanlar\u0131</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0">${topRows}</table>` : ""}
+        ${academicHtml}
         <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin-top:22px;"><tr><td align="center">
           <a href="${escapeHtml3(panelUrl)}" style="display:inline-block;background:#17625f;color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;padding:14px 28px;border-radius:12px;">Kurum Paneli'ni a\xE7</a>
         </td></tr></table>
@@ -4940,8 +4955,285 @@ function buildTeacherDigestEmail({ to, name, orgName, digest, rangeLabel: rangeL
   return { to, subject: subject2, html, text: text3 };
 }
 
+// server/org/caseDb.ts
+import { and as and8, desc as desc5, eq as eq11, gte as gte6, inArray as inArray6, isNull as isNull6, lt as lt6, sql as sql7 } from "drizzle-orm";
+
+// shared/academicCase.ts
+var ACADEMIC_CASE_RULES = {
+  /** Karşılaştırılan son deneme sayısı. */
+  examsCompared: 3,
+  /** Son denemeler en fazla bu kadar gün içine yayılmış olmalı. */
+  windowDays: 75,
+  /** Toplam düşüş eşiği (net). Sınav türünde tanım yoksa varsayılan. */
+  minTotalDrop: { default: 5, LGS: 3 },
+  /** Hazırlık dönemi bu ayda başlar (0 = Ocak; 7 = Ağustos): Ağustos–Temmuz arası aynı dönem. */
+  seasonStartMonth: 7
+};
+var DAY2 = 24 * 60 * 60 * 1e3;
+var normalizePublisher = (value) => (value ?? "").trim().toLocaleLowerCase("tr").replace(/\s+yay[ıi]nlar[ıi]$/, "").replace(/\s+/g, " ") || null;
+var round2 = (value) => Math.round(value * 100) / 100;
+function seasonOf(date, rules = ACADEMIC_CASE_RULES) {
+  return date.getMonth() >= rules.seasonStartMonth ? date.getFullYear() : date.getFullYear() - 1;
+}
+var minTotalDropFor = (kind, rules = ACADEMIC_CASE_RULES) => rules.minTotalDrop[kind] ?? rules.minTotalDrop.default ?? 5;
+function comparabilityKey(exam) {
+  return [exam.examKind, exam.scope ?? "full", normalizePublisher(exam.publisher) ?? "*"].join("|");
+}
+function trendDecline(exams, examKind2, rules = ACADEMIC_CASE_RULES) {
+  const recent = exams.filter((exam) => exam.examKind === examKind2 && exam.scope !== "branch" && Number.isFinite(exam.net)).sort((a, b) => b.date.getTime() - a.date.getTime() || b.id - a.id).slice(0, rules.examsCompared).reverse();
+  const evidence = recent.map(({ id: id6, date, net }) => ({ id: id6, date, net }));
+  if (recent.length < rules.examsCompared) return { status: "insufficient", examKind: examKind2, reason: "not_enough_exams", evidence };
+  if (recent.at(-1).date.getTime() - recent[0].date.getTime() > rules.windowDays * DAY2) return { status: "insufficient", examKind: examKind2, reason: "too_spread_out", evidence };
+  if (new Set(recent.map((exam) => seasonOf(exam.date, rules))).size > 1) return { status: "insufficient", examKind: examKind2, reason: "different_season", evidence };
+  const publishers2 = new Set(recent.map((exam) => normalizePublisher(exam.publisher)).filter((value) => Boolean(value)));
+  if (publishers2.size > 1) return { status: "insufficient", examKind: examKind2, reason: "mixed_publishers", evidence };
+  const steps = recent.slice(1).map((exam, index2) => round2(exam.net - recent[index2].net));
+  const totalChange = round2(recent.at(-1).net - recent[0].net);
+  const declining = steps.every((step) => step <= 0) && -totalChange >= minTotalDropFor(examKind2, rules);
+  if (!declining) return { status: "no_signal", examKind: examKind2, evidence, totalChange, steps };
+  const allKnown = recent.every((exam) => normalizePublisher(exam.publisher));
+  const confidence = recent.every((exam) => exam.source === "org") && allKnown ? "high" : "medium";
+  return { status: "signal", examKind: examKind2, confidence, evidence, totalChange, steps };
+}
+function trendSignals(exams, rules = ACADEMIC_CASE_RULES) {
+  const kinds = Array.from(new Set(exams.map((exam) => exam.examKind)));
+  return kinds.map((kind) => trendDecline(exams, kind, rules));
+}
+var ACADEMIC_REVIEW_TITLE = "Akademik inceleme \xF6nerisi";
+var ACADEMIC_REVIEW_TEXT = "\xD6\u011Frencinin son \xFC\xE7 kar\u015F\u0131la\u015Ft\u0131r\u0131labilir denemesinde netleri d\xFC\u015F\xFC\u015F e\u011Filimindedir. \xC7al\u0131\u015Fma kay\u0131tlar\u0131 ve ders bazl\u0131 sonu\xE7lar incelenerek rehberlik g\xF6r\xFC\u015Fmesi de\u011Ferlendirilmesi \xF6nerilir.";
+var INSUFFICIENT_REASON_TEXT = {
+  not_enough_exams: "Kar\u015F\u0131la\u015Ft\u0131rma i\xE7in bu s\u0131nav t\xFCr\xFCnde en az \xFC\xE7 tam deneme gerekli.",
+  mixed_publishers: "Son denemeler farkl\u0131 yay\u0131nevlerine ait; netler do\u011Frudan kar\u015F\u0131la\u015Ft\u0131r\u0131lamaz.",
+  different_season: "Son denemeler farkl\u0131 haz\u0131rl\u0131k d\xF6nemlerine ait.",
+  too_spread_out: "Son denemeler aras\u0131nda \xE7ok uzun s\xFCre var; e\u011Filim g\xFCvenilir de\u011Fil."
+};
+var CONFIDENCE_TEXT = {
+  high: "Y\xFCksek g\xFCven: kurumdan aktar\u0131lan, ayn\u0131 yay\u0131nevine ait denemeler.",
+  medium: "Orta g\xFCven: denemelerin bir k\u0131sm\u0131 \xF6\u011Frencinin kendi giri\u015Fi ya da yay\u0131nevi bilinmiyor."
+};
+function describeTrend(result) {
+  const label = EXAM_KIND_DEFS[result.examKind]?.label ?? result.examKind;
+  const chain = result.evidence.map((exam) => String(round2(exam.net)).replace(".", ",")).join(" \u2192 ");
+  if (result.status === "insufficient") return `${label}: inceleme i\xE7in yetersiz veri. ${INSUFFICIENT_REASON_TEXT[result.reason]}`;
+  const change = String(Math.abs(result.totalChange)).replace(".", ",");
+  return `${label}: ${chain} (${result.totalChange < 0 ? "\u2212" : "+"}${change} net)`;
+}
+
+// shared/classSchedule.ts
+var SCHEDULE_SOURCES = ["school", "course", "tutor", "other"];
+var DAY_LABELS = ["Pazartesi", "Sal\u0131", "\xC7ar\u015Famba", "Per\u015Fembe", "Cuma", "Cumartesi", "Pazar"];
+var YKS_SUBJECTS = ["T\xFCrk\xE7e", "Matematik", "Geometri", "Fizik", "Kimya", "Biyoloji", "Edebiyat", "Tarih", "Co\u011Frafya", "Felsefe"];
+var NON_YKS_PRESETS = ["Din K\xFClt\xFCr\xFC", "Yabanc\u0131 Dil", "Rehberlik", "Beden E\u011Fitimi", "Sanat / M\xFCzik", "Di\u011Fer ders"];
+var LGS_SUBJECTS = ["T\xFCrk\xE7e", "Matematik", "Fen Bilimleri", "\u0130nk\u0131lap Tarihi", "Din K\xFClt\xFCr\xFC", "\u0130ngilizce"];
+var NON_LGS_PRESETS = ["Teknoloji ve Tasar\u0131m", "Bili\u015Fim Teknolojileri", "Rehberlik", "Beden E\u011Fitimi", "Sanat / M\xFCzik", "Di\u011Fer ders"];
+var SCHEDULE_SUBJECTS_BY_TRACK = {
+  YKS: { subjects: YKS_SUBJECTS, nonExamPresets: NON_YKS_PRESETS },
+  LGS: { subjects: LGS_SUBJECTS, nonExamPresets: NON_LGS_PRESETS },
+  // Yetişkin adaylar: programdaki bloklar çoğunlukla iş/kurs saatleri; ders olarak KPSS dersleri.
+  KPSS: { subjects: ["T\xFCrk\xE7e", "Matematik", "Tarih", "Co\u011Frafya", "Vatanda\u015Fl\u0131k", "G\xFCncel Bilgiler"], nonExamPresets: ["\u0130\u015F", "Kurs / dershane", "\xDCniversite dersi", "Di\u011Fer"] },
+  DGS: { subjects: ["Say\u0131sal", "S\xF6zel"], nonExamPresets: ["\xD6nlisans dersi", "\u0130\u015F", "Kurs / dershane", "Di\u011Fer"] },
+  MEB_AGS: { subjects: ["E\u011Fitim Bilimleri", "S\xF6zel Yetenek", "Say\u0131sal Yetenek", "Mevzuat", "Tarih", "T\xFCrkiye Co\u011Frafyas\u0131"], nonExamPresets: ["\xDCniversite dersi", "Staj / okul uygulamas\u0131", "\u0130\u015F", "Kurs / dershane", "Di\u011Fer"] },
+  KPSS_A: { subjects: ["Hukuk", "\u0130ktisat", "Maliye", "Muhasebe", "\u0130\u015Fletme", "\xC7al\u0131\u015Fma Ekonomisi", "\u0130statistik", "Kamu Y\xF6netimi", "Uluslararas\u0131 \u0130li\u015Fkiler"], nonExamPresets: ["\u0130\u015F", "Kurs / dershane", "Di\u011Fer"] }
+};
+var SCHEDULE_SUBJECTS = Array.from(new Set(Object.values(SCHEDULE_SUBJECTS_BY_TRACK).flatMap((entry) => entry.subjects)));
+var scheduleSubjectsFor = (track) => SCHEDULE_SUBJECTS_BY_TRACK[track].subjects;
+var nonExamPresetsFor = (track) => SCHEDULE_SUBJECTS_BY_TRACK[track].nonExamPresets;
+var AFTER_CLASS_BUFFER_MINUTES = 30;
+var PLAN_DAY_END = "23:30";
+var MAX_SCHEDULE_BLOCKS = 120;
+var MAX_SCHOOL_PERIODS = 12;
+var DEFAULT_SCHOOL_PERIODS = [
+  { start: "08:30", end: "09:10" },
+  { start: "09:20", end: "10:00" },
+  { start: "10:10", end: "10:50" },
+  { start: "11:00", end: "11:40" },
+  { start: "13:00", end: "13:40" },
+  { start: "13:50", end: "14:30" },
+  { start: "14:40", end: "15:20" },
+  { start: "15:30", end: "16:10" }
+];
+var TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
+var isValidTime = (value) => TIME_PATTERN.test(value);
+var toMinutes = (value) => {
+  const match = TIME_PATTERN.exec(value);
+  return match ? Number(match[1]) * 60 + Number(match[2]) : NaN;
+};
+var fromMinutes = (minutes) => `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+var weekdayOf = (date) => (date.getDay() + 6) % 7 + 1;
+var isYksBlock = (block) => block.subject !== null;
+function blocksOn(blocks, date) {
+  const day = weekdayOf(date);
+  return blocks.filter((block) => block.dayOfWeek === day).sort((a, b) => toMinutes(a.startTime) - toMinutes(b.startTime));
+}
+function validateSchedule(schedule) {
+  for (const period of schedule.periods) {
+    if (!isValidTime(period.start) || !isValidTime(period.end) || toMinutes(period.start) >= toMinutes(period.end)) return `Ders saati ${period.start}\u2013${period.end} ge\xE7ersiz: ba\u015Flang\u0131\xE7 biti\u015Ften \xF6nce olmal\u0131.`;
+  }
+  for (const block of schedule.blocks) {
+    if (!isValidTime(block.startTime) || !isValidTime(block.endTime) || toMinutes(block.startTime) >= toMinutes(block.endTime)) return `${block.label} (${block.startTime}\u2013${block.endTime}) ge\xE7ersiz: ba\u015Flang\u0131\xE7 biti\u015Ften \xF6nce olmal\u0131.`;
+  }
+  for (let day = 1; day <= 7; day++) {
+    const sorted = schedule.blocks.filter((block) => block.dayOfWeek === day).sort((a, b) => toMinutes(a.startTime) - toMinutes(b.startTime));
+    for (let index2 = 1; index2 < sorted.length; index2++) {
+      const previous = sorted[index2 - 1];
+      const current = sorted[index2];
+      if (toMinutes(current.startTime) < toMinutes(previous.endTime)) return `${DAY_LABELS[day - 1]}: ${previous.label} (${previous.startTime}\u2013${previous.endTime}) ile ${current.label} (${current.startTime}\u2013${current.endTime}) \xE7ak\u0131\u015F\u0131yor.`;
+    }
+  }
+  return null;
+}
+function computeFreeSlots(blocks, date, options) {
+  const from = toMinutes(options.from);
+  const to = toMinutes(options.to ?? PLAN_DAY_END);
+  const buffer = options.buffer ?? AFTER_CLASS_BUFFER_MINUTES;
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to) return [];
+  const busy = blocksOn(blocks, date).map((block) => ({ start: toMinutes(block.startTime), end: toMinutes(block.endTime) + buffer }));
+  const slots = [];
+  let cursor = from;
+  for (const interval of busy) {
+    if (interval.end <= cursor) continue;
+    if (interval.start > cursor) slots.push({ start: cursor, end: Math.min(interval.start, to) });
+    cursor = Math.max(cursor, interval.end);
+    if (cursor >= to) break;
+  }
+  if (cursor < to) slots.push({ start: cursor, end: to });
+  return slots.filter((slot) => slot.end > slot.start);
+}
+var freeMinutes = (slots) => slots.reduce((sum, slot) => sum + slot.end - slot.start, 0);
+function describeWeekForPlan(blocks, weekStart, from) {
+  if (blocks.length === 0) return null;
+  const lines = [];
+  for (let offset = 0; offset < 7; offset++) {
+    const date = new Date(weekStart);
+    date.setDate(weekStart.getDate() + offset);
+    const slots = computeFreeSlots(blocks, date, { from });
+    const subjects = Array.from(new Set(blocksOn(blocks, date).filter(isYksBlock).map((block) => block.subject)));
+    const slotText = slots.filter((slot) => slot.end - slot.start >= 30).map((slot) => `${fromMinutes(slot.start)}\u2013${fromMinutes(slot.end)}`).join(", ") || "yok";
+    const isoDate2 = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    lines.push(`${DAY_LABELS[weekdayOf(date) - 1]} (${isoDate2}): bo\u015F zaman ${freeMinutes(slots)} dk (${slotText})${subjects.length ? `; okulda/dershanede i\u015Flenen dersler: ${subjects.join(", ")}` : ""}`);
+  }
+  return lines.join("\n");
+}
+
+// shared/planPlacement.ts
+var TASK_EARLIEST = "08:00";
+var TASK_GAP_MINUTES = 10;
+var sameLocalDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+function busyOn(date, input) {
+  const fromBlocks = (blocks, kind) => blocksOn(blocks, date).map((block) => ({ start: toMinutes(block.startTime), end: toMinutes(block.endTime), label: block.label, kind }));
+  const sessions = (input.sessions ?? []).filter((session) => (session.status ?? "planned") === "planned").map((session) => ({ session, at: new Date(session.sessionDate) })).filter(({ at }) => sameLocalDay(at, date)).map(({ session, at }) => {
+    const start = at.getHours() * 60 + at.getMinutes();
+    return { start, end: start + Math.max(0, session.plannedMinutes), label: session.title?.trim() || "Planl\u0131 \xE7al\u0131\u015Fma", kind: "session" };
+  });
+  return [...fromBlocks(input.blocks, "class"), ...fromBlocks(input.courseBlocks ?? [], "course"), ...sessions].sort((a, b) => a.start - b.start || a.end - b.end);
+}
+function findTaskConflict(busy, start, minutes) {
+  const end = start + minutes;
+  return busy.find((interval) => start < interval.end && end > interval.start) ?? null;
+}
+function suggestStart(busy, minutes, options = {}) {
+  const gap = options.gap ?? TASK_GAP_MINUTES;
+  const to = options.to ?? toMinutes(PLAN_DAY_END);
+  let cursor = options.from ?? toMinutes(TASK_EARLIEST);
+  for (const interval of busy) {
+    if (cursor + minutes + gap <= interval.start) break;
+    cursor = Math.max(cursor, interval.end + gap);
+  }
+  return cursor + minutes <= to ? cursor : null;
+}
+function placePlanItems(items, from, days, busyFor, options = {}) {
+  const perDay = options.perDay ?? 1;
+  const earliest = toMinutes(options.earliest ?? TASK_EARLIEST);
+  const latest = toMinutes(options.latest ?? PLAN_DAY_END);
+  const dates = Array.from({ length: Math.max(1, days) }, (_, offset) => {
+    const date = new Date(from);
+    date.setHours(12, 0, 0, 0);
+    date.setDate(date.getDate() + offset);
+    return date;
+  });
+  const placedByDay = dates.map(() => []);
+  let dayCursor = 0;
+  return items.map((item, index2) => {
+    for (let attempt = 0; attempt < dates.length; attempt += 1) {
+      const dayIndex = (dayCursor + attempt) % dates.length;
+      if (placedByDay[dayIndex].length >= perDay) continue;
+      const busy = [...busyFor(dates[dayIndex]), ...placedByDay[dayIndex]].sort((a, b) => a.start - b.start);
+      const start = suggestStart(busy, item.minutes, { from: earliest, to: latest, gap: options.gap });
+      if (start === null) continue;
+      placedByDay[dayIndex].push({ start, end: start + item.minutes, label: "Yeni g\xF6rev", kind: "session" });
+      dayCursor = dayIndex + 1;
+      return { index: index2, date: dates[dayIndex], start };
+    }
+    return { index: index2, date: null, reason: "no_slot" };
+  });
+}
+var describeInterval = (interval) => `${interval.label} (${fromMinutes(interval.start)}\u2013${fromMinutes(interval.end)})`;
+
+// server/push/push.ts
+import { and as and6, eq as eq8, inArray as inArray4 } from "drizzle-orm";
+import webpush from "web-push";
+var publicKey = process.env.VAPID_PUBLIC_KEY ?? "";
+var privateKey = process.env.VAPID_PRIVATE_KEY ?? "";
+var subject = process.env.VAPID_SUBJECT || process.env.APP_URL || "https://yks-study-coach.vercel.app";
+var pushConfigured = () => Boolean(publicKey && privateKey);
+var pushPublicKey = () => pushConfigured() ? publicKey : null;
+var vapidSet = false;
+var ensureVapid = () => {
+  if (!vapidSet) {
+    webpush.setVapidDetails(subject, publicKey, privateKey);
+    vapidSet = true;
+  }
+};
+async function saveSubscription(userId, subscription, userAgent) {
+  const db = await getDb();
+  if (!db) return;
+  const values = { userId, endpoint: subscription.endpoint, p256dh: subscription.keys.p256dh, auth: subscription.keys.auth, userAgent: userAgent?.slice(0, 300) ?? null };
+  await db.insert(pushSubscriptions).values(values).onConflictDoUpdate({ target: pushSubscriptions.endpoint, set: { userId, p256dh: values.p256dh, auth: values.auth, userAgent: values.userAgent } });
+}
+async function removeSubscription(userId, endpoint) {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(pushSubscriptions).where(and6(eq8(pushSubscriptions.userId, userId), eq8(pushSubscriptions.endpoint, endpoint)));
+}
+async function hasSubscription(userId, endpoint) {
+  const db = await getDb();
+  if (!db) return false;
+  const rows = await db.select({ id: pushSubscriptions.id }).from(pushSubscriptions).where(and6(eq8(pushSubscriptions.userId, userId), eq8(pushSubscriptions.endpoint, endpoint))).limit(1);
+  return rows.length > 0;
+}
+async function sendToUser(userId, payload) {
+  const result = { delivered: 0, removed: 0, failed: 0 };
+  const db = await getDb();
+  if (!db || !pushConfigured()) return result;
+  ensureVapid();
+  const subscriptions2 = await db.select().from(pushSubscriptions).where(eq8(pushSubscriptions.userId, userId));
+  const gone = [];
+  const delivered = [];
+  await Promise.all(subscriptions2.map(async (row) => {
+    try {
+      await webpush.sendNotification({ endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } }, JSON.stringify(payload), { TTL: 15 * 60, urgency: "high" });
+      delivered.push(row.id);
+    } catch (error) {
+      const status = error.statusCode;
+      if (status === 404 || status === 410) gone.push(row.id);
+      else {
+        result.failed++;
+        console.error(`[Push] subscription ${row.id} failed (${status ?? "?"}):`, error instanceof Error ? error.message : error);
+      }
+    }
+  }));
+  if (gone.length) await db.delete(pushSubscriptions).where(inArray4(pushSubscriptions.id, gone));
+  if (delivered.length) await db.update(pushSubscriptions).set({ lastSentAt: /* @__PURE__ */ new Date() }).where(inArray4(pushSubscriptions.id, delivered));
+  result.delivered = delivered.length;
+  result.removed = gone.length;
+  return result;
+}
+
+// server/schedule/classScheduleDb.ts
+import { asc as asc2, eq as eq10 } from "drizzle-orm";
+
 // server/org/orgDb.ts
-import { and as and6, desc as desc4, eq as eq8, gte as gte5, inArray as inArray4, isNull as isNull5, lt as lt5, sql as sql6 } from "drizzle-orm";
+import { and as and7, desc as desc4, eq as eq9, gte as gte5, inArray as inArray5, isNull as isNull5, lt as lt5, sql as sql6 } from "drizzle-orm";
 var OrgError = class extends Error {
 };
 async function requireDb4() {
@@ -4953,19 +5245,19 @@ var membershipColumns = { orgId: organizationMembers.orgId, orgName: organizatio
 var toMembership = (row) => ({ orgId: row.orgId, orgName: row.orgName, role: row.role, state: membershipState(row) });
 async function getActiveMembership(userId, orgId) {
   const db = await requireDb4();
-  const [row] = await db.select(membershipColumns).from(organizationMembers).innerJoin(organizations, eq8(organizations.id, organizationMembers.orgId)).where(and6(eq8(organizationMembers.userId, userId), eq8(organizationMembers.orgId, orgId), eq8(organizationMembers.status, "active"), eq8(organizations.status, "active"))).limit(1);
+  const [row] = await db.select(membershipColumns).from(organizationMembers).innerJoin(organizations, eq9(organizations.id, organizationMembers.orgId)).where(and7(eq9(organizationMembers.userId, userId), eq9(organizationMembers.orgId, orgId), eq9(organizationMembers.status, "active"), eq9(organizations.status, "active"))).limit(1);
   return row ? toMembership(row) : null;
 }
 async function listMyMemberships(userId) {
   const db = await requireDb4();
-  const rows = await db.select({ ...membershipColumns, kvkkVersion: organizationMembers.kvkkVersion, consentAt: organizationMembers.consentAt }).from(organizationMembers).innerJoin(organizations, eq8(organizations.id, organizationMembers.orgId)).where(and6(eq8(organizationMembers.userId, userId), eq8(organizationMembers.status, "active"), eq8(organizations.status, "active")));
+  const rows = await db.select({ ...membershipColumns, kvkkVersion: organizationMembers.kvkkVersion, consentAt: organizationMembers.consentAt }).from(organizationMembers).innerJoin(organizations, eq9(organizations.id, organizationMembers.orgId)).where(and7(eq9(organizationMembers.userId, userId), eq9(organizationMembers.status, "active"), eq9(organizations.status, "active")));
   return rows.map((row) => ({ ...toMembership(row), kvkkVersion: row.kvkkVersion, consentAt: row.consentAt }));
 }
 async function teacherStudentIds(orgId, teacherUserId) {
   const db = await requireDb4();
   const [assigned, advised] = await Promise.all([
-    db.select({ studentUserId: teacherAssignments.studentUserId }).from(teacherAssignments).where(and6(eq8(teacherAssignments.orgId, orgId), eq8(teacherAssignments.teacherUserId, teacherUserId), eq8(teacherAssignments.active, 1))),
-    db.select({ studentUserId: classStudents.studentUserId }).from(classStudents).innerJoin(organizationClasses, eq8(organizationClasses.id, classStudents.classId)).where(and6(eq8(organizationClasses.orgId, orgId), eq8(organizationClasses.advisorUserId, teacherUserId)))
+    db.select({ studentUserId: teacherAssignments.studentUserId }).from(teacherAssignments).where(and7(eq9(teacherAssignments.orgId, orgId), eq9(teacherAssignments.teacherUserId, teacherUserId), eq9(teacherAssignments.active, 1))),
+    db.select({ studentUserId: classStudents.studentUserId }).from(classStudents).innerJoin(organizationClasses, eq9(organizationClasses.id, classStudents.classId)).where(and7(eq9(organizationClasses.orgId, orgId), eq9(organizationClasses.advisorUserId, teacherUserId)))
   ]);
   return Array.from(new Set([...assigned, ...advised].map((row) => row.studentUserId)));
 }
@@ -4974,43 +5266,43 @@ async function hasActiveAssignment(orgId, teacherUserId, studentUserId) {
 }
 async function isActiveStudent(orgId, studentUserId) {
   const db = await requireDb4();
-  const [row] = await db.select({ id: organizationMembers.id }).from(organizationMembers).where(and6(eq8(organizationMembers.orgId, orgId), eq8(organizationMembers.userId, studentUserId), eq8(organizationMembers.role, "student"), eq8(organizationMembers.status, "active"))).limit(1);
+  const [row] = await db.select({ id: organizationMembers.id }).from(organizationMembers).where(and7(eq9(organizationMembers.orgId, orgId), eq9(organizationMembers.userId, studentUserId), eq9(organizationMembers.role, "student"), eq9(organizationMembers.status, "active"))).limit(1);
   return Boolean(row);
 }
 async function listMembers(orgId, options = {}) {
   const db = await requireDb4();
-  const conditions = [eq8(organizationMembers.orgId, orgId), eq8(organizationMembers.status, "active")];
-  if (options.role) conditions.push(eq8(organizationMembers.role, options.role));
+  const conditions = [eq9(organizationMembers.orgId, orgId), eq9(organizationMembers.status, "active")];
+  if (options.role) conditions.push(eq9(organizationMembers.role, options.role));
   if (options.teacherUserId) {
     const visible = await teacherStudentIds(orgId, options.teacherUserId);
     if (!visible.length) return [];
-    conditions.push(inArray4(organizationMembers.userId, visible));
+    conditions.push(inArray5(organizationMembers.userId, visible));
   }
-  const rows = await db.select({ userId: organizationMembers.userId, preferredName: studentProfiles.preferredName, name: users.name, email: users.email, role: organizationMembers.role, subject: organizationMembers.subject, joinedAt: organizationMembers.joinedAt, consentAt: organizationMembers.consentAt, lastSignedIn: users.lastSignedIn }).from(organizationMembers).innerJoin(users, eq8(users.id, organizationMembers.userId)).leftJoin(studentProfiles, eq8(studentProfiles.userId, organizationMembers.userId)).where(and6(...conditions)).orderBy(users.name);
+  const rows = await db.select({ userId: organizationMembers.userId, preferredName: studentProfiles.preferredName, name: users.name, email: users.email, role: organizationMembers.role, subject: organizationMembers.subject, joinedAt: organizationMembers.joinedAt, consentAt: organizationMembers.consentAt, lastSignedIn: users.lastSignedIn }).from(organizationMembers).innerJoin(users, eq9(users.id, organizationMembers.userId)).leftJoin(studentProfiles, eq9(studentProfiles.userId, organizationMembers.userId)).where(and7(...conditions)).orderBy(users.name);
   return rows.map((row) => ({ userId: row.userId, name: row.preferredName || row.name || "\u0130simsiz", email: row.email, role: row.role, subject: row.subject, joinedAt: row.joinedAt, consentAt: row.consentAt, lastSignedIn: row.lastSignedIn }));
 }
 async function getMemberRole(orgId, userId) {
   const db = await requireDb4();
-  const [row] = await db.select({ role: organizationMembers.role }).from(organizationMembers).where(and6(eq8(organizationMembers.orgId, orgId), eq8(organizationMembers.userId, userId), eq8(organizationMembers.status, "active"))).limit(1);
+  const [row] = await db.select({ role: organizationMembers.role }).from(organizationMembers).where(and7(eq9(organizationMembers.orgId, orgId), eq9(organizationMembers.userId, userId), eq9(organizationMembers.status, "active"))).limit(1);
   return row?.role ?? null;
 }
 async function setMemberRole(orgId, userId, role) {
   const db = await requireDb4();
-  await db.update(organizationMembers).set({ role }).where(and6(eq8(organizationMembers.orgId, orgId), eq8(organizationMembers.userId, userId), eq8(organizationMembers.status, "active")));
+  await db.update(organizationMembers).set({ role }).where(and7(eq9(organizationMembers.orgId, orgId), eq9(organizationMembers.userId, userId), eq9(organizationMembers.status, "active")));
 }
 async function setMemberSubject(orgId, userId, subject2) {
   const db = await requireDb4();
-  const result = await db.update(organizationMembers).set({ subject: subject2 }).where(and6(eq8(organizationMembers.orgId, orgId), eq8(organizationMembers.userId, userId), eq8(organizationMembers.status, "active"), sql6`${organizationMembers.role} <> 'student'`)).returning();
+  const result = await db.update(organizationMembers).set({ subject: subject2 }).where(and7(eq9(organizationMembers.orgId, orgId), eq9(organizationMembers.userId, userId), eq9(organizationMembers.status, "active"), sql6`${organizationMembers.role} <> 'student'`)).returning();
   return result.length > 0;
 }
 async function endMembership(orgId, userId, status) {
   const db = await requireDb4();
-  await db.update(organizationMembers).set({ status, leftAt: /* @__PURE__ */ new Date() }).where(and6(eq8(organizationMembers.orgId, orgId), eq8(organizationMembers.userId, userId), eq8(organizationMembers.status, "active")));
-  await db.update(teacherAssignments).set({ active: 0 }).where(and6(eq8(teacherAssignments.orgId, orgId), sql6`(${teacherAssignments.studentUserId} = ${userId} OR ${teacherAssignments.teacherUserId} = ${userId})`));
-  const classes = await db.select({ id: organizationClasses.id }).from(organizationClasses).where(eq8(organizationClasses.orgId, orgId));
-  if (classes.length) await db.delete(classStudents).where(and6(eq8(classStudents.studentUserId, userId), inArray4(classStudents.classId, classes.map((row) => row.id))));
-  await db.update(organizationClasses).set({ advisorUserId: null }).where(and6(eq8(organizationClasses.orgId, orgId), eq8(organizationClasses.advisorUserId, userId)));
-  await db.update(classTimetableSlots).set({ teacherUserId: null }).where(and6(eq8(classTimetableSlots.orgId, orgId), eq8(classTimetableSlots.teacherUserId, userId)));
+  await db.update(organizationMembers).set({ status, leftAt: /* @__PURE__ */ new Date() }).where(and7(eq9(organizationMembers.orgId, orgId), eq9(organizationMembers.userId, userId), eq9(organizationMembers.status, "active")));
+  await db.update(teacherAssignments).set({ active: 0 }).where(and7(eq9(teacherAssignments.orgId, orgId), sql6`(${teacherAssignments.studentUserId} = ${userId} OR ${teacherAssignments.teacherUserId} = ${userId})`));
+  const classes = await db.select({ id: organizationClasses.id }).from(organizationClasses).where(eq9(organizationClasses.orgId, orgId));
+  if (classes.length) await db.delete(classStudents).where(and7(eq9(classStudents.studentUserId, userId), inArray5(classStudents.classId, classes.map((row) => row.id))));
+  await db.update(organizationClasses).set({ advisorUserId: null }).where(and7(eq9(organizationClasses.orgId, orgId), eq9(organizationClasses.advisorUserId, userId)));
+  await db.update(classTimetableSlots).set({ teacherUserId: null }).where(and7(eq9(classTimetableSlots.orgId, orgId), eq9(classTimetableSlots.teacherUserId, userId)));
 }
 async function createInvitation(input) {
   const db = await requireDb4();
@@ -5019,16 +5311,16 @@ async function createInvitation(input) {
 }
 async function listInvitations(orgId) {
   const db = await requireDb4();
-  return db.select({ id: organizationInvitations.id, role: organizationInvitations.role, note: organizationInvitations.note, subject: organizationInvitations.subject, expiresAt: organizationInvitations.expiresAt, maxUses: organizationInvitations.maxUses, usedCount: organizationInvitations.usedCount, revokedAt: organizationInvitations.revokedAt, createdAt: organizationInvitations.createdAt }).from(organizationInvitations).where(eq8(organizationInvitations.orgId, orgId)).orderBy(desc4(organizationInvitations.createdAt)).limit(100);
+  return db.select({ id: organizationInvitations.id, role: organizationInvitations.role, note: organizationInvitations.note, subject: organizationInvitations.subject, expiresAt: organizationInvitations.expiresAt, maxUses: organizationInvitations.maxUses, usedCount: organizationInvitations.usedCount, revokedAt: organizationInvitations.revokedAt, createdAt: organizationInvitations.createdAt }).from(organizationInvitations).where(eq9(organizationInvitations.orgId, orgId)).orderBy(desc4(organizationInvitations.createdAt)).limit(100);
 }
 async function revokeInvitation(orgId, id6) {
   const db = await requireDb4();
-  const result = await db.update(organizationInvitations).set({ revokedAt: /* @__PURE__ */ new Date() }).where(and6(eq8(organizationInvitations.orgId, orgId), eq8(organizationInvitations.id, id6), isNull5(organizationInvitations.revokedAt))).returning();
+  const result = await db.update(organizationInvitations).set({ revokedAt: /* @__PURE__ */ new Date() }).where(and7(eq9(organizationInvitations.orgId, orgId), eq9(organizationInvitations.id, id6), isNull5(organizationInvitations.revokedAt))).returning();
   return result.length > 0;
 }
 async function findInvitationByHash(codeHash) {
   const db = await requireDb4();
-  const [row] = await db.select({ id: organizationInvitations.id, orgId: organizationInvitations.orgId, orgName: organizations.name, orgStatus: organizations.status, role: organizationInvitations.role, expiresAt: organizationInvitations.expiresAt, maxUses: organizationInvitations.maxUses, usedCount: organizationInvitations.usedCount, revokedAt: organizationInvitations.revokedAt, createdBy: organizationInvitations.createdBy, subject: organizationInvitations.subject, membershipStartsAt: organizations.membershipStartsAt, membershipEndsAt: organizations.membershipEndsAt }).from(organizationInvitations).innerJoin(organizations, eq8(organizations.id, organizationInvitations.orgId)).where(eq8(organizationInvitations.codeHash, codeHash)).limit(1);
+  const [row] = await db.select({ id: organizationInvitations.id, orgId: organizationInvitations.orgId, orgName: organizations.name, orgStatus: organizations.status, role: organizationInvitations.role, expiresAt: organizationInvitations.expiresAt, maxUses: organizationInvitations.maxUses, usedCount: organizationInvitations.usedCount, revokedAt: organizationInvitations.revokedAt, createdBy: organizationInvitations.createdBy, subject: organizationInvitations.subject, membershipStartsAt: organizations.membershipStartsAt, membershipEndsAt: organizations.membershipEndsAt }).from(organizationInvitations).innerJoin(organizations, eq9(organizations.id, organizationInvitations.orgId)).where(eq9(organizationInvitations.codeHash, codeHash)).limit(1);
   return row ?? null;
 }
 async function acceptInvitation(input) {
@@ -5037,15 +5329,15 @@ async function acceptInvitation(input) {
   const consentAt = input.role === "student" ? now : null;
   const subject2 = input.role === "student" ? null : input.subject ?? null;
   const kvkkVersion = input.role === "student" ? input.kvkkVersion ?? null : null;
-  const [existing] = await db.select({ id: organizationMembers.id }).from(organizationMembers).where(and6(eq8(organizationMembers.orgId, input.orgId), eq8(organizationMembers.userId, input.userId))).limit(1);
-  if (existing) await db.update(organizationMembers).set({ role: input.role, status: "active", consentAt, subject: subject2, kvkkVersion, joinedAt: now, leftAt: null, invitedBy: input.invitedBy }).where(eq8(organizationMembers.id, existing.id));
+  const [existing] = await db.select({ id: organizationMembers.id }).from(organizationMembers).where(and7(eq9(organizationMembers.orgId, input.orgId), eq9(organizationMembers.userId, input.userId))).limit(1);
+  if (existing) await db.update(organizationMembers).set({ role: input.role, status: "active", consentAt, subject: subject2, kvkkVersion, joinedAt: now, leftAt: null, invitedBy: input.invitedBy }).where(eq9(organizationMembers.id, existing.id));
   else await db.insert(organizationMembers).values({ orgId: input.orgId, userId: input.userId, role: input.role, status: "active", consentAt, subject: subject2, kvkkVersion, joinedAt: now, invitedBy: input.invitedBy });
-  await db.update(organizationInvitations).set({ usedCount: sql6`${organizationInvitations.usedCount} + 1` }).where(eq8(organizationInvitations.id, input.invitationId));
+  await db.update(organizationInvitations).set({ usedCount: sql6`${organizationInvitations.usedCount} + 1` }).where(eq9(organizationInvitations.id, input.invitationId));
 }
 async function listClasses(orgId) {
   const db = await requireDb4();
-  const classes = await db.select({ id: organizationClasses.id, name: organizationClasses.name, gradeLevel: organizationClasses.gradeLevel, track: organizationClasses.track, advisorUserId: organizationClasses.advisorUserId }).from(organizationClasses).where(eq8(organizationClasses.orgId, orgId)).orderBy(organizationClasses.name);
-  const links = classes.length ? await db.select({ classId: classStudents.classId, studentUserId: classStudents.studentUserId }).from(classStudents).where(inArray4(classStudents.classId, classes.map((row) => row.id))) : [];
+  const classes = await db.select({ id: organizationClasses.id, name: organizationClasses.name, gradeLevel: organizationClasses.gradeLevel, track: organizationClasses.track, advisorUserId: organizationClasses.advisorUserId }).from(organizationClasses).where(eq9(organizationClasses.orgId, orgId)).orderBy(organizationClasses.name);
+  const links = classes.length ? await db.select({ classId: classStudents.classId, studentUserId: classStudents.studentUserId }).from(classStudents).where(inArray5(classStudents.classId, classes.map((row) => row.id))) : [];
   return classes.map((row) => ({ ...row, studentUserIds: links.filter((link) => link.classId === row.id).map((link) => link.studentUserId) }));
 }
 async function createClass(orgId, fields2) {
@@ -5055,35 +5347,35 @@ async function createClass(orgId, fields2) {
 }
 async function updateClass(orgId, classId, fields2) {
   const db = await requireDb4();
-  const result = await db.update(organizationClasses).set(fields2).where(and6(eq8(organizationClasses.orgId, orgId), eq8(organizationClasses.id, classId))).returning();
+  const result = await db.update(organizationClasses).set(fields2).where(and7(eq9(organizationClasses.orgId, orgId), eq9(organizationClasses.id, classId))).returning();
   return result.length > 0;
 }
 async function deleteClass(orgId, classId) {
   const db = await requireDb4();
-  const [row] = await db.select({ id: organizationClasses.id }).from(organizationClasses).where(and6(eq8(organizationClasses.orgId, orgId), eq8(organizationClasses.id, classId))).limit(1);
+  const [row] = await db.select({ id: organizationClasses.id }).from(organizationClasses).where(and7(eq9(organizationClasses.orgId, orgId), eq9(organizationClasses.id, classId))).limit(1);
   if (!row) return false;
-  await db.delete(classStudents).where(eq8(classStudents.classId, classId));
-  await db.delete(classTimetableSlots).where(and6(eq8(classTimetableSlots.orgId, orgId), eq8(classTimetableSlots.classId, classId)));
-  await db.delete(organizationClasses).where(eq8(organizationClasses.id, classId));
+  await db.delete(classStudents).where(eq9(classStudents.classId, classId));
+  await db.delete(classTimetableSlots).where(and7(eq9(classTimetableSlots.orgId, orgId), eq9(classTimetableSlots.classId, classId)));
+  await db.delete(organizationClasses).where(eq9(organizationClasses.id, classId));
   return true;
 }
 async function setClassStudents(orgId, classId, studentUserIds) {
   const db = await requireDb4();
-  const [row] = await db.select({ id: organizationClasses.id }).from(organizationClasses).where(and6(eq8(organizationClasses.orgId, orgId), eq8(organizationClasses.id, classId))).limit(1);
+  const [row] = await db.select({ id: organizationClasses.id }).from(organizationClasses).where(and7(eq9(organizationClasses.orgId, orgId), eq9(organizationClasses.id, classId))).limit(1);
   if (!row) return false;
   const valid = studentUserIds.length ? (await listMembers(orgId, { role: "student" })).map((member) => member.userId).filter((id6) => studentUserIds.includes(id6)) : [];
-  await db.delete(classStudents).where(eq8(classStudents.classId, classId));
+  await db.delete(classStudents).where(eq9(classStudents.classId, classId));
   if (valid.length) await db.insert(classStudents).values(valid.map((studentUserId) => ({ classId, studentUserId })));
   return true;
 }
 async function listAssignments(orgId) {
   const db = await requireDb4();
-  return db.select({ teacherUserId: teacherAssignments.teacherUserId, studentUserId: teacherAssignments.studentUserId }).from(teacherAssignments).where(and6(eq8(teacherAssignments.orgId, orgId), eq8(teacherAssignments.active, 1)));
+  return db.select({ teacherUserId: teacherAssignments.teacherUserId, studentUserId: teacherAssignments.studentUserId }).from(teacherAssignments).where(and7(eq9(teacherAssignments.orgId, orgId), eq9(teacherAssignments.active, 1)));
 }
 async function setTeacherStudents(orgId, teacherUserId, studentUserIds) {
   const db = await requireDb4();
   const valid = studentUserIds.length ? (await listMembers(orgId, { role: "student" })).map((member) => member.userId).filter((id6) => studentUserIds.includes(id6)) : [];
-  await db.update(teacherAssignments).set({ active: 0 }).where(and6(eq8(teacherAssignments.orgId, orgId), eq8(teacherAssignments.teacherUserId, teacherUserId)));
+  await db.update(teacherAssignments).set({ active: 0 }).where(and7(eq9(teacherAssignments.orgId, orgId), eq9(teacherAssignments.teacherUserId, teacherUserId)));
   for (const studentUserId of valid) {
     await db.insert(teacherAssignments).values({ orgId, teacherUserId, studentUserId, active: 1 }).onConflictDoUpdate({ target: [teacherAssignments.orgId, teacherAssignments.teacherUserId, teacherAssignments.studentUserId], set: { active: 1 } });
   }
@@ -5092,16 +5384,16 @@ async function setTeacherStudents(orgId, teacherUserId, studentUserIds) {
 var slotColumns = { id: classTimetableSlots.id, classId: classTimetableSlots.classId, dayOfWeek: classTimetableSlots.dayOfWeek, startTime: classTimetableSlots.startTime, endTime: classTimetableSlots.endTime, subject: classTimetableSlots.subject, teacherUserId: classTimetableSlots.teacherUserId, room: classTimetableSlots.room };
 async function listOrgTimetable(orgId) {
   const db = await requireDb4();
-  return db.select(slotColumns).from(classTimetableSlots).where(eq8(classTimetableSlots.orgId, orgId)).orderBy(classTimetableSlots.dayOfWeek, classTimetableSlots.startTime);
+  return db.select(slotColumns).from(classTimetableSlots).where(eq9(classTimetableSlots.orgId, orgId)).orderBy(classTimetableSlots.dayOfWeek, classTimetableSlots.startTime);
 }
 async function replaceClassTimetables(orgId, plans) {
   const db = await requireDb4();
   const classIds = plans.map((plan) => plan.classId);
   if (!classIds.length) return true;
-  const rows = await db.select({ id: organizationClasses.id }).from(organizationClasses).where(and6(eq8(organizationClasses.orgId, orgId), inArray4(organizationClasses.id, classIds)));
+  const rows = await db.select({ id: organizationClasses.id }).from(organizationClasses).where(and7(eq9(organizationClasses.orgId, orgId), inArray5(organizationClasses.id, classIds)));
   if (rows.length !== new Set(classIds).size) return false;
   await db.transaction(async (tx) => {
-    await tx.delete(classTimetableSlots).where(and6(eq8(classTimetableSlots.orgId, orgId), inArray4(classTimetableSlots.classId, classIds)));
+    await tx.delete(classTimetableSlots).where(and7(eq9(classTimetableSlots.orgId, orgId), inArray5(classTimetableSlots.classId, classIds)));
     const values = plans.flatMap((plan) => plan.slots.map((slot) => ({ ...slot, orgId, classId: plan.classId })));
     if (values.length) await tx.insert(classTimetableSlots).values(values);
   });
@@ -5109,11 +5401,11 @@ async function replaceClassTimetables(orgId, plans) {
 }
 async function listStudentTimetable(studentUserId) {
   const db = await requireDb4();
-  return db.select({ orgName: organizations.name, className: organizationClasses.name, dayOfWeek: classTimetableSlots.dayOfWeek, startTime: classTimetableSlots.startTime, endTime: classTimetableSlots.endTime, subject: classTimetableSlots.subject, room: classTimetableSlots.room, teacherName: users.name }).from(classStudents).innerJoin(organizationClasses, eq8(organizationClasses.id, classStudents.classId)).innerJoin(organizationMembers, and6(eq8(organizationMembers.orgId, organizationClasses.orgId), eq8(organizationMembers.userId, classStudents.studentUserId), eq8(organizationMembers.role, "student"), eq8(organizationMembers.status, "active"))).innerJoin(organizations, eq8(organizations.id, organizationClasses.orgId)).innerJoin(classTimetableSlots, eq8(classTimetableSlots.classId, organizationClasses.id)).leftJoin(users, eq8(users.id, classTimetableSlots.teacherUserId)).where(eq8(classStudents.studentUserId, studentUserId)).orderBy(classTimetableSlots.dayOfWeek, classTimetableSlots.startTime);
+  return db.select({ orgName: organizations.name, className: organizationClasses.name, dayOfWeek: classTimetableSlots.dayOfWeek, startTime: classTimetableSlots.startTime, endTime: classTimetableSlots.endTime, subject: classTimetableSlots.subject, room: classTimetableSlots.room, teacherName: users.name }).from(classStudents).innerJoin(organizationClasses, eq9(organizationClasses.id, classStudents.classId)).innerJoin(organizationMembers, and7(eq9(organizationMembers.orgId, organizationClasses.orgId), eq9(organizationMembers.userId, classStudents.studentUserId), eq9(organizationMembers.role, "student"), eq9(organizationMembers.status, "active"))).innerJoin(organizations, eq9(organizations.id, organizationClasses.orgId)).innerJoin(classTimetableSlots, eq9(classTimetableSlots.classId, organizationClasses.id)).leftJoin(users, eq9(users.id, classTimetableSlots.teacherUserId)).where(eq9(classStudents.studentUserId, studentUserId)).orderBy(classTimetableSlots.dayOfWeek, classTimetableSlots.startTime);
 }
 async function listNotes2(orgId, studentUserId) {
   const db = await requireDb4();
-  return db.select({ id: counselingNotes.id, body: counselingNotes.body, visibility: counselingNotes.visibility, authorUserId: counselingNotes.authorUserId, authorName: users.name, createdAt: counselingNotes.createdAt }).from(counselingNotes).innerJoin(users, eq8(users.id, counselingNotes.authorUserId)).where(and6(eq8(counselingNotes.orgId, orgId), eq8(counselingNotes.studentUserId, studentUserId))).orderBy(desc4(counselingNotes.createdAt)).limit(200);
+  return db.select({ id: counselingNotes.id, body: counselingNotes.body, visibility: counselingNotes.visibility, authorUserId: counselingNotes.authorUserId, authorName: users.name, createdAt: counselingNotes.createdAt }).from(counselingNotes).innerJoin(users, eq9(users.id, counselingNotes.authorUserId)).where(and7(eq9(counselingNotes.orgId, orgId), eq9(counselingNotes.studentUserId, studentUserId))).orderBy(desc4(counselingNotes.createdAt)).limit(200);
 }
 async function createNote(input) {
   const db = await requireDb4();
@@ -5122,16 +5414,16 @@ async function createNote(input) {
 }
 async function getNote2(orgId, id6) {
   const db = await requireDb4();
-  const [row] = await db.select({ id: counselingNotes.id, studentUserId: counselingNotes.studentUserId, authorUserId: counselingNotes.authorUserId }).from(counselingNotes).where(and6(eq8(counselingNotes.orgId, orgId), eq8(counselingNotes.id, id6))).limit(1);
+  const [row] = await db.select({ id: counselingNotes.id, studentUserId: counselingNotes.studentUserId, authorUserId: counselingNotes.authorUserId }).from(counselingNotes).where(and7(eq9(counselingNotes.orgId, orgId), eq9(counselingNotes.id, id6))).limit(1);
   return row ?? null;
 }
 async function deleteNote2(orgId, id6) {
   const db = await requireDb4();
-  await db.delete(counselingNotes).where(and6(eq8(counselingNotes.orgId, orgId), eq8(counselingNotes.id, id6)));
+  await db.delete(counselingNotes).where(and7(eq9(counselingNotes.orgId, orgId), eq9(counselingNotes.id, id6)));
 }
 async function listStudentFeedback(studentUserId) {
   const db = await requireDb4();
-  return db.select({ id: counselingNotes.id, body: counselingNotes.body, orgName: organizations.name, authorName: users.name, createdAt: counselingNotes.createdAt }).from(counselingNotes).innerJoin(organizationMembers, and6(eq8(organizationMembers.orgId, counselingNotes.orgId), eq8(organizationMembers.userId, studentUserId), eq8(organizationMembers.status, "active"))).innerJoin(organizations, eq8(organizations.id, counselingNotes.orgId)).innerJoin(users, eq8(users.id, counselingNotes.authorUserId)).where(and6(eq8(counselingNotes.studentUserId, studentUserId), eq8(counselingNotes.visibility, "student"))).orderBy(desc4(counselingNotes.createdAt)).limit(20);
+  return db.select({ id: counselingNotes.id, body: counselingNotes.body, orgName: organizations.name, authorName: users.name, createdAt: counselingNotes.createdAt }).from(counselingNotes).innerJoin(organizationMembers, and7(eq9(organizationMembers.orgId, counselingNotes.orgId), eq9(organizationMembers.userId, studentUserId), eq9(organizationMembers.status, "active"))).innerJoin(organizations, eq9(organizations.id, counselingNotes.orgId)).innerJoin(users, eq9(users.id, counselingNotes.authorUserId)).where(and7(eq9(counselingNotes.studentUserId, studentUserId), eq9(counselingNotes.visibility, "student"))).orderBy(desc4(counselingNotes.createdAt)).limit(20);
 }
 async function writeAudit(input) {
   const db = await requireDb4();
@@ -5139,18 +5431,18 @@ async function writeAudit(input) {
 }
 async function listAudit(orgId) {
   const db = await requireDb4();
-  return db.select({ id: organizationAuditLogs.id, action: organizationAuditLogs.action, targetType: organizationAuditLogs.targetType, targetId: organizationAuditLogs.targetId, metadataJson: organizationAuditLogs.metadataJson, actorName: users.name, createdAt: organizationAuditLogs.createdAt }).from(organizationAuditLogs).innerJoin(users, eq8(users.id, organizationAuditLogs.actorUserId)).where(eq8(organizationAuditLogs.orgId, orgId)).orderBy(desc4(organizationAuditLogs.createdAt)).limit(200);
+  return db.select({ id: organizationAuditLogs.id, action: organizationAuditLogs.action, targetType: organizationAuditLogs.targetType, targetId: organizationAuditLogs.targetId, metadataJson: organizationAuditLogs.metadataJson, actorName: users.name, createdAt: organizationAuditLogs.createdAt }).from(organizationAuditLogs).innerJoin(users, eq9(users.id, organizationAuditLogs.actorUserId)).where(eq9(organizationAuditLogs.orgId, orgId)).orderBy(desc4(organizationAuditLogs.createdAt)).limit(200);
 }
 async function loadStudentSignals(studentUserIds, weekStart, weekEnd, logsSince) {
   const signals = new Map(studentUserIds.map((id6) => [id6, { exams: [], logs: [], weekSessions: [], weakTopicCount: 0, lastSignedIn: null }]));
   if (!studentUserIds.length) return signals;
   const db = await requireDb4();
   const [exams, logs, sessions, weak, signins] = await Promise.all([
-    db.select({ userId: userMockExams.userId, exam: userMockExams.exam, examDate: userMockExams.examDate, net: userMockExams.net }).from(userMockExams).where(inArray4(userMockExams.userId, studentUserIds)),
-    db.select({ userId: topicStudyLogs.userId, studyDate: topicStudyLogs.studyDate, minutes: topicStudyLogs.minutes }).from(topicStudyLogs).where(and6(inArray4(topicStudyLogs.userId, studentUserIds), gte5(topicStudyLogs.studyDate, logsSince))),
-    db.select({ userId: studyPlanSessions.userId, status: studyPlanSessions.status, plannedMinutes: studyPlanSessions.plannedMinutes, actualMinutes: studyPlanSessions.actualMinutes, targetQuestions: studyPlanSessions.targetQuestions, actualQuestions: studyPlanSessions.actualQuestions, sessionDate: studyPlanSessions.sessionDate, rescheduledFrom: studyPlanSessions.rescheduledFrom }).from(studyPlanSessions).where(and6(inArray4(studyPlanSessions.userId, studentUserIds), gte5(studyPlanSessions.sessionDate, weekStart), lt5(studyPlanSessions.sessionDate, weekEnd))),
-    db.select({ userId: topicProgress.userId, count: sql6`COUNT(*)::int` }).from(topicProgress).where(and6(inArray4(topicProgress.userId, studentUserIds), eq8(topicProgress.status, "weak"))).groupBy(topicProgress.userId),
-    db.select({ id: users.id, lastSignedIn: users.lastSignedIn }).from(users).where(inArray4(users.id, studentUserIds))
+    db.select({ userId: userMockExams.userId, exam: userMockExams.exam, examDate: userMockExams.examDate, net: userMockExams.net }).from(userMockExams).where(inArray5(userMockExams.userId, studentUserIds)),
+    db.select({ userId: topicStudyLogs.userId, studyDate: topicStudyLogs.studyDate, minutes: topicStudyLogs.minutes }).from(topicStudyLogs).where(and7(inArray5(topicStudyLogs.userId, studentUserIds), gte5(topicStudyLogs.studyDate, logsSince))),
+    db.select({ userId: studyPlanSessions.userId, status: studyPlanSessions.status, plannedMinutes: studyPlanSessions.plannedMinutes, actualMinutes: studyPlanSessions.actualMinutes, targetQuestions: studyPlanSessions.targetQuestions, actualQuestions: studyPlanSessions.actualQuestions, sessionDate: studyPlanSessions.sessionDate, rescheduledFrom: studyPlanSessions.rescheduledFrom }).from(studyPlanSessions).where(and7(inArray5(studyPlanSessions.userId, studentUserIds), gte5(studyPlanSessions.sessionDate, weekStart), lt5(studyPlanSessions.sessionDate, weekEnd))),
+    db.select({ userId: topicProgress.userId, count: sql6`COUNT(*)::int` }).from(topicProgress).where(and7(inArray5(topicProgress.userId, studentUserIds), eq9(topicProgress.status, "weak"))).groupBy(topicProgress.userId),
+    db.select({ id: users.id, lastSignedIn: users.lastSignedIn }).from(users).where(inArray5(users.id, studentUserIds))
   ]);
   for (const row of exams) signals.get(row.userId)?.exams.push({ exam: row.exam, examDate: row.examDate, net: Number(row.net) });
   for (const row of logs) signals.get(row.userId)?.logs.push({ studyDate: row.studyDate, minutes: row.minutes });
@@ -5168,8 +5460,8 @@ async function loadStudentSignals(studentUserIds, weekStart, weekEnd, logsSince)
 async function getStudentCalendarReadOnly(studentUserId, since) {
   const db = await requireDb4();
   const [sessions, logs] = await Promise.all([
-    db.select().from(studyPlanSessions).where(and6(eq8(studyPlanSessions.userId, studentUserId), gte5(studyPlanSessions.sessionDate, since))).orderBy(studyPlanSessions.sessionDate).limit(300),
-    db.select().from(topicStudyLogs).where(and6(eq8(topicStudyLogs.userId, studentUserId), gte5(topicStudyLogs.studyDate, since))).orderBy(desc4(topicStudyLogs.studyDate)).limit(300)
+    db.select().from(studyPlanSessions).where(and7(eq9(studyPlanSessions.userId, studentUserId), gte5(studyPlanSessions.sessionDate, since))).orderBy(studyPlanSessions.sessionDate).limit(300),
+    db.select().from(topicStudyLogs).where(and7(eq9(topicStudyLogs.userId, studentUserId), gte5(topicStudyLogs.studyDate, since))).orderBy(desc4(topicStudyLogs.studyDate)).limit(300)
   ]);
   return { sessions, logs };
 }
@@ -5179,7 +5471,7 @@ async function listPlannedSessionsOn(studentUserId, day) {
   start.setHours(0, 0, 0, 0);
   const end = new Date(start);
   end.setDate(end.getDate() + 1);
-  return db.select({ sessionDate: studyPlanSessions.sessionDate, plannedMinutes: studyPlanSessions.plannedMinutes, status: studyPlanSessions.status, title: studyPlanSessions.title }).from(studyPlanSessions).where(and6(eq8(studyPlanSessions.userId, studentUserId), eq8(studyPlanSessions.status, "planned"), gte5(studyPlanSessions.sessionDate, start), lt5(studyPlanSessions.sessionDate, end)));
+  return db.select({ sessionDate: studyPlanSessions.sessionDate, plannedMinutes: studyPlanSessions.plannedMinutes, status: studyPlanSessions.status, title: studyPlanSessions.title }).from(studyPlanSessions).where(and7(eq9(studyPlanSessions.userId, studentUserId), eq9(studyPlanSessions.status, "planned"), gte5(studyPlanSessions.sessionDate, start), lt5(studyPlanSessions.sessionDate, end)));
 }
 async function insertAssignedTask(input) {
   const db = await requireDb4();
@@ -5213,29 +5505,29 @@ async function getOrganization(orgId) {
     kvkkConsent: organizations.kvkkConsent,
     kvkkVersion: organizations.kvkkVersion,
     kvkkUpdatedAt: organizations.kvkkUpdatedAt
-  }).from(organizations).where(eq8(organizations.id, orgId)).limit(1);
+  }).from(organizations).where(eq9(organizations.id, orgId)).limit(1);
   return row ?? null;
 }
 async function updateOrgMembership(orgId, input) {
   const db = await requireDb4();
-  await db.update(organizations).set(input).where(eq8(organizations.id, orgId));
+  await db.update(organizations).set(input).where(eq9(organizations.id, orgId));
 }
 async function setPerStudentCreditCap(orgId, cap3) {
   const db = await requireDb4();
-  await db.update(organizations).set({ perStudentCreditCap: cap3 }).where(eq8(organizations.id, orgId));
+  await db.update(organizations).set({ perStudentCreditCap: cap3 }).where(eq9(organizations.id, orgId));
 }
 async function updateKvkk(orgId, notice, consent) {
   const db = await requireDb4();
-  await db.update(organizations).set({ kvkkNotice: notice, kvkkConsent: consent, kvkkVersion: sql6`${organizations.kvkkVersion} + 1`, kvkkUpdatedAt: /* @__PURE__ */ new Date() }).where(eq8(organizations.id, orgId));
+  await db.update(organizations).set({ kvkkNotice: notice, kvkkConsent: consent, kvkkVersion: sql6`${organizations.kvkkVersion} + 1`, kvkkUpdatedAt: /* @__PURE__ */ new Date() }).where(eq9(organizations.id, orgId));
 }
 async function listStudentKvkkVersions(orgId) {
   const db = await requireDb4();
-  const rows = await db.select({ kvkkVersion: organizationMembers.kvkkVersion }).from(organizationMembers).where(and6(eq8(organizationMembers.orgId, orgId), eq8(organizationMembers.role, "student"), eq8(organizationMembers.status, "active")));
+  const rows = await db.select({ kvkkVersion: organizationMembers.kvkkVersion }).from(organizationMembers).where(and7(eq9(organizationMembers.orgId, orgId), eq9(organizationMembers.role, "student"), eq9(organizationMembers.status, "active")));
   return rows.map((row) => row.kvkkVersion);
 }
 async function updateOrganization(orgId, profile) {
   const db = await requireDb4();
-  await db.update(organizations).set(profile).where(eq8(organizations.id, orgId));
+  await db.update(organizations).set(profile).where(eq9(organizations.id, orgId));
 }
 async function createOrganization(name, slug) {
   const db = await requireDb4();
@@ -5245,12 +5537,12 @@ async function createOrganization(name, slug) {
 async function listOrganizations() {
   const db = await requireDb4();
   const rows = await db.select({ id: organizations.id, name: organizations.name, slug: organizations.slug, status: organizations.status, createdAt: organizations.createdAt, plan: organizations.plan, membershipStartsAt: organizations.membershipStartsAt, membershipEndsAt: organizations.membershipEndsAt, aiCreditsMonthly: organizations.aiCreditsMonthly }).from(organizations).orderBy(desc4(organizations.createdAt));
-  const counts = rows.length ? await db.select({ orgId: organizationMembers.orgId, role: organizationMembers.role, count: sql6`COUNT(*)::int` }).from(organizationMembers).where(and6(inArray4(organizationMembers.orgId, rows.map((row) => row.id)), eq8(organizationMembers.status, "active"))).groupBy(organizationMembers.orgId, organizationMembers.role) : [];
+  const counts = rows.length ? await db.select({ orgId: organizationMembers.orgId, role: organizationMembers.role, count: sql6`COUNT(*)::int` }).from(organizationMembers).where(and7(inArray5(organizationMembers.orgId, rows.map((row) => row.id)), eq9(organizationMembers.status, "active"))).groupBy(organizationMembers.orgId, organizationMembers.role) : [];
   return rows.map((row) => ({ ...row, students: Number(counts.find((count4) => count4.orgId === row.id && count4.role === "student")?.count ?? 0), staff: counts.filter((count4) => count4.orgId === row.id && count4.role !== "student").reduce((sum, count4) => sum + Number(count4.count), 0) }));
 }
 async function setOrganizationStatus(orgId, status) {
   const db = await requireDb4();
-  await db.update(organizations).set({ status }).where(eq8(organizations.id, orgId));
+  await db.update(organizations).set({ status }).where(eq9(organizations.id, orgId));
 }
 var upgradeColumns = { id: organizationUpgradeRequests.id, orgId: organizationUpgradeRequests.orgId, currentPlan: organizationUpgradeRequests.currentPlan, requestedPlan: organizationUpgradeRequests.requestedPlan, note: organizationUpgradeRequests.note, status: organizationUpgradeRequests.status, createdAt: organizationUpgradeRequests.createdAt, resolvedAt: organizationUpgradeRequests.resolvedAt, requestedBy: organizationUpgradeRequests.requestedBy };
 async function createUpgradeRequest(input) {
@@ -5260,26 +5552,395 @@ async function createUpgradeRequest(input) {
 }
 async function listOrgUpgradeRequests(orgId) {
   const db = await requireDb4();
-  return db.select(upgradeColumns).from(organizationUpgradeRequests).where(eq8(organizationUpgradeRequests.orgId, orgId)).orderBy(desc4(organizationUpgradeRequests.createdAt)).limit(10);
+  return db.select(upgradeColumns).from(organizationUpgradeRequests).where(eq9(organizationUpgradeRequests.orgId, orgId)).orderBy(desc4(organizationUpgradeRequests.createdAt)).limit(10);
 }
 async function cancelUpgradeRequest(orgId, requestId) {
   const db = await requireDb4();
-  const result = await db.update(organizationUpgradeRequests).set({ status: "canceled", resolvedAt: /* @__PURE__ */ new Date() }).where(and6(eq8(organizationUpgradeRequests.orgId, orgId), eq8(organizationUpgradeRequests.id, requestId), eq8(organizationUpgradeRequests.status, "pending"))).returning();
+  const result = await db.update(organizationUpgradeRequests).set({ status: "canceled", resolvedAt: /* @__PURE__ */ new Date() }).where(and7(eq9(organizationUpgradeRequests.orgId, orgId), eq9(organizationUpgradeRequests.id, requestId), eq9(organizationUpgradeRequests.status, "pending"))).returning();
   return result.length > 0;
 }
 async function listPendingUpgradeRequests() {
   const db = await requireDb4();
-  return db.select({ ...upgradeColumns, orgName: organizations.name, requesterName: users.name, requesterEmail: users.email, membershipEndsAt: organizations.membershipEndsAt }).from(organizationUpgradeRequests).innerJoin(organizations, eq8(organizations.id, organizationUpgradeRequests.orgId)).innerJoin(users, eq8(users.id, organizationUpgradeRequests.requestedBy)).where(eq8(organizationUpgradeRequests.status, "pending")).orderBy(organizationUpgradeRequests.createdAt);
+  return db.select({ ...upgradeColumns, orgName: organizations.name, requesterName: users.name, requesterEmail: users.email, membershipEndsAt: organizations.membershipEndsAt }).from(organizationUpgradeRequests).innerJoin(organizations, eq9(organizations.id, organizationUpgradeRequests.orgId)).innerJoin(users, eq9(users.id, organizationUpgradeRequests.requestedBy)).where(eq9(organizationUpgradeRequests.status, "pending")).orderBy(organizationUpgradeRequests.createdAt);
 }
 async function getUpgradeRequest(requestId) {
   const db = await requireDb4();
-  const [row] = await db.select(upgradeColumns).from(organizationUpgradeRequests).where(eq8(organizationUpgradeRequests.id, requestId)).limit(1);
+  const [row] = await db.select(upgradeColumns).from(organizationUpgradeRequests).where(eq9(organizationUpgradeRequests.id, requestId)).limit(1);
   return row ?? null;
 }
 async function resolveUpgradeRequest(requestId, status, resolvedBy) {
   const db = await requireDb4();
-  const result = await db.update(organizationUpgradeRequests).set({ status, resolvedBy, resolvedAt: /* @__PURE__ */ new Date() }).where(and6(eq8(organizationUpgradeRequests.id, requestId), eq8(organizationUpgradeRequests.status, "pending"))).returning();
+  const result = await db.update(organizationUpgradeRequests).set({ status, resolvedBy, resolvedAt: /* @__PURE__ */ new Date() }).where(and7(eq9(organizationUpgradeRequests.id, requestId), eq9(organizationUpgradeRequests.status, "pending"))).returning();
   return result.length > 0;
+}
+
+// server/schedule/classScheduleDb.ts
+var ScheduleError = class extends Error {
+};
+function parsePeriods(raw) {
+  if (!raw) return DEFAULT_SCHOOL_PERIODS;
+  try {
+    const value = JSON.parse(raw);
+    if (!Array.isArray(value)) return DEFAULT_SCHOOL_PERIODS;
+    return value.filter((item) => typeof item?.start === "string" && typeof item?.end === "string").map((item) => ({ start: item.start, end: item.end }));
+  } catch {
+    return DEFAULT_SCHOOL_PERIODS;
+  }
+}
+async function getClassSchedule(userId) {
+  const db = await getDb();
+  if (!db) return { periods: DEFAULT_SCHOOL_PERIODS, blocks: [] };
+  const [profile] = await db.select({ schoolPeriodsJson: studentProfiles.schoolPeriodsJson }).from(studentProfiles).where(eq10(studentProfiles.userId, userId)).limit(1);
+  const rows = await db.select({ source: classScheduleBlocks.source, dayOfWeek: classScheduleBlocks.dayOfWeek, startTime: classScheduleBlocks.startTime, endTime: classScheduleBlocks.endTime, subject: classScheduleBlocks.subject, label: classScheduleBlocks.label }).from(classScheduleBlocks).where(eq10(classScheduleBlocks.userId, userId)).orderBy(asc2(classScheduleBlocks.dayOfWeek), asc2(classScheduleBlocks.startTime));
+  return { periods: parsePeriods(profile?.schoolPeriodsJson), blocks: rows };
+}
+async function getPlanScheduleContext(userId, startDate) {
+  const db = await getDb();
+  if (!db) return null;
+  const [profile] = await db.select({ start: studentProfiles.preferredStudyStartTime }).from(studentProfiles).where(eq10(studentProfiles.userId, userId)).limit(1);
+  const { blocks } = await getClassSchedule(userId);
+  return describeWeekForPlan([...blocks, ...await getCourseBlocks(userId)], startDate, profile?.start && isValidTime(profile.start) ? profile.start : "16:00");
+}
+async function getCourseBlocks(userId) {
+  const rows = await listStudentTimetable(userId).catch(() => []);
+  return rows.map((slot) => ({ source: "course", dayOfWeek: slot.dayOfWeek, startTime: slot.startTime, endTime: slot.endTime, subject: slot.subject, label: `${slot.className} \xB7 ${slot.subject}`, orgName: slot.orgName, teacherName: slot.teacherName, room: slot.room }));
+}
+async function saveClassSchedule(userId, schedule) {
+  const problem = validateSchedule(schedule);
+  if (problem) throw new ScheduleError(problem);
+  const db = await getDb();
+  if (!db) throw new ScheduleError("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
+  const blocks = schedule.blocks.map((block) => ({ ...block, label: block.label.trim() || block.subject || "Ders" }));
+  const periodsJson = JSON.stringify(schedule.periods);
+  await db.transaction(async (tx) => {
+    await tx.delete(classScheduleBlocks).where(eq10(classScheduleBlocks.userId, userId));
+    if (blocks.length) await tx.insert(classScheduleBlocks).values(blocks.map((block) => ({ ...block, userId })));
+    await tx.insert(studentProfiles).values({ userId, schoolPeriodsJson: periodsJson }).onConflictDoUpdate({ target: studentProfiles.userId, set: { schoolPeriodsJson: periodsJson } });
+  });
+  return getClassSchedule(userId);
+}
+
+// server/org/caseDb.ts
+var CaseError = class extends Error {
+  constructor(message, code = "BAD_REQUEST") {
+    super(message);
+    this.code = code;
+  }
+};
+async function requireDb5() {
+  const db = await getDb();
+  if (!db) throw new CaseError("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
+  return db;
+}
+var DAY3 = 24 * 60 * 60 * 1e3;
+async function isCasesEnabled(orgId) {
+  const db = await requireDb5();
+  const [row] = await db.select({ enabled: organizations.academicCasesEnabled }).from(organizations).where(eq11(organizations.id, orgId)).limit(1);
+  return row?.enabled === 1;
+}
+async function setCasesEnabled(orgId, enabled) {
+  const db = await requireDb5();
+  await db.update(organizations).set({ academicCasesEnabled: enabled ? 1 : 0 }).where(eq11(organizations.id, orgId));
+}
+async function responsibleTeacherIds(orgId, studentUserId) {
+  const db = await requireDb5();
+  const [advisors, assigned] = await Promise.all([
+    db.select({ userId: organizationClasses.advisorUserId }).from(classStudents).innerJoin(organizationClasses, eq11(organizationClasses.id, classStudents.classId)).where(and8(eq11(organizationClasses.orgId, orgId), eq11(classStudents.studentUserId, studentUserId))),
+    db.select({ userId: teacherAssignments.teacherUserId }).from(teacherAssignments).where(and8(eq11(teacherAssignments.orgId, orgId), eq11(teacherAssignments.studentUserId, studentUserId), eq11(teacherAssignments.active, 1)))
+  ]);
+  return Array.from(new Set([...advisors, ...assigned].map((row) => row.userId).filter((id6) => typeof id6 === "number")));
+}
+async function canReadNotes(orgId, viewerUserId, studentUserId) {
+  return (await responsibleTeacherIds(orgId, studentUserId)).includes(viewerUserId);
+}
+function filterPrivateNotes(notes2, viewerUserId, viewerIsResponsible) {
+  return viewerIsResponsible ? notes2 : notes2.filter((note) => note.authorUserId === viewerUserId);
+}
+async function comparableExamsOf(studentUserId) {
+  const db = await requireDb5();
+  const rows = await db.select({ id: userMockExams.id, exam: userMockExams.exam, examDate: userMockExams.examDate, net: userMockExams.net, publisher: userMockExams.publisher, scope: userMockExams.scope }).from(userMockExams).where(eq11(userMockExams.userId, studentUserId));
+  return rows.map((row) => ({ id: row.id, examKind: row.exam, date: new Date(row.examDate), net: Number(row.net), source: "student", publisher: row.publisher, scope: row.scope }));
+}
+var keyOfTrend = (exams, result) => {
+  const latest = exams.filter((exam) => result.evidence.some((item) => item.id === exam.id)).at(-1);
+  return latest ? comparabilityKey(latest) : comparabilityKey({ examKind: result.examKind, scope: null, publisher: null });
+};
+async function listSignals(orgId, studentUserIds) {
+  if (!studentUserIds.length) return [];
+  const db = await requireDb5();
+  const open = await db.select({ studentUserId: academicCases.studentUserId, ruleKey: academicCases.ruleKey, comparabilityKey: academicCases.comparabilityKey, id: academicCases.id }).from(academicCases).where(and8(eq11(academicCases.orgId, orgId), inArray6(academicCases.studentUserId, studentUserIds), sql7`${academicCases.status} <> 'closed'`));
+  const result = [];
+  for (const studentUserId of studentUserIds) {
+    const exams = await comparableExamsOf(studentUserId);
+    for (const trend of trendSignals(exams)) {
+      if (trend.status === "no_signal") continue;
+      const key = keyOfTrend(exams, trend);
+      const existing = open.find((row) => row.studentUserId === studentUserId && row.ruleKey === "trend_decline" && row.comparabilityKey === key);
+      result.push({ studentUserId, examKind: trend.examKind, status: trend.status, confidence: trend.status === "signal" ? trend.confidence : null, description: describeTrend(trend), openCaseId: existing?.id ?? null });
+    }
+  }
+  return result.sort((a, b) => Number(b.status === "signal") - Number(a.status === "signal"));
+}
+var isUniqueViolation = (error) => {
+  const value = error;
+  return value?.code === "23505" || value?.cause?.code === "23505";
+};
+async function openCase(input) {
+  const db = await requireDb5();
+  const exams = await comparableExamsOf(input.studentUserId);
+  let trend = null;
+  let key = "";
+  let confidence = "medium";
+  if (input.ruleKey === "trend_decline") {
+    if (!input.examKind) throw new CaseError("S\u0131nav t\xFCr\xFC gerekli.");
+    trend = trendDecline(exams, input.examKind);
+    if (trend.status !== "signal") throw new CaseError(trend.status === "insufficient" ? describeTrend(trend) : "Bu s\u0131nav t\xFCr\xFCnde d\xFC\u015F\xFC\u015F e\u011Filimi g\xF6r\xFClm\xFCyor; inceleme \xF6nerisi yok.");
+    key = keyOfTrend(exams, trend);
+    confidence = trend.confidence;
+  } else {
+    key = `manual|${input.examKind ?? "*"}`;
+  }
+  const owners = await responsibleTeacherIds(input.orgId, input.studentUserId);
+  const ownerUserId = owners.includes(input.actorUserId) ? input.actorUserId : owners[0] ?? input.actorUserId;
+  let created;
+  try {
+    [created] = await db.insert(academicCases).values({ orgId: input.orgId, studentUserId: input.studentUserId, ownerUserId, examKind: input.examKind, ruleKey: input.ruleKey, comparabilityKey: key, confidence, openedByUserId: input.actorUserId }).returning();
+  } catch (error) {
+    if (!isUniqueViolation(error)) throw error;
+    const [existing] = await db.select({ id: academicCases.id }).from(academicCases).where(and8(eq11(academicCases.orgId, input.orgId), eq11(academicCases.studentUserId, input.studentUserId), eq11(academicCases.ruleKey, input.ruleKey), eq11(academicCases.comparabilityKey, key), sql7`${academicCases.status} <> 'closed'`)).limit(1);
+    return { caseId: existing.id, created: false };
+  }
+  await captureEvidence(db, created, exams, trend);
+  return { caseId: created.id, created: true };
+}
+async function captureEvidence(db, row, exams, trend) {
+  const examIds = trend ? trend.evidence.map((item) => item.id) : exams.filter((exam) => !row.examKind || exam.examKind === row.examKind).sort((a, b) => b.date.getTime() - a.date.getTime()).slice(0, 3).map((exam) => exam.id);
+  const examRows = examIds.length ? await db.select({ id: userMockExams.id, title: userMockExams.title, exam: userMockExams.exam, examDate: userMockExams.examDate, net: userMockExams.net, subjectsJson: userMockExams.subjectsJson }).from(userMockExams).where(and8(eq11(userMockExams.userId, row.studentUserId), inArray6(userMockExams.id, examIds))) : [];
+  const since = new Date(Date.now() - 28 * DAY3);
+  const logs = await db.select({ studyDate: topicStudyLogs.studyDate, minutes: topicStudyLogs.minutes, questions: topicStudyLogs.questions }).from(topicStudyLogs).where(and8(eq11(topicStudyLogs.userId, row.studentUserId), gte6(topicStudyLogs.studyDate, since)));
+  const weeks = [0, 1, 2, 3].map((index2) => {
+    const end = Date.now() - index2 * 7 * DAY3;
+    const inWeek = logs.filter((log) => {
+      const at = new Date(log.studyDate).getTime();
+      return at <= end && at > end - 7 * DAY3;
+    });
+    return { weeksAgo: index2, minutes: inWeek.reduce((sum, log) => sum + log.minutes, 0), questions: inWeek.reduce((sum, log) => sum + log.questions, 0) };
+  }).reverse();
+  const topics = (await getUserTopicProgress(row.studentUserId)).filter((topic) => !topic.insufficientData && topic.status === "Zay\u0131f" && (!row.examKind || topic.exam === row.examKind));
+  const values = [
+    ...examRows.sort((a, b) => new Date(a.examDate).getTime() - new Date(b.examDate).getTime()).map((exam) => ({ caseId: row.id, orgId: row.orgId, kind: "exam", refId: exam.id, snapshotJson: JSON.stringify({ title: exam.title, exam: exam.exam, date: exam.examDate, net: Number(exam.net), subjects: safeJson(exam.subjectsJson) }) })),
+    { caseId: row.id, orgId: row.orgId, kind: "study", refId: null, snapshotJson: JSON.stringify({ weeks }) },
+    { caseId: row.id, orgId: row.orgId, kind: "topic", refId: null, snapshotJson: JSON.stringify({ weak: topics.slice(0, 12).map((topic) => ({ topicId: topic.id, subject: topic.subject, topic: topic.topic, progress: topic.progress })) }) }
+  ];
+  if (trend) values.unshift({ caseId: row.id, orgId: row.orgId, kind: "exam", refId: null, snapshotJson: JSON.stringify({ summary: describeTrend(trend), totalChange: trend.status !== "insufficient" ? trend.totalChange : null, confidence: row.confidence }) });
+  await db.insert(caseEvidence).values(values);
+}
+var safeJson = (value) => {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+};
+async function requireCase(db, orgId, caseId) {
+  const [row] = await db.select().from(academicCases).where(and8(eq11(academicCases.id, caseId), eq11(academicCases.orgId, orgId))).limit(1);
+  if (!row) throw new CaseError("Takip dosyas\u0131 bulunamad\u0131.", "NOT_FOUND");
+  return row;
+}
+async function getCaseRow(orgId, caseId) {
+  return requireCase(await requireDb5(), orgId, caseId);
+}
+async function listCases(orgId, options = {}) {
+  const db = await requireDb5();
+  if (options.studentUserIds && !options.studentUserIds.length) return [];
+  const conditions = [eq11(academicCases.orgId, orgId)];
+  if (options.studentUserIds) conditions.push(inArray6(academicCases.studentUserId, options.studentUserIds));
+  if (options.status) conditions.push(eq11(academicCases.status, options.status));
+  const rows = await db.select({ case: academicCases, studentName: users.name }).from(academicCases).innerJoin(users, eq11(users.id, academicCases.studentUserId)).where(and8(...conditions)).orderBy(desc5(academicCases.openedAt)).limit(200);
+  const ids = rows.map((row) => row.case.id);
+  const lastActions = ids.length ? await db.select({ caseId: caseActions.caseId, at: sql7`max(${caseActions.createdAt})` }).from(caseActions).where(inArray6(caseActions.caseId, ids)).groupBy(caseActions.caseId) : [];
+  return rows.map((row) => ({ ...row.case, studentName: row.studentName, lastActionAt: lastActions.find((item) => item.caseId === row.case.id)?.at ?? null }));
+}
+async function getCaseDetail(orgId, caseId) {
+  const db = await requireDb5();
+  const row = await requireCase(db, orgId, caseId);
+  const [evidence, actions, evaluations, notes2] = await Promise.all([
+    db.select().from(caseEvidence).where(eq11(caseEvidence.caseId, caseId)).orderBy(caseEvidence.id),
+    db.select().from(caseActions).where(eq11(caseActions.caseId, caseId)).orderBy(caseActions.createdAt),
+    db.select().from(caseEvaluations).where(eq11(caseEvaluations.caseId, caseId)).orderBy(caseEvaluations.evaluatedAt),
+    db.select({ id: counselingNotes.id, body: counselingNotes.body, visibility: counselingNotes.visibility, authorUserId: counselingNotes.authorUserId, authorName: users.name, createdAt: counselingNotes.createdAt }).from(counselingNotes).innerJoin(users, eq11(users.id, counselingNotes.authorUserId)).where(and8(eq11(counselingNotes.orgId, orgId), eq11(counselingNotes.caseId, caseId))).orderBy(desc5(counselingNotes.createdAt))
+  ]);
+  const actionIds = actions.map((action) => action.id);
+  const tasks = actionIds.length ? await db.select({ id: studyPlanSessions.id, caseActionId: studyPlanSessions.caseActionId, sessionDate: studyPlanSessions.sessionDate, title: studyPlanSessions.title, plannedMinutes: studyPlanSessions.plannedMinutes, status: studyPlanSessions.status, studentFeedback: studyPlanSessions.studentFeedback, actualQuestions: studyPlanSessions.actualQuestions, correct: studyPlanSessions.correct, wrong: studyPlanSessions.wrong }).from(studyPlanSessions).where(and8(eq11(studyPlanSessions.userId, row.studentUserId), inArray6(studyPlanSessions.caseActionId, actionIds))).orderBy(studyPlanSessions.sessionDate) : [];
+  return {
+    case: row,
+    evidence: evidence.map((item) => ({ ...item, snapshot: safeJson(item.snapshotJson) })),
+    actions: actions.map((item) => ({ ...item, payload: safeJson(item.payloadJson) })),
+    evaluations: evaluations.map((item) => ({ ...item, netChange: item.netChange === null ? null : Number(item.netChange), studentSignals: safeJson(item.studentSignalsJson) })),
+    notes: notes2,
+    tasks
+  };
+}
+async function addCaseAction(input) {
+  const db = await requireDb5();
+  const row = await requireCase(db, input.orgId, input.caseId);
+  if (row.status === "closed") throw new CaseError("Dosya kapal\u0131. \xD6nce yeniden a\xE7.");
+  const [inserted] = await db.insert(caseActions).values({ caseId: row.id, orgId: row.orgId, type: input.type, payloadJson: JSON.stringify(input.payload), bookId: input.bookId ?? null, bookContentId: input.bookContentId ?? null, status: input.status ?? "done", createdByUserId: input.actorUserId, idempotencyKey: input.idempotencyKey }).onConflictDoNothing({ target: [caseActions.caseId, caseActions.idempotencyKey] }).returning({ id: caseActions.id });
+  if (!inserted) {
+    const [existing] = await db.select({ id: caseActions.id }).from(caseActions).where(and8(eq11(caseActions.caseId, row.id), eq11(caseActions.idempotencyKey, input.idempotencyKey))).limit(1);
+    return { actionId: existing.id, created: false };
+  }
+  if (row.status === "open") await db.update(academicCases).set({ status: "in_progress" }).where(eq11(academicCases.id, row.id));
+  return { actionId: inserted.id, created: true };
+}
+async function addCaseNote(input) {
+  const db = await requireDb5();
+  const row = await requireCase(db, input.orgId, input.caseId);
+  const [note] = await db.insert(counselingNotes).values({ orgId: row.orgId, studentUserId: row.studentUserId, authorUserId: input.authorUserId, body: input.body, visibility: input.visibility, caseId: row.id }).returning({ id: counselingNotes.id });
+  return note.id;
+}
+async function suggestOwnedResources(studentUserId, topicIds) {
+  const db = await requireDb5();
+  if (!topicIds.length) return { owned: [], missingTopicIds: [], catalog: [] };
+  const rows = await db.select({ bookId: userBookContents.bookId, contentId: userBookContents.id, topicId: userBookContents.topicId, label: userBookContents.label, title: userBookContents.title, unitTitle: userBookContents.unitTitle, testNumber: userBookContents.testNumber, pageStart: userBookContents.pageStart, pageEnd: userBookContents.pageEnd, bookTitle: userResourceBooks.title }).from(userBookContents).innerJoin(bookInventory, and8(eq11(bookInventory.userId, userBookContents.userId), eq11(bookInventory.bookId, userBookContents.bookId), isNull6(bookInventory.removedAt))).leftJoin(userResourceBooks, and8(eq11(userResourceBooks.userId, userBookContents.userId), eq11(userResourceBooks.bookId, userBookContents.bookId))).where(and8(eq11(userBookContents.userId, studentUserId), inArray6(userBookContents.topicId, topicIds))).orderBy(userBookContents.bookId, userBookContents.sortOrder);
+  const byBook = /* @__PURE__ */ new Map();
+  for (const row of rows) {
+    const entry = byBook.get(row.bookId) ?? { bookId: row.bookId, title: row.bookTitle ?? "Kitab\u0131m", items: [] };
+    entry.items.push({ bookContentId: row.contentId, topicId: row.topicId, label: row.label, title: row.title || row.unitTitle, pageStart: row.pageStart, pageEnd: row.pageEnd });
+    byBook.set(row.bookId, entry);
+  }
+  const covered2 = new Set(rows.map((row) => row.topicId));
+  const missingTopicIds = topicIds.filter((id6) => !covered2.has(id6));
+  const catalog = missingTopicIds.length ? await db.selectDistinct({ catalogBookId: catalogBooks.id, title: catalogBooks.name, topicId: bookCurriculumTopics.topicId }).from(bookCurriculumTopics).innerJoin(catalogBooks, eq11(catalogBooks.id, bookCurriculumTopics.bookId)).where(and8(inArray6(bookCurriculumTopics.topicId, missingTopicIds), eq11(catalogBooks.active, 1))).limit(3) : [];
+  return { owned: Array.from(byBook.values()), missingTopicIds, catalog };
+}
+async function busyProvider(studentUserId, from, days) {
+  const db = await requireDb5();
+  const start = new Date(from);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + days + 1);
+  const [schedule, courseBlocks, sessions] = await Promise.all([
+    getClassSchedule(studentUserId),
+    getCourseBlocks(studentUserId).catch(() => []),
+    db.select({ sessionDate: studyPlanSessions.sessionDate, plannedMinutes: studyPlanSessions.plannedMinutes, status: studyPlanSessions.status, title: studyPlanSessions.title }).from(studyPlanSessions).where(and8(eq11(studyPlanSessions.userId, studentUserId), eq11(studyPlanSessions.status, "planned"), gte6(studyPlanSessions.sessionDate, start), lt6(studyPlanSessions.sessionDate, end)))
+  ]);
+  return (date) => busyOn(date, { blocks: schedule.blocks, courseBlocks, sessions });
+}
+async function previewCasePlan(studentUserId, items, from, days) {
+  const busyFor = await busyProvider(studentUserId, from, days);
+  return placePlanItems(items.map((item) => ({ minutes: item.minutes })), from, days, busyFor, { earliest: "16:00" });
+}
+async function assignCasePlan(input) {
+  const db = await requireDb5();
+  const row = await requireCase(db, input.orgId, input.caseId);
+  const placements = await previewCasePlan(row.studentUserId, input.items, input.from, input.days);
+  const { actionId, created } = await addCaseAction({ orgId: input.orgId, caseId: input.caseId, type: "plan", payload: { items: input.items, from: input.from, days: input.days }, actorUserId: input.actorUserId, idempotencyKey: input.idempotencyKey, status: "planned" });
+  if (!created) {
+    const existing = await db.select({ id: studyPlanSessions.id }).from(studyPlanSessions).where(and8(eq11(studyPlanSessions.userId, row.studentUserId), eq11(studyPlanSessions.caseActionId, actionId)));
+    return { actionId, sessionIds: existing.map((session) => session.id), skipped: [], duplicate: true };
+  }
+  const sessionIds = [];
+  const skipped = [];
+  const placedDates = [];
+  for (const placement of placements) {
+    const item = input.items[placement.index];
+    if (!placement.date) {
+      skipped.push({ itemIndex: placement.index, reason: "no_slot" });
+      continue;
+    }
+    const at = new Date(placement.date);
+    at.setHours(Math.floor(placement.start / 60), placement.start % 60, 0, 0);
+    sessionIds.push(await insertAssignedTask({ orgId: input.orgId, studentUserId: row.studentUserId, teacherUserId: input.actorUserId, sessionDate: at, title: `${item.subject} \xB7 ${item.topic}`, subject: item.subject, topic: item.topic, kind: "Konu tekrar\u0131", plannedMinutes: item.minutes, targetQuestions: item.targetQuestions ?? null, summary: "Akademik takip dosyas\u0131ndan \xF6\u011Fretmenin \xF6nerdi\u011Fi \xE7al\u0131\u015Fma.", caseActionId: actionId, targetPages: item.pages ?? null, sourceBookId: item.bookId ?? null }));
+    placedDates.push(at);
+  }
+  const [teacher] = await db.select({ name: users.name }).from(users).where(eq11(users.id, input.actorUserId)).limit(1);
+  await notifyStudentOfTasks({ studentUserId: row.studentUserId, teacherName: teacher?.name ?? null, sessionDates: placedDates }).catch((error) => console.warn("[cases] notify failed:", error instanceof Error ? error.message : error));
+  return { actionId, sessionIds, skipped, duplicate: false };
+}
+async function evaluateCase(input) {
+  const db = await requireDb5();
+  const detail = await getCaseDetail(input.orgId, input.caseId);
+  const row = detail.case;
+  if (row.status === "closed") throw new CaseError("Dosya kapal\u0131. \xD6nce yeniden a\xE7.");
+  const examEvidence = detail.evidence.filter((item) => item.kind === "exam" && item.refId !== null);
+  const baseline = examEvidence.at(-1) ?? null;
+  const baselineDate = baseline ? new Date(baseline.snapshot.date) : row.openedAt;
+  const exams = (await comparableExamsOf(row.studentUserId)).filter((exam) => (!row.examKind || exam.examKind === row.examKind) && exam.scope !== "branch" && exam.date.getTime() > Math.max(baselineDate.getTime(), new Date(row.openedAt).getTime() - DAY3));
+  const followup = exams.sort((a, b) => a.date.getTime() - b.date.getTime())[0] ?? null;
+  const baselineNet = baseline ? Number(baseline.snapshot.net) : null;
+  const netChange = followup && baselineNet !== null ? Math.round((followup.net - baselineNet) * 100) / 100 : null;
+  const signals = { done: 0, struggled: 0, needs_review: 0 };
+  for (const task of detail.tasks) if (task.studentFeedback) signals[task.studentFeedback] += 1;
+  const tasksDone = detail.tasks.filter((task) => task.status === "completed" || task.studentFeedback === "done").length;
+  const limited = !followup;
+  const uncertaintyNote = limited ? "Kar\u015F\u0131la\u015Ft\u0131r\u0131labilir yeni deneme yok; de\u011Ferlendirme yaln\u0131zca g\xF6rev tamamlama ve \xF6\u011Frencinin geri bildirimine dayan\u0131yor." : "Net de\u011Fi\u015Fimi tek ba\u015F\u0131na m\xFCdahalenin etkisini g\xF6stermez; deneme zorlu\u011Fu ve ba\u015Fka etkenler de rol oynar.";
+  const [evaluation] = await db.insert(caseEvaluations).values({ caseId: row.id, orgId: row.orgId, baselineExamId: baseline?.refId ?? null, followupExamId: followup?.id ?? null, netChange: netChange === null ? null : netChange.toFixed(2), tasksDone, tasksTotal: detail.tasks.length, studentSignalsJson: JSON.stringify(signals), limitedEvidence: limited ? 1 : 0, uncertaintyNote, teacherOutcome: input.outcome, evaluatedByUserId: input.actorUserId }).returning({ id: caseEvaluations.id });
+  await db.update(academicCases).set(input.outcome === "completed" ? { status: "closed", outcome: "completed", closedAt: /* @__PURE__ */ new Date() } : { status: "in_progress", outcome: input.outcome }).where(eq11(academicCases.id, row.id));
+  if (input.note?.trim()) await addCaseNote({ orgId: input.orgId, caseId: row.id, authorUserId: input.actorUserId, body: input.note.trim(), visibility: "staff" });
+  return { evaluationId: evaluation.id, limitedEvidence: limited, netChange, tasksDone, tasksTotal: detail.tasks.length };
+}
+async function reopenCase(input) {
+  const db = await requireDb5();
+  const row = await requireCase(db, input.orgId, input.caseId);
+  if (row.status !== "closed") throw new CaseError("Dosya zaten a\xE7\u0131k.");
+  try {
+    await db.update(academicCases).set({ status: "in_progress", outcome: null, closedAt: null }).where(eq11(academicCases.id, row.id));
+  } catch (error) {
+    if (isUniqueViolation(error)) throw new CaseError("Bu \xF6\u011Frenci i\xE7in ayn\u0131 konuda a\xE7\u0131k bir dosya var.", "CONFLICT");
+    throw error;
+  }
+  await addCaseAction({ orgId: input.orgId, caseId: row.id, type: "review", payload: { reopened: true, reason: input.reason }, actorUserId: input.actorUserId, idempotencyKey: `reopen-${Date.now()}` });
+}
+async function caseSummary(orgId, now = /* @__PURE__ */ new Date()) {
+  const cases = await listCases(orgId);
+  const stale = (row) => row.status !== "closed" && now.getTime() - new Date(row.lastActionAt ?? row.openedAt).getTime() > 7 * DAY3;
+  return {
+    open: cases.filter((row) => row.status === "open").length,
+    inProgress: cases.filter((row) => row.status === "in_progress").length,
+    evaluating: cases.filter((row) => row.status === "evaluating").length,
+    closedLast30: cases.filter((row) => row.status === "closed" && row.closedAt && now.getTime() - new Date(row.closedAt).getTime() <= 30 * DAY3).length,
+    overdue: cases.filter(stale).length
+  };
+}
+async function listStudentAssignedTasks(studentUserId, now = /* @__PURE__ */ new Date()) {
+  const db = await requireDb5();
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - (start.getDay() + 6) % 7);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 7);
+  return db.select({ id: studyPlanSessions.id, sessionDate: studyPlanSessions.sessionDate, title: studyPlanSessions.title, subject: studyPlanSessions.subject, topic: studyPlanSessions.topic, plannedMinutes: studyPlanSessions.plannedMinutes, targetPages: studyPlanSessions.targetPages, status: studyPlanSessions.status, studentFeedback: studyPlanSessions.studentFeedback, assignedBy: users.name }).from(studyPlanSessions).leftJoin(users, eq11(users.id, studyPlanSessions.assignedByUserId)).where(and8(eq11(studyPlanSessions.userId, studentUserId), sql7`${studyPlanSessions.assignedByUserId} IS NOT NULL`, gte6(studyPlanSessions.sessionDate, start), lt6(studyPlanSessions.sessionDate, end))).orderBy(studyPlanSessions.sessionDate);
+}
+async function setStudentFeedback(studentUserId, sessionId, feedback) {
+  const db = await requireDb5();
+  const now = /* @__PURE__ */ new Date();
+  const rows = await db.update(studyPlanSessions).set({ studentFeedback: feedback, studentFeedbackAt: now, ...feedback === "done" ? { status: "completed", completedAt: now } : {} }).where(and8(eq11(studyPlanSessions.id, sessionId), eq11(studyPlanSessions.userId, studentUserId), sql7`${studyPlanSessions.assignedByUserId} IS NOT NULL`)).returning({ id: studyPlanSessions.id });
+  return rows.length > 0;
+}
+async function academicDigestFor(orgId, students, now = /* @__PURE__ */ new Date()) {
+  if (!students.length || !await isCasesEnabled(orgId)) return null;
+  const ids = students.map((student) => student.userId);
+  const names = new Map(students.map((student) => [student.userId, student.name]));
+  const signals = await listSignals(orgId, ids);
+  const cases = (await listCases(orgId, { studentUserIds: ids })).filter((row) => row.status !== "closed");
+  return {
+    suggestions: signals.filter((signal) => signal.status === "signal" && !signal.openCaseId).map((signal) => ({ name: names.get(signal.studentUserId) ?? "\xD6\u011Frenci", description: signal.description })),
+    openCases: cases.length,
+    staleCases: cases.filter((row) => now.getTime() - new Date(row.lastActionAt ?? row.openedAt).getTime() > 7 * DAY3).length
+  };
+}
+async function notifyStudentOfTasks(input) {
+  if (!input.sessionDates.length) return;
+  const db = await requireDb5();
+  const first = [...input.sessionDates].sort((a, b) => a.getTime() - b.getTime())[0];
+  const when2 = first.toLocaleString("tr-TR", { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Istanbul" });
+  const who = input.teacherName?.trim() || "\xD6\u011Fretmenin";
+  const count4 = input.sessionDates.length;
+  const title = count4 > 1 ? `${who} ${count4} \xE7al\u0131\u015Fma \xF6nerdi` : `${who} bir \xE7al\u0131\u015Fma \xF6nerdi`;
+  const message = `Takvimine eklendi; ilki ${when2}. Genel Bak\u0131\u015F'taki "Bu haftaki \xE7al\u0131\u015Fmalar"dan durumunu bildirebilirsin.`;
+  await db.insert(coachAlerts).values({ userId: input.studentUserId, level: "action", ruleKey: "teacher_tasks", title, message });
+  if (pushConfigured()) await sendToUser(input.studentUserId, { title, body: message, url: "/", tag: "teacher-tasks" }).catch(() => void 0);
 }
 
 // server/digest/unsubscribeToken.ts
@@ -5308,19 +5969,19 @@ var TIME_BUDGET_MS = 12e4;
 async function getStaffDigestEnabled(userId, orgId) {
   const db = await getDb();
   if (!db) return true;
-  const [row] = await db.select({ optOut: organizationMembers.weeklyDigestOptOut }).from(organizationMembers).where(and7(eq9(organizationMembers.userId, userId), eq9(organizationMembers.orgId, orgId))).limit(1);
+  const [row] = await db.select({ optOut: organizationMembers.weeklyDigestOptOut }).from(organizationMembers).where(and9(eq12(organizationMembers.userId, userId), eq12(organizationMembers.orgId, orgId))).limit(1);
   return !row || row.optOut === 0;
 }
 async function setStaffDigestEnabled(userId, orgId, enabled) {
   const db = await getDb();
   if (!db) return enabled;
-  await db.update(organizationMembers).set({ weeklyDigestOptOut: enabled ? 0 : 1 }).where(and7(eq9(organizationMembers.userId, userId), eq9(organizationMembers.orgId, orgId)));
+  await db.update(organizationMembers).set({ weeklyDigestOptOut: enabled ? 0 : 1 }).where(and9(eq12(organizationMembers.userId, userId), eq12(organizationMembers.orgId, orgId)));
   return enabled;
 }
 async function setStaffDigestEnabledByMemberId(memberId, enabled) {
   const db = await getDb();
   if (!db) return;
-  await db.update(organizationMembers).set({ weeklyDigestOptOut: enabled ? 0 : 1 }).where(eq9(organizationMembers.id, memberId));
+  await db.update(organizationMembers).set({ weeklyDigestOptOut: enabled ? 0 : 1 }).where(eq12(organizationMembers.id, memberId));
 }
 async function runTeacherDigest(options) {
   const result = { candidates: 0, sent: 0, skipped: 0, failed: 0, stoppedEarly: false, ...options.dryRun ? { previews: [] } : {} };
@@ -5330,17 +5991,17 @@ async function runTeacherDigest(options) {
   const { start } = weeklyDigestWindow(now);
   const weekEnd = new Date(start.getTime() + 7 * DAY_MS3);
   const startedAt = Date.now();
-  const rows = await db.select({ memberId: organizationMembers.id, userId: users.id, email: users.email, name: users.name, role: organizationMembers.role, orgId: organizations.id, orgName: organizations.name, membershipStartsAt: organizations.membershipStartsAt, membershipEndsAt: organizations.membershipEndsAt }).from(organizationMembers).innerJoin(users, eq9(users.id, organizationMembers.userId)).innerJoin(organizations, eq9(organizations.id, organizationMembers.orgId)).where(and7(
-    inArray5(organizationMembers.role, [...STAFF_ROLES]),
-    eq9(organizationMembers.status, "active"),
-    eq9(organizationMembers.weeklyDigestOptOut, 0),
-    or2(isNull6(organizationMembers.weeklyDigestLastSentAt), lt6(organizationMembers.weeklyDigestLastSentAt, new Date(now.getTime() - RESEND_AFTER_MS))),
-    eq9(organizations.status, "active"),
+  const rows = await db.select({ memberId: organizationMembers.id, userId: users.id, email: users.email, name: users.name, role: organizationMembers.role, orgId: organizations.id, orgName: organizations.name, membershipStartsAt: organizations.membershipStartsAt, membershipEndsAt: organizations.membershipEndsAt }).from(organizationMembers).innerJoin(users, eq12(users.id, organizationMembers.userId)).innerJoin(organizations, eq12(organizations.id, organizationMembers.orgId)).where(and9(
+    inArray7(organizationMembers.role, [...STAFF_ROLES]),
+    eq12(organizationMembers.status, "active"),
+    eq12(organizationMembers.weeklyDigestOptOut, 0),
+    or2(isNull7(organizationMembers.weeklyDigestLastSentAt), lt7(organizationMembers.weeklyDigestLastSentAt, new Date(now.getTime() - RESEND_AFTER_MS))),
+    eq12(organizations.status, "active"),
     isNotNull3(users.email),
     isNotNull3(users.emailVerifiedAt),
-    eq9(users.approvalStatus, "approved"),
-    eq9(users.accountStatus, "active")
-  )).orderBy(desc5(users.lastSignedIn)).limit(options.maxPerRun);
+    eq12(users.approvalStatus, "approved"),
+    eq12(users.accountStatus, "active")
+  )).orderBy(desc6(users.lastSignedIn)).limit(options.maxPerRun);
   const targets = rows.filter((row) => membershipState(row, now) === "active" && (!options.onlyMemberIds || options.onlyMemberIds.includes(row.memberId)));
   result.candidates = targets.length;
   for (const member of targets) {
@@ -5355,7 +6016,8 @@ async function runTeacherDigest(options) {
         continue;
       }
       const signals = await loadStudentSignals(students.map((student) => student.userId), start, weekEnd, new Date(now.getTime() - 30 * DAY_MS3));
-      const digest = buildTeacherDigest(students.map((student) => ({ name: student.name, summary: summarizeStudent(signals.get(student.userId), now) })));
+      const academic = await academicDigestFor(member.orgId, students.map((student) => ({ userId: student.userId, name: student.name })), now).catch(() => null);
+      const digest = buildTeacherDigest(students.map((student) => ({ name: student.name, summary: summarizeStudent(signals.get(student.userId), now) })), academic);
       const mail = buildTeacherDigestEmail({
         to: member.email,
         name: member.name?.split(" ")[0] || null,
@@ -5363,6 +6025,7 @@ async function runTeacherDigest(options) {
         digest,
         rangeLabel: rangeLabel(start, now),
         panelUrl: `${options.appUrl}/kurum`,
+        casesUrl: academic ? `${options.appUrl}/kurum/akademik-takip` : void 0,
         unsubscribeUrl: await unsubscribeUrlFor(options.appUrl, "staff", member.memberId)
       });
       if (options.dryRun) {
@@ -5370,7 +6033,7 @@ async function runTeacherDigest(options) {
         continue;
       }
       await sendMail(mail);
-      await db.update(organizationMembers).set({ weeklyDigestLastSentAt: now }).where(eq9(organizationMembers.id, member.memberId));
+      await db.update(organizationMembers).set({ weeklyDigestLastSentAt: now }).where(eq12(organizationMembers.id, member.memberId));
       result.sent++;
     } catch (error) {
       if (error instanceof MailNotConfiguredError) throw error;
@@ -5382,7 +6045,7 @@ async function runTeacherDigest(options) {
 }
 
 // server/digest/parentDigest.ts
-import { and as and8, desc as desc6, eq as eq10, gte as gte6, isNotNull as isNotNull4, isNull as isNull7, lt as lt7, or as or3 } from "drizzle-orm";
+import { and as and10, desc as desc7, eq as eq13, gte as gte7, isNotNull as isNotNull4, isNull as isNull8, lt as lt8, or as or3 } from "drizzle-orm";
 
 // server/_core/emails/parentEmails.ts
 var escapeHtml4 = (value) => value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
@@ -5474,14 +6137,14 @@ async function runParentDigest(options) {
   const now = options.now ?? /* @__PURE__ */ new Date();
   const { start } = weeklyDigestWindow(now);
   const startedAt = Date.now();
-  const rows = await db.select({ linkId: parentLinks.id, studentUserId: parentLinks.studentUserId, email: users.email }).from(parentLinks).innerJoin(users, eq10(users.id, parentLinks.parentUserId)).where(and8(
-    eq10(parentLinks.status, "active"),
-    eq10(parentLinks.weeklyDigestOptOut, 0),
-    or3(isNull7(parentLinks.weeklyDigestLastSentAt), lt7(parentLinks.weeklyDigestLastSentAt, new Date(now.getTime() - RESEND_AFTER_MS2))),
+  const rows = await db.select({ linkId: parentLinks.id, studentUserId: parentLinks.studentUserId, email: users.email }).from(parentLinks).innerJoin(users, eq13(users.id, parentLinks.parentUserId)).where(and10(
+    eq13(parentLinks.status, "active"),
+    eq13(parentLinks.weeklyDigestOptOut, 0),
+    or3(isNull8(parentLinks.weeklyDigestLastSentAt), lt8(parentLinks.weeklyDigestLastSentAt, new Date(now.getTime() - RESEND_AFTER_MS2))),
     isNotNull4(users.email),
     isNotNull4(users.emailVerifiedAt),
-    eq10(users.approvalStatus, "approved"),
-    eq10(users.accountStatus, "active")
+    eq13(users.approvalStatus, "approved"),
+    eq13(users.accountStatus, "active")
   )).limit(options.maxPerRun);
   const result = { candidates: rows.length, sent: 0, failed: 0, stoppedEarly: false, ...options.dryRun ? { previews: [] } : {} };
   for (const row of rows) {
@@ -5490,11 +6153,11 @@ async function runParentDigest(options) {
       break;
     }
     try {
-      const [student] = await db.select({ name: users.name, preferredName: studentProfiles.preferredName }).from(users).leftJoin(studentProfiles, eq10(studentProfiles.userId, users.id)).where(eq10(users.id, row.studentUserId)).limit(1);
+      const [student] = await db.select({ name: users.name, preferredName: studentProfiles.preferredName }).from(users).leftJoin(studentProfiles, eq13(studentProfiles.userId, users.id)).where(eq13(users.id, row.studentUserId)).limit(1);
       const studentName = student?.preferredName || student?.name?.split(" ")[0] || "\xD6\u011Frenci";
       const digest = await collectDigest(row.studentUserId, start, now);
-      const [exam] = await db.select({ title: userMockExams.title, exam: userMockExams.exam, net: userMockExams.net, subjectsJson: userMockExams.subjectsJson }).from(userMockExams).where(and8(eq10(userMockExams.userId, row.studentUserId), gte6(userMockExams.examDate, new Date(now.getTime() - 30 * DAY_MS4)))).orderBy(desc6(userMockExams.examDate)).limit(1);
-      const lastExam = exam ? { title: exam.title, exam: exam.exam, net: Number(exam.net), estimatedScore: estimateScore(exam.exam, safeJson(exam.subjectsJson)) } : null;
+      const [exam] = await db.select({ title: userMockExams.title, exam: userMockExams.exam, net: userMockExams.net, subjectsJson: userMockExams.subjectsJson }).from(userMockExams).where(and10(eq13(userMockExams.userId, row.studentUserId), gte7(userMockExams.examDate, new Date(now.getTime() - 30 * DAY_MS4)))).orderBy(desc7(userMockExams.examDate)).limit(1);
+      const lastExam = exam ? { title: exam.title, exam: exam.exam, net: Number(exam.net), estimatedScore: estimateScore(exam.exam, safeJson2(exam.subjectsJson)) } : null;
       const unsubscribeUrl = await unsubscribeUrlFor(options.appUrl, "parent", row.linkId);
       const mail = buildParentDigestEmail({ to: row.email, studentName, digest, start, end: now, appUrl: options.appUrl, unsubscribeUrl, lastExam });
       if (options.dryRun) {
@@ -5502,7 +6165,7 @@ async function runParentDigest(options) {
         continue;
       }
       await sendMail(mail);
-      await db.update(parentLinks).set({ weeklyDigestLastSentAt: now }).where(eq10(parentLinks.id, row.linkId));
+      await db.update(parentLinks).set({ weeklyDigestLastSentAt: now }).where(eq13(parentLinks.id, row.linkId));
       result.sent++;
     } catch (error) {
       if (error instanceof MailNotConfiguredError) throw error;
@@ -5512,7 +6175,7 @@ async function runParentDigest(options) {
   }
   return result;
 }
-function safeJson(value) {
+function safeJson2(value) {
   try {
     const parsed = JSON.parse(value);
     return parsed && typeof parsed === "object" ? parsed : {};
@@ -5522,7 +6185,7 @@ function safeJson(value) {
 }
 
 // server/parent/parentDb.ts
-import { and as and9, desc as desc7, eq as eq11, gte as gte7, inArray as inArray6, ne as ne3 } from "drizzle-orm";
+import { and as and11, desc as desc8, eq as eq14, gte as gte8, inArray as inArray8, ne as ne3 } from "drizzle-orm";
 
 // shared/parent.ts
 var MAX_PARENTS_PER_STUDENT = 3;
@@ -5550,75 +6213,75 @@ var ParentLinkError = class extends Error {
 };
 var DAY_MS5 = 24 * 60 * 60 * 1e3;
 var MAX_INVITES_PER_DAY = 5;
-async function requireDb5() {
+async function requireDb6() {
   const db = await getDb();
   if (!db) throw new Error("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
   return db;
 }
 var displayNameOf = (row) => row.preferredName || row.name?.split(" ")[0] || "\xD6\u011Frenci";
 async function createParentInvite(studentUserId, codeHash, now = /* @__PURE__ */ new Date()) {
-  const db = await requireDb5();
-  const open = await db.select({ id: parentLinks.id, status: parentLinks.status }).from(parentLinks).where(and9(eq11(parentLinks.studentUserId, studentUserId), inArray6(parentLinks.status, ["pending", "active"])));
+  const db = await requireDb6();
+  const open = await db.select({ id: parentLinks.id, status: parentLinks.status }).from(parentLinks).where(and11(eq14(parentLinks.studentUserId, studentUserId), inArray8(parentLinks.status, ["pending", "active"])));
   if (open.length >= MAX_PARENTS_PER_STUDENT) throw new ParentLinkError(`En fazla ${MAX_PARENTS_PER_STUDENT} veli ba\u011Flanabilir. Yeni kod i\xE7in \xF6nce bir veli eri\u015Fimini kald\u0131r.`);
-  const recent = await db.select({ id: parentLinks.id }).from(parentLinks).where(and9(eq11(parentLinks.studentUserId, studentUserId), gte7(parentLinks.createdAt, new Date(now.getTime() - DAY_MS5))));
+  const recent = await db.select({ id: parentLinks.id }).from(parentLinks).where(and11(eq14(parentLinks.studentUserId, studentUserId), gte8(parentLinks.createdAt, new Date(now.getTime() - DAY_MS5))));
   if (recent.length >= MAX_INVITES_PER_DAY) throw new ParentLinkError("Bug\xFCn yeterince kod \xFCrettin; yar\u0131n yeniden deneyebilirsin.");
-  await db.update(parentLinks).set({ status: "revoked", revokedAt: now }).where(and9(eq11(parentLinks.studentUserId, studentUserId), eq11(parentLinks.status, "invited")));
+  await db.update(parentLinks).set({ status: "revoked", revokedAt: now }).where(and11(eq14(parentLinks.studentUserId, studentUserId), eq14(parentLinks.status, "invited")));
   const expiresAt = new Date(now.getTime() + PARENT_INVITE_DAYS * DAY_MS5);
   const [row] = await db.insert(parentLinks).values({ studentUserId, codeHash, status: "invited", expiresAt }).returning({ id: parentLinks.id });
   return { id: row.id, expiresAt };
 }
 async function redeemParentInvite(parentUserId, codeHash, now = /* @__PURE__ */ new Date()) {
-  const db = await requireDb5();
-  const [link] = await db.select().from(parentLinks).where(eq11(parentLinks.codeHash, codeHash)).limit(1);
+  const db = await requireDb6();
+  const [link] = await db.select().from(parentLinks).where(eq14(parentLinks.codeHash, codeHash)).limit(1);
   const problem = parentInviteProblem(link, now);
   if (problem) throw new ParentLinkError(problem);
   if (link.studentUserId === parentUserId) throw new ParentLinkError("Kendi kodunu veli olarak kullanamazs\u0131n; kodu velinle payla\u015F.");
-  const [existing] = await db.select({ id: parentLinks.id }).from(parentLinks).where(and9(eq11(parentLinks.studentUserId, link.studentUserId), eq11(parentLinks.parentUserId, parentUserId), inArray6(parentLinks.status, ["pending", "active"]))).limit(1);
+  const [existing] = await db.select({ id: parentLinks.id }).from(parentLinks).where(and11(eq14(parentLinks.studentUserId, link.studentUserId), eq14(parentLinks.parentUserId, parentUserId), inArray8(parentLinks.status, ["pending", "active"]))).limit(1);
   if (existing) throw new ParentLinkError("Bu \xF6\u011Frenciye zaten ba\u011Fl\u0131s\u0131n ya da iste\u011Fin onay bekliyor.");
-  const updated = await db.update(parentLinks).set({ parentUserId, status: "pending", parentConsentAt: now, parentConsentVersion: PARENT_CONSENT_VERSION }).where(and9(eq11(parentLinks.id, link.id), eq11(parentLinks.status, "invited"))).returning({ id: parentLinks.id });
+  const updated = await db.update(parentLinks).set({ parentUserId, status: "pending", parentConsentAt: now, parentConsentVersion: PARENT_CONSENT_VERSION }).where(and11(eq14(parentLinks.id, link.id), eq14(parentLinks.status, "invited"))).returning({ id: parentLinks.id });
   if (!updated.length) throw new ParentLinkError("Bu kod daha \xF6nce kullan\u0131lm\u0131\u015F. \xD6\u011Frenciden yeni bir kod isteyebilirsin.");
   return { linkId: link.id, studentUserId: link.studentUserId };
 }
 async function decideParentRequest(studentUserId, linkId, approve, now = /* @__PURE__ */ new Date()) {
-  const db = await requireDb5();
-  const updated = await db.update(parentLinks).set(approve ? { status: "active", studentApprovedAt: now } : { status: "revoked", revokedAt: now }).where(and9(eq11(parentLinks.id, linkId), eq11(parentLinks.studentUserId, studentUserId), eq11(parentLinks.status, "pending"))).returning({ id: parentLinks.id });
+  const db = await requireDb6();
+  const updated = await db.update(parentLinks).set(approve ? { status: "active", studentApprovedAt: now } : { status: "revoked", revokedAt: now }).where(and11(eq14(parentLinks.id, linkId), eq14(parentLinks.studentUserId, studentUserId), eq14(parentLinks.status, "pending"))).returning({ id: parentLinks.id });
   if (!updated.length) throw new ParentLinkError("Bu istek bulunamad\u0131 ya da zaten yan\u0131tland\u0131.");
 }
 async function revokeParentLink(actor, linkId, now = /* @__PURE__ */ new Date()) {
-  const db = await requireDb5();
-  const owner = actor.side === "student" ? eq11(parentLinks.studentUserId, actor.userId) : eq11(parentLinks.parentUserId, actor.userId);
-  const updated = await db.update(parentLinks).set({ status: "revoked", revokedAt: now }).where(and9(eq11(parentLinks.id, linkId), owner, ne3(parentLinks.status, "revoked"))).returning({ id: parentLinks.id });
+  const db = await requireDb6();
+  const owner = actor.side === "student" ? eq14(parentLinks.studentUserId, actor.userId) : eq14(parentLinks.parentUserId, actor.userId);
+  const updated = await db.update(parentLinks).set({ status: "revoked", revokedAt: now }).where(and11(eq14(parentLinks.id, linkId), owner, ne3(parentLinks.status, "revoked"))).returning({ id: parentLinks.id });
   if (!updated.length) throw new ParentLinkError("Bu ba\u011Flant\u0131 bulunamad\u0131.");
 }
 async function listLinksForStudent(studentUserId, now = /* @__PURE__ */ new Date()) {
-  const db = await requireDb5();
-  const rows = await db.select({ id: parentLinks.id, status: parentLinks.status, expiresAt: parentLinks.expiresAt, createdAt: parentLinks.createdAt, parentConsentAt: parentLinks.parentConsentAt, studentApprovedAt: parentLinks.studentApprovedAt, parentName: users.name, parentEmail: users.email }).from(parentLinks).leftJoin(users, eq11(users.id, parentLinks.parentUserId)).where(and9(eq11(parentLinks.studentUserId, studentUserId), ne3(parentLinks.status, "revoked"))).orderBy(desc7(parentLinks.createdAt));
+  const db = await requireDb6();
+  const rows = await db.select({ id: parentLinks.id, status: parentLinks.status, expiresAt: parentLinks.expiresAt, createdAt: parentLinks.createdAt, parentConsentAt: parentLinks.parentConsentAt, studentApprovedAt: parentLinks.studentApprovedAt, parentName: users.name, parentEmail: users.email }).from(parentLinks).leftJoin(users, eq14(users.id, parentLinks.parentUserId)).where(and11(eq14(parentLinks.studentUserId, studentUserId), ne3(parentLinks.status, "revoked"))).orderBy(desc8(parentLinks.createdAt));
   return rows.filter((row) => row.status !== "invited" || row.expiresAt.getTime() > now.getTime()).map((row) => ({ ...row, parentName: row.parentName ?? null, parentEmail: row.parentEmail ?? null }));
 }
 async function listLinksForParent(parentUserId) {
-  const db = await requireDb5();
-  const rows = await db.select({ id: parentLinks.id, studentUserId: parentLinks.studentUserId, status: parentLinks.status, weeklyDigestOptOut: parentLinks.weeklyDigestOptOut, name: users.name, preferredName: studentProfiles.preferredName }).from(parentLinks).innerJoin(users, eq11(users.id, parentLinks.studentUserId)).leftJoin(studentProfiles, eq11(studentProfiles.userId, parentLinks.studentUserId)).where(and9(eq11(parentLinks.parentUserId, parentUserId), inArray6(parentLinks.status, ["pending", "active"]))).orderBy(desc7(parentLinks.createdAt));
+  const db = await requireDb6();
+  const rows = await db.select({ id: parentLinks.id, studentUserId: parentLinks.studentUserId, status: parentLinks.status, weeklyDigestOptOut: parentLinks.weeklyDigestOptOut, name: users.name, preferredName: studentProfiles.preferredName }).from(parentLinks).innerJoin(users, eq14(users.id, parentLinks.studentUserId)).leftJoin(studentProfiles, eq14(studentProfiles.userId, parentLinks.studentUserId)).where(and11(eq14(parentLinks.parentUserId, parentUserId), inArray8(parentLinks.status, ["pending", "active"]))).orderBy(desc8(parentLinks.createdAt));
   return rows.map((row) => ({ id: row.id, studentUserId: row.studentUserId, status: row.status, weeklyDigest: row.weeklyDigestOptOut === 0, studentName: displayNameOf({ preferredName: row.preferredName ?? null, name: row.name }) }));
 }
 async function findActiveLink(parentUserId, studentUserId) {
-  const db = await requireDb5();
-  const [row] = await db.select({ id: parentLinks.id, status: parentLinks.status }).from(parentLinks).where(and9(eq11(parentLinks.parentUserId, parentUserId), eq11(parentLinks.studentUserId, studentUserId), eq11(parentLinks.status, "active"))).limit(1);
+  const db = await requireDb6();
+  const [row] = await db.select({ id: parentLinks.id, status: parentLinks.status }).from(parentLinks).where(and11(eq14(parentLinks.parentUserId, parentUserId), eq14(parentLinks.studentUserId, studentUserId), eq14(parentLinks.status, "active"))).limit(1);
   return row ?? null;
 }
 async function studentDisplayName(studentUserId) {
-  const db = await requireDb5();
-  const [row] = await db.select({ name: users.name, preferredName: studentProfiles.preferredName }).from(users).leftJoin(studentProfiles, eq11(studentProfiles.userId, users.id)).where(eq11(users.id, studentUserId)).limit(1);
+  const db = await requireDb6();
+  const [row] = await db.select({ name: users.name, preferredName: studentProfiles.preferredName }).from(users).leftJoin(studentProfiles, eq14(studentProfiles.userId, users.id)).where(eq14(users.id, studentUserId)).limit(1);
   return row ? displayNameOf({ preferredName: row.preferredName ?? null, name: row.name }) : "\xD6\u011Frenci";
 }
 async function setParentDigestEnabled(parentUserId, linkId, enabled) {
-  const db = await requireDb5();
-  const updated = await db.update(parentLinks).set({ weeklyDigestOptOut: enabled ? 0 : 1 }).where(and9(eq11(parentLinks.id, linkId), eq11(parentLinks.parentUserId, parentUserId))).returning({ id: parentLinks.id });
+  const db = await requireDb6();
+  const updated = await db.update(parentLinks).set({ weeklyDigestOptOut: enabled ? 0 : 1 }).where(and11(eq14(parentLinks.id, linkId), eq14(parentLinks.parentUserId, parentUserId))).returning({ id: parentLinks.id });
   if (!updated.length) throw new ParentLinkError("Bu ba\u011Flant\u0131 bulunamad\u0131.");
   return enabled;
 }
 async function disableParentDigestByLinkId(linkId) {
-  const db = await requireDb5();
-  await db.update(parentLinks).set({ weeklyDigestOptOut: 1 }).where(eq11(parentLinks.id, linkId));
+  const db = await requireDb6();
+  await db.update(parentLinks).set({ weeklyDigestOptOut: 1 }).where(eq14(parentLinks.id, linkId));
 }
 
 // server/digest/weeklyDigest.ts
@@ -5631,21 +6294,21 @@ var WEEKLY_DIGEST_MAX_PER_RUN = DEFAULT_MAX_PER_RUN;
 async function getWeeklyDigestEnabled(userId) {
   const db = await getDb();
   if (!db) return true;
-  const [row] = await db.select({ optOut: studentProfiles.weeklyDigestOptOut }).from(studentProfiles).where(eq12(studentProfiles.userId, userId)).limit(1);
+  const [row] = await db.select({ optOut: studentProfiles.weeklyDigestOptOut }).from(studentProfiles).where(eq15(studentProfiles.userId, userId)).limit(1);
   return !row || row.optOut === 0;
 }
 async function setWeeklyDigestEnabled(userId, enabled) {
   const db = await getDb();
   if (!db) return enabled;
-  await db.update(studentProfiles).set({ weeklyDigestOptOut: enabled ? 0 : 1 }).where(eq12(studentProfiles.userId, userId));
+  await db.update(studentProfiles).set({ weeklyDigestOptOut: enabled ? 0 : 1 }).where(eq15(studentProfiles.userId, userId));
   return enabled;
 }
 async function collectDigest(userId, start, end) {
   const db = await getDb();
   const [sessions, logs, weakTopics, review] = await Promise.all([
-    db.select({ sessionDate: studyPlanSessions.sessionDate, status: studyPlanSessions.status, plannedMinutes: studyPlanSessions.plannedMinutes }).from(studyPlanSessions).where(and10(eq12(studyPlanSessions.userId, userId), gte8(studyPlanSessions.sessionDate, start), lt8(studyPlanSessions.sessionDate, end))),
-    db.select({ studyDate: topicStudyLogs.studyDate, subject: topicStudyLogs.subject, minutes: topicStudyLogs.minutes, questions: topicStudyLogs.questions, correct: topicStudyLogs.correct }).from(topicStudyLogs).where(and10(eq12(topicStudyLogs.userId, userId), gte8(topicStudyLogs.studyDate, start), lt8(topicStudyLogs.studyDate, end))),
-    db.select({ subject: yksTopics.subject, topic: yksTopics.topic, progress: topicProgress.progress }).from(topicProgress).innerJoin(yksTopics, eq12(yksTopics.id, topicProgress.topicId)).where(and10(eq12(topicProgress.userId, userId), eq12(topicProgress.status, "weak"))).orderBy(asc2(topicProgress.progress)).limit(3),
+    db.select({ sessionDate: studyPlanSessions.sessionDate, status: studyPlanSessions.status, plannedMinutes: studyPlanSessions.plannedMinutes }).from(studyPlanSessions).where(and12(eq15(studyPlanSessions.userId, userId), gte9(studyPlanSessions.sessionDate, start), lt9(studyPlanSessions.sessionDate, end))),
+    db.select({ studyDate: topicStudyLogs.studyDate, subject: topicStudyLogs.subject, minutes: topicStudyLogs.minutes, questions: topicStudyLogs.questions, correct: topicStudyLogs.correct }).from(topicStudyLogs).where(and12(eq15(topicStudyLogs.userId, userId), gte9(topicStudyLogs.studyDate, start), lt9(topicStudyLogs.studyDate, end))),
+    db.select({ subject: yksTopics.subject, topic: yksTopics.topic, progress: topicProgress.progress }).from(topicProgress).innerJoin(yksTopics, eq15(yksTopics.id, topicProgress.topicId)).where(and12(eq15(topicProgress.userId, userId), eq15(topicProgress.status, "weak"))).orderBy(asc3(topicProgress.progress)).limit(3),
     getReviewSummary(userId).catch(() => ({ due: 0 }))
   ]);
   return buildWeeklyDigest({ sessions, logs, weakTopics, dueReviews: review.due, start, end });
@@ -5656,16 +6319,16 @@ async function runWeeklyDigest(options) {
   const now = options.now ?? /* @__PURE__ */ new Date();
   const { start } = weeklyDigestWindow(now);
   const startedAt = Date.now();
-  const recipients = await db.select({ id: users.id, email: users.email, name: users.name, preferredName: studentProfiles.preferredName }).from(users).innerJoin(studentProfiles, eq12(studentProfiles.userId, users.id)).where(and10(
+  const recipients = await db.select({ id: users.id, email: users.email, name: users.name, preferredName: studentProfiles.preferredName }).from(users).innerJoin(studentProfiles, eq15(studentProfiles.userId, users.id)).where(and12(
     isNotNull5(users.email),
     isNotNull5(users.emailVerifiedAt),
-    eq12(users.approvalStatus, "approved"),
-    eq12(users.accountStatus, "active"),
-    gte8(users.lastSignedIn, new Date(now.getTime() - ACTIVE_WITHIN_MS)),
-    eq12(studentProfiles.onboardingCompleted, 1),
-    eq12(studentProfiles.weeklyDigestOptOut, 0),
-    or4(isNull8(studentProfiles.weeklyDigestLastSentAt), lt8(studentProfiles.weeklyDigestLastSentAt, new Date(now.getTime() - RESEND_AFTER_MS3)))
-  )).orderBy(desc8(users.lastSignedIn)).limit(options.maxPerRun ?? DEFAULT_MAX_PER_RUN);
+    eq15(users.approvalStatus, "approved"),
+    eq15(users.accountStatus, "active"),
+    gte9(users.lastSignedIn, new Date(now.getTime() - ACTIVE_WITHIN_MS)),
+    eq15(studentProfiles.onboardingCompleted, 1),
+    eq15(studentProfiles.weeklyDigestOptOut, 0),
+    or4(isNull9(studentProfiles.weeklyDigestLastSentAt), lt9(studentProfiles.weeklyDigestLastSentAt, new Date(now.getTime() - RESEND_AFTER_MS3)))
+  )).orderBy(desc9(users.lastSignedIn)).limit(options.maxPerRun ?? DEFAULT_MAX_PER_RUN);
   const targets = options.onlyUserIds ? recipients.filter((user) => options.onlyUserIds.includes(user.id)) : recipients;
   const result = { candidates: targets.length, sent: 0, failed: 0, stoppedEarly: false, ...options.dryRun ? { previews: [] } : {} };
   for (const user of targets) {
@@ -5682,7 +6345,7 @@ async function runWeeklyDigest(options) {
         continue;
       }
       await sendMail(mail);
-      await db.update(studentProfiles).set({ weeklyDigestLastSentAt: now }).where(eq12(studentProfiles.userId, user.id));
+      await db.update(studentProfiles).set({ weeklyDigestLastSentAt: now }).where(eq15(studentProfiles.userId, user.id));
       result.sent++;
     } catch (error) {
       if (error instanceof MailNotConfiguredError) throw error;
@@ -5747,7 +6410,7 @@ function registerWeeklyDigestRoutes(app2) {
 
 // server/errors/errorLog.ts
 import { createHash as createHash2 } from "node:crypto";
-import { and as and11, desc as desc9, eq as eq13, isNotNull as isNotNull6, isNull as isNull9, sql as sql7 } from "drizzle-orm";
+import { and as and13, desc as desc10, eq as eq16, isNotNull as isNotNull6, isNull as isNull10, sql as sql8 } from "drizzle-orm";
 import { z } from "zod";
 
 // shared/errorLog.ts
@@ -5784,7 +6447,7 @@ async function recordAppError(input) {
     const fingerprint = createHash2("sha256").update(errorFingerprintKey(input.source, message, stack)).digest("hex");
     const now = /* @__PURE__ */ new Date();
     const latest = { message, stack, path: input.path?.slice(0, 300) ?? null, lastUserId: input.userId ?? null, userAgent: input.userAgent?.slice(0, 300) ?? null };
-    await db.insert(appErrors).values({ fingerprint, source: input.source, ...latest, firstSeenAt: now, lastSeenAt: now }).onConflictDoUpdate({ target: appErrors.fingerprint, set: { ...latest, count: sql7`${appErrors.count} + 1`, lastSeenAt: now, resolvedAt: null } });
+    await db.insert(appErrors).values({ fingerprint, source: input.source, ...latest, firstSeenAt: now, lastSeenAt: now }).onConflictDoUpdate({ target: appErrors.fingerprint, set: { ...latest, count: sql8`${appErrors.count} + 1`, lastSeenAt: now, resolvedAt: null } });
   } catch (error) {
     console.error("[ErrorLog] could not record:", error instanceof Error ? error.message : error);
   }
@@ -5792,12 +6455,12 @@ async function recordAppError(input) {
 async function listAppErrors(status, limit = 200) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(appErrors).where(status === "open" ? isNull9(appErrors.resolvedAt) : isNotNull6(appErrors.resolvedAt)).orderBy(desc9(appErrors.lastSeenAt)).limit(limit);
+  return db.select().from(appErrors).where(status === "open" ? isNull10(appErrors.resolvedAt) : isNotNull6(appErrors.resolvedAt)).orderBy(desc10(appErrors.lastSeenAt)).limit(limit);
 }
 async function resolveAppError(id6) {
   const db = await getDb();
   if (!db) return;
-  await db.update(appErrors).set({ resolvedAt: /* @__PURE__ */ new Date() }).where(and11(eq13(appErrors.id, id6), isNull9(appErrors.resolvedAt)));
+  await db.update(appErrors).set({ resolvedAt: /* @__PURE__ */ new Date() }).where(and13(eq16(appErrors.id, id6), isNull10(appErrors.resolvedAt)));
 }
 var clientReport = z.object({
   message: z.string().min(1).max(2e3),
@@ -5840,7 +6503,7 @@ function errorLogMiddleware(error, req, res, next) {
 }
 
 // server/push/sessionReminders.ts
-import { and as and13, eq as eq15, gte as gte9, isNull as isNull10, lte as lte4 } from "drizzle-orm";
+import { and as and14, eq as eq17, gte as gte10, isNull as isNull11, lte as lte4 } from "drizzle-orm";
 
 // shared/sessionReminder.ts
 var REMINDER_MIN_LEAD_MS = 2 * 60 * 1e3;
@@ -5857,80 +6520,20 @@ function buildReminderMessage(session, now) {
   };
 }
 
-// server/push/push.ts
-import { and as and12, eq as eq14, inArray as inArray7 } from "drizzle-orm";
-import webpush from "web-push";
-var publicKey = process.env.VAPID_PUBLIC_KEY ?? "";
-var privateKey = process.env.VAPID_PRIVATE_KEY ?? "";
-var subject = process.env.VAPID_SUBJECT || process.env.APP_URL || "https://yks-study-coach.vercel.app";
-var pushConfigured = () => Boolean(publicKey && privateKey);
-var pushPublicKey = () => pushConfigured() ? publicKey : null;
-var vapidSet = false;
-var ensureVapid = () => {
-  if (!vapidSet) {
-    webpush.setVapidDetails(subject, publicKey, privateKey);
-    vapidSet = true;
-  }
-};
-async function saveSubscription(userId, subscription, userAgent) {
-  const db = await getDb();
-  if (!db) return;
-  const values = { userId, endpoint: subscription.endpoint, p256dh: subscription.keys.p256dh, auth: subscription.keys.auth, userAgent: userAgent?.slice(0, 300) ?? null };
-  await db.insert(pushSubscriptions).values(values).onConflictDoUpdate({ target: pushSubscriptions.endpoint, set: { userId, p256dh: values.p256dh, auth: values.auth, userAgent: values.userAgent } });
-}
-async function removeSubscription(userId, endpoint) {
-  const db = await getDb();
-  if (!db) return;
-  await db.delete(pushSubscriptions).where(and12(eq14(pushSubscriptions.userId, userId), eq14(pushSubscriptions.endpoint, endpoint)));
-}
-async function hasSubscription(userId, endpoint) {
-  const db = await getDb();
-  if (!db) return false;
-  const rows = await db.select({ id: pushSubscriptions.id }).from(pushSubscriptions).where(and12(eq14(pushSubscriptions.userId, userId), eq14(pushSubscriptions.endpoint, endpoint))).limit(1);
-  return rows.length > 0;
-}
-async function sendToUser(userId, payload) {
-  const result = { delivered: 0, removed: 0, failed: 0 };
-  const db = await getDb();
-  if (!db || !pushConfigured()) return result;
-  ensureVapid();
-  const subscriptions2 = await db.select().from(pushSubscriptions).where(eq14(pushSubscriptions.userId, userId));
-  const gone = [];
-  const delivered = [];
-  await Promise.all(subscriptions2.map(async (row) => {
-    try {
-      await webpush.sendNotification({ endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } }, JSON.stringify(payload), { TTL: 15 * 60, urgency: "high" });
-      delivered.push(row.id);
-    } catch (error) {
-      const status = error.statusCode;
-      if (status === 404 || status === 410) gone.push(row.id);
-      else {
-        result.failed++;
-        console.error(`[Push] subscription ${row.id} failed (${status ?? "?"}):`, error instanceof Error ? error.message : error);
-      }
-    }
-  }));
-  if (gone.length) await db.delete(pushSubscriptions).where(inArray7(pushSubscriptions.id, gone));
-  if (delivered.length) await db.update(pushSubscriptions).set({ lastSentAt: /* @__PURE__ */ new Date() }).where(inArray7(pushSubscriptions.id, delivered));
-  result.delivered = delivered.length;
-  result.removed = gone.length;
-  return result;
-}
-
 // server/push/sessionReminders.ts
 async function runSessionReminders(now = /* @__PURE__ */ new Date()) {
   const result = { due: 0, sent: 0, delivered: 0, removed: 0, failed: 0 };
   const db = await getDb();
   if (!db || !pushConfigured()) return result;
-  const sessions = await db.selectDistinct({ id: studyPlanSessions.id, userId: studyPlanSessions.userId, sessionDate: studyPlanSessions.sessionDate, subject: studyPlanSessions.subject, topic: studyPlanSessions.topic, kind: studyPlanSessions.kind, plannedMinutes: studyPlanSessions.plannedMinutes }).from(studyPlanSessions).innerJoin(pushSubscriptions, eq15(pushSubscriptions.userId, studyPlanSessions.userId)).where(and13(
-    eq15(studyPlanSessions.status, "planned"),
-    isNull10(studyPlanSessions.reminderSentAt),
-    gte9(studyPlanSessions.sessionDate, new Date(now.getTime() + REMINDER_MIN_LEAD_MS)),
+  const sessions = await db.selectDistinct({ id: studyPlanSessions.id, userId: studyPlanSessions.userId, sessionDate: studyPlanSessions.sessionDate, subject: studyPlanSessions.subject, topic: studyPlanSessions.topic, kind: studyPlanSessions.kind, plannedMinutes: studyPlanSessions.plannedMinutes }).from(studyPlanSessions).innerJoin(pushSubscriptions, eq17(pushSubscriptions.userId, studyPlanSessions.userId)).where(and14(
+    eq17(studyPlanSessions.status, "planned"),
+    isNull11(studyPlanSessions.reminderSentAt),
+    gte10(studyPlanSessions.sessionDate, new Date(now.getTime() + REMINDER_MIN_LEAD_MS)),
     lte4(studyPlanSessions.sessionDate, new Date(now.getTime() + REMINDER_MAX_LEAD_MS))
   )).limit(500);
   result.due = sessions.length;
   for (const session of sessions) {
-    const [claim] = await db.update(studyPlanSessions).set({ reminderSentAt: now }).where(and13(eq15(studyPlanSessions.id, session.id), isNull10(studyPlanSessions.reminderSentAt))).returning({ id: studyPlanSessions.id });
+    const [claim] = await db.update(studyPlanSessions).set({ reminderSentAt: now }).where(and14(eq17(studyPlanSessions.id, session.id), isNull11(studyPlanSessions.reminderSentAt))).returning({ id: studyPlanSessions.id });
     if (!claim) continue;
     const outcome = await sendToUser(session.userId, buildReminderMessage(session, now));
     result.sent++;
@@ -6227,36 +6830,36 @@ function yksTermPrice(input) {
 }
 
 // server/subscriptions/subscriptionDb.ts
-import { and as and14, desc as desc10, eq as eq16, gte as gte10, sql as sql8 } from "drizzle-orm";
+import { and as and15, desc as desc11, eq as eq18, gte as gte11, sql as sql9 } from "drizzle-orm";
 async function listActivePlans() {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(subscriptionPlans).where(eq16(subscriptionPlans.isActive, 1));
+  return db.select().from(subscriptionPlans).where(eq18(subscriptionPlans.isActive, 1));
 }
 async function getStudentExamYearFor(userId, track) {
   const db = await getDb();
   if (!db) return null;
-  const [profile] = await db.select({ examTrack: studentProfiles.examTrack, examYear: studentProfiles.examYear }).from(studentProfiles).where(eq16(studentProfiles.userId, userId)).limit(1);
+  const [profile] = await db.select({ examTrack: studentProfiles.examTrack, examYear: studentProfiles.examYear }).from(studentProfiles).where(eq18(studentProfiles.userId, userId)).limit(1);
   if (profile?.examTrack === track) return profile.examYear ?? null;
-  const [row] = await db.select({ examYear: studentExamTracks.examYear }).from(studentExamTracks).where(and14(eq16(studentExamTracks.userId, userId), eq16(studentExamTracks.track, track))).limit(1);
+  const [row] = await db.select({ examYear: studentExamTracks.examYear }).from(studentExamTracks).where(and15(eq18(studentExamTracks.userId, userId), eq18(studentExamTracks.track, track))).limit(1);
   return row?.examYear ?? null;
 }
 async function getStudentExamTrack(userId) {
   const db = await getDb();
   if (!db) return "YKS";
-  const [row] = await db.select({ examTrack: studentProfiles.examTrack }).from(studentProfiles).where(eq16(studentProfiles.userId, userId)).limit(1);
+  const [row] = await db.select({ examTrack: studentProfiles.examTrack }).from(studentProfiles).where(eq18(studentProfiles.userId, userId)).limit(1);
   return row?.examTrack ?? "YKS";
 }
 async function getPlanByCode(code) {
   const db = await getDb();
   if (!db) return void 0;
-  const rows = await db.select().from(subscriptionPlans).where(eq16(subscriptionPlans.code, code)).limit(1);
+  const rows = await db.select().from(subscriptionPlans).where(eq18(subscriptionPlans.code, code)).limit(1);
   return rows[0];
 }
 async function getPlanById(id6) {
   const db = await getDb();
   if (!db) return void 0;
-  const rows = await db.select().from(subscriptionPlans).where(eq16(subscriptionPlans.id, id6)).limit(1);
+  const rows = await db.select().from(subscriptionPlans).where(eq18(subscriptionPlans.id, id6)).limit(1);
   return rows[0];
 }
 async function upsertPlan(input, options = {}) {
@@ -6265,7 +6868,7 @@ async function upsertPlan(input, options = {}) {
   const existing = await getPlanByCode(input.code);
   if (existing) {
     const priceFields = options.keepPrice ? {} : { price: input.price, trialDays: input.trialDays ?? 0 };
-    await db.update(subscriptionPlans).set({ name: input.name, description: input.description ?? null, tier: input.tier, track: input.track ?? null, billingPeriod: input.billingPeriod, currency: input.currency ?? "TRY", storeProductId: input.storeProductId ?? null, provider: input.provider ?? null, ...priceFields }).where(eq16(subscriptionPlans.id, existing.id));
+    await db.update(subscriptionPlans).set({ name: input.name, description: input.description ?? null, tier: input.tier, track: input.track ?? null, billingPeriod: input.billingPeriod, currency: input.currency ?? "TRY", storeProductId: input.storeProductId ?? null, provider: input.provider ?? null, ...priceFields }).where(eq18(subscriptionPlans.id, existing.id));
     return;
   }
   await db.insert(subscriptionPlans).values({ code: input.code, name: input.name, description: input.description ?? null, tier: input.tier, track: input.track ?? null, billingPeriod: input.billingPeriod, price: input.price, currency: input.currency ?? "TRY", trialDays: input.trialDays ?? 0, storeProductId: input.storeProductId ?? null, provider: input.provider ?? null });
@@ -6278,19 +6881,19 @@ async function listAllPlans() {
 async function updatePlanPricing(id6, patch) {
   const db = await getDb();
   if (!db) return void 0;
-  await db.update(subscriptionPlans).set({ ...patch.price !== void 0 ? { price: patch.price } : {}, ...patch.trialDays !== void 0 ? { trialDays: patch.trialDays } : {}, ...patch.isActive !== void 0 ? { isActive: patch.isActive ? 1 : 0 } : {} }).where(eq16(subscriptionPlans.id, id6));
+  await db.update(subscriptionPlans).set({ ...patch.price !== void 0 ? { price: patch.price } : {}, ...patch.trialDays !== void 0 ? { trialDays: patch.trialDays } : {}, ...patch.isActive !== void 0 ? { isActive: patch.isActive ? 1 : 0 } : {} }).where(eq18(subscriptionPlans.id, id6));
   return getPlanById(id6);
 }
 async function getSubscriptionByUserId(userId, track) {
   const db = await getDb();
   if (!db) return void 0;
-  const rows = await db.select().from(subscriptions).where(and14(eq16(subscriptions.userId, userId), eq16(subscriptions.track, track))).limit(1);
+  const rows = await db.select().from(subscriptions).where(and15(eq18(subscriptions.userId, userId), eq18(subscriptions.track, track))).limit(1);
   return rows[0];
 }
 async function listSubscriptionsForUser(userId) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(subscriptions).where(eq16(subscriptions.userId, userId));
+  return db.select().from(subscriptions).where(eq18(subscriptions.userId, userId));
 }
 async function ensureFreeSubscription(userId, track) {
   const db = await getDb();
@@ -6321,12 +6924,12 @@ async function listAllSubscriptionsForAdmin() {
     isManualOverride: subscriptions.isManualOverride,
     provider: subscriptions.provider,
     updatedAt: subscriptions.updatedAt
-  }).from(subscriptions).innerJoin(users, eq16(users.id, subscriptions.userId)).innerJoin(subscriptionPlans, eq16(subscriptionPlans.id, subscriptions.planId)).orderBy(desc10(subscriptions.updatedAt));
+  }).from(subscriptions).innerJoin(users, eq18(users.id, subscriptions.userId)).innerJoin(subscriptionPlans, eq18(subscriptionPlans.id, subscriptions.planId)).orderBy(desc11(subscriptions.updatedAt));
 }
 async function updateSubscription(userId, track, patch) {
   const db = await getDb();
   if (!db) throw new Error("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok");
-  await db.update(subscriptions).set(patch).where(and14(eq16(subscriptions.userId, userId), eq16(subscriptions.track, track)));
+  await db.update(subscriptions).set(patch).where(and15(eq18(subscriptions.userId, userId), eq18(subscriptions.track, track)));
   const updated = await getSubscriptionByUserId(userId, track);
   if (!updated) throw new Error("Abonelik bulunamad\u0131");
   return updated;
@@ -6340,22 +6943,22 @@ async function createPayment(input) {
 async function updatePaymentStatus(paymentId, patch) {
   const db = await getDb();
   if (!db) return;
-  await db.update(payments).set(patch).where(eq16(payments.id, paymentId));
+  await db.update(payments).set(patch).where(eq18(payments.id, paymentId));
 }
 async function listPaymentsForUser(userId) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(payments).where(eq16(payments.userId, userId)).orderBy(desc10(payments.createdAt));
+  return db.select().from(payments).where(eq18(payments.userId, userId)).orderBy(desc11(payments.createdAt));
 }
 async function listAllPaymentsForAdmin(limit = 100) {
   const db = await getDb();
   if (!db) return [];
-  return db.select({ id: payments.id, userId: payments.userId, userName: users.name, userEmail: users.email, amount: payments.amount, currency: payments.currency, provider: payments.provider, status: payments.status, paymentType: payments.paymentType, providerPaymentId: payments.providerPaymentId, createdAt: payments.createdAt, paidAt: payments.paidAt }).from(payments).innerJoin(users, eq16(users.id, payments.userId)).orderBy(desc10(payments.createdAt)).limit(Math.min(500, Math.max(1, limit)));
+  return db.select({ id: payments.id, userId: payments.userId, userName: users.name, userEmail: users.email, amount: payments.amount, currency: payments.currency, provider: payments.provider, status: payments.status, paymentType: payments.paymentType, providerPaymentId: payments.providerPaymentId, createdAt: payments.createdAt, paidAt: payments.paidAt }).from(payments).innerJoin(users, eq18(users.id, payments.userId)).orderBy(desc11(payments.createdAt)).limit(Math.min(500, Math.max(1, limit)));
 }
 async function isDuplicateEvent(provider, eventId) {
   const db = await getDb();
   if (!db) return false;
-  const rows = await db.select({ id: paymentEvents.id, status: paymentEvents.status }).from(paymentEvents).where(and14(eq16(paymentEvents.provider, provider), eq16(paymentEvents.eventId, eventId))).limit(1);
+  const rows = await db.select({ id: paymentEvents.id, status: paymentEvents.status }).from(paymentEvents).where(and15(eq18(paymentEvents.provider, provider), eq18(paymentEvents.eventId, eventId))).limit(1);
   return rows.length > 0 && rows[0].status === "processed";
 }
 async function recordEventReceived(input) {
@@ -6365,14 +6968,14 @@ async function recordEventReceived(input) {
     const result = await db.insert(paymentEvents).values(input).returning({ id: paymentEvents.id });
     return Number(result[0].id);
   } catch {
-    const rows = await db.select({ id: paymentEvents.id }).from(paymentEvents).where(and14(eq16(paymentEvents.provider, input.provider), eq16(paymentEvents.eventId, input.eventId))).limit(1);
+    const rows = await db.select({ id: paymentEvents.id }).from(paymentEvents).where(and15(eq18(paymentEvents.provider, input.provider), eq18(paymentEvents.eventId, input.eventId))).limit(1);
     return rows[0]?.id ?? null;
   }
 }
 async function markEventProcessed(id6, status, errorMessage) {
   const db = await getDb();
   if (!db) return;
-  await db.update(paymentEvents).set({ status, processedAt: /* @__PURE__ */ new Date(), errorMessage: errorMessage ?? null }).where(eq16(paymentEvents.id, id6));
+  await db.update(paymentEvents).set({ status, processedAt: /* @__PURE__ */ new Date(), errorMessage: errorMessage ?? null }).where(eq18(paymentEvents.id, id6));
 }
 async function writeAuditLog(input) {
   const db = await getDb();
@@ -6390,12 +6993,12 @@ async function writeAuditLog(input) {
 async function listAuditLogsForUser(userId) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(subscriptionAuditLogs).where(eq16(subscriptionAuditLogs.userId, userId)).orderBy(desc10(subscriptionAuditLogs.createdAt));
+  return db.select().from(subscriptionAuditLogs).where(eq18(subscriptionAuditLogs.userId, userId)).orderBy(desc11(subscriptionAuditLogs.createdAt));
 }
 async function listAllAuditLogs(limit = 100) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(subscriptionAuditLogs).orderBy(desc10(subscriptionAuditLogs.createdAt)).limit(Math.min(500, Math.max(1, limit)));
+  return db.select().from(subscriptionAuditLogs).orderBy(desc11(subscriptionAuditLogs.createdAt)).limit(Math.min(500, Math.max(1, limit)));
 }
 async function recordFeatureUsage(userId, featureKey, track) {
   const db = await getDb();
@@ -6406,32 +7009,32 @@ async function countFeatureUsage(userId, featureKey, windowDays, track) {
   const db = await getDb();
   if (!db) return 0;
   const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1e3);
-  const rows = await db.select({ id: featureUsageLogs.id }).from(featureUsageLogs).where(and14(eq16(featureUsageLogs.userId, userId), eq16(featureUsageLogs.track, track), eq16(featureUsageLogs.featureKey, featureKey), gte10(featureUsageLogs.usedAt, since)));
+  const rows = await db.select({ id: featureUsageLogs.id }).from(featureUsageLogs).where(and15(eq18(featureUsageLogs.userId, userId), eq18(featureUsageLogs.track, track), eq18(featureUsageLogs.featureKey, featureKey), gte11(featureUsageLogs.usedAt, since)));
   return rows.length;
 }
 async function resetFeatureUsage(userId, featureKey, windowDays, adminId, track) {
   const db = await getDb();
   if (!db) return;
   const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1e3);
-  await db.delete(featureUsageLogs).where(and14(eq16(featureUsageLogs.userId, userId), eq16(featureUsageLogs.featureKey, featureKey), gte10(featureUsageLogs.usedAt, since), ...track ? [eq16(featureUsageLogs.track, track)] : []));
+  await db.delete(featureUsageLogs).where(and15(eq18(featureUsageLogs.userId, userId), eq18(featureUsageLogs.featureKey, featureKey), gte11(featureUsageLogs.usedAt, since), ...track ? [eq18(featureUsageLogs.track, track)] : []));
   await writeAuditLog({ userId, adminId, action: "usage_reset", newState: { featureKey, windowDays, track: track ?? "all" } });
 }
 async function listPendingUsers() {
   const db = await getDb();
   if (!db) return [];
-  const rows = await db.select().from(users).where(eq16(users.approvalStatus, "pending")).orderBy(desc10(users.createdAt));
+  const rows = await db.select().from(users).where(eq18(users.approvalStatus, "pending")).orderBy(desc11(users.createdAt));
   return rows.map(({ passwordHash: _passwordHash, ...safeUser }) => ({ ...safeUser, phone: phoneFromOpenId(safeUser.openId) }));
 }
 async function approveUser(userId, adminId) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ approvalStatus: "approved", approvedAt: /* @__PURE__ */ new Date(), approvedBy: adminId, rejectedAt: null, rejectionReason: null }).where(eq16(users.id, userId));
+  await db.update(users).set({ approvalStatus: "approved", approvedAt: /* @__PURE__ */ new Date(), approvedBy: adminId, rejectedAt: null, rejectionReason: null }).where(eq18(users.id, userId));
   await writeAuditLog({ userId, adminId, action: "user_approved", newState: { approvalStatus: "approved" } });
 }
 async function rejectUser(userId, adminId, reason) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ approvalStatus: "rejected", rejectedAt: /* @__PURE__ */ new Date(), rejectionReason: reason ?? null }).where(eq16(users.id, userId));
+  await db.update(users).set({ approvalStatus: "rejected", rejectedAt: /* @__PURE__ */ new Date(), rejectionReason: reason ?? null }).where(eq18(users.id, userId));
   await writeAuditLog({ userId, adminId, action: "user_rejected", newState: { approvalStatus: "rejected" }, reason });
 }
 
@@ -6778,13 +7381,13 @@ async function getUsageSummaryForUser(userId, track) {
 }
 
 // server/org/orgCredits.ts
-import { and as and15, desc as desc11, eq as eq17, gte as gte11, sql as sql9 } from "drizzle-orm";
+import { and as and16, desc as desc12, eq as eq19, gte as gte12, sql as sql10 } from "drizzle-orm";
 async function sumCredits(orgId, since, userId) {
   const db = await getDb();
   if (!db) return 0;
-  const conditions = [eq17(organizationCreditUsage.orgId, orgId), gte11(organizationCreditUsage.usedAt, since)];
-  if (userId) conditions.push(eq17(organizationCreditUsage.userId, userId));
-  const [row] = await db.select({ total: sql9`COALESCE(SUM(${organizationCreditUsage.credits}), 0)`.mapWith(Number) }).from(organizationCreditUsage).where(and15(...conditions));
+  const conditions = [eq19(organizationCreditUsage.orgId, orgId), gte12(organizationCreditUsage.usedAt, since)];
+  if (userId) conditions.push(eq19(organizationCreditUsage.userId, userId));
+  const [row] = await db.select({ total: sql10`COALESCE(SUM(${organizationCreditUsage.credits}), 0)`.mapWith(Number) }).from(organizationCreditUsage).where(and16(...conditions));
   return Number(row?.total ?? 0);
 }
 async function findOrgCreditSource(userId, feature, now = /* @__PURE__ */ new Date()) {
@@ -6792,7 +7395,7 @@ async function findOrgCreditSource(userId, feature, now = /* @__PURE__ */ new Da
   if (!cost) return null;
   const db = await getDb();
   if (!db) return null;
-  const [org] = await db.select({ orgId: organizations.id, monthly: organizations.aiCreditsMonthly, cap: organizations.perStudentCreditCap, membershipStartsAt: organizations.membershipStartsAt, membershipEndsAt: organizations.membershipEndsAt }).from(organizationMembers).innerJoin(organizations, eq17(organizations.id, organizationMembers.orgId)).where(and15(eq17(organizationMembers.userId, userId), eq17(organizationMembers.role, "student"), eq17(organizationMembers.status, "active"), eq17(organizations.status, "active"))).limit(1);
+  const [org] = await db.select({ orgId: organizations.id, monthly: organizations.aiCreditsMonthly, cap: organizations.perStudentCreditCap, membershipStartsAt: organizations.membershipStartsAt, membershipEndsAt: organizations.membershipEndsAt }).from(organizationMembers).innerJoin(organizations, eq19(organizations.id, organizationMembers.orgId)).where(and16(eq19(organizationMembers.userId, userId), eq19(organizationMembers.role, "student"), eq19(organizationMembers.status, "active"), eq19(organizations.status, "active"))).limit(1);
   if (!org || org.monthly <= 0 || membershipState(org, now) !== "active") return null;
   const since = creditPeriodStart(now);
   const [usedByOrg, usedByStudent] = await Promise.all([sumCredits(org.orgId, since), org.cap === null ? Promise.resolve(0) : sumCredits(org.orgId, since, userId)]);
@@ -6807,12 +7410,12 @@ async function orgCreditReport(orgId, now = /* @__PURE__ */ new Date()) {
   const db = await getDb();
   if (!db) return { periodStart: creditPeriodStart(now), used: 0, byFeature: [], byStudent: [] };
   const since = creditPeriodStart(now);
-  const scope = and15(eq17(organizationCreditUsage.orgId, orgId), gte11(organizationCreditUsage.usedAt, since));
-  const total = sql9`SUM(${organizationCreditUsage.credits})`.mapWith(Number);
-  const count4 = sql9`COUNT(*)::int`;
+  const scope = and16(eq19(organizationCreditUsage.orgId, orgId), gte12(organizationCreditUsage.usedAt, since));
+  const total = sql10`SUM(${organizationCreditUsage.credits})`.mapWith(Number);
+  const count4 = sql10`COUNT(*)::int`;
   const [byFeature, byStudent] = await Promise.all([
     db.select({ featureKey: organizationCreditUsage.featureKey, credits: total, uses: count4 }).from(organizationCreditUsage).where(scope).groupBy(organizationCreditUsage.featureKey),
-    db.select({ userId: organizationCreditUsage.userId, name: users.name, preferredName: studentProfiles.preferredName, credits: total, uses: count4 }).from(organizationCreditUsage).innerJoin(users, eq17(users.id, organizationCreditUsage.userId)).leftJoin(studentProfiles, eq17(studentProfiles.userId, organizationCreditUsage.userId)).where(scope).groupBy(organizationCreditUsage.userId, users.name, studentProfiles.preferredName).orderBy(desc11(total)).limit(20)
+    db.select({ userId: organizationCreditUsage.userId, name: users.name, preferredName: studentProfiles.preferredName, credits: total, uses: count4 }).from(organizationCreditUsage).innerJoin(users, eq19(users.id, organizationCreditUsage.userId)).leftJoin(studentProfiles, eq19(studentProfiles.userId, organizationCreditUsage.userId)).where(scope).groupBy(organizationCreditUsage.userId, users.name, studentProfiles.preferredName).orderBy(desc12(total)).limit(20)
   ]);
   return {
     periodStart: since,
@@ -7321,7 +7924,7 @@ import { TRPCError as TRPCError2 } from "@trpc/server";
 import { z as z4 } from "zod";
 
 // server/bookContent/bookContentDb.ts
-import { and as and16, eq as eq18, inArray as inArray8, isNull as isNull11 } from "drizzle-orm";
+import { and as and17, eq as eq20, inArray as inArray9, isNull as isNull12 } from "drizzle-orm";
 
 // shared/examTopicLinks.ts
 var examTopicKey = (value) => value.replace(/İ/g, "i").replace(/I/g, "\u0131").toLowerCase().replace(/[çğıöşüâîû]/g, (char) => ({ \u00E7: "c", \u011F: "g", \u0131: "i", \u00F6: "o", \u015F: "s", \u00FC: "u", \u00E2: "a", \u00EE: "i", \u00FB: "u" })[char] ?? char).replace(/[^a-z0-9]+/g, " ").trim();
@@ -7548,7 +8151,7 @@ function deriveCurriculumWeakTopics(rows, topics) {
 }
 
 // server/bookContent/bookContentDb.ts
-async function requireDb6() {
+async function requireDb7() {
   const db = await getDb();
   if (!db) throw new Error("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
   return db;
@@ -7563,14 +8166,14 @@ async function getMatchableTopicsFor(userId) {
   return getMatchableTopics((await getStudentProfile(userId)).examTrack);
 }
 async function userOwnsBook(userId, bookId) {
-  const db = await requireDb6();
-  const [row] = await db.select({ id: bookInventory.id }).from(bookInventory).where(and16(eq18(bookInventory.userId, userId), eq18(bookInventory.bookId, bookId), isNull11(bookInventory.removedAt))).limit(1);
+  const db = await requireDb7();
+  const [row] = await db.select({ id: bookInventory.id }).from(bookInventory).where(and17(eq20(bookInventory.userId, userId), eq20(bookInventory.bookId, bookId), isNull12(bookInventory.removedAt))).limit(1);
   return Boolean(row);
 }
 async function replaceBookContents(userId, bookId, subject2, items, source) {
-  const db = await requireDb6();
+  const db = await requireDb7();
   const topicIds = Array.from(new Set(items.map((item) => item.topicId).filter((id6) => id6 !== null)));
-  const validTopics = topicIds.length ? await db.select().from(yksTopics).where(inArray8(yksTopics.id, topicIds)) : [];
+  const validTopics = topicIds.length ? await db.select().from(yksTopics).where(inArray9(yksTopics.id, topicIds)) : [];
   const topicById = new Map(validTopics.map((row) => [row.id, row]));
   const unknown = topicIds.filter((id6) => !topicById.has(id6));
   if (unknown.length) throw new Error("Ge\xE7ersiz m\xFCfredat konusu se\xE7ildi. Sayfay\u0131 yenileyip tekrar dener misin?");
@@ -7594,7 +8197,7 @@ async function replaceBookContents(userId, bookId, subject2, items, source) {
     source
   }));
   await db.transaction(async (tx) => {
-    await tx.delete(userBookContents).where(and16(eq18(userBookContents.userId, userId), eq18(userBookContents.bookId, bookId)));
+    await tx.delete(userBookContents).where(and17(eq20(userBookContents.userId, userId), eq20(userBookContents.bookId, bookId)));
     if (rows.length) await tx.insert(userBookContents).values(rows);
   });
   for (const topicId of topicIds) {
@@ -7616,21 +8219,21 @@ async function replaceBookContents(userId, bookId, subject2, items, source) {
   return getBookContents(userId, bookId);
 }
 async function getBookContents(userId, bookId) {
-  const db = await requireDb6();
-  const rows = await db.select().from(userBookContents).where(and16(eq18(userBookContents.userId, userId), eq18(userBookContents.bookId, bookId))).orderBy(userBookContents.sortOrder);
+  const db = await requireDb7();
+  const rows = await db.select().from(userBookContents).where(and17(eq20(userBookContents.userId, userId), eq20(userBookContents.bookId, bookId))).orderBy(userBookContents.sortOrder);
   const topicIds = Array.from(new Set(rows.map((row) => row.topicId).filter((id6) => id6 !== null)));
-  const topics = topicIds.length ? await db.select({ id: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject, unit: yksTopics.unit }).from(yksTopics).where(inArray8(yksTopics.id, topicIds)) : [];
+  const topics = topicIds.length ? await db.select({ id: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject, unit: yksTopics.unit }).from(yksTopics).where(inArray9(yksTopics.id, topicIds)) : [];
   const topicById = new Map(topics.map((row) => [row.id, row]));
   return rows.map((row) => ({ ...row, mappingConfidence: Number(row.mappingConfidence), topic: row.topicId !== null ? topicById.get(row.topicId) ?? null : null }));
 }
 async function getBookContentSummaries(userId) {
-  const db = await requireDb6();
-  const activeBooks = (await db.select({ bookId: bookInventory.bookId }).from(bookInventory).where(and16(eq18(bookInventory.userId, userId), isNull11(bookInventory.removedAt)))).map((row) => row.bookId);
+  const db = await requireDb7();
+  const activeBooks = (await db.select({ bookId: bookInventory.bookId }).from(bookInventory).where(and17(eq20(bookInventory.userId, userId), isNull12(bookInventory.removedAt)))).map((row) => row.bookId);
   if (activeBooks.length === 0) return [];
   const [contentRows, logs, customBooks] = await Promise.all([
-    db.select({ bookId: userBookContents.bookId, topicId: userBookContents.topicId, unitNumber: userBookContents.unitNumber, unitTitle: userBookContents.unitTitle, pageStart: userBookContents.pageStart }).from(userBookContents).where(and16(eq18(userBookContents.userId, userId), inArray8(userBookContents.bookId, activeBooks))).orderBy(userBookContents.sortOrder),
-    db.select({ bookId: bookStudyLogs.bookId, pageStart: bookStudyLogs.pageStart, pageEnd: bookStudyLogs.pageEnd, questions: bookStudyLogs.questions, correct: bookStudyLogs.correct }).from(bookStudyLogs).where(and16(eq18(bookStudyLogs.userId, userId), inArray8(bookStudyLogs.bookId, activeBooks))),
-    db.select({ bookId: userResourceBooks.bookId, pageCount: userResourceBooks.pageCount }).from(userResourceBooks).where(and16(eq18(userResourceBooks.userId, userId), inArray8(userResourceBooks.bookId, activeBooks)))
+    db.select({ bookId: userBookContents.bookId, topicId: userBookContents.topicId, unitNumber: userBookContents.unitNumber, unitTitle: userBookContents.unitTitle, pageStart: userBookContents.pageStart }).from(userBookContents).where(and17(eq20(userBookContents.userId, userId), inArray9(userBookContents.bookId, activeBooks))).orderBy(userBookContents.sortOrder),
+    db.select({ bookId: bookStudyLogs.bookId, pageStart: bookStudyLogs.pageStart, pageEnd: bookStudyLogs.pageEnd, questions: bookStudyLogs.questions, correct: bookStudyLogs.correct }).from(bookStudyLogs).where(and17(eq20(bookStudyLogs.userId, userId), inArray9(bookStudyLogs.bookId, activeBooks))),
+    db.select({ bookId: userResourceBooks.bookId, pageCount: userResourceBooks.pageCount }).from(userResourceBooks).where(and17(eq20(userResourceBooks.userId, userId), inArray9(userResourceBooks.bookId, activeBooks)))
   ]);
   const pageCountByBook = new Map(customBooks.map((row) => [row.bookId, row.pageCount]));
   return activeBooks.map((bookId) => {
@@ -7650,16 +8253,16 @@ var parseRange = (value) => {
   return { pageStart: start, pageEnd: Number(match[2] ?? match[1]) };
 };
 async function getWeakTopicBookRecommendations(userId) {
-  const db = await requireDb6();
+  const db = await requireDb7();
   const [progress, topics] = await Promise.all([getUserTopicProgress(userId), getMatchableTopicsFor(userId)]);
   const weakTopics = deriveCurriculumWeakTopics(progress, topics);
   if (weakTopics.length === 0) return [];
-  const activeBooks = (await db.select({ bookId: bookInventory.bookId }).from(bookInventory).where(and16(eq18(bookInventory.userId, userId), isNull11(bookInventory.removedAt)))).map((row) => row.bookId);
+  const activeBooks = (await db.select({ bookId: bookInventory.bookId }).from(bookInventory).where(and17(eq20(bookInventory.userId, userId), isNull12(bookInventory.removedAt)))).map((row) => row.bookId);
   if (activeBooks.length === 0) return [];
   const [contentRows, logs, planned] = await Promise.all([
-    db.select().from(userBookContents).where(and16(eq18(userBookContents.userId, userId), eq18(userBookContents.mappingStatus, "confirmed"), inArray8(userBookContents.bookId, activeBooks), inArray8(userBookContents.topicId, weakTopics.map((topic) => topic.topicId)))),
-    db.select({ bookId: bookStudyLogs.bookId, pageStart: bookStudyLogs.pageStart, pageEnd: bookStudyLogs.pageEnd }).from(bookStudyLogs).where(and16(eq18(bookStudyLogs.userId, userId), inArray8(bookStudyLogs.bookId, activeBooks))),
-    db.select({ bookId: studyPlanSessions.sourceBookId, targetPages: studyPlanSessions.targetPages }).from(studyPlanSessions).where(and16(eq18(studyPlanSessions.userId, userId), eq18(studyPlanSessions.status, "planned"), inArray8(studyPlanSessions.sourceBookId, activeBooks)))
+    db.select().from(userBookContents).where(and17(eq20(userBookContents.userId, userId), eq20(userBookContents.mappingStatus, "confirmed"), inArray9(userBookContents.bookId, activeBooks), inArray9(userBookContents.topicId, weakTopics.map((topic) => topic.topicId)))),
+    db.select({ bookId: bookStudyLogs.bookId, pageStart: bookStudyLogs.pageStart, pageEnd: bookStudyLogs.pageEnd }).from(bookStudyLogs).where(and17(eq20(bookStudyLogs.userId, userId), inArray9(bookStudyLogs.bookId, activeBooks))),
+    db.select({ bookId: studyPlanSessions.sourceBookId, targetPages: studyPlanSessions.targetPages }).from(studyPlanSessions).where(and17(eq20(studyPlanSessions.userId, userId), eq20(studyPlanSessions.status, "planned"), inArray9(studyPlanSessions.sourceBookId, activeBooks)))
   ]);
   const donePages = {};
   for (const log of logs) if (log.pageStart !== null) (donePages[log.bookId] ??= []).push({ pageStart: log.pageStart, pageEnd: log.pageEnd ?? log.pageStart });
@@ -7672,12 +8275,12 @@ async function getWeakTopicBookRecommendations(userId) {
   return buildBookRecommendations({ weakTopics, contents, donePages, scheduledPages });
 }
 async function getAutoSchedule(userId) {
-  const db = await requireDb6();
-  const [row] = await db.select({ value: studentProfiles.autoScheduleBookTasks }).from(studentProfiles).where(eq18(studentProfiles.userId, userId)).limit(1);
+  const db = await requireDb7();
+  const [row] = await db.select({ value: studentProfiles.autoScheduleBookTasks }).from(studentProfiles).where(eq20(studentProfiles.userId, userId)).limit(1);
   return row?.value === 1;
 }
 async function setAutoSchedule(userId, enabled) {
-  const db = await requireDb6();
+  const db = await requireDb7();
   await db.insert(studentProfiles).values({ userId, autoScheduleBookTasks: enabled ? 1 : 0 }).onConflictDoUpdate({ target: studentProfiles.userId, set: { autoScheduleBookTasks: enabled ? 1 : 0 } });
   return enabled;
 }
@@ -7697,16 +8300,16 @@ async function runAutoSchedule(userId, bookTitles, maxTasks = 3) {
   return { added };
 }
 async function resolveBookTitle(db, userId, bookId, fallback) {
-  const [custom] = await db.select({ title: userResourceBooks.title }).from(userResourceBooks).where(and16(eq18(userResourceBooks.userId, userId), eq18(userResourceBooks.bookId, bookId))).limit(1);
+  const [custom] = await db.select({ title: userResourceBooks.title }).from(userResourceBooks).where(and17(eq20(userResourceBooks.userId, userId), eq20(userResourceBooks.bookId, bookId))).limit(1);
   if (custom) return custom.title;
   if (/^\d+$/.test(bookId)) {
-    const [catalogBook] = await db.select({ name: catalogBooks.name }).from(catalogBooks).where(eq18(catalogBooks.id, Number(bookId))).limit(1);
+    const [catalogBook] = await db.select({ name: catalogBooks.name }).from(catalogBooks).where(eq20(catalogBooks.id, Number(bookId))).limit(1);
     if (catalogBook) return catalogBook.name;
   }
   return fallback.slice(0, 120) || "Kitap";
 }
 async function addRecommendationToPlan(userId, input) {
-  const db = await requireDb6();
+  const db = await requireDb7();
   if (!await userOwnsBook(userId, input.bookId)) throw new Error("Bu kitap k\xFCt\xFCphanende bulunmuyor.");
   const recommendation = (await getWeakTopicBookRecommendations(userId)).find((rec) => rec.topicId === input.topicId && rec.bookId === input.bookId);
   if (!recommendation) throw new Error("Bu \xF6neri art\u0131k ge\xE7erli de\u011Fil (testler \xE7\xF6z\xFClm\xFC\u015F ya da zaten planlanm\u0131\u015F olabilir).");
@@ -7733,8 +8336,8 @@ async function addRecommendationToPlan(userId, input) {
 }
 
 // server/bookContent/sharedBooks.ts
-import { and as and17, desc as desc12, eq as eq19, isNull as isNull12, or as or5, sql as sql10, ilike as ilike2 } from "drizzle-orm";
-async function requireDb7() {
+import { and as and18, desc as desc13, eq as eq21, isNull as isNull13, or as or5, sql as sql11, ilike as ilike2 } from "drizzle-orm";
+async function requireDb8() {
   const db = await getDb();
   if (!db) throw new Error("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
   return db;
@@ -7765,17 +8368,17 @@ function scoreSharedBook(draft, row) {
 var toMatch = (row, score, exact) => ({ id: row.id, title: row.title, publisher: row.publisher, subject: row.subject, exam: row.exam, authors: row.authors, isbn: row.isbn, edition: row.edition, ownerCount: row.ownerCount, contentsItemCount: row.contentsItemCount, contentsTopicCount: row.contentsTopicCount, score: Math.round(score * 100) / 100, exact });
 async function candidatesFor(db, title, isbn) {
   const tokens = tokensOf(title).filter((token) => token.length >= 3).sort((a, b) => b.length - a.length).slice(0, 3);
-  const conditions = [...tokens.map((token) => ilike2(sharedBooks.titleKey, `%${token.slice(0, 5)}%`)), ...isbn ? [eq19(sharedBooks.isbn, isbn)] : []];
+  const conditions = [...tokens.map((token) => ilike2(sharedBooks.titleKey, `%${token.slice(0, 5)}%`)), ...isbn ? [eq21(sharedBooks.isbn, isbn)] : []];
   if (!conditions.length) return [];
-  return db.select().from(sharedBooks).where(or5(...conditions)).orderBy(desc12(sharedBooks.ownerCount)).limit(100);
+  return db.select().from(sharedBooks).where(or5(...conditions)).orderBy(desc13(sharedBooks.ownerCount)).limit(100);
 }
 async function findSharedBookMatches(draft, limit = 3) {
-  const db = await requireDb7();
+  const db = await requireDb8();
   const rows = await candidatesFor(db, draft.title, normalizeIsbn(draft.isbn));
   return rows.map((row) => ({ row, score: scoreSharedBook(draft, row), exact: isSameBook(draft, row) })).filter((item) => item.exact || item.score >= MATCH_MIN_SCORE).sort((a, b) => Number(b.exact) - Number(a.exact) || b.score - a.score || b.row.ownerCount - a.row.ownerCount).slice(0, limit).map((item) => toMatch(item.row, item.exact ? Math.max(item.score, 0.95) : item.score, item.exact));
 }
 async function searchSharedBooks(query, limit = 8) {
-  const db = await requireDb7();
+  const db = await requireDb8();
   const queryTokens = tokensOf(query);
   if (!queryTokens.length) return [];
   const isbn = normalizeIsbn(query);
@@ -7807,16 +8410,16 @@ async function registerSharedBook(db, userId, draft) {
   return created;
 }
 async function addBookToLibrary(userId, input) {
-  const db = await requireDb7();
+  const db = await requireDb8();
   let shared;
   if (input.sharedBookId) {
-    const [row2] = await db.select().from(sharedBooks).where(eq19(sharedBooks.id, input.sharedBookId)).limit(1);
+    const [row2] = await db.select().from(sharedBooks).where(eq21(sharedBooks.id, input.sharedBookId)).limit(1);
     if (!row2) throw new Error("Se\xE7ilen kitap bulunamad\u0131. Kapa\u011F\u0131 foto\u011Frafla ekleyebilirsin.");
     shared = row2;
   } else {
     shared = await registerSharedBook(db, userId, input.draft);
   }
-  const [owned] = await db.select().from(userResourceBooks).innerJoin(bookInventory, and17(eq19(bookInventory.userId, userResourceBooks.userId), eq19(bookInventory.bookId, userResourceBooks.bookId), isNull12(bookInventory.removedAt))).where(and17(eq19(userResourceBooks.userId, userId), eq19(userResourceBooks.sharedBookId, shared.id))).limit(1);
+  const [owned] = await db.select().from(userResourceBooks).innerJoin(bookInventory, and18(eq21(bookInventory.userId, userResourceBooks.userId), eq21(bookInventory.bookId, userResourceBooks.bookId), isNull13(bookInventory.removedAt))).where(and18(eq21(userResourceBooks.userId, userId), eq21(userResourceBooks.sharedBookId, shared.id))).limit(1);
   if (owned) return { book: asAddedBook(owned.user_resource_books, shared.id), contentsCopied: 0, topicCount: 0, alreadyOwned: true };
   const identity = input.sharedBookId ? { title: shared.title, publisher: shared.publisher, subject: shared.subject, exam: shared.exam, authors: shared.authors, isbn: shared.isbn, edition: shared.edition } : input.draft;
   const edition = identity.edition?.trim();
@@ -7837,7 +8440,7 @@ async function addBookToLibrary(userId, input) {
     sharedBookId: shared.id
   }).returning();
   await addBookToInventory(userId, bookId);
-  await db.update(sharedBooks).set({ ownerCount: sql10`${sharedBooks.ownerCount} + 1` }).where(eq19(sharedBooks.id, shared.id));
+  await db.update(sharedBooks).set({ ownerCount: sql11`${sharedBooks.ownerCount} + 1` }).where(eq21(sharedBooks.id, shared.id));
   let contentsCopied = 0, topicCount = 0;
   if (input.useSharedContents && shared.contentsJson) {
     try {
@@ -7845,7 +8448,7 @@ async function addBookToLibrary(userId, input) {
       await replaceBookContents(userId, bookId, stored.subject || row.subject, stored.items, shared.contentsSource ?? "ocr");
       contentsCopied = stored.items.length;
       topicCount = shared.contentsTopicCount;
-      await db.update(sharedBooks).set({ contentsReuseCount: sql10`${sharedBooks.contentsReuseCount} + 1` }).where(eq19(sharedBooks.id, shared.id));
+      await db.update(sharedBooks).set({ contentsReuseCount: sql11`${sharedBooks.contentsReuseCount} + 1` }).where(eq21(sharedBooks.id, shared.id));
     } catch (error) {
       console.warn("[shared books] contents reuse failed:", error instanceof Error ? error.message : error);
     }
@@ -7858,11 +8461,11 @@ function asAddedBook(row, sharedBookId) {
 async function shareBookContents(userId, bookId, subject2, items, source) {
   const topicCount = new Set(items.map((item) => item.topicId).filter((id6) => id6 !== null)).size;
   if (items.length < SHARED_CONTENTS_MIN_ITEMS || topicCount === 0) return false;
-  const db = await requireDb7();
-  const [own] = await db.select({ sharedBookId: userResourceBooks.sharedBookId }).from(userResourceBooks).where(and17(eq19(userResourceBooks.userId, userId), eq19(userResourceBooks.bookId, bookId))).limit(1);
+  const db = await requireDb8();
+  const [own] = await db.select({ sharedBookId: userResourceBooks.sharedBookId }).from(userResourceBooks).where(and18(eq21(userResourceBooks.userId, userId), eq21(userResourceBooks.bookId, bookId))).limit(1);
   if (!own?.sharedBookId) return false;
   const contentsJson = JSON.stringify({ subject: subject2, items });
-  const updated = await db.update(sharedBooks).set({ contentsJson, contentsItemCount: items.length, contentsTopicCount: topicCount, contentsSource: source, contentsByUserId: userId, contentsUpdatedAt: /* @__PURE__ */ new Date() }).where(and17(eq19(sharedBooks.id, own.sharedBookId), eq19(sharedBooks.contentsItemCount, 0))).returning({ id: sharedBooks.id });
+  const updated = await db.update(sharedBooks).set({ contentsJson, contentsItemCount: items.length, contentsTopicCount: topicCount, contentsSource: source, contentsByUserId: userId, contentsUpdatedAt: /* @__PURE__ */ new Date() }).where(and18(eq21(sharedBooks.id, own.sharedBookId), eq21(sharedBooks.contentsItemCount, 0))).returning({ id: sharedBooks.id });
   return updated.length > 0;
 }
 
@@ -8104,7 +8707,7 @@ async function extractPlainTextFromImage(imageDataUrl) {
 
 // server/bookContent/ocrCache.ts
 import { createHash as createHash3 } from "node:crypto";
-import { and as and18, eq as eq20, lt as lt9 } from "drizzle-orm";
+import { and as and19, eq as eq22, lt as lt10 } from "drizzle-orm";
 var OCR_PIPELINE_VERSION = "toc-2.0";
 var CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1e3;
 var disabledReason = null;
@@ -8119,7 +8722,7 @@ async function readOcrCache(userId, hash) {
   try {
     const db = await getDb();
     if (!db) return null;
-    const [row] = await db.select({ resultJson: ocrPageCache.resultJson, createdAt: ocrPageCache.createdAt }).from(ocrPageCache).where(and18(eq20(ocrPageCache.userId, userId), eq20(ocrPageCache.imageHash, hash), eq20(ocrPageCache.pipelineVersion, OCR_PIPELINE_VERSION))).limit(1);
+    const [row] = await db.select({ resultJson: ocrPageCache.resultJson, createdAt: ocrPageCache.createdAt }).from(ocrPageCache).where(and19(eq22(ocrPageCache.userId, userId), eq22(ocrPageCache.imageHash, hash), eq22(ocrPageCache.pipelineVersion, OCR_PIPELINE_VERSION))).limit(1);
     if (!row || Date.now() - new Date(row.createdAt).getTime() > CACHE_TTL_MS) return null;
     return JSON.parse(row.resultJson);
   } catch (error) {
@@ -8134,7 +8737,7 @@ async function writeOcrCache(userId, hash, result) {
     if (!db) return;
     const resultJson = JSON.stringify(result);
     await db.insert(ocrPageCache).values({ userId, imageHash: hash, pipelineVersion: OCR_PIPELINE_VERSION, resultJson }).onConflictDoUpdate({ target: [ocrPageCache.userId, ocrPageCache.imageHash, ocrPageCache.pipelineVersion], set: { resultJson, createdAt: /* @__PURE__ */ new Date() } });
-    await db.delete(ocrPageCache).where(and18(eq20(ocrPageCache.userId, userId), lt9(ocrPageCache.createdAt, new Date(Date.now() - CACHE_TTL_MS))));
+    await db.delete(ocrPageCache).where(and19(eq22(ocrPageCache.userId, userId), lt10(ocrPageCache.createdAt, new Date(Date.now() - CACHE_TTL_MS))));
   } catch (error) {
     disable(error);
   }
@@ -9877,12 +10480,12 @@ async function readLimited(response, maxBytes) {
 }
 
 // server/wall/wallDb.ts
-import { and as and19, desc as desc13, eq as eq21, ilike as ilike3, inArray as inArray9, isNull as isNull13, lt as lt10, or as or6, sql as sql11 } from "drizzle-orm";
+import { and as and20, desc as desc14, eq as eq23, ilike as ilike3, inArray as inArray10, isNull as isNull14, lt as lt11, or as or6, sql as sql12 } from "drizzle-orm";
 var WallError = class extends Error {
 };
 var WALL_PAGE_SIZE = 20;
 var WALL_MAX_TAGS = 8;
-async function requireDb8() {
+async function requireDb9() {
   const db = await getDb();
   if (!db) throw new WallError("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
   return db;
@@ -9931,7 +10534,7 @@ async function prepare(db, input) {
   if (input.kind !== "link" && !plainText.trim() && !referencedAttachmentIds(input.content).length && !contentJson.includes('"formula"') && !contentJson.includes('"drawing"')) throw new WallError("Bo\u015F kay\u0131t eklenemez.");
   let subject2 = null;
   if (input.topicId) {
-    const [topic] = await db.select({ subject: yksTopics.subject }).from(yksTopics).where(eq21(yksTopics.id, input.topicId)).limit(1);
+    const [topic] = await db.select({ subject: yksTopics.subject }).from(yksTopics).where(eq23(yksTopics.id, input.topicId)).limit(1);
     if (!topic) throw new WallError("Se\xE7ilen konu bulunamad\u0131.");
     subject2 = topic.subject;
   }
@@ -9953,34 +10556,34 @@ async function prepare(db, input) {
 }
 async function withTopics(db, rows) {
   const ids = Array.from(new Set(rows.map((row) => row.topicId).filter((id6) => id6 !== null)));
-  const topics = ids.length ? await db.select({ id: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject }).from(yksTopics).where(inArray9(yksTopics.id, ids)) : [];
+  const topics = ids.length ? await db.select({ id: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject }).from(yksTopics).where(inArray10(yksTopics.id, ids)) : [];
   const byId = new Map(topics.map((row) => [row.id, row]));
   return rows.map((row) => toPost(row, row.topicId !== null ? byId.get(row.topicId) ?? null : null));
 }
 async function createWallPost(userId, input) {
-  const db = await requireDb8();
+  const db = await requireDb9();
   const values = await prepare(db, input);
   const [row] = await db.insert(wallPosts).values({ userId, ...values }).returning();
   await getAttachmentStorage().syncWallPostLinks(userId, row.id, referencedAttachmentIds(input.content));
   return (await withTopics(db, [row]))[0];
 }
 async function updateWallPost(userId, id6, input) {
-  const db = await requireDb8();
+  const db = await requireDb9();
   const values = await prepare(db, input);
-  const [row] = await db.update(wallPosts).set({ ...values, ...values.readLater ? {} : { readAt: null } }).where(and19(eq21(wallPosts.id, id6), eq21(wallPosts.userId, userId))).returning();
+  const [row] = await db.update(wallPosts).set({ ...values, ...values.readLater ? {} : { readAt: null } }).where(and20(eq23(wallPosts.id, id6), eq23(wallPosts.userId, userId))).returning();
   if (!row) throw new WallError("Kay\u0131t bulunamad\u0131.");
   await getAttachmentStorage().syncWallPostLinks(userId, row.id, referencedAttachmentIds(input.content));
   return (await withTopics(db, [row]))[0];
 }
 async function deleteWallPost(userId, id6) {
-  const db = await requireDb8();
-  const [row] = await db.delete(wallPosts).where(and19(eq21(wallPosts.id, id6), eq21(wallPosts.userId, userId))).returning({ id: wallPosts.id });
+  const db = await requireDb9();
+  const [row] = await db.delete(wallPosts).where(and20(eq23(wallPosts.id, id6), eq23(wallPosts.userId, userId))).returning({ id: wallPosts.id });
   if (!row) return false;
   await getAttachmentStorage().deleteForWallPost(userId, id6);
   return true;
 }
 async function setWallPostFlags(userId, id6, flags) {
-  const db = await requireDb8();
+  const db = await requireDb9();
   const set = {};
   if (flags.read !== void 0) set.readAt = flags.read ? /* @__PURE__ */ new Date() : null;
   if (flags.pinned !== void 0) set.isPinned = flags.pinned ? 1 : 0;
@@ -9989,39 +10592,39 @@ async function setWallPostFlags(userId, id6, flags) {
     if (flags.readLater) set.readAt = null;
   }
   if (!Object.keys(set).length) return true;
-  const rows = await db.update(wallPosts).set(set).where(and19(eq21(wallPosts.id, id6), eq21(wallPosts.userId, userId))).returning({ id: wallPosts.id });
+  const rows = await db.update(wallPosts).set(set).where(and20(eq23(wallPosts.id, id6), eq23(wallPosts.userId, userId))).returning({ id: wallPosts.id });
   return rows.length > 0;
 }
 async function listWallPosts(userId, options = {}) {
-  const db = await requireDb8();
+  const db = await requireDb9();
   const limit = Math.min(50, options.limit ?? WALL_PAGE_SIZE);
-  const conditions = [eq21(wallPosts.userId, userId)];
-  if (options.filter === "unread") conditions.push(eq21(wallPosts.readLater, 1), isNull13(wallPosts.readAt));
-  if (options.filter === "pinned") conditions.push(eq21(wallPosts.isPinned, 1));
+  const conditions = [eq23(wallPosts.userId, userId)];
+  if (options.filter === "unread") conditions.push(eq23(wallPosts.readLater, 1), isNull14(wallPosts.readAt));
+  if (options.filter === "pinned") conditions.push(eq23(wallPosts.isPinned, 1));
   const tag = options.tag ? normalizeTag(options.tag) : null;
-  if (tag) conditions.push(sql11`(',' || ${wallPosts.tags} || ',') LIKE ${`%,${tag.replace(/[%_]/g, "")},%`}`);
-  if (options.topicId) conditions.push(eq21(wallPosts.topicId, options.topicId));
+  if (tag) conditions.push(sql12`(',' || ${wallPosts.tags} || ',') LIKE ${`%,${tag.replace(/[%_]/g, "")},%`}`);
+  if (options.topicId) conditions.push(eq23(wallPosts.topicId, options.topicId));
   const q = options.q?.trim().replace(/[%_\\]/g, "").slice(0, 100);
   if (q) conditions.push(or6(ilike3(wallPosts.title, `%${q}%`), ilike3(wallPosts.plainText, `%${q}%`), ilike3(wallPosts.sourceTitle, `%${q}%`), ilike3(wallPosts.sourceUrl, `%${q}%`)));
-  if (options.cursor) conditions.push(or6(lt10(wallPosts.postedAt, options.cursor.postedAt), and19(eq21(wallPosts.postedAt, options.cursor.postedAt), lt10(wallPosts.id, options.cursor.id))));
-  const rows = await db.select().from(wallPosts).where(and19(...conditions)).orderBy(desc13(wallPosts.postedAt), desc13(wallPosts.id)).limit(limit + 1);
+  if (options.cursor) conditions.push(or6(lt11(wallPosts.postedAt, options.cursor.postedAt), and20(eq23(wallPosts.postedAt, options.cursor.postedAt), lt11(wallPosts.id, options.cursor.id))));
+  const rows = await db.select().from(wallPosts).where(and20(...conditions)).orderBy(desc14(wallPosts.postedAt), desc14(wallPosts.id)).limit(limit + 1);
   const page2 = rows.slice(0, limit);
   const last = page2.at(-1);
   return { posts: await withTopics(db, page2), nextCursor: rows.length > limit && last ? { postedAt: last.postedAt, id: last.id } : null };
 }
 async function getWallPost(userId, id6) {
-  const db = await requireDb8();
-  const [row] = await db.select().from(wallPosts).where(and19(eq21(wallPosts.id, id6), eq21(wallPosts.userId, userId))).limit(1);
+  const db = await requireDb9();
+  const [row] = await db.select().from(wallPosts).where(and20(eq23(wallPosts.id, id6), eq23(wallPosts.userId, userId))).limit(1);
   return row ? (await withTopics(db, [row]))[0] : null;
 }
 async function wallSummary(userId) {
-  const db = await requireDb8();
+  const db = await requireDb9();
   const [counts] = await db.select({
-    total: sql11`COUNT(*)`,
-    unread: sql11`COUNT(*) FILTER (WHERE ${wallPosts.readLater} = 1 AND ${wallPosts.readAt} IS NULL)`,
-    pinned: sql11`COUNT(*) FILTER (WHERE ${wallPosts.isPinned} = 1)`
-  }).from(wallPosts).where(eq21(wallPosts.userId, userId));
-  const tagRows = await db.select({ tags: wallPosts.tags }).from(wallPosts).where(and19(eq21(wallPosts.userId, userId), sql11`${wallPosts.tags} <> ''`)).orderBy(desc13(wallPosts.postedAt)).limit(300);
+    total: sql12`COUNT(*)`,
+    unread: sql12`COUNT(*) FILTER (WHERE ${wallPosts.readLater} = 1 AND ${wallPosts.readAt} IS NULL)`,
+    pinned: sql12`COUNT(*) FILTER (WHERE ${wallPosts.isPinned} = 1)`
+  }).from(wallPosts).where(eq23(wallPosts.userId, userId));
+  const tagRows = await db.select({ tags: wallPosts.tags }).from(wallPosts).where(and20(eq23(wallPosts.userId, userId), sql12`${wallPosts.tags} <> ''`)).orderBy(desc14(wallPosts.postedAt)).limit(300);
   const tagCounts = /* @__PURE__ */ new Map();
   for (const row of tagRows) for (const tag of tagList(row.tags)) tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
   return {
@@ -10095,67 +10698,6 @@ var wallRouter = router({
 import { TRPCError as TRPCError6 } from "@trpc/server";
 import { z as z8 } from "zod";
 
-// shared/academicCase.ts
-var ACADEMIC_CASE_RULES = {
-  /** Karşılaştırılan son deneme sayısı. */
-  examsCompared: 3,
-  /** Son denemeler en fazla bu kadar gün içine yayılmış olmalı. */
-  windowDays: 75,
-  /** Toplam düşüş eşiği (net). Sınav türünde tanım yoksa varsayılan. */
-  minTotalDrop: { default: 5, LGS: 3 },
-  /** Hazırlık dönemi bu ayda başlar (0 = Ocak; 7 = Ağustos): Ağustos–Temmuz arası aynı dönem. */
-  seasonStartMonth: 7
-};
-var DAY2 = 24 * 60 * 60 * 1e3;
-var normalizePublisher = (value) => (value ?? "").trim().toLocaleLowerCase("tr").replace(/\s+yay[ıi]nlar[ıi]$/, "").replace(/\s+/g, " ") || null;
-var round2 = (value) => Math.round(value * 100) / 100;
-function seasonOf(date, rules = ACADEMIC_CASE_RULES) {
-  return date.getMonth() >= rules.seasonStartMonth ? date.getFullYear() : date.getFullYear() - 1;
-}
-var minTotalDropFor = (kind, rules = ACADEMIC_CASE_RULES) => rules.minTotalDrop[kind] ?? rules.minTotalDrop.default ?? 5;
-function comparabilityKey(exam) {
-  return [exam.examKind, exam.scope ?? "full", normalizePublisher(exam.publisher) ?? "*"].join("|");
-}
-function trendDecline(exams, examKind2, rules = ACADEMIC_CASE_RULES) {
-  const recent = exams.filter((exam) => exam.examKind === examKind2 && exam.scope !== "branch" && Number.isFinite(exam.net)).sort((a, b) => b.date.getTime() - a.date.getTime() || b.id - a.id).slice(0, rules.examsCompared).reverse();
-  const evidence = recent.map(({ id: id6, date, net }) => ({ id: id6, date, net }));
-  if (recent.length < rules.examsCompared) return { status: "insufficient", examKind: examKind2, reason: "not_enough_exams", evidence };
-  if (recent.at(-1).date.getTime() - recent[0].date.getTime() > rules.windowDays * DAY2) return { status: "insufficient", examKind: examKind2, reason: "too_spread_out", evidence };
-  if (new Set(recent.map((exam) => seasonOf(exam.date, rules))).size > 1) return { status: "insufficient", examKind: examKind2, reason: "different_season", evidence };
-  const publishers2 = new Set(recent.map((exam) => normalizePublisher(exam.publisher)).filter((value) => Boolean(value)));
-  if (publishers2.size > 1) return { status: "insufficient", examKind: examKind2, reason: "mixed_publishers", evidence };
-  const steps = recent.slice(1).map((exam, index2) => round2(exam.net - recent[index2].net));
-  const totalChange = round2(recent.at(-1).net - recent[0].net);
-  const declining = steps.every((step) => step <= 0) && -totalChange >= minTotalDropFor(examKind2, rules);
-  if (!declining) return { status: "no_signal", examKind: examKind2, evidence, totalChange, steps };
-  const allKnown = recent.every((exam) => normalizePublisher(exam.publisher));
-  const confidence = recent.every((exam) => exam.source === "org") && allKnown ? "high" : "medium";
-  return { status: "signal", examKind: examKind2, confidence, evidence, totalChange, steps };
-}
-function trendSignals(exams, rules = ACADEMIC_CASE_RULES) {
-  const kinds = Array.from(new Set(exams.map((exam) => exam.examKind)));
-  return kinds.map((kind) => trendDecline(exams, kind, rules));
-}
-var ACADEMIC_REVIEW_TITLE = "Akademik inceleme \xF6nerisi";
-var ACADEMIC_REVIEW_TEXT = "\xD6\u011Frencinin son \xFC\xE7 kar\u015F\u0131la\u015Ft\u0131r\u0131labilir denemesinde netleri d\xFC\u015F\xFC\u015F e\u011Filimindedir. \xC7al\u0131\u015Fma kay\u0131tlar\u0131 ve ders bazl\u0131 sonu\xE7lar incelenerek rehberlik g\xF6r\xFC\u015Fmesi de\u011Ferlendirilmesi \xF6nerilir.";
-var INSUFFICIENT_REASON_TEXT = {
-  not_enough_exams: "Kar\u015F\u0131la\u015Ft\u0131rma i\xE7in bu s\u0131nav t\xFCr\xFCnde en az \xFC\xE7 tam deneme gerekli.",
-  mixed_publishers: "Son denemeler farkl\u0131 yay\u0131nevlerine ait; netler do\u011Frudan kar\u015F\u0131la\u015Ft\u0131r\u0131lamaz.",
-  different_season: "Son denemeler farkl\u0131 haz\u0131rl\u0131k d\xF6nemlerine ait.",
-  too_spread_out: "Son denemeler aras\u0131nda \xE7ok uzun s\xFCre var; e\u011Filim g\xFCvenilir de\u011Fil."
-};
-var CONFIDENCE_TEXT = {
-  high: "Y\xFCksek g\xFCven: kurumdan aktar\u0131lan, ayn\u0131 yay\u0131nevine ait denemeler.",
-  medium: "Orta g\xFCven: denemelerin bir k\u0131sm\u0131 \xF6\u011Frencinin kendi giri\u015Fi ya da yay\u0131nevi bilinmiyor."
-};
-function describeTrend(result) {
-  const label = EXAM_KIND_DEFS[result.examKind]?.label ?? result.examKind;
-  const chain = result.evidence.map((exam) => String(round2(exam.net)).replace(".", ",")).join(" \u2192 ");
-  if (result.status === "insufficient") return `${label}: inceleme i\xE7in yetersiz veri. ${INSUFFICIENT_REASON_TEXT[result.reason]}`;
-  const change = String(Math.abs(result.totalChange)).replace(".", ",");
-  return `${label}: ${chain} (${result.totalChange < 0 ? "\u2212" : "+"}${change} net)`;
-}
-
 // server/org/orgAccess.ts
 import { TRPCError as TRPCError5 } from "@trpc/server";
 import { z as z7 } from "zod";
@@ -10179,501 +10721,6 @@ async function assertCanViewStudent(ctx, studentUserId) {
 }
 function audit(ctx, action, target, metadata) {
   return writeAudit({ orgId: ctx.membership.orgId, actorUserId: ctx.user.id, action, targetType: target?.type, targetId: target?.id, metadata });
-}
-
-// server/org/caseDb.ts
-import { and as and20, desc as desc14, eq as eq23, gte as gte13, inArray as inArray10, isNull as isNull14, lt as lt11, sql as sql12 } from "drizzle-orm";
-
-// shared/classSchedule.ts
-var SCHEDULE_SOURCES = ["school", "course", "tutor", "other"];
-var DAY_LABELS = ["Pazartesi", "Sal\u0131", "\xC7ar\u015Famba", "Per\u015Fembe", "Cuma", "Cumartesi", "Pazar"];
-var YKS_SUBJECTS = ["T\xFCrk\xE7e", "Matematik", "Geometri", "Fizik", "Kimya", "Biyoloji", "Edebiyat", "Tarih", "Co\u011Frafya", "Felsefe"];
-var NON_YKS_PRESETS = ["Din K\xFClt\xFCr\xFC", "Yabanc\u0131 Dil", "Rehberlik", "Beden E\u011Fitimi", "Sanat / M\xFCzik", "Di\u011Fer ders"];
-var LGS_SUBJECTS = ["T\xFCrk\xE7e", "Matematik", "Fen Bilimleri", "\u0130nk\u0131lap Tarihi", "Din K\xFClt\xFCr\xFC", "\u0130ngilizce"];
-var NON_LGS_PRESETS = ["Teknoloji ve Tasar\u0131m", "Bili\u015Fim Teknolojileri", "Rehberlik", "Beden E\u011Fitimi", "Sanat / M\xFCzik", "Di\u011Fer ders"];
-var SCHEDULE_SUBJECTS_BY_TRACK = {
-  YKS: { subjects: YKS_SUBJECTS, nonExamPresets: NON_YKS_PRESETS },
-  LGS: { subjects: LGS_SUBJECTS, nonExamPresets: NON_LGS_PRESETS },
-  // Yetişkin adaylar: programdaki bloklar çoğunlukla iş/kurs saatleri; ders olarak KPSS dersleri.
-  KPSS: { subjects: ["T\xFCrk\xE7e", "Matematik", "Tarih", "Co\u011Frafya", "Vatanda\u015Fl\u0131k", "G\xFCncel Bilgiler"], nonExamPresets: ["\u0130\u015F", "Kurs / dershane", "\xDCniversite dersi", "Di\u011Fer"] },
-  DGS: { subjects: ["Say\u0131sal", "S\xF6zel"], nonExamPresets: ["\xD6nlisans dersi", "\u0130\u015F", "Kurs / dershane", "Di\u011Fer"] },
-  MEB_AGS: { subjects: ["E\u011Fitim Bilimleri", "S\xF6zel Yetenek", "Say\u0131sal Yetenek", "Mevzuat", "Tarih", "T\xFCrkiye Co\u011Frafyas\u0131"], nonExamPresets: ["\xDCniversite dersi", "Staj / okul uygulamas\u0131", "\u0130\u015F", "Kurs / dershane", "Di\u011Fer"] },
-  KPSS_A: { subjects: ["Hukuk", "\u0130ktisat", "Maliye", "Muhasebe", "\u0130\u015Fletme", "\xC7al\u0131\u015Fma Ekonomisi", "\u0130statistik", "Kamu Y\xF6netimi", "Uluslararas\u0131 \u0130li\u015Fkiler"], nonExamPresets: ["\u0130\u015F", "Kurs / dershane", "Di\u011Fer"] }
-};
-var SCHEDULE_SUBJECTS = Array.from(new Set(Object.values(SCHEDULE_SUBJECTS_BY_TRACK).flatMap((entry) => entry.subjects)));
-var scheduleSubjectsFor = (track) => SCHEDULE_SUBJECTS_BY_TRACK[track].subjects;
-var nonExamPresetsFor = (track) => SCHEDULE_SUBJECTS_BY_TRACK[track].nonExamPresets;
-var AFTER_CLASS_BUFFER_MINUTES = 30;
-var PLAN_DAY_END = "23:30";
-var MAX_SCHEDULE_BLOCKS = 120;
-var MAX_SCHOOL_PERIODS = 12;
-var DEFAULT_SCHOOL_PERIODS = [
-  { start: "08:30", end: "09:10" },
-  { start: "09:20", end: "10:00" },
-  { start: "10:10", end: "10:50" },
-  { start: "11:00", end: "11:40" },
-  { start: "13:00", end: "13:40" },
-  { start: "13:50", end: "14:30" },
-  { start: "14:40", end: "15:20" },
-  { start: "15:30", end: "16:10" }
-];
-var TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
-var isValidTime = (value) => TIME_PATTERN.test(value);
-var toMinutes = (value) => {
-  const match = TIME_PATTERN.exec(value);
-  return match ? Number(match[1]) * 60 + Number(match[2]) : NaN;
-};
-var fromMinutes = (minutes) => `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
-var weekdayOf = (date) => (date.getDay() + 6) % 7 + 1;
-var isYksBlock = (block) => block.subject !== null;
-function blocksOn(blocks, date) {
-  const day = weekdayOf(date);
-  return blocks.filter((block) => block.dayOfWeek === day).sort((a, b) => toMinutes(a.startTime) - toMinutes(b.startTime));
-}
-function validateSchedule(schedule) {
-  for (const period of schedule.periods) {
-    if (!isValidTime(period.start) || !isValidTime(period.end) || toMinutes(period.start) >= toMinutes(period.end)) return `Ders saati ${period.start}\u2013${period.end} ge\xE7ersiz: ba\u015Flang\u0131\xE7 biti\u015Ften \xF6nce olmal\u0131.`;
-  }
-  for (const block of schedule.blocks) {
-    if (!isValidTime(block.startTime) || !isValidTime(block.endTime) || toMinutes(block.startTime) >= toMinutes(block.endTime)) return `${block.label} (${block.startTime}\u2013${block.endTime}) ge\xE7ersiz: ba\u015Flang\u0131\xE7 biti\u015Ften \xF6nce olmal\u0131.`;
-  }
-  for (let day = 1; day <= 7; day++) {
-    const sorted = schedule.blocks.filter((block) => block.dayOfWeek === day).sort((a, b) => toMinutes(a.startTime) - toMinutes(b.startTime));
-    for (let index2 = 1; index2 < sorted.length; index2++) {
-      const previous = sorted[index2 - 1];
-      const current = sorted[index2];
-      if (toMinutes(current.startTime) < toMinutes(previous.endTime)) return `${DAY_LABELS[day - 1]}: ${previous.label} (${previous.startTime}\u2013${previous.endTime}) ile ${current.label} (${current.startTime}\u2013${current.endTime}) \xE7ak\u0131\u015F\u0131yor.`;
-    }
-  }
-  return null;
-}
-function computeFreeSlots(blocks, date, options) {
-  const from = toMinutes(options.from);
-  const to = toMinutes(options.to ?? PLAN_DAY_END);
-  const buffer = options.buffer ?? AFTER_CLASS_BUFFER_MINUTES;
-  if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to) return [];
-  const busy = blocksOn(blocks, date).map((block) => ({ start: toMinutes(block.startTime), end: toMinutes(block.endTime) + buffer }));
-  const slots = [];
-  let cursor = from;
-  for (const interval of busy) {
-    if (interval.end <= cursor) continue;
-    if (interval.start > cursor) slots.push({ start: cursor, end: Math.min(interval.start, to) });
-    cursor = Math.max(cursor, interval.end);
-    if (cursor >= to) break;
-  }
-  if (cursor < to) slots.push({ start: cursor, end: to });
-  return slots.filter((slot) => slot.end > slot.start);
-}
-var freeMinutes = (slots) => slots.reduce((sum, slot) => sum + slot.end - slot.start, 0);
-function describeWeekForPlan(blocks, weekStart, from) {
-  if (blocks.length === 0) return null;
-  const lines = [];
-  for (let offset = 0; offset < 7; offset++) {
-    const date = new Date(weekStart);
-    date.setDate(weekStart.getDate() + offset);
-    const slots = computeFreeSlots(blocks, date, { from });
-    const subjects = Array.from(new Set(blocksOn(blocks, date).filter(isYksBlock).map((block) => block.subject)));
-    const slotText = slots.filter((slot) => slot.end - slot.start >= 30).map((slot) => `${fromMinutes(slot.start)}\u2013${fromMinutes(slot.end)}`).join(", ") || "yok";
-    const isoDate2 = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-    lines.push(`${DAY_LABELS[weekdayOf(date) - 1]} (${isoDate2}): bo\u015F zaman ${freeMinutes(slots)} dk (${slotText})${subjects.length ? `; okulda/dershanede i\u015Flenen dersler: ${subjects.join(", ")}` : ""}`);
-  }
-  return lines.join("\n");
-}
-
-// shared/planPlacement.ts
-var TASK_EARLIEST = "08:00";
-var TASK_GAP_MINUTES = 10;
-var sameLocalDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-function busyOn(date, input) {
-  const fromBlocks = (blocks, kind) => blocksOn(blocks, date).map((block) => ({ start: toMinutes(block.startTime), end: toMinutes(block.endTime), label: block.label, kind }));
-  const sessions = (input.sessions ?? []).filter((session) => (session.status ?? "planned") === "planned").map((session) => ({ session, at: new Date(session.sessionDate) })).filter(({ at }) => sameLocalDay(at, date)).map(({ session, at }) => {
-    const start = at.getHours() * 60 + at.getMinutes();
-    return { start, end: start + Math.max(0, session.plannedMinutes), label: session.title?.trim() || "Planl\u0131 \xE7al\u0131\u015Fma", kind: "session" };
-  });
-  return [...fromBlocks(input.blocks, "class"), ...fromBlocks(input.courseBlocks ?? [], "course"), ...sessions].sort((a, b) => a.start - b.start || a.end - b.end);
-}
-function findTaskConflict(busy, start, minutes) {
-  const end = start + minutes;
-  return busy.find((interval) => start < interval.end && end > interval.start) ?? null;
-}
-function suggestStart(busy, minutes, options = {}) {
-  const gap = options.gap ?? TASK_GAP_MINUTES;
-  const to = options.to ?? toMinutes(PLAN_DAY_END);
-  let cursor = options.from ?? toMinutes(TASK_EARLIEST);
-  for (const interval of busy) {
-    if (cursor + minutes + gap <= interval.start) break;
-    cursor = Math.max(cursor, interval.end + gap);
-  }
-  return cursor + minutes <= to ? cursor : null;
-}
-function placePlanItems(items, from, days, busyFor, options = {}) {
-  const perDay = options.perDay ?? 1;
-  const earliest = toMinutes(options.earliest ?? TASK_EARLIEST);
-  const latest = toMinutes(options.latest ?? PLAN_DAY_END);
-  const dates = Array.from({ length: Math.max(1, days) }, (_, offset) => {
-    const date = new Date(from);
-    date.setHours(12, 0, 0, 0);
-    date.setDate(date.getDate() + offset);
-    return date;
-  });
-  const placedByDay = dates.map(() => []);
-  let dayCursor = 0;
-  return items.map((item, index2) => {
-    for (let attempt = 0; attempt < dates.length; attempt += 1) {
-      const dayIndex = (dayCursor + attempt) % dates.length;
-      if (placedByDay[dayIndex].length >= perDay) continue;
-      const busy = [...busyFor(dates[dayIndex]), ...placedByDay[dayIndex]].sort((a, b) => a.start - b.start);
-      const start = suggestStart(busy, item.minutes, { from: earliest, to: latest, gap: options.gap });
-      if (start === null) continue;
-      placedByDay[dayIndex].push({ start, end: start + item.minutes, label: "Yeni g\xF6rev", kind: "session" });
-      dayCursor = dayIndex + 1;
-      return { index: index2, date: dates[dayIndex], start };
-    }
-    return { index: index2, date: null, reason: "no_slot" };
-  });
-}
-var describeInterval = (interval) => `${interval.label} (${fromMinutes(interval.start)}\u2013${fromMinutes(interval.end)})`;
-
-// server/schedule/classScheduleDb.ts
-import { asc as asc3, eq as eq22 } from "drizzle-orm";
-var ScheduleError = class extends Error {
-};
-function parsePeriods(raw) {
-  if (!raw) return DEFAULT_SCHOOL_PERIODS;
-  try {
-    const value = JSON.parse(raw);
-    if (!Array.isArray(value)) return DEFAULT_SCHOOL_PERIODS;
-    return value.filter((item) => typeof item?.start === "string" && typeof item?.end === "string").map((item) => ({ start: item.start, end: item.end }));
-  } catch {
-    return DEFAULT_SCHOOL_PERIODS;
-  }
-}
-async function getClassSchedule(userId) {
-  const db = await getDb();
-  if (!db) return { periods: DEFAULT_SCHOOL_PERIODS, blocks: [] };
-  const [profile] = await db.select({ schoolPeriodsJson: studentProfiles.schoolPeriodsJson }).from(studentProfiles).where(eq22(studentProfiles.userId, userId)).limit(1);
-  const rows = await db.select({ source: classScheduleBlocks.source, dayOfWeek: classScheduleBlocks.dayOfWeek, startTime: classScheduleBlocks.startTime, endTime: classScheduleBlocks.endTime, subject: classScheduleBlocks.subject, label: classScheduleBlocks.label }).from(classScheduleBlocks).where(eq22(classScheduleBlocks.userId, userId)).orderBy(asc3(classScheduleBlocks.dayOfWeek), asc3(classScheduleBlocks.startTime));
-  return { periods: parsePeriods(profile?.schoolPeriodsJson), blocks: rows };
-}
-async function getPlanScheduleContext(userId, startDate) {
-  const db = await getDb();
-  if (!db) return null;
-  const [profile] = await db.select({ start: studentProfiles.preferredStudyStartTime }).from(studentProfiles).where(eq22(studentProfiles.userId, userId)).limit(1);
-  const { blocks } = await getClassSchedule(userId);
-  return describeWeekForPlan([...blocks, ...await getCourseBlocks(userId)], startDate, profile?.start && isValidTime(profile.start) ? profile.start : "16:00");
-}
-async function getCourseBlocks(userId) {
-  const rows = await listStudentTimetable(userId).catch(() => []);
-  return rows.map((slot) => ({ source: "course", dayOfWeek: slot.dayOfWeek, startTime: slot.startTime, endTime: slot.endTime, subject: slot.subject, label: `${slot.className} \xB7 ${slot.subject}`, orgName: slot.orgName, teacherName: slot.teacherName, room: slot.room }));
-}
-async function saveClassSchedule(userId, schedule) {
-  const problem = validateSchedule(schedule);
-  if (problem) throw new ScheduleError(problem);
-  const db = await getDb();
-  if (!db) throw new ScheduleError("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
-  const blocks = schedule.blocks.map((block) => ({ ...block, label: block.label.trim() || block.subject || "Ders" }));
-  const periodsJson = JSON.stringify(schedule.periods);
-  await db.transaction(async (tx) => {
-    await tx.delete(classScheduleBlocks).where(eq22(classScheduleBlocks.userId, userId));
-    if (blocks.length) await tx.insert(classScheduleBlocks).values(blocks.map((block) => ({ ...block, userId })));
-    await tx.insert(studentProfiles).values({ userId, schoolPeriodsJson: periodsJson }).onConflictDoUpdate({ target: studentProfiles.userId, set: { schoolPeriodsJson: periodsJson } });
-  });
-  return getClassSchedule(userId);
-}
-
-// server/org/caseDb.ts
-var CaseError = class extends Error {
-  constructor(message, code = "BAD_REQUEST") {
-    super(message);
-    this.code = code;
-  }
-};
-async function requireDb9() {
-  const db = await getDb();
-  if (!db) throw new CaseError("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
-  return db;
-}
-var DAY3 = 24 * 60 * 60 * 1e3;
-async function isCasesEnabled(orgId) {
-  const db = await requireDb9();
-  const [row] = await db.select({ enabled: organizations.academicCasesEnabled }).from(organizations).where(eq23(organizations.id, orgId)).limit(1);
-  return row?.enabled === 1;
-}
-async function setCasesEnabled(orgId, enabled) {
-  const db = await requireDb9();
-  await db.update(organizations).set({ academicCasesEnabled: enabled ? 1 : 0 }).where(eq23(organizations.id, orgId));
-}
-async function responsibleTeacherIds(orgId, studentUserId) {
-  const db = await requireDb9();
-  const [advisors, assigned] = await Promise.all([
-    db.select({ userId: organizationClasses.advisorUserId }).from(classStudents).innerJoin(organizationClasses, eq23(organizationClasses.id, classStudents.classId)).where(and20(eq23(organizationClasses.orgId, orgId), eq23(classStudents.studentUserId, studentUserId))),
-    db.select({ userId: teacherAssignments.teacherUserId }).from(teacherAssignments).where(and20(eq23(teacherAssignments.orgId, orgId), eq23(teacherAssignments.studentUserId, studentUserId), eq23(teacherAssignments.active, 1)))
-  ]);
-  return Array.from(new Set([...advisors, ...assigned].map((row) => row.userId).filter((id6) => typeof id6 === "number")));
-}
-async function canReadNotes(orgId, viewerUserId, studentUserId) {
-  return (await responsibleTeacherIds(orgId, studentUserId)).includes(viewerUserId);
-}
-function filterPrivateNotes(notes2, viewerUserId, viewerIsResponsible) {
-  return viewerIsResponsible ? notes2 : notes2.filter((note) => note.authorUserId === viewerUserId);
-}
-async function comparableExamsOf(studentUserId) {
-  const db = await requireDb9();
-  const rows = await db.select({ id: userMockExams.id, exam: userMockExams.exam, examDate: userMockExams.examDate, net: userMockExams.net, publisher: userMockExams.publisher, scope: userMockExams.scope }).from(userMockExams).where(eq23(userMockExams.userId, studentUserId));
-  return rows.map((row) => ({ id: row.id, examKind: row.exam, date: new Date(row.examDate), net: Number(row.net), source: "student", publisher: row.publisher, scope: row.scope }));
-}
-var keyOfTrend = (exams, result) => {
-  const latest = exams.filter((exam) => result.evidence.some((item) => item.id === exam.id)).at(-1);
-  return latest ? comparabilityKey(latest) : comparabilityKey({ examKind: result.examKind, scope: null, publisher: null });
-};
-async function listSignals(orgId, studentUserIds) {
-  if (!studentUserIds.length) return [];
-  const db = await requireDb9();
-  const open = await db.select({ studentUserId: academicCases.studentUserId, ruleKey: academicCases.ruleKey, comparabilityKey: academicCases.comparabilityKey, id: academicCases.id }).from(academicCases).where(and20(eq23(academicCases.orgId, orgId), inArray10(academicCases.studentUserId, studentUserIds), sql12`${academicCases.status} <> 'closed'`));
-  const result = [];
-  for (const studentUserId of studentUserIds) {
-    const exams = await comparableExamsOf(studentUserId);
-    for (const trend of trendSignals(exams)) {
-      if (trend.status === "no_signal") continue;
-      const key = keyOfTrend(exams, trend);
-      const existing = open.find((row) => row.studentUserId === studentUserId && row.ruleKey === "trend_decline" && row.comparabilityKey === key);
-      result.push({ studentUserId, examKind: trend.examKind, status: trend.status, confidence: trend.status === "signal" ? trend.confidence : null, description: describeTrend(trend), openCaseId: existing?.id ?? null });
-    }
-  }
-  return result.sort((a, b) => Number(b.status === "signal") - Number(a.status === "signal"));
-}
-var isUniqueViolation = (error) => {
-  const value = error;
-  return value?.code === "23505" || value?.cause?.code === "23505";
-};
-async function openCase(input) {
-  const db = await requireDb9();
-  const exams = await comparableExamsOf(input.studentUserId);
-  let trend = null;
-  let key = "";
-  let confidence = "medium";
-  if (input.ruleKey === "trend_decline") {
-    if (!input.examKind) throw new CaseError("S\u0131nav t\xFCr\xFC gerekli.");
-    trend = trendDecline(exams, input.examKind);
-    if (trend.status !== "signal") throw new CaseError(trend.status === "insufficient" ? describeTrend(trend) : "Bu s\u0131nav t\xFCr\xFCnde d\xFC\u015F\xFC\u015F e\u011Filimi g\xF6r\xFClm\xFCyor; inceleme \xF6nerisi yok.");
-    key = keyOfTrend(exams, trend);
-    confidence = trend.confidence;
-  } else {
-    key = `manual|${input.examKind ?? "*"}`;
-  }
-  const owners = await responsibleTeacherIds(input.orgId, input.studentUserId);
-  const ownerUserId = owners.includes(input.actorUserId) ? input.actorUserId : owners[0] ?? input.actorUserId;
-  let created;
-  try {
-    [created] = await db.insert(academicCases).values({ orgId: input.orgId, studentUserId: input.studentUserId, ownerUserId, examKind: input.examKind, ruleKey: input.ruleKey, comparabilityKey: key, confidence, openedByUserId: input.actorUserId }).returning();
-  } catch (error) {
-    if (!isUniqueViolation(error)) throw error;
-    const [existing] = await db.select({ id: academicCases.id }).from(academicCases).where(and20(eq23(academicCases.orgId, input.orgId), eq23(academicCases.studentUserId, input.studentUserId), eq23(academicCases.ruleKey, input.ruleKey), eq23(academicCases.comparabilityKey, key), sql12`${academicCases.status} <> 'closed'`)).limit(1);
-    return { caseId: existing.id, created: false };
-  }
-  await captureEvidence(db, created, exams, trend);
-  return { caseId: created.id, created: true };
-}
-async function captureEvidence(db, row, exams, trend) {
-  const examIds = trend ? trend.evidence.map((item) => item.id) : exams.filter((exam) => !row.examKind || exam.examKind === row.examKind).sort((a, b) => b.date.getTime() - a.date.getTime()).slice(0, 3).map((exam) => exam.id);
-  const examRows = examIds.length ? await db.select({ id: userMockExams.id, title: userMockExams.title, exam: userMockExams.exam, examDate: userMockExams.examDate, net: userMockExams.net, subjectsJson: userMockExams.subjectsJson }).from(userMockExams).where(and20(eq23(userMockExams.userId, row.studentUserId), inArray10(userMockExams.id, examIds))) : [];
-  const since = new Date(Date.now() - 28 * DAY3);
-  const logs = await db.select({ studyDate: topicStudyLogs.studyDate, minutes: topicStudyLogs.minutes, questions: topicStudyLogs.questions }).from(topicStudyLogs).where(and20(eq23(topicStudyLogs.userId, row.studentUserId), gte13(topicStudyLogs.studyDate, since)));
-  const weeks = [0, 1, 2, 3].map((index2) => {
-    const end = Date.now() - index2 * 7 * DAY3;
-    const inWeek = logs.filter((log) => {
-      const at = new Date(log.studyDate).getTime();
-      return at <= end && at > end - 7 * DAY3;
-    });
-    return { weeksAgo: index2, minutes: inWeek.reduce((sum, log) => sum + log.minutes, 0), questions: inWeek.reduce((sum, log) => sum + log.questions, 0) };
-  }).reverse();
-  const topics = (await getUserTopicProgress(row.studentUserId)).filter((topic) => !topic.insufficientData && topic.status === "Zay\u0131f" && (!row.examKind || topic.exam === row.examKind));
-  const values = [
-    ...examRows.sort((a, b) => new Date(a.examDate).getTime() - new Date(b.examDate).getTime()).map((exam) => ({ caseId: row.id, orgId: row.orgId, kind: "exam", refId: exam.id, snapshotJson: JSON.stringify({ title: exam.title, exam: exam.exam, date: exam.examDate, net: Number(exam.net), subjects: safeJson2(exam.subjectsJson) }) })),
-    { caseId: row.id, orgId: row.orgId, kind: "study", refId: null, snapshotJson: JSON.stringify({ weeks }) },
-    { caseId: row.id, orgId: row.orgId, kind: "topic", refId: null, snapshotJson: JSON.stringify({ weak: topics.slice(0, 12).map((topic) => ({ topicId: topic.id, subject: topic.subject, topic: topic.topic, progress: topic.progress })) }) }
-  ];
-  if (trend) values.unshift({ caseId: row.id, orgId: row.orgId, kind: "exam", refId: null, snapshotJson: JSON.stringify({ summary: describeTrend(trend), totalChange: trend.status !== "insufficient" ? trend.totalChange : null, confidence: row.confidence }) });
-  await db.insert(caseEvidence).values(values);
-}
-var safeJson2 = (value) => {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
-};
-async function requireCase(db, orgId, caseId) {
-  const [row] = await db.select().from(academicCases).where(and20(eq23(academicCases.id, caseId), eq23(academicCases.orgId, orgId))).limit(1);
-  if (!row) throw new CaseError("Takip dosyas\u0131 bulunamad\u0131.", "NOT_FOUND");
-  return row;
-}
-async function getCaseRow(orgId, caseId) {
-  return requireCase(await requireDb9(), orgId, caseId);
-}
-async function listCases(orgId, options = {}) {
-  const db = await requireDb9();
-  if (options.studentUserIds && !options.studentUserIds.length) return [];
-  const conditions = [eq23(academicCases.orgId, orgId)];
-  if (options.studentUserIds) conditions.push(inArray10(academicCases.studentUserId, options.studentUserIds));
-  if (options.status) conditions.push(eq23(academicCases.status, options.status));
-  const rows = await db.select({ case: academicCases, studentName: users.name }).from(academicCases).innerJoin(users, eq23(users.id, academicCases.studentUserId)).where(and20(...conditions)).orderBy(desc14(academicCases.openedAt)).limit(200);
-  const ids = rows.map((row) => row.case.id);
-  const lastActions = ids.length ? await db.select({ caseId: caseActions.caseId, at: sql12`max(${caseActions.createdAt})` }).from(caseActions).where(inArray10(caseActions.caseId, ids)).groupBy(caseActions.caseId) : [];
-  return rows.map((row) => ({ ...row.case, studentName: row.studentName, lastActionAt: lastActions.find((item) => item.caseId === row.case.id)?.at ?? null }));
-}
-async function getCaseDetail(orgId, caseId) {
-  const db = await requireDb9();
-  const row = await requireCase(db, orgId, caseId);
-  const [evidence, actions, evaluations, notes2] = await Promise.all([
-    db.select().from(caseEvidence).where(eq23(caseEvidence.caseId, caseId)).orderBy(caseEvidence.id),
-    db.select().from(caseActions).where(eq23(caseActions.caseId, caseId)).orderBy(caseActions.createdAt),
-    db.select().from(caseEvaluations).where(eq23(caseEvaluations.caseId, caseId)).orderBy(caseEvaluations.evaluatedAt),
-    db.select({ id: counselingNotes.id, body: counselingNotes.body, visibility: counselingNotes.visibility, authorUserId: counselingNotes.authorUserId, authorName: users.name, createdAt: counselingNotes.createdAt }).from(counselingNotes).innerJoin(users, eq23(users.id, counselingNotes.authorUserId)).where(and20(eq23(counselingNotes.orgId, orgId), eq23(counselingNotes.caseId, caseId))).orderBy(desc14(counselingNotes.createdAt))
-  ]);
-  const actionIds = actions.map((action) => action.id);
-  const tasks = actionIds.length ? await db.select({ id: studyPlanSessions.id, caseActionId: studyPlanSessions.caseActionId, sessionDate: studyPlanSessions.sessionDate, title: studyPlanSessions.title, plannedMinutes: studyPlanSessions.plannedMinutes, status: studyPlanSessions.status, studentFeedback: studyPlanSessions.studentFeedback, actualQuestions: studyPlanSessions.actualQuestions, correct: studyPlanSessions.correct, wrong: studyPlanSessions.wrong }).from(studyPlanSessions).where(and20(eq23(studyPlanSessions.userId, row.studentUserId), inArray10(studyPlanSessions.caseActionId, actionIds))).orderBy(studyPlanSessions.sessionDate) : [];
-  return {
-    case: row,
-    evidence: evidence.map((item) => ({ ...item, snapshot: safeJson2(item.snapshotJson) })),
-    actions: actions.map((item) => ({ ...item, payload: safeJson2(item.payloadJson) })),
-    evaluations: evaluations.map((item) => ({ ...item, netChange: item.netChange === null ? null : Number(item.netChange), studentSignals: safeJson2(item.studentSignalsJson) })),
-    notes: notes2,
-    tasks
-  };
-}
-async function addCaseAction(input) {
-  const db = await requireDb9();
-  const row = await requireCase(db, input.orgId, input.caseId);
-  if (row.status === "closed") throw new CaseError("Dosya kapal\u0131. \xD6nce yeniden a\xE7.");
-  const [inserted] = await db.insert(caseActions).values({ caseId: row.id, orgId: row.orgId, type: input.type, payloadJson: JSON.stringify(input.payload), bookId: input.bookId ?? null, bookContentId: input.bookContentId ?? null, status: input.status ?? "done", createdByUserId: input.actorUserId, idempotencyKey: input.idempotencyKey }).onConflictDoNothing({ target: [caseActions.caseId, caseActions.idempotencyKey] }).returning({ id: caseActions.id });
-  if (!inserted) {
-    const [existing] = await db.select({ id: caseActions.id }).from(caseActions).where(and20(eq23(caseActions.caseId, row.id), eq23(caseActions.idempotencyKey, input.idempotencyKey))).limit(1);
-    return { actionId: existing.id, created: false };
-  }
-  if (row.status === "open") await db.update(academicCases).set({ status: "in_progress" }).where(eq23(academicCases.id, row.id));
-  return { actionId: inserted.id, created: true };
-}
-async function addCaseNote(input) {
-  const db = await requireDb9();
-  const row = await requireCase(db, input.orgId, input.caseId);
-  const [note] = await db.insert(counselingNotes).values({ orgId: row.orgId, studentUserId: row.studentUserId, authorUserId: input.authorUserId, body: input.body, visibility: input.visibility, caseId: row.id }).returning({ id: counselingNotes.id });
-  return note.id;
-}
-async function suggestOwnedResources(studentUserId, topicIds) {
-  const db = await requireDb9();
-  if (!topicIds.length) return { owned: [], missingTopicIds: [], catalog: [] };
-  const rows = await db.select({ bookId: userBookContents.bookId, contentId: userBookContents.id, topicId: userBookContents.topicId, label: userBookContents.label, title: userBookContents.title, unitTitle: userBookContents.unitTitle, testNumber: userBookContents.testNumber, pageStart: userBookContents.pageStart, pageEnd: userBookContents.pageEnd, bookTitle: userResourceBooks.title }).from(userBookContents).innerJoin(bookInventory, and20(eq23(bookInventory.userId, userBookContents.userId), eq23(bookInventory.bookId, userBookContents.bookId), isNull14(bookInventory.removedAt))).leftJoin(userResourceBooks, and20(eq23(userResourceBooks.userId, userBookContents.userId), eq23(userResourceBooks.bookId, userBookContents.bookId))).where(and20(eq23(userBookContents.userId, studentUserId), inArray10(userBookContents.topicId, topicIds))).orderBy(userBookContents.bookId, userBookContents.sortOrder);
-  const byBook = /* @__PURE__ */ new Map();
-  for (const row of rows) {
-    const entry = byBook.get(row.bookId) ?? { bookId: row.bookId, title: row.bookTitle ?? "Kitab\u0131m", items: [] };
-    entry.items.push({ bookContentId: row.contentId, topicId: row.topicId, label: row.label, title: row.title || row.unitTitle, pageStart: row.pageStart, pageEnd: row.pageEnd });
-    byBook.set(row.bookId, entry);
-  }
-  const covered2 = new Set(rows.map((row) => row.topicId));
-  const missingTopicIds = topicIds.filter((id6) => !covered2.has(id6));
-  const catalog = missingTopicIds.length ? await db.selectDistinct({ catalogBookId: catalogBooks.id, title: catalogBooks.name, topicId: bookCurriculumTopics.topicId }).from(bookCurriculumTopics).innerJoin(catalogBooks, eq23(catalogBooks.id, bookCurriculumTopics.bookId)).where(and20(inArray10(bookCurriculumTopics.topicId, missingTopicIds), eq23(catalogBooks.active, 1))).limit(3) : [];
-  return { owned: Array.from(byBook.values()), missingTopicIds, catalog };
-}
-async function busyProvider(studentUserId, from, days) {
-  const db = await requireDb9();
-  const start = new Date(from);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setDate(end.getDate() + days + 1);
-  const [schedule, courseBlocks, sessions] = await Promise.all([
-    getClassSchedule(studentUserId),
-    getCourseBlocks(studentUserId).catch(() => []),
-    db.select({ sessionDate: studyPlanSessions.sessionDate, plannedMinutes: studyPlanSessions.plannedMinutes, status: studyPlanSessions.status, title: studyPlanSessions.title }).from(studyPlanSessions).where(and20(eq23(studyPlanSessions.userId, studentUserId), eq23(studyPlanSessions.status, "planned"), gte13(studyPlanSessions.sessionDate, start), lt11(studyPlanSessions.sessionDate, end)))
-  ]);
-  return (date) => busyOn(date, { blocks: schedule.blocks, courseBlocks, sessions });
-}
-async function previewCasePlan(studentUserId, items, from, days) {
-  const busyFor = await busyProvider(studentUserId, from, days);
-  return placePlanItems(items.map((item) => ({ minutes: item.minutes })), from, days, busyFor, { earliest: "16:00" });
-}
-async function assignCasePlan(input) {
-  const db = await requireDb9();
-  const row = await requireCase(db, input.orgId, input.caseId);
-  const placements = await previewCasePlan(row.studentUserId, input.items, input.from, input.days);
-  const { actionId, created } = await addCaseAction({ orgId: input.orgId, caseId: input.caseId, type: "plan", payload: { items: input.items, from: input.from, days: input.days }, actorUserId: input.actorUserId, idempotencyKey: input.idempotencyKey, status: "planned" });
-  if (!created) {
-    const existing = await db.select({ id: studyPlanSessions.id }).from(studyPlanSessions).where(and20(eq23(studyPlanSessions.userId, row.studentUserId), eq23(studyPlanSessions.caseActionId, actionId)));
-    return { actionId, sessionIds: existing.map((session) => session.id), skipped: [], duplicate: true };
-  }
-  const sessionIds = [];
-  const skipped = [];
-  for (const placement of placements) {
-    const item = input.items[placement.index];
-    if (!placement.date) {
-      skipped.push({ itemIndex: placement.index, reason: "no_slot" });
-      continue;
-    }
-    const at = new Date(placement.date);
-    at.setHours(Math.floor(placement.start / 60), placement.start % 60, 0, 0);
-    sessionIds.push(await insertAssignedTask({ orgId: input.orgId, studentUserId: row.studentUserId, teacherUserId: input.actorUserId, sessionDate: at, title: `${item.subject} \xB7 ${item.topic}`, subject: item.subject, topic: item.topic, kind: "Konu tekrar\u0131", plannedMinutes: item.minutes, targetQuestions: item.targetQuestions ?? null, summary: "Akademik takip dosyas\u0131ndan \xF6\u011Fretmenin \xF6nerdi\u011Fi \xE7al\u0131\u015Fma.", caseActionId: actionId, targetPages: item.pages ?? null, sourceBookId: item.bookId ?? null }));
-  }
-  return { actionId, sessionIds, skipped, duplicate: false };
-}
-async function evaluateCase(input) {
-  const db = await requireDb9();
-  const detail = await getCaseDetail(input.orgId, input.caseId);
-  const row = detail.case;
-  if (row.status === "closed") throw new CaseError("Dosya kapal\u0131. \xD6nce yeniden a\xE7.");
-  const examEvidence = detail.evidence.filter((item) => item.kind === "exam" && item.refId !== null);
-  const baseline = examEvidence.at(-1) ?? null;
-  const baselineDate = baseline ? new Date(baseline.snapshot.date) : row.openedAt;
-  const exams = (await comparableExamsOf(row.studentUserId)).filter((exam) => (!row.examKind || exam.examKind === row.examKind) && exam.scope !== "branch" && exam.date.getTime() > Math.max(baselineDate.getTime(), new Date(row.openedAt).getTime() - DAY3));
-  const followup = exams.sort((a, b) => a.date.getTime() - b.date.getTime())[0] ?? null;
-  const baselineNet = baseline ? Number(baseline.snapshot.net) : null;
-  const netChange = followup && baselineNet !== null ? Math.round((followup.net - baselineNet) * 100) / 100 : null;
-  const signals = { done: 0, struggled: 0, needs_review: 0 };
-  for (const task of detail.tasks) if (task.studentFeedback) signals[task.studentFeedback] += 1;
-  const tasksDone = detail.tasks.filter((task) => task.status === "completed" || task.studentFeedback === "done").length;
-  const limited = !followup;
-  const uncertaintyNote = limited ? "Kar\u015F\u0131la\u015Ft\u0131r\u0131labilir yeni deneme yok; de\u011Ferlendirme yaln\u0131zca g\xF6rev tamamlama ve \xF6\u011Frencinin geri bildirimine dayan\u0131yor." : "Net de\u011Fi\u015Fimi tek ba\u015F\u0131na m\xFCdahalenin etkisini g\xF6stermez; deneme zorlu\u011Fu ve ba\u015Fka etkenler de rol oynar.";
-  const [evaluation] = await db.insert(caseEvaluations).values({ caseId: row.id, orgId: row.orgId, baselineExamId: baseline?.refId ?? null, followupExamId: followup?.id ?? null, netChange: netChange === null ? null : netChange.toFixed(2), tasksDone, tasksTotal: detail.tasks.length, studentSignalsJson: JSON.stringify(signals), limitedEvidence: limited ? 1 : 0, uncertaintyNote, teacherOutcome: input.outcome, evaluatedByUserId: input.actorUserId }).returning({ id: caseEvaluations.id });
-  await db.update(academicCases).set(input.outcome === "completed" ? { status: "closed", outcome: "completed", closedAt: /* @__PURE__ */ new Date() } : { status: "in_progress", outcome: input.outcome }).where(eq23(academicCases.id, row.id));
-  if (input.note?.trim()) await addCaseNote({ orgId: input.orgId, caseId: row.id, authorUserId: input.actorUserId, body: input.note.trim(), visibility: "staff" });
-  return { evaluationId: evaluation.id, limitedEvidence: limited, netChange, tasksDone, tasksTotal: detail.tasks.length };
-}
-async function reopenCase(input) {
-  const db = await requireDb9();
-  const row = await requireCase(db, input.orgId, input.caseId);
-  if (row.status !== "closed") throw new CaseError("Dosya zaten a\xE7\u0131k.");
-  try {
-    await db.update(academicCases).set({ status: "in_progress", outcome: null, closedAt: null }).where(eq23(academicCases.id, row.id));
-  } catch (error) {
-    if (isUniqueViolation(error)) throw new CaseError("Bu \xF6\u011Frenci i\xE7in ayn\u0131 konuda a\xE7\u0131k bir dosya var.", "CONFLICT");
-    throw error;
-  }
-  await addCaseAction({ orgId: input.orgId, caseId: row.id, type: "review", payload: { reopened: true, reason: input.reason }, actorUserId: input.actorUserId, idempotencyKey: `reopen-${Date.now()}` });
-}
-async function caseSummary(orgId, now = /* @__PURE__ */ new Date()) {
-  const cases = await listCases(orgId);
-  const stale = (row) => row.status !== "closed" && now.getTime() - new Date(row.lastActionAt ?? row.openedAt).getTime() > 7 * DAY3;
-  return {
-    open: cases.filter((row) => row.status === "open").length,
-    inProgress: cases.filter((row) => row.status === "in_progress").length,
-    evaluating: cases.filter((row) => row.status === "evaluating").length,
-    closedLast30: cases.filter((row) => row.status === "closed" && row.closedAt && now.getTime() - new Date(row.closedAt).getTime() <= 30 * DAY3).length,
-    overdue: cases.filter(stale).length
-  };
-}
-async function listStudentAssignedTasks(studentUserId, now = /* @__PURE__ */ new Date()) {
-  const db = await requireDb9();
-  const start = new Date(now);
-  start.setHours(0, 0, 0, 0);
-  start.setDate(start.getDate() - (start.getDay() + 6) % 7);
-  const end = new Date(start);
-  end.setDate(end.getDate() + 7);
-  return db.select({ id: studyPlanSessions.id, sessionDate: studyPlanSessions.sessionDate, title: studyPlanSessions.title, subject: studyPlanSessions.subject, topic: studyPlanSessions.topic, plannedMinutes: studyPlanSessions.plannedMinutes, targetPages: studyPlanSessions.targetPages, status: studyPlanSessions.status, studentFeedback: studyPlanSessions.studentFeedback, assignedBy: users.name }).from(studyPlanSessions).leftJoin(users, eq23(users.id, studyPlanSessions.assignedByUserId)).where(and20(eq23(studyPlanSessions.userId, studentUserId), sql12`${studyPlanSessions.assignedByUserId} IS NOT NULL`, gte13(studyPlanSessions.sessionDate, start), lt11(studyPlanSessions.sessionDate, end))).orderBy(studyPlanSessions.sessionDate);
-}
-async function setStudentFeedback(studentUserId, sessionId, feedback) {
-  const db = await requireDb9();
-  const now = /* @__PURE__ */ new Date();
-  const rows = await db.update(studyPlanSessions).set({ studentFeedback: feedback, studentFeedbackAt: now, ...feedback === "done" ? { status: "completed", completedAt: now } : {} }).where(and20(eq23(studyPlanSessions.id, sessionId), eq23(studyPlanSessions.userId, studentUserId), sql12`${studyPlanSessions.assignedByUserId} IS NOT NULL`)).returning({ id: studyPlanSessions.id });
-  return rows.length > 0;
 }
 
 // server/routers/orgCases.ts
@@ -11863,6 +11910,8 @@ var orgRouter = router({
       }
       const sessionId = await insertAssignedTask({ orgId: ctx.membership.orgId, studentUserId: input.studentUserId, teacherUserId: ctx.user.id, sessionDate: /* @__PURE__ */ new Date(`${input.date}T${input.time}:00`), title: `${input.subject} \xB7 ${input.topic}`, subject: input.subject, topic: input.topic, kind: input.kind, plannedMinutes: input.minutes, targetQuestions: input.targetQuestions || null, summary: input.note || `${ctx.membership.orgName} \xF6\u011Fretmeninin atad\u0131\u011F\u0131 g\xF6rev.` });
       await audit(ctx, "task.assign", { type: "user", id: input.studentUserId }, { sessionId, subject: input.subject, topic: input.topic });
+      const teacherName = (await listMembers(ctx.membership.orgId)).find((member) => member.userId === ctx.user.id)?.name ?? null;
+      await notifyStudentOfTasks({ studentUserId: input.studentUserId, teacherName, sessionDates: [/* @__PURE__ */ new Date(`${input.date}T${input.time}:00`)] }).catch(() => void 0);
       return { sessionId };
     })
   }),

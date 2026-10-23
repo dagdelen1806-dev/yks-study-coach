@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { User } from "../drizzle/schema";
-import { academicCases, bookInventory, caseActions, caseEvaluations, caseEvidence, classStudents, classTimetableSlots, counselingNotes, organizationAuditLogs, organizationClasses, organizationMembers, organizations, studyPlanSessions, studyPlans, userBookContents, userMockExams, userResourceBooks, users, yksTopics } from "../drizzle/schema";
+import { academicCases, bookInventory, coachAlerts, caseActions, caseEvaluations, caseEvidence, classStudents, classTimetableSlots, counselingNotes, organizationAuditLogs, organizationClasses, organizationMembers, organizations, studyPlanSessions, studyPlans, userBookContents, userMockExams, userResourceBooks, users, yksTopics } from "../drizzle/schema";
 import type { TrpcContext } from "./_core/context";
 import { appRouter } from "./routers";
 import { getDb } from "./db";
@@ -53,6 +53,7 @@ describe.skipIf(!hasDb)("akademik takip dosyası (router + veritabanı)", () => 
       await db.delete(academicCases).where(inArray(academicCases.id, caseIds));
     }
     await db.delete(counselingNotes).where(eq(counselingNotes.orgId, orgId));
+    await db.delete(coachAlerts).where(eq(coachAlerts.userId, ids.student));
     await db.delete(studyPlanSessions).where(eq(studyPlanSessions.userId, ids.student));
     await db.delete(studyPlans).where(eq(studyPlans.userId, ids.student));
     await db.delete(userBookContents).where(eq(userBookContents.userId, ids.student));
@@ -117,6 +118,11 @@ describe.skipIf(!hasDb)("akademik takip dosyası (router + veritabanı)", () => 
     const sessions = await db.select().from(studyPlanSessions).where(inArray(studyPlanSessions.id, assigned.sessionIds));
     expect(sessions.every((session) => session.caseActionId === assigned.actionId && session.assignedByUserId === ids.advisor)).toBe(true);
     expect(sessions.map((session) => `${session.sessionDate.getHours()}:${session.sessionDate.getMinutes()}`).sort()).toEqual(["16:0", "18:10"]);
+    // Öğrenciye tek bildirim: görev sayısı ve öğretmenin adı; dosya ya da risk dili yok. Tekrar gönderim yeni bildirim üretmez.
+    const alerts = await db.select().from(coachAlerts).where(and(eq(coachAlerts.userId, ids.student), eq(coachAlerts.ruleKey, "teacher_tasks")));
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].title).toBe("Dosya advisor 2 çalışma önerdi");
+    expect(alerts[0].message).not.toMatch(/dosya|düşüş|risk/i);
     expect((await caller(ids.advisor).org.cases.get({ orgId, caseId })).case.status).toBe("in_progress");
   });
 
@@ -163,5 +169,16 @@ describe.skipIf(!hasDb)("akademik takip dosyası (router + veritabanı)", () => 
     expect(actions).toEqual(expect.arrayContaining(["cases.enable", "case.open", "case.plan", "case.note", "case.evaluate", "case.close", "case.reopen"]));
     expect(actions.filter((action) => action === "case.open")).toHaveLength(1);
     expect(actions.filter((action) => action === "case.plan")).toHaveLength(1);
+  });
+
+  it("öğretmen haftalık özeti: açık dosya sayısı; kapalı kurumda bölüm yok", async () => {
+    const { academicDigestFor } = await import("./org/caseDb");
+    const students = [{ userId: ids.student, name: "Dosya student" }];
+    expect(await academicDigestFor(orgId, students)).toMatchObject({ openCases: 1, suggestions: [] });
+    expect(await academicDigestFor(otherOrgId, [])).toBeNull();
+    const db = (await getDb())!;
+    await db.update(organizations).set({ academicCasesEnabled: 0 }).where(eq(organizations.id, orgId));
+    expect(await academicDigestFor(orgId, students)).toBeNull();
+    await db.update(organizations).set({ academicCasesEnabled: 1 }).where(eq(organizations.id, orgId));
   });
 });

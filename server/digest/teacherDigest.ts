@@ -7,6 +7,7 @@ import { buildTeacherDigestEmail } from "../_core/emails/teacherDigestEmail";
 import { rangeLabel } from "../_core/emails/weeklyDigestEmail";
 import { MailNotConfiguredError, sendMail, type OutgoingMail } from "../_core/mailer";
 import { getDb } from "../db";
+import { academicDigestFor } from "../org/caseDb";
 import { listMembers, loadStudentSignals } from "../org/orgDb";
 import { unsubscribeUrlFor } from "./unsubscribeToken";
 
@@ -79,7 +80,9 @@ export async function runTeacherDigest(options: { now?: Date; appUrl: string; ma
       const students = await listMembers(member.orgId, seesAllStudents(member.role) ? { role: "student" } : { role: "student", teacherUserId: member.userId });
       if (!students.length) { result.skipped++; continue; }
       const signals = await loadStudentSignals(students.map((student) => student.userId), start, weekEnd, new Date(now.getTime() - 30 * DAY_MS));
-      const digest = buildTeacherDigest(students.map((student) => ({ name: student.name, summary: summarizeStudent(signals.get(student.userId)!, now) })));
+      // Akademik takip bölümü yalnızca kurumda açıksa (aksi hâlde null, e-postada görünmez).
+      const academic = await academicDigestFor(member.orgId, students.map((student) => ({ userId: student.userId, name: student.name })), now).catch(() => null);
+      const digest = buildTeacherDigest(students.map((student) => ({ name: student.name, summary: summarizeStudent(signals.get(student.userId)!, now) })), academic);
       const mail = buildTeacherDigestEmail({
         to: member.email!,
         name: member.name?.split(" ")[0] || null,
@@ -87,6 +90,7 @@ export async function runTeacherDigest(options: { now?: Date; appUrl: string; ma
         digest,
         rangeLabel: rangeLabel(start, now),
         panelUrl: `${options.appUrl}/kurum`,
+        casesUrl: academic ? `${options.appUrl}/kurum/akademik-takip` : undefined,
         unsubscribeUrl: await unsubscribeUrlFor(options.appUrl, "staff", member.memberId),
       });
       if (options.dryRun) { result.previews!.push(mail); continue; }

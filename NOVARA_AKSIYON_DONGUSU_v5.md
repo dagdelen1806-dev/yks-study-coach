@@ -298,6 +298,10 @@ Tanı, kesin başarı tahmini ve otomatik karar yok; AI kapalıyken her şey ça
 4. ✅ Özellik kurum bazında açılır; pilotta tek kurum.
 5. ⏳ Eksik ek belge (`Novara_Akademik_Aksiyon_Dongusu_v5.md`) gelirse karşılaştırılacak.
 
+**G3 tamamlandı:** öğretmen haftalık özetine akademik takip bölümü (yeni inceleme önerileri, açık ve 7 günden uzun işlemsiz dosya sayısı; kapalı kurumda yok), öğretmen görev verince öğrenciye bildirim (zil + varsa telefon; dosya/risk dili yok), pilot kontrol listesi `NOVARA_PILOT_KONTROL_LISTESI.md`. Açık konu: sunucu saat dilimi (Vercel UTC) — kontrol listesi madde 1.3.
+
+**G2 tamamlandı (7d0c50e):** Akademik takip sayfası, öğrenci detayında Takip dosyası, Ayarlar anahtarı, öğrencide "Bu haftaki çalışmalar".
+
 **G1 tamamlandı (7fad9e1):** şema (`academic_cases`, `case_evidence`, `case_actions`, `case_evaluations` + eklemeli alanlar; RLS), `server/org/caseDb.ts`, `server/routers/orgCases.ts` (`org.cases.*`, öğrenci `studyTasks.*`), mahrem not kuralı (`org.student` notları ve not silme), `server/academicCases.test.ts` (8 veritabanı testi). Sıradaki: G2 ekranlar.
 
 **G0 tamamlandı:** `shared/academicCase.ts` (karşılaştırılabilirlik, düşüş eğilimi, güven, yetersiz veri gerekçeleri, öneri metni), `shared/planPlacement.ts` (dolu saatler, çakışma, uygun saat, plan önizleme yerleşimi), `server/academicCase.test.ts` (11 test), `orgIsolation.test.ts` 10. senaryo (görev çakışması). `summarizeStudent` rozetleri G0'da değiştirilmedi; yeni kural G1'de takip dosyası açılırken kullanılacak.
