@@ -112,9 +112,9 @@ export function canRequestPlan(current: OrgPlan, requested: OrgPlan): boolean {
   return ORG_PLAN_RANK[requested] >= ORG_PLAN_RANK[current];
 }
 /** Onaylanan talepte yeni bitiş: mevcut süre bitmediyse onun üstüne, bittiyse bugünden itibaren 1 yıl. */
-export function renewedMembershipEnd(currentEnd: Date | null, now = new Date()): Date {
+export function renewedMembershipEnd(currentEnd: Date | null, now = new Date(), months = 12): Date {
   const base = currentEnd && currentEnd.getTime() > now.getTime() ? new Date(currentEnd) : new Date(now);
-  base.setFullYear(base.getFullYear() + 1);
+  base.setMonth(base.getMonth() + months);
   return base;
 }
 

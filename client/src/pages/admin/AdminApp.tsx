@@ -1,6 +1,6 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
-import { BadgeCheck, BookOpen, Building2, ClipboardList, CreditCard, LayoutDashboard, LogOut, Menu, MessageSquareQuote, Package, ShieldCheck, TriangleAlert, UserCheck, Users, X } from "lucide-react";
+import { BadgeCheck, BookOpen, Building2, ClipboardList, CreditCard, FileText, LayoutDashboard, LogOut, Menu, MessageSquareQuote, Package, ShieldCheck, TriangleAlert, UserCheck, Users, X } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useLocation } from "wouter";
 
@@ -16,6 +16,9 @@ const AdminAuditPage = lazy(() => import("@/components/subscription/AdminAuditPa
 const AdminErrorsPage = lazy(() => import("@/components/subscription/AdminErrorsPage"));
 const AdminPackagesPage = lazy(() => import("./AdminPackagesPage"));
 const AdminOrgDetail = lazy(() => import("./AdminOrgDetail"));
+const AdminQuotesPage = lazy(() => import("./AdminQuotesPage"));
+const AdminQuoteEditor = lazy(() => import("./AdminQuotesPage").then((module) => ({ default: module.AdminQuoteEditor })));
+const AdminQuotePrint = lazy(() => import("./AdminQuotesPage").then((module) => ({ default: module.AdminQuotePrint })));
 
 export const ADMIN_PATHS = {
   dashboard: "/yonetim",
@@ -24,6 +27,7 @@ export const ADMIN_PATHS = {
   subscriptions: "/yonetim/abonelikler",
   packages: "/yonetim/paketler",
   orgs: "/yonetim/kurumlar",
+  quotes: "/yonetim/teklifler",
   payments: "/yonetim/odemeler",
   catalog: "/yonetim/katalog",
   testimonials: "/yonetim/yorumlar",
@@ -41,6 +45,7 @@ const NAV: Array<{ key: AdminSection; label: string; icon: typeof Users; group: 
   { key: "packages", label: "Paketler ve fiyatlar", icon: Package, group: "Üyelik" },
   { key: "payments", label: "Ödemeler", icon: CreditCard, group: "Üyelik" },
   { key: "orgs", label: "Kurumlar", icon: Building2, group: "Kurumsal" },
+  { key: "quotes", label: "Fiyat teklifleri", icon: FileText, group: "Kurumsal" },
   { key: "catalog", label: "Kaynak kataloğu", icon: BookOpen, group: "İçerik" },
   { key: "testimonials", label: "Yorumlar", icon: MessageSquareQuote, group: "İçerik" },
   { key: "audit", label: "Denetim kayıtları", icon: ClipboardList, group: "Sistem" },
@@ -54,6 +59,7 @@ const TITLES: Record<AdminSection, { title: string; description: string }> = {
   subscriptions: { title: "Abonelikler", description: "Sınav başına abonelikler; tanımla, iptal et, devam ettir." },
   packages: { title: "Paketler ve fiyatlar", description: "Bireysel sınav paketlerinin ve kurum paketlerinin fiyatları." },
   orgs: { title: "Kurumlar", description: "Kurumları oluştur, paket ve süresini yönet; üyelerini ve bağlarını gör." },
+  quotes: { title: "Fiyat teklifleri", description: "Kurumlara ve aday kurumlara abonelik teklifi hazırla, yazdır; kabul edileni kuruma uygula." },
   payments: { title: "Ödemeler", description: "Ödeme kayıtları." },
   catalog: { title: "Kaynak kataloğu", description: "Kitap kataloğu ve senkron." },
   testimonials: { title: "Yorumlar", description: "Tanıtım sayfasındaki öğrenci yorumlarını onayla." },
@@ -61,9 +67,12 @@ const TITLES: Record<AdminSection, { title: string; description: string }> = {
   errors: { title: "Hatalar", description: "Uygulamada yakalanan hatalar." },
 };
 
-function routeOf(path: string): { section: AdminSection | "org"; orgId?: number } {
+type AdminRoute = { section: AdminSection | "org" | "quote"; orgId?: number; quoteId?: number | null; print?: boolean };
+function routeOf(path: string): AdminRoute {
   const orgMatch = path.match(/^\/yonetim\/kurum\/(\d+)/);
   if (orgMatch) return { section: "org", orgId: Number(orgMatch[1]) };
+  const quoteMatch = path.match(/^\/yonetim\/teklif\/(yeni|\d+)(\/yazdir)?/);
+  if (quoteMatch) return { section: "quote", quoteId: quoteMatch[1] === "yeni" ? null : Number(quoteMatch[1]), print: Boolean(quoteMatch[2]) };
   const entry = (Object.entries(ADMIN_PATHS) as Array<[AdminSection, string]>).filter(([, value]) => value !== "/yonetim").find(([, value]) => path.startsWith(value));
   return { section: entry?.[0] ?? "dashboard" };
 }
@@ -98,10 +107,13 @@ export default function AdminApp() {
     );
   }
 
+  // Yazdırılabilir teklif kabuk olmadan açılır (PDF'e yalnızca teklif girer).
+  if (route.section === "quote" && route.print && route.quoteId) return <Suspense fallback={null}><AdminQuotePrint quoteId={route.quoteId} /></Suspense>;
+
   const badges: Partial<Record<AdminSection, number>> = { pending: pending.data?.length ?? 0, orgs: upgrades.data?.length ?? 0, errors: errors.data?.length ?? 0 };
   const isStaff = (memberships.data ?? []).some((membership) => membership.role !== "student");
-  const header = route.section === "org" ? { title: "Kurum", description: "" } : TITLES[route.section];
-  const activeKey: AdminSection = route.section === "org" ? "orgs" : route.section;
+  const header = route.section === "org" ? { title: "Kurum", description: "" } : route.section === "quote" ? { title: "Fiyat teklifi", description: "" } : TITLES[route.section];
+  const activeKey: AdminSection = route.section === "org" ? "orgs" : route.section === "quote" ? "quotes" : route.section;
 
   const sidebar = (
     <aside className={`app-sidebar ${drawer ? "is-drawer" : ""}`} aria-label="Yönetim menüsü">
@@ -129,7 +141,6 @@ export default function AdminApp() {
           <div className="truncate text-[12px] text-ink-3">{user?.email ?? "Platform yöneticisi"}</div>
           <div className="mt-3 flex gap-2">
             {isStaff && <button onClick={() => setLocation("/kurum")} className="flex-1 rounded-lg border border-rule px-2 py-1.5 text-[12px] font-semibold text-ink-2 hover:bg-paper">Kurum Paneli</button>}
-            <button onClick={() => setLocation("/")} className="flex-1 rounded-lg border border-rule px-2 py-1.5 text-[12px] font-semibold text-ink-2 hover:bg-paper">Uygulama</button>
             <button onClick={() => void logout()} className="rounded-lg border border-rule px-2 py-1.5 text-ink-3 hover:bg-paper" aria-label="Çıkış yap" title="Çıkış yap"><LogOut size={14} /></button>
           </div>
         </div>
@@ -148,7 +159,7 @@ export default function AdminApp() {
           <div className="topbar-actions"><span className="demo-chip"><ShieldCheck size={12} /> Platform yöneticisi</span></div>
         </header>
         <div className="content-wrap space-y-5">
-          {route.section !== "org" && (
+          {route.section !== "org" && route.section !== "quote" && (
             <div><h1 className="page-heading">{header.title}</h1>{header.description && <p className="page-subtitle">{header.description}</p>}</div>
           )}
           <Suspense fallback={<div className="flex min-h-[30vh] items-center justify-center"><span className="h-7 w-7 animate-spin rounded-full border-2 border-brand border-t-transparent" /></div>}>
@@ -159,6 +170,8 @@ export default function AdminApp() {
             {route.section === "packages" && <AdminPackagesPage />}
             {route.section === "orgs" && <AdminOrgsPage />}
             {route.section === "org" && route.orgId && <AdminOrgDetail orgId={route.orgId} />}
+            {route.section === "quotes" && <AdminQuotesPage />}
+            {route.section === "quote" && <AdminQuoteEditor key={route.quoteId ?? "yeni"} quoteId={route.quoteId ?? null} />}
             {route.section === "payments" && <AdminPaymentsPage />}
             {route.section === "catalog" && <AdminCatalogPage />}
             {route.section === "testimonials" && <AdminTestimonialsPage />}

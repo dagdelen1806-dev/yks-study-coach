@@ -704,6 +704,36 @@ export const orgPlanPrices = pgTable("org_plan_prices", {
   updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => new Date()).notNull(),
 });
 
+/**
+ * Kurumsal abonelik fiyat teklifi (Yönetim Paneli → Teklifler). Var olan bir kuruma ya da henüz
+ * kurumu açılmamış bir adaya hazırlanır; kalemler KDV hariç TL, toplamlar kayıt anında hesaplanıp saklanır.
+ */
+export const orgQuotes = pgTable("org_quotes", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  orgId: integer("orgId"),
+  customerName: varchar("customerName", { length: 160 }).notNull(),
+  contactName: varchar("contactName", { length: 120 }),
+  contactEmail: varchar("contactEmail", { length: 160 }),
+  plan: text("plan", { enum: ["trial", "standard", "pro"] }).notNull(),
+  months: integer("months").default(12).notNull(),
+  studentCount: integer("studentCount"),
+  /** JSON: [{ description, quantity, unitPriceTry }] */
+  linesJson: text("linesJson").notNull(),
+  discountPercent: integer("discountPercent").default(0).notNull(),
+  vatRate: integer("vatRate").default(20).notNull(),
+  subtotalTry: integer("subtotalTry").notNull(),
+  totalTry: integer("totalTry").notNull(),
+  validUntil: timestamp("validUntil", { withTimezone: true }),
+  note: text("note"),
+  status: text("status", { enum: ["draft", "sent", "accepted", "rejected"] }).default("draft").notNull(),
+  appliedAt: timestamp("appliedAt", { withTimezone: true }),
+  createdByUserId: integer("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => new Date()).notNull(),
+}, (table) => ({
+  orgIdx: index("org_quotes_org_idx").on(table.orgId),
+}));
+
 // ---------------------------------------------------------------------------
 // Novara Rehber — akademik takip dosyası. Bir dosya bir öğrenci için açılan "akademik inceleme"dir:
 // kanıt (açılış anının anlık görüntüsü), öğretmen eylemleri (inceleme, görüşme, kaynak, plan) ve

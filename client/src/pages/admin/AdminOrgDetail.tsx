@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, FileText, Loader2 } from "lucide-react";
 import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Card } from "@/components/ui/card";
@@ -40,7 +40,10 @@ export default function AdminOrgDetail({ orgId }: { orgId: number }) {
     <div className="space-y-5">
       <div>
         <Link href="/yonetim/kurumlar" className="inline-flex items-center gap-1 text-[13px] font-semibold text-ink-3 hover:text-ink"><ArrowLeft size={14} /> Kurumlar</Link>
-        <h1 className="page-heading mt-2">{org.name}</h1>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+          <h1 className="page-heading">{org.name}</h1>
+          <Link href={`/yonetim/teklif/yeni?kurum=${org.id}`} className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-brand px-4 text-[13px] font-semibold text-white"><FileText size={14} /> Teklif hazırla</Link>
+        </div>
         <p className="page-subtitle">{org.slug} · {ORG_PLAN_LABELS[org.plan]} · {trDay(org.membershipStartsAt)} → {trDay(org.membershipEndsAt)}{org.membershipState === "expired" ? " · süresi doldu" : ""} · {org.status === "active" ? "Aktif" : "Askıda"}</p>
       </div>
 

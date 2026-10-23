@@ -441,8 +441,8 @@ test("kurum yöneticisi Kurum Paneli'nde öğrencilerini görür", async ({ page
 
 test("Yönetim Paneli: platform yöneticisi kurumu açar, personel ekler, kurum paketi fiyatı kurum panelinde görünür; öğrenci giremez", async ({ page, browser }) => {
   await signIn(page, "platform.admin@test.local");
-  // Öğrenci anketini yapmamış platform yöneticisi doğrudan Yönetim Paneli'ne gider.
-  await page.goto("/");
+  // Platform yöneticisi öğrenci uygulamasına (takvim, odak oturumu) düşmez; her adres Yönetim Paneli'ne gider.
+  await page.goto("/takvim");
   await expect(page).toHaveURL(/\/yonetim$/);
   await expect(page.locator("main h1").first()).toHaveText("Genel bakış");
   const adminNav = (label: string) => page.locator('nav[aria-label="Yönetim bölümleri"] button', { hasText: label }).first();
@@ -472,4 +472,38 @@ test("Yönetim Paneli: platform yöneticisi kurumu açar, personel ekler, kurum 
   await orgAdmin.goto("/yonetim");
   await expect(orgAdmin.getByText("Bu bölüm yalnızca platform yöneticisi içindir.")).toBeVisible();
   await orgAdmin.close();
+});
+
+test("Yönetim Paneli: kuruma fiyat teklifi hazırlanır, yazdırılır, kabul edilince kuruma uygulanır", async ({ page }) => {
+  await signIn(page, "platform.admin@test.local");
+  await page.goto("/yonetim/kurumlar");
+  await page.getByRole("link", { name: "Test Dershanesi" }).click();
+  await page.getByRole("link", { name: "Teklif hazırla" }).click();
+  await expect(page.locator("main h1").first()).toHaveText("Yeni teklif");
+  await expect(page.getByLabel("Teklifteki ad")).toHaveValue("Test Dershanesi");
+
+  await page.getByRole("button", { name: "Kalem ekle" }).click();
+  await page.getByLabel("Kalem 1 açıklaması").fill("Standart kurum paketi — aylık");
+  await page.getByLabel("Kalem 1 adedi").fill("12");
+  await page.getByLabel("Kalem 1 birim fiyatı").fill("1000");
+  await page.getByLabel("İndirim (%)").fill("10");
+  // 12 × 1.000 = 12.000; %10 indirim → 10.800; %20 KDV 2.160 → 12.960.
+  await expect(page.getByText("12.960 TL")).toBeVisible();
+  await page.getByRole("button", { name: "Kaydet" }).click();
+  await expect(page).toHaveURL(/\/yonetim\/teklif\/\d+$/);
+  const quoteUrl = new URL(page.url()).pathname;
+
+  await page.getByRole("button", { name: "Kabul edildi" }).click();
+  await expect(page.getByText("Durum güncellendi.")).toBeVisible();
+  page.once("dialog", (dialog) => void dialog.accept());
+  await page.getByRole("button", { name: "Kuruma uygula" }).click();
+  await expect(page.getByText("Teklif kuruma uygulandı")).toBeVisible();
+  await expect(page.getByText("kuruma uygulandı").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Kuruma uygula" })).toHaveCount(0);
+
+  await page.goto(`${quoteUrl}/yazdir`);
+  await expect(page.getByText("Fiyat Teklifi")).toBeVisible();
+  await expect(page.getByText("Standart kurum paketi — aylık")).toBeVisible();
+  await expect(page.getByText("12.960 TL")).toBeVisible();
+  await expect(page.locator(".app-sidebar")).toHaveCount(0);
 });

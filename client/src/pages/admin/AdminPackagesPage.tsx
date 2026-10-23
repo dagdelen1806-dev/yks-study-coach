@@ -37,7 +37,7 @@ function OrgPlanPricesCard() {
   return (
     <Card className="soft-card p-5 sm:p-6">
       <h2 className="text-[16px] font-semibold text-ink">Kurum paketleri</h2>
-      <p className="mt-1 text-[12px] text-ink-3">Kurum panelindeki paket yükseltme ekranında görünen liste fiyatları (TL, KDV dahil yaz). Boş bırakılan alan "Fiyat için iletişime geçin" olarak görünür. Kurumun gerçek paketi ve süresi Kurumlar sayfasından verilir.</p>
+      <p className="mt-1 text-[12px] text-ink-3">Kurum panelindeki paket yükseltme ekranında görünen liste fiyatları (TL, KDV hariç; tekliflere "Liste fiyatından ekle" ile bu fiyatlar gelir). Boş bırakılan alan "Fiyat için iletişime geçin" olarak görünür. Kurumun gerçek paketi ve süresi Kurumlar sayfasından verilir.</p>
       {prices.isLoading ? <div className="flex justify-center p-6"><Loader2 className="animate-spin text-brand" /></div> : (
         <div className="mt-4 space-y-3">
           {prices.data?.map((row) => {

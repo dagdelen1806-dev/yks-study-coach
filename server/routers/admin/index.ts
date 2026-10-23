@@ -9,6 +9,7 @@ import { adminTestimonialsRouter } from "./testimonials";
 import { adminUsageRouter } from "./usage";
 import { adminUsersRouter } from "./users";
 import { adminOrgsRouter } from "../org";
+import { adminQuotesRouter } from "./quotes";
 
 /**
  * Admin Command Center (PHASE 3) — domain'e göre bölünmüş alt router'lar
@@ -26,6 +27,7 @@ export const adminRouter = router({
   payments: adminPaymentsRouter,
   system: adminSystemRouter,
   orgs: adminOrgsRouter,
+  quotes: adminQuotesRouter,
   errors: adminErrorsRouter,
   testimonials: adminTestimonialsRouter,
 });

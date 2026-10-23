@@ -152,7 +152,7 @@ function PlanPrice({ price }: { price?: { monthlyPriceTry: number | null; yearly
   if (!price || (price.monthlyPriceTry === null && price.yearlyPriceTry === null)) return <p className="mt-1 text-[12px] font-semibold text-ink-3">Fiyat için iletişime geçin</p>;
   return (
     <p className="mt-1 text-[13px] font-semibold text-ink-2">
-      {[price.monthlyPriceTry !== null && `${money(price.monthlyPriceTry)} / ay`, price.yearlyPriceTry !== null && `${money(price.yearlyPriceTry)} / yıl`].filter(Boolean).join(" · ")}
+      {[price.monthlyPriceTry !== null && `${money(price.monthlyPriceTry)} / ay`, price.yearlyPriceTry !== null && `${money(price.yearlyPriceTry)} / yıl`].filter(Boolean).join(" · ")} <span className="text-[11.5px] font-normal text-ink-3">+ KDV</span>
       {price.priceNote && <span className="block text-[11.5px] font-normal text-ink-3">{price.priceNote}</span>}
     </p>
   );

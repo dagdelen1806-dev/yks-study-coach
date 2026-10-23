@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq, inArray } from "drizzle-orm";
 import type { User } from "../drizzle/schema";
-import { orgPlanPrices, organizationAuditLogs, organizationMembers, organizations, users } from "../drizzle/schema";
+import { orgPlanPrices, orgQuotes, organizationAuditLogs, organizationMembers, organizations, users } from "../drizzle/schema";
 import type { TrpcContext } from "./_core/context";
 import { appRouter } from "./routers";
 import { getDb } from "./db";
@@ -14,6 +14,7 @@ describe.skipIf(!hasDb)("yönetim paneli (router + veritabanı)", () => {
   const email = (key: keyof typeof ids) => `panel-${key}-${stamp}@test.local`;
   let orgId = 0;
   let savedPrices: Array<typeof orgPlanPrices.$inferSelect> = [];
+  const createdQuoteIds: number[] = [];
   const caller = (id: number, role: "admin" | "user" = "user") => appRouter.createCaller({ user: { id, role, approvalStatus: "approved", accountStatus: "active", emailVerifiedAt: new Date(), loginMethod: "dev_email" } as unknown as User, req: { protocol: "https", headers: { host: "localhost" } } as TrpcContext["req"], res: {} as TrpcContext["res"] } as TrpcContext);
   const platform = () => caller(ids.platform, "admin");
 
@@ -36,6 +37,7 @@ describe.skipIf(!hasDb)("yönetim paneli (router + veritabanı)", () => {
     const db = (await getDb())!;
     await db.delete(orgPlanPrices);
     if (savedPrices.length) await db.insert(orgPlanPrices).values(savedPrices);
+    if (createdQuoteIds.length) await db.delete(orgQuotes).where(inArray(orgQuotes.id, createdQuoteIds));
     await db.delete(organizationAuditLogs).where(eq(organizationAuditLogs.orgId, orgId));
     await db.delete(organizationMembers).where(eq(organizationMembers.orgId, orgId));
     await db.delete(organizations).where(eq(organizations.id, orgId));
@@ -81,5 +83,35 @@ describe.skipIf(!hasDb)("yönetim paneli (router + veritabanı)", () => {
     expect(seen.standard).toEqual({ monthlyPriceTry: 4990, yearlyPriceTry: null, priceNote: "50 öğrenciye kadar" });
     // Koordinatör yönetici değil: kurum uçları yetkisiz role kurumu hiç göstermez.
     await expect(caller(ids.newcomer).org.settings.planPrices({ orgId })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("fiyat teklifi: yalnızca platform yöneticisi; kabul edilmeden ve iki kez uygulanmaz; sonuçlanan değişmez", async () => {
+    const draft = { orgId, customerName: "Panel Testi", contactName: null, contactEmail: null, plan: "pro" as const, months: 6, studentCount: 40, lines: [{ description: "Pro — aylık", quantity: 6, unitPriceTry: 2000 }], discountPercent: 0, vatRate: 20, validUntil: "2026-12-31", note: null };
+    await expect(caller(ids.teacher).admin.quotes.save(draft)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const { id: quoteId } = await platform().admin.quotes.save(draft);
+    const saved = await platform().admin.quotes.get({ id: quoteId });
+    expect(saved).toMatchObject({ status: "draft", subtotalTry: 12_000, totalTry: 14_400, totals: { vat: 2400 } });
+
+    await expect(platform().admin.quotes.applyToOrg({ id: quoteId })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await platform().admin.quotes.setStatus({ id: quoteId, status: "accepted" });
+    await expect(platform().admin.quotes.save({ ...draft, id: quoteId, discountPercent: 50 })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(platform().admin.quotes.delete({ id: quoteId })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+    const before = (await platform().admin.orgs.get({ orgId })).org;
+    await platform().admin.quotes.applyToOrg({ id: quoteId });
+    const after = (await platform().admin.orgs.get({ orgId })).org;
+    expect(after.plan).toBe("pro");
+    expect(after.aiCreditsMonthly).toBeGreaterThanOrEqual(20_000);
+    const expectedEnd = new Date(before.membershipEndsAt!);
+    expectedEnd.setMonth(expectedEnd.getMonth() + 6);
+    expect(new Date(after.membershipEndsAt!).toISOString()).toBe(expectedEnd.toISOString());
+    await expect(platform().admin.quotes.applyToOrg({ id: quoteId })).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(platform().admin.quotes.setStatus({ id: quoteId, status: "draft" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+    // Kuruma bağlı olmayan aday teklifi kabul edilse de uygulanamaz.
+    const { id: prospectId } = await platform().admin.quotes.save({ ...draft, orgId: null, customerName: "Aday Dershane" });
+    await platform().admin.quotes.setStatus({ id: prospectId, status: "accepted" });
+    await expect(platform().admin.quotes.applyToOrg({ id: prospectId })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    createdQuoteIds.push(quoteId, prospectId);
   });
 });

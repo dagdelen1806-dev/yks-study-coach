@@ -48,6 +48,7 @@ export default function AdminOrgsPage() {
             {upgrades.data!.map((row) => (
               <li key={row.id} className="flex flex-wrap items-center gap-3 py-3">
                 <span className="min-w-0 flex-1 text-[13px]"><strong className="text-ink">{row.orgName}</strong> · {ORG_PLAN_LABELS[row.currentPlan]} → <strong className="text-ink">{ORG_PLAN_LABELS[row.requestedPlan]}</strong>{row.requestedPlan === row.currentPlan ? " (süre uzatma)" : ""}<span className="block text-[12px] text-ink-3">{row.requesterName ?? "Kurum yöneticisi"}{row.requesterEmail ? ` · ${row.requesterEmail}` : ""} · {new Date(row.createdAt).toLocaleDateString("tr-TR")} · mevcut bitiş {trDay(row.membershipEndsAt)}{row.note ? ` · “${row.note}”` : ""}</span></span>
+                <Link href={`/yonetim/teklif/yeni?kurum=${row.orgId}`} className="text-[12px] font-semibold text-brand hover:underline">Teklif hazırla</Link>
                 <Button size="sm" disabled={resolveUpgrade.isPending} onClick={() => resolveUpgrade.mutate({ requestId: row.id, approve: true })}>Onayla</Button>
                 <Button size="sm" variant="outline" disabled={resolveUpgrade.isPending} onClick={() => { if (window.confirm(`${row.orgName} talebi reddedilsin mi?`)) resolveUpgrade.mutate({ requestId: row.id, approve: false }); }}>Reddet</Button>
               </li>

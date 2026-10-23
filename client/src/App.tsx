@@ -248,13 +248,14 @@ function AppGate() {
 
   if (!user) return <Suspense fallback={<div className="min-h-screen bg-paper" />}><Landing /></Suspense>;
 
-  if (user && (onboarding.isLoading || !onboarding.data || memberships.isLoading)) return <DashboardLayoutSkeleton />;
-
-  // Öğrenci anketini yapmamış platform yöneticisi Yönetim Paneli'ne gider.
-  if (user.role === "admin" && onboarding.data && !onboarding.data.onboardingCompleted) {
+  // Platform yöneticisi öğrenci uygulamasını (odak oturumu, plan, takvim) kullanmaz: her zaman Yönetim Paneli'ne gider.
+  if (user.role === "admin") {
     setTimeout(() => setLocation("/yonetim", { replace: true }), 0);
     return <DashboardLayoutSkeleton />;
   }
+
+  if (user && (onboarding.isLoading || !onboarding.data || memberships.isLoading)) return <DashboardLayoutSkeleton />;
+
   // Öğrenci onboarding'ini yapmamış kurum personeli öğrenci anketine değil Kurum Paneli'ne gider.
   if (user && isStaff && onboarding.data && !onboarding.data.onboardingCompleted) {
     setTimeout(() => setLocation("/kurum", { replace: true }), 0);

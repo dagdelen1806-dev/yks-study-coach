@@ -1003,6 +1003,31 @@ var orgPlanPrices = pgTable("org_plan_prices", {
   updatedByUserId: integer("updatedByUserId"),
   updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull()
 });
+var orgQuotes = pgTable("org_quotes", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  orgId: integer("orgId"),
+  customerName: varchar("customerName", { length: 160 }).notNull(),
+  contactName: varchar("contactName", { length: 120 }),
+  contactEmail: varchar("contactEmail", { length: 160 }),
+  plan: text("plan", { enum: ["trial", "standard", "pro"] }).notNull(),
+  months: integer("months").default(12).notNull(),
+  studentCount: integer("studentCount"),
+  /** JSON: [{ description, quantity, unitPriceTry }] */
+  linesJson: text("linesJson").notNull(),
+  discountPercent: integer("discountPercent").default(0).notNull(),
+  vatRate: integer("vatRate").default(20).notNull(),
+  subtotalTry: integer("subtotalTry").notNull(),
+  totalTry: integer("totalTry").notNull(),
+  validUntil: timestamp("validUntil", { withTimezone: true }),
+  note: text("note"),
+  status: text("status", { enum: ["draft", "sent", "accepted", "rejected"] }).default("draft").notNull(),
+  appliedAt: timestamp("appliedAt", { withTimezone: true }),
+  createdByUserId: integer("createdByUserId").notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull()
+}, (table) => ({
+  orgIdx: index("org_quotes_org_idx").on(table.orgId)
+}));
 var academicCases = pgTable("academic_cases", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   orgId: integer("orgId").notNull(),
@@ -3686,27 +3711,27 @@ var databaseAttachmentStorage = {
     const result = await db.insert(noteAttachments).values({ userId, kind: input.kind, mimeType: input.mimeType, byteSize: input.data.byteLength, data: storageKey ? null : input.data, storageKey, durationSec: input.durationSec ?? null }).returning({ id: noteAttachments.id });
     return { id: Number(result[0].id) };
   },
-  async get(userId, id6) {
+  async get(userId, id7) {
     const db = await requireDb();
-    const [row] = await db.select({ mimeType: noteAttachments.mimeType, data: noteAttachments.data, storageKey: noteAttachments.storageKey, kind: noteAttachments.kind, noteId: noteAttachments.noteId }).from(noteAttachments).where(and2(eq4(noteAttachments.id, id6), eq4(noteAttachments.userId, userId))).limit(1);
+    const [row] = await db.select({ mimeType: noteAttachments.mimeType, data: noteAttachments.data, storageKey: noteAttachments.storageKey, kind: noteAttachments.kind, noteId: noteAttachments.noteId }).from(noteAttachments).where(and2(eq4(noteAttachments.id, id7), eq4(noteAttachments.userId, userId))).limit(1);
     if (!row) return null;
     const store = getMediaBlobStore();
     const data = row.data ?? (row.storageKey && store ? await store.get(row.storageKey) : null);
     if (!data) return null;
     return { mimeType: row.mimeType, data, kind: row.kind, noteId: row.noteId };
   },
-  async locate(userId, id6) {
+  async locate(userId, id7) {
     const db = await requireDb();
-    const [row] = await db.select({ mimeType: noteAttachments.mimeType, data: noteAttachments.data, storageKey: noteAttachments.storageKey }).from(noteAttachments).where(and2(eq4(noteAttachments.id, id6), eq4(noteAttachments.userId, userId))).limit(1);
+    const [row] = await db.select({ mimeType: noteAttachments.mimeType, data: noteAttachments.data, storageKey: noteAttachments.storageKey }).from(noteAttachments).where(and2(eq4(noteAttachments.id, id7), eq4(noteAttachments.userId, userId))).limit(1);
     if (!row) return null;
     if (row.data) return { mimeType: row.mimeType, data: row.data };
     const store = getMediaBlobStore();
     if (!row.storageKey || !store) return null;
     return { mimeType: row.mimeType, url: await store.signedUrl(row.storageKey, SIGNED_URL_TTL_SEC) };
   },
-  async setOcrText(userId, id6, text3) {
+  async setOcrText(userId, id7, text3) {
     const db = await requireDb();
-    await db.update(noteAttachments).set({ ocrText: text3 }).where(and2(eq4(noteAttachments.id, id6), eq4(noteAttachments.userId, userId)));
+    await db.update(noteAttachments).set({ ocrText: text3 }).where(and2(eq4(noteAttachments.id, id7), eq4(noteAttachments.userId, userId)));
   },
   async syncNoteLinks(userId, noteId, referencedIds) {
     const db = await requireDb();
@@ -3744,8 +3769,8 @@ var getAttachmentStorage = () => databaseAttachmentStorage;
 // server/notes/attachmentRoutes.ts
 function registerNoteAttachmentRoutes(app2) {
   app2.get("/api/notes/attachments/:id", async (req, res) => {
-    const id6 = Number(req.params.id);
-    if (!Number.isInteger(id6) || id6 <= 0) {
+    const id7 = Number(req.params.id);
+    if (!Number.isInteger(id7) || id7 <= 0) {
       res.status(400).end();
       return;
     }
@@ -3757,7 +3782,7 @@ function registerNoteAttachmentRoutes(app2) {
       return;
     }
     try {
-      const attachment = await getAttachmentStorage().locate(userId, id6);
+      const attachment = await getAttachmentStorage().locate(userId, id7);
       if (!attachment) {
         res.status(404).end();
         return;
@@ -4273,9 +4298,9 @@ async function saveNote(userId, input) {
   return { id: saved.id, clientId: input.clientId, version: saved.version, title: saved.title, updatedAt: saved.updatedAt };
 }
 async function describeLinks(db, userId, rows) {
-  const topicIds = Array.from(new Set(rows.map((row) => row.topicId).filter((id6) => id6 !== null)));
-  const bookIds = Array.from(new Set(rows.map((row) => row.bookId).filter((id6) => Boolean(id6))));
-  const numeric = bookIds.filter((id6) => /^\d+$/.test(id6)).map(Number);
+  const topicIds = Array.from(new Set(rows.map((row) => row.topicId).filter((id7) => id7 !== null)));
+  const bookIds = Array.from(new Set(rows.map((row) => row.bookId).filter((id7) => Boolean(id7))));
+  const numeric = bookIds.filter((id7) => /^\d+$/.test(id7)).map(Number);
   const [topics, custom, catalog] = await Promise.all([
     topicIds.length ? db.select({ id: yksTopics.id, topic: yksTopics.topic, unit: yksTopics.unit }).from(yksTopics).where(inArray3(yksTopics.id, topicIds)) : Promise.resolve([]),
     bookIds.length ? db.select({ bookId: userResourceBooks.bookId, title: userResourceBooks.title }).from(userResourceBooks).where(and4(eq6(userResourceBooks.userId, userId), inArray3(userResourceBooks.bookId, bookIds))) : Promise.resolve([]),
@@ -4292,12 +4317,12 @@ var parseStats = (value) => {
     return computeNoteStats({ type: "doc", content: [] });
   }
 };
-async function getNote(userId, id6) {
+async function getNote(userId, id7) {
   const db = await requireDb2();
-  const [row] = await db.select().from(notes).where(and4(eq6(notes.id, id6), eq6(notes.userId, userId))).limit(1);
+  const [row] = await db.select().from(notes).where(and4(eq6(notes.id, id7), eq6(notes.userId, userId))).limit(1);
   if (!row) return null;
   const [tags, links] = await Promise.all([
-    db.select({ tag: noteTags.tag }).from(noteTags).where(and4(eq6(noteTags.userId, userId), eq6(noteTags.noteId, id6))),
+    db.select({ tag: noteTags.tag }).from(noteTags).where(and4(eq6(noteTags.userId, userId), eq6(noteTags.noteId, id7))),
     describeLinks(db, userId, [row])
   ]);
   return {
@@ -4355,8 +4380,8 @@ async function listNotes(userId, filters) {
   }
   if (filters.q?.trim()) conditions.push(await keywordCondition(db, userId, filters.q));
   if (filters.cursor) {
-    const [time2, id6] = filters.cursor.split("_").map(Number);
-    if (Number.isFinite(time2) && Number.isFinite(id6)) conditions.push(or(lt3(notes.noteDate, new Date(time2)), and4(eq6(notes.noteDate, new Date(time2)), lt3(notes.id, id6))));
+    const [time2, id7] = filters.cursor.split("_").map(Number);
+    if (Number.isFinite(time2) && Number.isFinite(id7)) conditions.push(or(lt3(notes.noteDate, new Date(time2)), and4(eq6(notes.noteDate, new Date(time2)), lt3(notes.id, id7))));
   }
   const rows = await db.select({
     id: notes.id,
@@ -4404,7 +4429,7 @@ var endOfToday = () => {
   date.setHours(23, 59, 59, 999);
   return date;
 };
-async function updateNoteFlags(userId, id6, flags) {
+async function updateNoteFlags(userId, id7, flags) {
   const db = await requireDb2();
   const set = {
     ...flags.isFavorite !== void 0 ? { isFavorite: flags.isFavorite ? 1 : 0 } : {},
@@ -4412,23 +4437,23 @@ async function updateNoteFlags(userId, id6, flags) {
     ...flags.reviewAt !== void 0 ? { reviewAt: flags.reviewAt } : {},
     ...flags.archived !== void 0 ? { status: flags.archived ? "archived" : "active" } : {}
   };
-  const [row] = await db.select({ id: notes.id }).from(notes).where(and4(eq6(notes.id, id6), eq6(notes.userId, userId))).limit(1);
+  const [row] = await db.select({ id: notes.id }).from(notes).where(and4(eq6(notes.id, id7), eq6(notes.userId, userId))).limit(1);
   if (!row) throw new NoteError("Not bulunamad\u0131.");
   if (Object.keys(set).length === 0) return;
-  await db.update(notes).set(set).where(and4(eq6(notes.id, id6), eq6(notes.userId, userId)));
+  await db.update(notes).set(set).where(and4(eq6(notes.id, id7), eq6(notes.userId, userId)));
 }
-async function deleteNote(userId, id6) {
+async function deleteNote(userId, id7) {
   const db = await requireDb2();
-  const [row] = await db.select({ id: notes.id }).from(notes).where(and4(eq6(notes.id, id6), eq6(notes.userId, userId))).limit(1);
+  const [row] = await db.select({ id: notes.id }).from(notes).where(and4(eq6(notes.id, id7), eq6(notes.userId, userId))).limit(1);
   if (!row) throw new NoteError("Not bulunamad\u0131.");
-  await getAttachmentStorage().deleteForNote(userId, id6);
-  const [question] = await db.select({ id: notebookQuestions.id }).from(notebookQuestions).where(and4(eq6(notebookQuestions.userId, userId), eq6(notebookQuestions.noteId, id6))).limit(1);
+  await getAttachmentStorage().deleteForNote(userId, id7);
+  const [question] = await db.select({ id: notebookQuestions.id }).from(notebookQuestions).where(and4(eq6(notebookQuestions.userId, userId), eq6(notebookQuestions.noteId, id7))).limit(1);
   if (question) {
     await db.delete(questionAttempts).where(and4(eq6(questionAttempts.userId, userId), eq6(questionAttempts.questionId, question.id)));
     await db.delete(notebookQuestions).where(eq6(notebookQuestions.id, question.id));
   }
-  await db.delete(noteTags).where(and4(eq6(noteTags.userId, userId), eq6(noteTags.noteId, id6)));
-  await db.delete(notes).where(and4(eq6(notes.id, id6), eq6(notes.userId, userId)));
+  await db.delete(noteTags).where(and4(eq6(noteTags.userId, userId), eq6(noteTags.noteId, id7)));
+  await db.delete(notes).where(and4(eq6(notes.id, id7), eq6(notes.userId, userId)));
 }
 async function getNoteCalendar(userId, from, to) {
   const db = await requireDb2();
@@ -4486,9 +4511,9 @@ var endOfToday2 = () => {
   return date;
 };
 var clean = (value, max) => value?.trim() ? value.trim().slice(0, max) : null;
-async function assertAttachment(userId, id6, kind) {
-  if (!id6) return;
-  const attachment = await getAttachmentStorage().get(userId, id6);
+async function assertAttachment(userId, id7, kind) {
+  if (!id7) return;
+  const attachment = await getAttachmentStorage().get(userId, id7);
   if (!attachment || attachment.kind !== kind) throw new NoteError(kind === "image" ? "Foto\u011Fraf bulunamad\u0131." : "Ses kayd\u0131 bulunamad\u0131.");
 }
 async function resolveTopic(db, topicId) {
@@ -4549,9 +4574,9 @@ async function createQuestion(userId, input) {
   if (!row) throw new NoteError("Soru kaydedilemedi.");
   return await getQuestion(userId, row.id);
 }
-async function updateQuestion(userId, id6, patch) {
+async function updateQuestion(userId, id7, patch) {
   const db = await requireDb3();
-  const [row] = await db.select().from(notebookQuestions).where(and5(eq7(notebookQuestions.id, id6), eq7(notebookQuestions.userId, userId))).limit(1);
+  const [row] = await db.select().from(notebookQuestions).where(and5(eq7(notebookQuestions.id, id7), eq7(notebookQuestions.userId, userId))).limit(1);
   if (!row) throw new NoteError("Soru bulunamad\u0131.");
   const [note] = await db.select({ clientId: notes.clientId, content: notes.content, noteDate: notes.noteDate, bookId: notes.bookId, studySessionId: notes.studySessionId, isFavorite: notes.isFavorite, isPinned: notes.isPinned }).from(notes).where(and5(eq7(notes.id, row.noteId), eq7(notes.userId, userId))).limit(1);
   if (!note) throw new NoteError("Soru bulunamad\u0131.");
@@ -4585,8 +4610,8 @@ async function updateQuestion(userId, id6, patch) {
     isFavorite: note.isFavorite === 1,
     isPinned: note.isPinned === 1
   });
-  await db.update(notebookQuestions).set(next).where(eq7(notebookQuestions.id, id6));
-  return await getQuestion(userId, id6);
+  await db.update(notebookQuestions).set(next).where(eq7(notebookQuestions.id, id7));
+  return await getQuestion(userId, id7);
 }
 var questionColumns = {
   id: notebookQuestions.id,
@@ -4615,23 +4640,23 @@ var questionColumns = {
   createdAt: notebookQuestions.createdAt
 };
 var shape = (row) => ({ ...row, errorType: row.errorType, aiSolution: row.aiSolution ? parseAiSolution(row.aiSolution) : null });
-async function getQuestion(userId, id6) {
+async function getQuestion(userId, id7) {
   const db = await requireDb3();
-  const [row] = await db.select(questionColumns).from(notebookQuestions).leftJoin(yksTopics, eq7(yksTopics.id, notebookQuestions.topicId)).where(and5(eq7(notebookQuestions.id, id6), eq7(notebookQuestions.userId, userId))).limit(1);
+  const [row] = await db.select(questionColumns).from(notebookQuestions).leftJoin(yksTopics, eq7(yksTopics.id, notebookQuestions.topicId)).where(and5(eq7(notebookQuestions.id, id7), eq7(notebookQuestions.userId, userId))).limit(1);
   if (!row) return null;
-  const attempts = await db.select({ result: questionAttempts.result, sawSolution: questionAttempts.sawSolution, hintLevel: questionAttempts.hintLevel, attemptedAt: questionAttempts.attemptedAt }).from(questionAttempts).where(and5(eq7(questionAttempts.userId, userId), eq7(questionAttempts.questionId, id6))).orderBy(desc3(questionAttempts.attemptedAt), desc3(questionAttempts.id)).limit(20);
+  const attempts = await db.select({ result: questionAttempts.result, sawSolution: questionAttempts.sawSolution, hintLevel: questionAttempts.hintLevel, attemptedAt: questionAttempts.attemptedAt }).from(questionAttempts).where(and5(eq7(questionAttempts.userId, userId), eq7(questionAttempts.questionId, id7))).orderBy(desc3(questionAttempts.attemptedAt), desc3(questionAttempts.id)).limit(20);
   return { ...shape(row), attempts: attempts.map((attempt) => ({ ...attempt, sawSolution: attempt.sawSolution === 1 })) };
 }
-async function getSolveContext(userId, id6) {
+async function getSolveContext(userId, id7) {
   const db = await requireDb3();
-  const [row] = await db.select({ questionImageId: notebookQuestions.questionImageId, stuckPoint: notebookQuestions.stuckPoint, subject: notebookQuestions.subject, topic: yksTopics.topic, exam: yksTopics.exam, content: notes.content, aiSolution: notebookQuestions.aiSolution, aiSolutionModel: notebookQuestions.aiSolutionModel, difficulty: notebookQuestions.difficulty, lastResult: notebookQuestions.lastResult }).from(notebookQuestions).innerJoin(notes, eq7(notes.id, notebookQuestions.noteId)).leftJoin(yksTopics, eq7(yksTopics.id, notebookQuestions.topicId)).where(and5(eq7(notebookQuestions.id, id6), eq7(notebookQuestions.userId, userId))).limit(1);
+  const [row] = await db.select({ questionImageId: notebookQuestions.questionImageId, stuckPoint: notebookQuestions.stuckPoint, subject: notebookQuestions.subject, topic: yksTopics.topic, exam: yksTopics.exam, content: notes.content, aiSolution: notebookQuestions.aiSolution, aiSolutionModel: notebookQuestions.aiSolutionModel, difficulty: notebookQuestions.difficulty, lastResult: notebookQuestions.lastResult }).from(notebookQuestions).innerJoin(notes, eq7(notes.id, notebookQuestions.noteId)).leftJoin(yksTopics, eq7(yksTopics.id, notebookQuestions.topicId)).where(and5(eq7(notebookQuestions.id, id7), eq7(notebookQuestions.userId, userId))).limit(1);
   if (!row) throw new NoteError("Soru bulunamad\u0131.");
   return { questionImageId: row.questionImageId, ocrText: ocrTextOf(row.content, row.questionImageId), stuckPoint: row.stuckPoint, subject: row.subject, topic: row.topic, aiSolution: parseAiSolution(row.aiSolution), aiSolutionModel: row.aiSolutionModel, exam: row.exam, difficulty: row.difficulty, lastResult: row.lastResult };
 }
-async function saveAiSolution(userId, id6, solution, aiSolutionModel = null) {
+async function saveAiSolution(userId, id7, solution, aiSolutionModel = null) {
   const db = await requireDb3();
   const aiSolutionAt = /* @__PURE__ */ new Date();
-  await db.update(notebookQuestions).set({ aiSolution: JSON.stringify(solution), aiSolutionAt, aiSolutionModel }).where(and5(eq7(notebookQuestions.id, id6), eq7(notebookQuestions.userId, userId)));
+  await db.update(notebookQuestions).set({ aiSolution: JSON.stringify(solution), aiSolutionAt, aiSolutionModel }).where(and5(eq7(notebookQuestions.id, id7), eq7(notebookQuestions.userId, userId)));
   return { aiSolution: solution, aiSolutionAt, aiSolutionModel };
 }
 async function getQuestionIdByNote(userId, noteId) {
@@ -4653,21 +4678,21 @@ async function listQuestions(userId, filters) {
   const page2 = rows.slice(0, limit).map(shape);
   return { items: page2, nextCursor: !filters.due && rows.length > limit ? page2[page2.length - 1]?.id ?? null : null };
 }
-async function deleteQuestion(userId, id6) {
+async function deleteQuestion(userId, id7) {
   const db = await requireDb3();
-  const [row] = await db.select({ noteId: notebookQuestions.noteId }).from(notebookQuestions).where(and5(eq7(notebookQuestions.id, id6), eq7(notebookQuestions.userId, userId))).limit(1);
+  const [row] = await db.select({ noteId: notebookQuestions.noteId }).from(notebookQuestions).where(and5(eq7(notebookQuestions.id, id7), eq7(notebookQuestions.userId, userId))).limit(1);
   if (!row) throw new NoteError("Soru bulunamad\u0131.");
   await deleteNote(userId, row.noteId);
 }
-async function recordAttempt(userId, id6, input) {
+async function recordAttempt(userId, id7, input) {
   const db = await requireDb3();
-  const [row] = await db.select({ reviewStage: notebookQuestions.reviewStage }).from(notebookQuestions).where(and5(eq7(notebookQuestions.id, id6), eq7(notebookQuestions.userId, userId))).limit(1);
+  const [row] = await db.select({ reviewStage: notebookQuestions.reviewStage }).from(notebookQuestions).where(and5(eq7(notebookQuestions.id, id7), eq7(notebookQuestions.userId, userId))).limit(1);
   if (!row) throw new NoteError("Soru bulunamad\u0131.");
   const now = /* @__PURE__ */ new Date();
   const hintLevel = Math.min(Math.max(Math.round(input.hintLevel ?? 0), 0), HINT_LEVELS.solution);
   const next = scheduleAfterAttempt(row, input.result, input.sawSolution, now, hintLevel);
-  await db.insert(questionAttempts).values({ userId, questionId: id6, result: input.result, sawSolution: input.sawSolution ? 1 : 0, hintLevel, seconds: input.seconds ? Math.min(Math.round(input.seconds), 7200) : null, stageBefore: row.reviewStage, attemptedAt: now });
-  await db.update(notebookQuestions).set({ ...next, attemptCount: sql5`${notebookQuestions.attemptCount} + 1`, lastResult: input.result, lastAttemptAt: now }).where(eq7(notebookQuestions.id, id6));
+  await db.insert(questionAttempts).values({ userId, questionId: id7, result: input.result, sawSolution: input.sawSolution ? 1 : 0, hintLevel, seconds: input.seconds ? Math.min(Math.round(input.seconds), 7200) : null, stageBefore: row.reviewStage, attemptedAt: now });
+  await db.update(notebookQuestions).set({ ...next, attemptCount: sql5`${notebookQuestions.attemptCount} + 1`, lastResult: input.result, lastAttemptAt: now }).where(eq7(notebookQuestions.id, id7));
   return next;
 }
 var questionSubject = (subject2) => subject2 === void 0 ? [] : [subject2 === null ? isNull4(notebookQuestions.subject) : eq7(notebookQuestions.subject, subject2)];
@@ -4820,9 +4845,9 @@ function canRequestPlan(current, requested) {
   if (requested === "trial") return false;
   return ORG_PLAN_RANK[requested] >= ORG_PLAN_RANK[current];
 }
-function renewedMembershipEnd(currentEnd, now = /* @__PURE__ */ new Date()) {
+function renewedMembershipEnd(currentEnd, now = /* @__PURE__ */ new Date(), months = 12) {
   const base = currentEnd && currentEnd.getTime() > now.getTime() ? new Date(currentEnd) : new Date(now);
-  base.setFullYear(base.getFullYear() + 1);
+  base.setMonth(base.getMonth() + months);
   return base;
 }
 var ORG_CREDIT_COSTS = {
@@ -5005,7 +5030,7 @@ function comparabilityKey(exam) {
 }
 function trendDecline(exams, examKind2, rules = ACADEMIC_CASE_RULES) {
   const recent = exams.filter((exam) => exam.examKind === examKind2 && exam.scope !== "branch" && Number.isFinite(exam.net)).sort((a, b) => b.date.getTime() - a.date.getTime() || b.id - a.id).slice(0, rules.examsCompared).reverse();
-  const evidence = recent.map(({ id: id6, date, net }) => ({ id: id6, date, net }));
+  const evidence = recent.map(({ id: id7, date, net }) => ({ id: id7, date, net }));
   if (recent.length < rules.examsCompared) return { status: "insufficient", examKind: examKind2, reason: "not_enough_exams", evidence };
   if (recent.at(-1).date.getTime() - recent[0].date.getTime() > rules.windowDays * DAY2) return { status: "insufficient", examKind: examKind2, reason: "too_spread_out", evidence };
   if (new Set(recent.map((exam) => seasonOf(exam.date, rules))).size > 1) return { status: "insufficient", examKind: examKind2, reason: "different_season", evidence };
@@ -5086,8 +5111,8 @@ var fromMinutes = (minutes) => `${String(Math.floor(minutes / 60)).padStart(2, "
 var weekdayOf = (date) => (date.getDay() + 6) % 7 + 1;
 var isYksBlock = (block) => block.subject !== null;
 function blocksOn(blocks, date) {
-  const day = weekdayOf(date);
-  return blocks.filter((block) => block.dayOfWeek === day).sort((a, b) => toMinutes(a.startTime) - toMinutes(b.startTime));
+  const day2 = weekdayOf(date);
+  return blocks.filter((block) => block.dayOfWeek === day2).sort((a, b) => toMinutes(a.startTime) - toMinutes(b.startTime));
 }
 function validateSchedule(schedule) {
   for (const period of schedule.periods) {
@@ -5096,12 +5121,12 @@ function validateSchedule(schedule) {
   for (const block of schedule.blocks) {
     if (!isValidTime(block.startTime) || !isValidTime(block.endTime) || toMinutes(block.startTime) >= toMinutes(block.endTime)) return `${block.label} (${block.startTime}\u2013${block.endTime}) ge\xE7ersiz: ba\u015Flang\u0131\xE7 biti\u015Ften \xF6nce olmal\u0131.`;
   }
-  for (let day = 1; day <= 7; day++) {
-    const sorted = schedule.blocks.filter((block) => block.dayOfWeek === day).sort((a, b) => toMinutes(a.startTime) - toMinutes(b.startTime));
+  for (let day2 = 1; day2 <= 7; day2++) {
+    const sorted = schedule.blocks.filter((block) => block.dayOfWeek === day2).sort((a, b) => toMinutes(a.startTime) - toMinutes(b.startTime));
     for (let index2 = 1; index2 < sorted.length; index2++) {
       const previous = sorted[index2 - 1];
       const current = sorted[index2];
-      if (toMinutes(current.startTime) < toMinutes(previous.endTime)) return `${DAY_LABELS[day - 1]}: ${previous.label} (${previous.startTime}\u2013${previous.endTime}) ile ${current.label} (${current.startTime}\u2013${current.endTime}) \xE7ak\u0131\u015F\u0131yor.`;
+      if (toMinutes(current.startTime) < toMinutes(previous.endTime)) return `${DAY_LABELS[day2 - 1]}: ${previous.label} (${previous.startTime}\u2013${previous.endTime}) ile ${current.label} (${current.startTime}\u2013${current.endTime}) \xE7ak\u0131\u015F\u0131yor.`;
     }
   }
   return null;
@@ -5366,9 +5391,9 @@ async function listInvitations(orgId) {
   const db = await requireDb4();
   return db.select({ id: organizationInvitations.id, role: organizationInvitations.role, note: organizationInvitations.note, subject: organizationInvitations.subject, expiresAt: organizationInvitations.expiresAt, maxUses: organizationInvitations.maxUses, usedCount: organizationInvitations.usedCount, revokedAt: organizationInvitations.revokedAt, createdAt: organizationInvitations.createdAt }).from(organizationInvitations).where(eq9(organizationInvitations.orgId, orgId)).orderBy(desc4(organizationInvitations.createdAt)).limit(100);
 }
-async function revokeInvitation(orgId, id6) {
+async function revokeInvitation(orgId, id7) {
   const db = await requireDb4();
-  const result = await db.update(organizationInvitations).set({ revokedAt: /* @__PURE__ */ new Date() }).where(and7(eq9(organizationInvitations.orgId, orgId), eq9(organizationInvitations.id, id6), isNull5(organizationInvitations.revokedAt))).returning();
+  const result = await db.update(organizationInvitations).set({ revokedAt: /* @__PURE__ */ new Date() }).where(and7(eq9(organizationInvitations.orgId, orgId), eq9(organizationInvitations.id, id7), isNull5(organizationInvitations.revokedAt))).returning();
   return result.length > 0;
 }
 async function findInvitationByHash(codeHash) {
@@ -5416,7 +5441,7 @@ async function setClassStudents(orgId, classId, studentUserIds) {
   const db = await requireDb4();
   const [row] = await db.select({ id: organizationClasses.id }).from(organizationClasses).where(and7(eq9(organizationClasses.orgId, orgId), eq9(organizationClasses.id, classId))).limit(1);
   if (!row) return false;
-  const valid = studentUserIds.length ? (await listMembers(orgId, { role: "student" })).map((member) => member.userId).filter((id6) => studentUserIds.includes(id6)) : [];
+  const valid = studentUserIds.length ? (await listMembers(orgId, { role: "student" })).map((member) => member.userId).filter((id7) => studentUserIds.includes(id7)) : [];
   await db.delete(classStudents).where(eq9(classStudents.classId, classId));
   if (valid.length) await db.insert(classStudents).values(valid.map((studentUserId) => ({ classId, studentUserId })));
   return true;
@@ -5427,7 +5452,7 @@ async function listAssignments(orgId) {
 }
 async function setTeacherStudents(orgId, teacherUserId, studentUserIds) {
   const db = await requireDb4();
-  const valid = studentUserIds.length ? (await listMembers(orgId, { role: "student" })).map((member) => member.userId).filter((id6) => studentUserIds.includes(id6)) : [];
+  const valid = studentUserIds.length ? (await listMembers(orgId, { role: "student" })).map((member) => member.userId).filter((id7) => studentUserIds.includes(id7)) : [];
   await db.update(teacherAssignments).set({ active: 0 }).where(and7(eq9(teacherAssignments.orgId, orgId), eq9(teacherAssignments.teacherUserId, teacherUserId)));
   for (const studentUserId of valid) {
     await db.insert(teacherAssignments).values({ orgId, teacherUserId, studentUserId, active: 1 }).onConflictDoUpdate({ target: [teacherAssignments.orgId, teacherAssignments.teacherUserId, teacherAssignments.studentUserId], set: { active: 1 } });
@@ -5465,14 +5490,14 @@ async function createNote(input) {
   const result = await db.insert(counselingNotes).values(input).returning({ id: counselingNotes.id });
   return Number(result[0].id);
 }
-async function getNote2(orgId, id6) {
+async function getNote2(orgId, id7) {
   const db = await requireDb4();
-  const [row] = await db.select({ id: counselingNotes.id, studentUserId: counselingNotes.studentUserId, authorUserId: counselingNotes.authorUserId }).from(counselingNotes).where(and7(eq9(counselingNotes.orgId, orgId), eq9(counselingNotes.id, id6))).limit(1);
+  const [row] = await db.select({ id: counselingNotes.id, studentUserId: counselingNotes.studentUserId, authorUserId: counselingNotes.authorUserId }).from(counselingNotes).where(and7(eq9(counselingNotes.orgId, orgId), eq9(counselingNotes.id, id7))).limit(1);
   return row ?? null;
 }
-async function deleteNote2(orgId, id6) {
+async function deleteNote2(orgId, id7) {
   const db = await requireDb4();
-  await db.delete(counselingNotes).where(and7(eq9(counselingNotes.orgId, orgId), eq9(counselingNotes.id, id6)));
+  await db.delete(counselingNotes).where(and7(eq9(counselingNotes.orgId, orgId), eq9(counselingNotes.id, id7)));
 }
 async function listStudentFeedback(studentUserId) {
   const db = await requireDb4();
@@ -5487,7 +5512,7 @@ async function listAudit(orgId) {
   return db.select({ id: organizationAuditLogs.id, action: organizationAuditLogs.action, targetType: organizationAuditLogs.targetType, targetId: organizationAuditLogs.targetId, metadataJson: organizationAuditLogs.metadataJson, actorName: users.name, createdAt: organizationAuditLogs.createdAt }).from(organizationAuditLogs).innerJoin(users, eq9(users.id, organizationAuditLogs.actorUserId)).where(eq9(organizationAuditLogs.orgId, orgId)).orderBy(desc4(organizationAuditLogs.createdAt)).limit(200);
 }
 async function loadStudentSignals(studentUserIds, weekStart, weekEnd, logsSince) {
-  const signals = new Map(studentUserIds.map((id6) => [id6, { exams: [], logs: [], weekSessions: [], weakTopicCount: 0, lastSignedIn: null }]));
+  const signals = new Map(studentUserIds.map((id7) => [id7, { exams: [], logs: [], weekSessions: [], weakTopicCount: 0, lastSignedIn: null }]));
   if (!studentUserIds.length) return signals;
   const db = await requireDb4();
   const [exams, logs, sessions, weak, signins] = await Promise.all([
@@ -5518,9 +5543,9 @@ async function getStudentCalendarReadOnly(studentUserId, since) {
   ]);
   return { sessions, logs };
 }
-async function listPlannedSessionsOn(studentUserId, day) {
+async function listPlannedSessionsOn(studentUserId, day2) {
   const db = await requireDb4();
-  const start = new Date(day);
+  const start = new Date(day2);
   start.setHours(0, 0, 0, 0);
   const end = new Date(start);
   end.setDate(end.getDate() + 1);
@@ -5702,7 +5727,7 @@ async function responsibleTeacherIds(orgId, studentUserId) {
     db.select({ userId: organizationClasses.advisorUserId }).from(classStudents).innerJoin(organizationClasses, eq11(organizationClasses.id, classStudents.classId)).where(and8(eq11(organizationClasses.orgId, orgId), eq11(classStudents.studentUserId, studentUserId))),
     db.select({ userId: teacherAssignments.teacherUserId }).from(teacherAssignments).where(and8(eq11(teacherAssignments.orgId, orgId), eq11(teacherAssignments.studentUserId, studentUserId), eq11(teacherAssignments.active, 1)))
   ]);
-  return Array.from(new Set([...advisors, ...assigned].map((row) => row.userId).filter((id6) => typeof id6 === "number")));
+  return Array.from(new Set([...advisors, ...assigned].map((row) => row.userId).filter((id7) => typeof id7 === "number")));
 }
 async function canReadNotes(orgId, viewerUserId, studentUserId) {
   return (await responsibleTeacherIds(orgId, studentUserId)).includes(viewerUserId);
@@ -5864,7 +5889,7 @@ async function suggestOwnedResources(studentUserId, topicIds) {
     byBook.set(row.bookId, entry);
   }
   const covered2 = new Set(rows.map((row) => row.topicId));
-  const missingTopicIds = topicIds.filter((id6) => !covered2.has(id6));
+  const missingTopicIds = topicIds.filter((id7) => !covered2.has(id7));
   const catalog = missingTopicIds.length ? await db.selectDistinct({ catalogBookId: catalogBooks.id, title: catalogBooks.name, topicId: bookCurriculumTopics.topicId }).from(bookCurriculumTopics).innerJoin(catalogBooks, eq11(catalogBooks.id, bookCurriculumTopics.bookId)).where(and8(inArray6(bookCurriculumTopics.topicId, missingTopicIds), eq11(catalogBooks.active, 1))).limit(3) : [];
   return { owned: Array.from(byBook.values()), missingTopicIds, catalog };
 }
@@ -6001,16 +6026,16 @@ async function notifyStudentOfTasks(input) {
 import { SignJWT as SignJWT3, jwtVerify as jwtVerify3 } from "jose";
 var AUDIENCE = "weekly-digest-unsubscribe";
 var secretKey3 = () => new TextEncoder().encode(ENV.cookieSecret);
-async function createUnsubscribeToken(kind, id6) {
-  return new SignJWT3({ k: kind }).setProtectedHeader({ alg: "HS256" }).setSubject(String(id6)).setAudience(AUDIENCE).setIssuedAt().sign(secretKey3());
+async function createUnsubscribeToken(kind, id7) {
+  return new SignJWT3({ k: kind }).setProtectedHeader({ alg: "HS256" }).setSubject(String(id7)).setAudience(AUDIENCE).setIssuedAt().sign(secretKey3());
 }
-var unsubscribeUrlFor = async (appUrl, kind, id6) => `${appUrl}/api/email/weekly-digest/unsubscribe?token=${encodeURIComponent(await createUnsubscribeToken(kind, id6))}`;
+var unsubscribeUrlFor = async (appUrl, kind, id7) => `${appUrl}/api/email/weekly-digest/unsubscribe?token=${encodeURIComponent(await createUnsubscribeToken(kind, id7))}`;
 async function readUnsubscribeToken(token) {
   try {
     const { payload } = await jwtVerify3(token, secretKey3(), { audience: AUDIENCE, algorithms: ["HS256"] });
-    const id6 = Number(payload.sub);
-    if (!Number.isInteger(id6) || id6 <= 0) return null;
-    return { kind: payload.k === "staff" ? "staff" : payload.k === "parent" ? "parent" : "student", id: id6 };
+    const id7 = Number(payload.sub);
+    if (!Number.isInteger(id7) || id7 <= 0) return null;
+    return { kind: payload.k === "staff" ? "staff" : payload.k === "parent" ? "parent" : "student", id: id7 };
   } catch {
     return null;
   }
@@ -6511,10 +6536,10 @@ async function listAppErrors(status, limit = 200) {
   if (!db) return [];
   return db.select().from(appErrors).where(status === "open" ? isNull10(appErrors.resolvedAt) : isNotNull6(appErrors.resolvedAt)).orderBy(desc10(appErrors.lastSeenAt)).limit(limit);
 }
-async function resolveAppError(id6) {
+async function resolveAppError(id7) {
   const db = await getDb();
   if (!db) return;
-  await db.update(appErrors).set({ resolvedAt: /* @__PURE__ */ new Date() }).where(and13(eq16(appErrors.id, id6), isNull10(appErrors.resolvedAt)));
+  await db.update(appErrors).set({ resolvedAt: /* @__PURE__ */ new Date() }).where(and13(eq16(appErrors.id, id7), isNull10(appErrors.resolvedAt)));
 }
 var clientReport = z.object({
   message: z.string().min(1).max(2e3),
@@ -6910,10 +6935,10 @@ async function getPlanByCode(code) {
   const rows = await db.select().from(subscriptionPlans).where(eq18(subscriptionPlans.code, code)).limit(1);
   return rows[0];
 }
-async function getPlanById(id6) {
+async function getPlanById(id7) {
   const db = await getDb();
   if (!db) return void 0;
-  const rows = await db.select().from(subscriptionPlans).where(eq18(subscriptionPlans.id, id6)).limit(1);
+  const rows = await db.select().from(subscriptionPlans).where(eq18(subscriptionPlans.id, id7)).limit(1);
   return rows[0];
 }
 async function upsertPlan(input, options = {}) {
@@ -6932,11 +6957,11 @@ async function listAllPlans() {
   if (!db) return [];
   return db.select().from(subscriptionPlans).orderBy(subscriptionPlans.code);
 }
-async function updatePlanPricing(id6, patch) {
+async function updatePlanPricing(id7, patch) {
   const db = await getDb();
   if (!db) return void 0;
-  await db.update(subscriptionPlans).set({ ...patch.price !== void 0 ? { price: patch.price } : {}, ...patch.trialDays !== void 0 ? { trialDays: patch.trialDays } : {}, ...patch.isActive !== void 0 ? { isActive: patch.isActive ? 1 : 0 } : {} }).where(eq18(subscriptionPlans.id, id6));
-  return getPlanById(id6);
+  await db.update(subscriptionPlans).set({ ...patch.price !== void 0 ? { price: patch.price } : {}, ...patch.trialDays !== void 0 ? { trialDays: patch.trialDays } : {}, ...patch.isActive !== void 0 ? { isActive: patch.isActive ? 1 : 0 } : {} }).where(eq18(subscriptionPlans.id, id7));
+  return getPlanById(id7);
 }
 async function getSubscriptionByUserId(userId, track) {
   const db = await getDb();
@@ -7026,10 +7051,10 @@ async function recordEventReceived(input) {
     return rows[0]?.id ?? null;
   }
 }
-async function markEventProcessed(id6, status, errorMessage) {
+async function markEventProcessed(id7, status, errorMessage) {
   const db = await getDb();
   if (!db) return;
-  await db.update(paymentEvents).set({ status, processedAt: /* @__PURE__ */ new Date(), errorMessage: errorMessage ?? null }).where(eq18(paymentEvents.id, id6));
+  await db.update(paymentEvents).set({ status, processedAt: /* @__PURE__ */ new Date(), errorMessage: errorMessage ?? null }).where(eq18(paymentEvents.id, id7));
 }
 async function writeAuditLog(input) {
   const db = await getDb();
@@ -7290,7 +7315,7 @@ function registerWebhookRoutes(app2) {
 }
 
 // server/routers.ts
-import { TRPCError as TRPCError18 } from "@trpc/server";
+import { TRPCError as TRPCError19 } from "@trpc/server";
 
 // server/_core/systemRouter.ts
 import { z as z2 } from "zod";
@@ -7947,7 +7972,7 @@ function validateDataUrl(dataUrl, declaredMimeType) {
 }
 
 // server/routers.ts
-import { z as z28 } from "zod";
+import { z as z30 } from "zod";
 
 // server/routers/topics.ts
 import { z as z3 } from "zod";
@@ -8165,11 +8190,11 @@ var CURRICULUM_SLUGS = new Set(CURRICULUM.map((def) => def.slug));
 function resolveToCurriculumTopicIds(row, topics) {
   const idBySlug = new Map(topics.map((topic) => [topic.slug, topic.id]));
   if (CURRICULUM_SLUGS.has(row.slug)) {
-    const id6 = idBySlug.get(row.slug);
-    return id6 === void 0 ? [] : [id6];
+    const id7 = idBySlug.get(row.slug);
+    return id7 === void 0 ? [] : [id7];
   }
   const linked = EXAM_TOPIC_LINKS.get(examTopicKey(row.topic));
-  if (linked) return Array.from(new Set(linked.map((def) => idBySlug.get(def.slug)).filter((id6) => id6 !== void 0)));
+  if (linked) return Array.from(new Set(linked.map((def) => idBySlug.get(def.slug)).filter((id7) => id7 !== void 0)));
   const curriculumTopics = topics.filter((topic) => CURRICULUM_SLUGS.has(topic.slug));
   const subjects = curriculumSubjectsFor(row.subject, row.category);
   const parts = [row.topic, ...row.topic.split(/[,()]/).map((part) => part.trim()).filter((part) => part.length >= 4)];
@@ -8190,16 +8215,16 @@ function deriveCurriculumWeakTopics(rows, topics) {
   for (const row of rows) {
     if (row.insufficientData) continue;
     const at = row.lastReviewedAt ? new Date(row.lastReviewedAt).getTime() : 0;
-    for (const id6 of resolveToCurriculumTopicIds(row, topics)) signals.set(id6, [...signals.get(id6) ?? [], { accuracy: row.progress, at }]);
+    for (const id7 of resolveToCurriculumTopicIds(row, topics)) signals.set(id7, [...signals.get(id7) ?? [], { accuracy: row.progress, at }]);
   }
   const weak = [];
-  for (const [id6, list] of Array.from(signals)) {
+  for (const [id7, list] of Array.from(signals)) {
     const latestDay = Math.floor(Math.max(...list.map((signal) => signal.at)) / DAY_MS8);
     const latest = list.filter((signal) => Math.floor(signal.at / DAY_MS8) === latestDay);
     const accuracy = Math.round(latest.reduce((sum, signal) => sum + signal.accuracy, 0) / latest.length);
-    const topic = topicById.get(id6);
+    const topic = topicById.get(id7);
     if (!topic || accuracy >= bookContentConfig.allocation.reviewMaxAccuracy) continue;
-    weak.push({ topicId: id6, topic: topic.topic, subject: topic.subject, exam: topic.exam, accuracy });
+    weak.push({ topicId: id7, topic: topic.topic, subject: topic.subject, exam: topic.exam, accuracy });
   }
   return weak;
 }
@@ -8226,10 +8251,10 @@ async function userOwnsBook(userId, bookId) {
 }
 async function replaceBookContents(userId, bookId, subject2, items, source) {
   const db = await requireDb7();
-  const topicIds = Array.from(new Set(items.map((item) => item.topicId).filter((id6) => id6 !== null)));
+  const topicIds = Array.from(new Set(items.map((item) => item.topicId).filter((id7) => id7 !== null)));
   const validTopics = topicIds.length ? await db.select().from(yksTopics).where(inArray9(yksTopics.id, topicIds)) : [];
   const topicById = new Map(validTopics.map((row) => [row.id, row]));
-  const unknown = topicIds.filter((id6) => !topicById.has(id6));
+  const unknown = topicIds.filter((id7) => !topicById.has(id7));
   if (unknown.length) throw new Error("Ge\xE7ersiz m\xFCfredat konusu se\xE7ildi. Sayfay\u0131 yenileyip tekrar dener misin?");
   const mixed = (type) => type === "review" || type === "simulation";
   const rows = items.map((item, index2) => ({
@@ -8275,7 +8300,7 @@ async function replaceBookContents(userId, bookId, subject2, items, source) {
 async function getBookContents(userId, bookId) {
   const db = await requireDb7();
   const rows = await db.select().from(userBookContents).where(and17(eq20(userBookContents.userId, userId), eq20(userBookContents.bookId, bookId))).orderBy(userBookContents.sortOrder);
-  const topicIds = Array.from(new Set(rows.map((row) => row.topicId).filter((id6) => id6 !== null)));
+  const topicIds = Array.from(new Set(rows.map((row) => row.topicId).filter((id7) => id7 !== null)));
   const topics = topicIds.length ? await db.select({ id: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject, unit: yksTopics.unit }).from(yksTopics).where(inArray9(yksTopics.id, topicIds)) : [];
   const topicById = new Map(topics.map((row) => [row.id, row]));
   return rows.map((row) => ({ ...row, mappingConfidence: Number(row.mappingConfidence), topic: row.topicId !== null ? topicById.get(row.topicId) ?? null : null }));
@@ -8295,7 +8320,7 @@ async function getBookContentSummaries(userId) {
     return {
       bookId,
       entries: contents.length,
-      topicIds: Array.from(new Set(contents.map((row) => row.topicId).filter((id6) => id6 !== null))),
+      topicIds: Array.from(new Set(contents.map((row) => row.topicId).filter((id7) => id7 !== null))),
       completion: computeBookCompletion({ contents, logs: logs.filter((log) => log.bookId === bookId), pageCount: pageCountByBook.get(bookId) ?? null })
     };
   });
@@ -8513,7 +8538,7 @@ function asAddedBook(row, sharedBookId) {
   return { id: row.bookId, title: row.title, publisher: row.publisher, subject: row.subject, exam: row.exam, level: row.level, format: row.format, reason: row.reason, sourceUrl: row.sourceUrl ?? "", tone: row.tone, authors: row.authors ?? void 0, isbn: row.isbn ?? void 0, sharedBookId };
 }
 async function shareBookContents(userId, bookId, subject2, items, source) {
-  const topicCount = new Set(items.map((item) => item.topicId).filter((id6) => id6 !== null)).size;
+  const topicCount = new Set(items.map((item) => item.topicId).filter((id7) => id7 !== null)).size;
   if (items.length < SHARED_CONTENTS_MIN_ITEMS || topicCount === 0) return false;
   const db = await requireDb8();
   const [own] = await db.select({ sharedBookId: userResourceBooks.sharedBookId }).from(userResourceBooks).where(and18(eq21(userResourceBooks.userId, userId), eq21(userResourceBooks.bookId, bookId))).limit(1);
@@ -10105,7 +10130,7 @@ var bookContentRouter = router({
   topicOptions: protectedProcedure.input(z4.object({ subject: z4.string().max(80).nullable().optional() }).optional()).query(async ({ ctx, input }) => {
     const topics = await getMatchableTopicsFor(ctx.user.id);
     const subject2 = input?.subject?.trim();
-    return topics.filter((topic) => !subject2 || topic.subject === subject2).map(({ id: id6, exam, subject: topicSubject, unit, topic }) => ({ id: id6, exam, subject: topicSubject, unit, topic })).sort((a, b) => a.exam.localeCompare(b.exam) || a.subject.localeCompare(b.subject, "tr") || a.unit.localeCompare(b.unit, "tr") || a.topic.localeCompare(b.topic, "tr"));
+    return topics.filter((topic) => !subject2 || topic.subject === subject2).map(({ id: id7, exam, subject: topicSubject, unit, topic }) => ({ id: id7, exam, subject: topicSubject, unit, topic })).sort((a, b) => a.exam.localeCompare(b.exam) || a.subject.localeCompare(b.subject, "tr") || a.unit.localeCompare(b.unit, "tr") || a.topic.localeCompare(b.topic, "tr"));
   }),
   // Öğrencinin onayladığı içerik (OCR'dan ya da tamamen elle).
   save: protectedProcedure.input(z4.object({
@@ -10609,7 +10634,7 @@ async function prepare(db, input) {
   };
 }
 async function withTopics(db, rows) {
-  const ids = Array.from(new Set(rows.map((row) => row.topicId).filter((id6) => id6 !== null)));
+  const ids = Array.from(new Set(rows.map((row) => row.topicId).filter((id7) => id7 !== null)));
   const topics = ids.length ? await db.select({ id: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject }).from(yksTopics).where(inArray10(yksTopics.id, ids)) : [];
   const byId = new Map(topics.map((row) => [row.id, row]));
   return rows.map((row) => toPost(row, row.topicId !== null ? byId.get(row.topicId) ?? null : null));
@@ -10621,22 +10646,22 @@ async function createWallPost(userId, input) {
   await getAttachmentStorage().syncWallPostLinks(userId, row.id, referencedAttachmentIds(input.content));
   return (await withTopics(db, [row]))[0];
 }
-async function updateWallPost(userId, id6, input) {
+async function updateWallPost(userId, id7, input) {
   const db = await requireDb9();
   const values = await prepare(db, input);
-  const [row] = await db.update(wallPosts).set({ ...values, ...values.readLater ? {} : { readAt: null } }).where(and20(eq23(wallPosts.id, id6), eq23(wallPosts.userId, userId))).returning();
+  const [row] = await db.update(wallPosts).set({ ...values, ...values.readLater ? {} : { readAt: null } }).where(and20(eq23(wallPosts.id, id7), eq23(wallPosts.userId, userId))).returning();
   if (!row) throw new WallError("Kay\u0131t bulunamad\u0131.");
   await getAttachmentStorage().syncWallPostLinks(userId, row.id, referencedAttachmentIds(input.content));
   return (await withTopics(db, [row]))[0];
 }
-async function deleteWallPost(userId, id6) {
+async function deleteWallPost(userId, id7) {
   const db = await requireDb9();
-  const [row] = await db.delete(wallPosts).where(and20(eq23(wallPosts.id, id6), eq23(wallPosts.userId, userId))).returning({ id: wallPosts.id });
+  const [row] = await db.delete(wallPosts).where(and20(eq23(wallPosts.id, id7), eq23(wallPosts.userId, userId))).returning({ id: wallPosts.id });
   if (!row) return false;
-  await getAttachmentStorage().deleteForWallPost(userId, id6);
+  await getAttachmentStorage().deleteForWallPost(userId, id7);
   return true;
 }
-async function setWallPostFlags(userId, id6, flags) {
+async function setWallPostFlags(userId, id7, flags) {
   const db = await requireDb9();
   const set = {};
   if (flags.read !== void 0) set.readAt = flags.read ? /* @__PURE__ */ new Date() : null;
@@ -10646,7 +10671,7 @@ async function setWallPostFlags(userId, id6, flags) {
     if (flags.readLater) set.readAt = null;
   }
   if (!Object.keys(set).length) return true;
-  const rows = await db.update(wallPosts).set(set).where(and20(eq23(wallPosts.id, id6), eq23(wallPosts.userId, userId))).returning({ id: wallPosts.id });
+  const rows = await db.update(wallPosts).set(set).where(and20(eq23(wallPosts.id, id7), eq23(wallPosts.userId, userId))).returning({ id: wallPosts.id });
   return rows.length > 0;
 }
 async function listWallPosts(userId, options = {}) {
@@ -10666,9 +10691,9 @@ async function listWallPosts(userId, options = {}) {
   const last = page2.at(-1);
   return { posts: await withTopics(db, page2), nextCursor: rows.length > limit && last ? { postedAt: last.postedAt, id: last.id } : null };
 }
-async function getWallPost(userId, id6) {
+async function getWallPost(userId, id7) {
   const db = await requireDb9();
-  const [row] = await db.select().from(wallPosts).where(and20(eq23(wallPosts.id, id6), eq23(wallPosts.userId, userId))).limit(1);
+  const [row] = await db.select().from(wallPosts).where(and20(eq23(wallPosts.id, id7), eq23(wallPosts.userId, userId))).limit(1);
   return row ? (await withTopics(db, [row]))[0] : null;
 }
 async function wallSummary(userId) {
@@ -11348,11 +11373,11 @@ function parseScheduleImport(raw, track = "YKS") {
   const blocks = [];
   for (const item of Array.isArray(value.lessons) ? value.lessons : []) {
     const lesson = item ?? {};
-    const day = Number(lesson.day);
+    const day2 = Number(lesson.day);
     const periodIndex = Number(lesson.period) - 1;
     const period = periods[periodIndex];
-    const key = `${day}-${periodIndex}`;
-    if (!Number.isInteger(day) || day < 1 || day > 7 || !period || seen.has(key)) {
+    const key = `${day2}-${periodIndex}`;
+    if (!Number.isInteger(day2) || day2 < 1 || day2 > 7 || !period || seen.has(key)) {
       skipped += 1;
       continue;
     }
@@ -11366,7 +11391,7 @@ function parseScheduleImport(raw, track = "YKS") {
     const byName = classifyLesson(name || code, track);
     const fromModel = examSubjects.includes(lesson.subject) ? lesson.subject : null;
     const subject2 = byName.known ? byName.subject : fromModel;
-    blocks.push({ source: "school", dayOfWeek: day, startTime: period.start, endTime: period.end, subject: subject2, label: subject2 && !/SE[ÇC]MEL[İI]|HTDE/i.test(name) ? subject2 : lessonLabel(name, code, subject2) });
+    blocks.push({ source: "school", dayOfWeek: day2, startTime: period.start, endTime: period.end, subject: subject2, label: subject2 && !/SE[ÇC]MEL[İI]|HTDE/i.test(name) ? subject2 : lessonLabel(name, code, subject2) });
   }
   return { periods, blocks, skipped };
 }
@@ -11506,7 +11531,7 @@ async function addReadingBook(userId, input) {
   const [row] = await db.select(columns).from(readingBooks).where(and21(eq24(readingBooks.id, Number(result[0].id)), eq24(readingBooks.userId, userId))).limit(1);
   return row;
 }
-async function updateReadingBook(userId, id6, patch) {
+async function updateReadingBook(userId, id7, patch) {
   const db = await getDb();
   if (!db) throw new ReadingError("Veritaban\u0131na ula\u015F\u0131lamad\u0131.");
   const values = {};
@@ -11515,23 +11540,23 @@ async function updateReadingBook(userId, id6, patch) {
     values.status = patch.status;
     values.finishedAt = patch.status === "finished" ? /* @__PURE__ */ new Date() : null;
   }
-  if (Object.keys(values).length) await db.update(readingBooks).set(values).where(and21(eq24(readingBooks.id, id6), eq24(readingBooks.userId, userId)));
-  const [row] = await db.select(columns).from(readingBooks).where(and21(eq24(readingBooks.id, id6), eq24(readingBooks.userId, userId))).limit(1);
+  if (Object.keys(values).length) await db.update(readingBooks).set(values).where(and21(eq24(readingBooks.id, id7), eq24(readingBooks.userId, userId)));
+  const [row] = await db.select(columns).from(readingBooks).where(and21(eq24(readingBooks.id, id7), eq24(readingBooks.userId, userId))).limit(1);
   if (!row) throw new ReadingError("Kitap bulunamad\u0131.");
   return row;
 }
-async function removeReadingBook(userId, id6) {
+async function removeReadingBook(userId, id7) {
   const db = await getDb();
   if (!db) return;
-  await db.delete(readingBooks).where(and21(eq24(readingBooks.id, id6), eq24(readingBooks.userId, userId)));
+  await db.delete(readingBooks).where(and21(eq24(readingBooks.id, id7), eq24(readingBooks.userId, userId)));
 }
-async function recordReadingPages(userId, id6, pages2) {
+async function recordReadingPages(userId, id7, pages2) {
   const db = await getDb();
   if (!db) return null;
-  const [book] = await db.select(columns).from(readingBooks).where(and21(eq24(readingBooks.id, id6), eq24(readingBooks.userId, userId))).limit(1);
+  const [book] = await db.select(columns).from(readingBooks).where(and21(eq24(readingBooks.id, id7), eq24(readingBooks.userId, userId))).limit(1);
   if (!book) return null;
   const next = applyReadingProgress(book, pages2);
-  await db.update(readingBooks).set({ pagesRead: next.pagesRead, status: next.status, ...next.justFinished ? { finishedAt: /* @__PURE__ */ new Date() } : {} }).where(and21(eq24(readingBooks.id, id6), eq24(readingBooks.userId, userId)));
+  await db.update(readingBooks).set({ pagesRead: next.pagesRead, status: next.status, ...next.justFinished ? { finishedAt: /* @__PURE__ */ new Date() } : {} }).where(and21(eq24(readingBooks.id, id7), eq24(readingBooks.userId, userId)));
   return { ...book, pagesRead: next.pagesRead, status: next.status, justFinished: next.justFinished };
 }
 
@@ -11958,9 +11983,9 @@ var orgRouter = router({
       await assertCanViewStudent(ctx, input.studentUserId);
       const start = toMinutes(input.time);
       if (start + input.minutes > 23 * 60 + 30) throw new TRPCError11({ code: "BAD_REQUEST", message: "G\xF6rev 23:30'dan \xF6nce bitmeli." });
-      const day = /* @__PURE__ */ new Date(`${input.date}T12:00:00`);
-      const [schedule, courseBlocks, sessions] = await Promise.all([getClassSchedule(input.studentUserId), getCourseBlocks(input.studentUserId), listPlannedSessionsOn(input.studentUserId, day)]);
-      const busy = busyOn(day, { blocks: schedule.blocks, courseBlocks, sessions });
+      const day2 = /* @__PURE__ */ new Date(`${input.date}T12:00:00`);
+      const [schedule, courseBlocks, sessions] = await Promise.all([getClassSchedule(input.studentUserId), getCourseBlocks(input.studentUserId), listPlannedSessionsOn(input.studentUserId, day2)]);
+      const busy = busyOn(day2, { blocks: schedule.blocks, courseBlocks, sessions });
       const conflict = findTaskConflict(busy, start, input.minutes);
       if (conflict) {
         const suggestion = suggestStart(busy, input.minutes, { from: start });
@@ -12066,8 +12091,8 @@ var adminOrgsRouter = router({
   }),
   setMembership: adminProcedure.input(z13.object({ orgId: id4, plan: z13.enum(ORG_PLANS), startsAt: z13.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), endsAt: z13.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), aiCreditsMonthly: z13.number().int().min(0).max(1e7) })).mutation(async ({ input }) => {
     if (input.startsAt && input.endsAt && input.endsAt < input.startsAt) throw new TRPCError11({ code: "BAD_REQUEST", message: "Biti\u015F tarihi ba\u015Flang\u0131\xE7tan \xF6nce olamaz." });
-    const day = (value) => value ? /* @__PURE__ */ new Date(`${value}T00:00:00`) : null;
-    await updateOrgMembership(input.orgId, { plan: input.plan, membershipStartsAt: day(input.startsAt), membershipEndsAt: day(input.endsAt), aiCreditsMonthly: input.aiCreditsMonthly });
+    const day2 = (value) => value ? /* @__PURE__ */ new Date(`${value}T00:00:00`) : null;
+    await updateOrgMembership(input.orgId, { plan: input.plan, membershipStartsAt: day2(input.startsAt), membershipEndsAt: day2(input.endsAt), aiCreditsMonthly: input.aiCreditsMonthly });
     return { ok: true };
   }),
   create: adminProcedure.input(z13.object({ name: z13.string().trim().min(2).max(160), slug: z13.string().trim().regex(/^[a-z0-9-]{3,80}$/, "K\u0131sa ad k\xFC\xE7\xFCk harf, rakam ve tire i\xE7ermeli.") })).mutation(({ ctx, input }) => userFacing4(async () => {
@@ -12350,7 +12375,7 @@ async function listCatalogBooks(filters, page2) {
       return true;
     });
   }
-  const publisherIds = Array.from(new Set(rows.map((r) => r.publisherId).filter((id6) => id6 !== null)));
+  const publisherIds = Array.from(new Set(rows.map((r) => r.publisherId).filter((id7) => id7 !== null)));
   const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray11(publishers.id, publisherIds)) : [];
   const publisherNameById = new Map(publisherRows.map((p) => [p.id, p.name]));
   const bookIds = rows.map((r) => r.id);
@@ -12390,7 +12415,7 @@ async function listCatalogBooksForAdmin(filters, page2) {
   const [{ count: count4 }] = await (where ? countQuery.where(where) : countQuery);
   const rowsQuery = db.select().from(catalogBooks).orderBy(desc16(catalogBooks.createdAt)).limit(pageSize).offset(offset);
   const rows = await (where ? rowsQuery.where(where) : rowsQuery);
-  const publisherIds = Array.from(new Set(rows.map((r) => r.publisherId).filter((id6) => id6 !== null)));
+  const publisherIds = Array.from(new Set(rows.map((r) => r.publisherId).filter((id7) => id7 !== null)));
   const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray11(publishers.id, publisherIds)) : [];
   const publisherNameById = new Map(publisherRows.map((p) => [p.id, p.name]));
   const items = rows.map((row) => ({
@@ -12471,13 +12496,13 @@ async function listMyLibraryCatalogBooks(userId) {
   const db = await getDb();
   if (!db) return [];
   const inventoryRows = await db.select().from(bookInventory).where(and22(eq25(bookInventory.userId, userId), isNull15(bookInventory.removedAt)));
-  const numericIds = Array.from(new Set(inventoryRows.map((row) => row.bookId).filter((id6) => /^\d+$/.test(id6)).map(Number)));
+  const numericIds = Array.from(new Set(inventoryRows.map((row) => row.bookId).filter((id7) => /^\d+$/.test(id7)).map(Number)));
   if (numericIds.length === 0) return [];
   const [books, topicRows] = await Promise.all([
     db.select().from(catalogBooks).where(inArray11(catalogBooks.id, numericIds)),
     db.select({ bookId: bookCurriculumTopics.bookId, topicId: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject, isVerified: bookCurriculumTopics.isVerified, confidence: bookCurriculumTopics.confidence }).from(bookCurriculumTopics).innerJoin(yksTopics, eq25(bookCurriculumTopics.topicId, yksTopics.id)).where(inArray11(bookCurriculumTopics.bookId, numericIds))
   ]);
-  const publisherIds = Array.from(new Set(books.map((b) => b.publisherId).filter((id6) => id6 !== null)));
+  const publisherIds = Array.from(new Set(books.map((b) => b.publisherId).filter((id7) => id7 !== null)));
   const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray11(publishers.id, publisherIds)) : [];
   const publisherNameById = new Map(publisherRows.map((p) => [p.id, p.name]));
   const topicsByBook = /* @__PURE__ */ new Map();
@@ -12667,8 +12692,8 @@ var catalogDb = {
     const db = await getDb();
     if (!db) throw new Error("Database not available");
     const result = await db.insert(publishers).values(input).returning({ id: publishers.id });
-    const id6 = Number(result[0].id);
-    return { id: id6, ...input };
+    const id7 = Number(result[0].id);
+    return { id: id7, ...input };
   },
   async findExternalSource(source, sourceProductId) {
     const db = await getDb();
@@ -12699,13 +12724,13 @@ var catalogDb = {
       return { id: existing[0].id, source: row.source, sourceProductId: row.sourceProductId, matchedBookId: existing[0].matchedBookId, syncStatus: existing[0].syncStatus };
     }
     const result = await db.insert(externalBookSources).values(values).returning({ id: externalBookSources.id });
-    const id6 = Number(result[0].id);
-    return { id: id6, source: row.source, sourceProductId: row.sourceProductId, matchedBookId: null, syncStatus: "pending" };
+    const id7 = Number(result[0].id);
+    return { id: id7, source: row.source, sourceProductId: row.sourceProductId, matchedBookId: null, syncStatus: "pending" };
   },
-  async markExternalSourceOutcome(id6, patch) {
+  async markExternalSourceOutcome(id7, patch) {
     const db = await getDb();
     if (!db) return;
-    await db.update(externalBookSources).set({ matchedBookId: patch.matchedBookId, syncStatus: patch.syncStatus, lastSyncedAt: /* @__PURE__ */ new Date(), errorMessage: patch.errorMessage ?? null }).where(eq26(externalBookSources.id, id6));
+    await db.update(externalBookSources).set({ matchedBookId: patch.matchedBookId, syncStatus: patch.syncStatus, lastSyncedAt: /* @__PURE__ */ new Date(), errorMessage: patch.errorMessage ?? null }).where(eq26(externalBookSources.id, id7));
   },
   async findCatalogBookByIsbn(isbn) {
     const db = await getDb();
@@ -12719,10 +12744,10 @@ var catalogDb = {
     const rows = await db.select().from(catalogBooks).where(eq26(catalogBooks.publisherId, publisherId));
     return rows.map((row) => ({ id: row.id, isbn: row.isbn, publisherId: row.publisherId, name: row.name, editionYear: row.editionYear }));
   },
-  async getCatalogBookById(id6) {
+  async getCatalogBookById(id7) {
     const db = await getDb();
     if (!db) return null;
-    const rows = await db.select().from(catalogBooks).where(eq26(catalogBooks.id, id6)).limit(1);
+    const rows = await db.select().from(catalogBooks).where(eq26(catalogBooks.id, id7)).limit(1);
     return rows[0] ? toCatalogBookRow(rows[0]) : null;
   },
   async createCatalogBook(input) {
@@ -12741,12 +12766,12 @@ var catalogDb = {
       subject: input.subject,
       metadata: input.metadata ? JSON.stringify(input.metadata) : null
     }).returning({ id: catalogBooks.id });
-    const id6 = Number(result[0].id);
-    const row = await this.getCatalogBookById(id6);
+    const id7 = Number(result[0].id);
+    const row = await this.getCatalogBookById(id7);
     if (!row) throw new Error("Failed to read back created catalog book");
     return row;
   },
-  async updateCatalogBook(id6, patch) {
+  async updateCatalogBook(id7, patch) {
     const db = await getDb();
     if (!db) throw new Error("Database not available");
     const values = {};
@@ -12761,13 +12786,13 @@ var catalogDb = {
     if (patch.subject !== void 0) values.subject = patch.subject;
     if (patch.metadata !== void 0) values.metadata = patch.metadata ? JSON.stringify(patch.metadata) : null;
     if (Object.keys(values).length > 0) {
-      await db.update(catalogBooks).set(values).where(eq26(catalogBooks.id, id6));
+      await db.update(catalogBooks).set(values).where(eq26(catalogBooks.id, id7));
     }
-    const row = await this.getCatalogBookById(id6);
-    if (!row) throw new Error(`Catalog book ${id6} not found after update`);
+    const row = await this.getCatalogBookById(id7);
+    if (!row) throw new Error(`Catalog book ${id7} not found after update`);
     return row;
   },
-  async updateCatalogBookDifficulty(id6, patch) {
+  async updateCatalogBookDifficulty(id7, patch) {
     const db = await getDb();
     if (!db) return;
     await db.update(catalogBooks).set({
@@ -12777,7 +12802,7 @@ var catalogDb = {
       classificationMethod: patch.classificationMethod,
       needsReview: patch.needsReview ? 1 : 0,
       classifiedAt: patch.classifiedAt
-    }).where(eq26(catalogBooks.id, id6));
+    }).where(eq26(catalogBooks.id, id7));
   },
   async upsertBookOffer(input) {
     const db = await getDb();
@@ -12813,8 +12838,8 @@ var catalogDb = {
     const result = await db.insert(resourceCatalogSyncLogs).values({ source: input.source, startedAt: input.startedAt, dryRun: input.dryRun ? 1 : 0, triggeredBy: input.triggeredBy }).returning({ id: resourceCatalogSyncLogs.id });
     return { id: Number(result[0].id) };
   },
-  async finishSyncLog(id6, patch) {
-    if (id6 < 0) return;
+  async finishSyncLog(id7, patch) {
+    if (id7 < 0) return;
     const db = await getDb();
     if (!db) return;
     await db.update(resourceCatalogSyncLogs).set({
@@ -12827,7 +12852,7 @@ var catalogDb = {
       needsReview: patch.needsReview,
       statsJson: patch.statsJson,
       errorLog: patch.errorLog
-    }).where(eq26(resourceCatalogSyncLogs.id, id6));
+    }).where(eq26(resourceCatalogSyncLogs.id, id7));
   }
 };
 async function listResourceCatalogSyncLogs(limit = 20) {
@@ -13806,10 +13831,10 @@ async function listTestimonialsForAdmin(status) {
   if (!db) return [];
   return db.select({ id: testimonials.id, displayName: testimonials.displayName, detail: testimonials.detail, rating: testimonials.rating, body: testimonials.body, status: testimonials.status, updatedAt: testimonials.updatedAt, userId: testimonials.userId, userName: users.name, userEmail: users.email }).from(testimonials).leftJoin(users, eq29(users.id, testimonials.userId)).where(eq29(testimonials.status, status)).orderBy(desc17(testimonials.updatedAt)).limit(200);
 }
-async function reviewTestimonial(id6, status, reviewerId) {
+async function reviewTestimonial(id7, status, reviewerId) {
   const db = await getDb();
   if (!db) return;
-  await db.update(testimonials).set({ status, reviewedAt: /* @__PURE__ */ new Date(), reviewedBy: reviewerId }).where(eq29(testimonials.id, id6));
+  await db.update(testimonials).set({ status, reviewedAt: /* @__PURE__ */ new Date(), reviewedBy: reviewerId }).where(eq29(testimonials.id, id7));
 }
 
 // server/routers/admin/testimonials.ts
@@ -14052,7 +14077,7 @@ async function getUserDetailForAdmin(userId) {
     return map;
   }, /* @__PURE__ */ new Map()).values());
   const bookIds = bookContents.map((book) => book.bookId);
-  const numericIds = bookIds.filter((id6) => /^\d+$/.test(id6)).map(Number);
+  const numericIds = bookIds.filter((id7) => /^\d+$/.test(id7)).map(Number);
   const [customTitles, catalogTitles] = bookIds.length ? await Promise.all([
     db.select({ bookId: userResourceBooks.bookId, title: userResourceBooks.title }).from(userResourceBooks).where(and27(eq31(userResourceBooks.userId, userId), inArray13(userResourceBooks.bookId, bookIds))),
     numericIds.length ? db.select({ id: catalogBooks.id, name: catalogBooks.name }).from(catalogBooks).where(inArray13(catalogBooks.id, numericIds)) : Promise.resolve([])
@@ -14107,6 +14132,145 @@ var adminUsersRouter = router({
   verifyEmail: adminProcedure.input(z26.object({ userId: z26.number().int() })).mutation(({ ctx, input }) => verifyUserEmailManually(input.userId, ctx.user.id))
 });
 
+// server/routers/admin/quotes.ts
+import { TRPCError as TRPCError18 } from "@trpc/server";
+import { z as z28 } from "zod";
+
+// shared/orgQuote.ts
+import { z as z27 } from "zod";
+var QUOTE_STATUSES = ["draft", "sent", "accepted", "rejected"];
+var quoteLineSchema = z27.object({
+  description: z27.string().trim().min(1).max(200),
+  quantity: z27.number().int().min(1).max(1e5),
+  unitPriceTry: z27.number().int().min(0).max(1e8)
+});
+function computeQuoteTotals(lines, discountPercent, vatRate) {
+  const subtotal = lines.reduce((sum, line) => sum + line.quantity * line.unitPriceTry, 0);
+  const discount = Math.round(subtotal * Math.min(100, Math.max(0, discountPercent)) / 100);
+  const net = subtotal - discount;
+  const vat = Math.round(net * Math.max(0, vatRate) / 100);
+  return { subtotal, discount, net, vat, total: net + vat };
+}
+var quoteNumber = (id7, createdAt) => `T-${new Date(createdAt).getFullYear()}-${String(id7).padStart(4, "0")}`;
+
+// server/org/quoteDb.ts
+import { desc as desc19, eq as eq32 } from "drizzle-orm";
+async function requireDb11() {
+  const db = await getDb();
+  if (!db) throw new Error("Veritaban\u0131na ula\u015F\u0131lamad\u0131.");
+  return db;
+}
+var parseLines = (json) => {
+  try {
+    return quoteLineSchema.array().parse(JSON.parse(json));
+  } catch {
+    return [];
+  }
+};
+var toRow = (input) => {
+  const totals = computeQuoteTotals(input.lines, input.discountPercent, input.vatRate);
+  const { lines, ...rest } = input;
+  return { ...rest, linesJson: JSON.stringify(lines), subtotalTry: totals.subtotal, totalTry: totals.total };
+};
+async function listQuotes() {
+  const db = await requireDb11();
+  return db.select({ id: orgQuotes.id, orgId: orgQuotes.orgId, orgName: organizations.name, customerName: orgQuotes.customerName, plan: orgQuotes.plan, months: orgQuotes.months, totalTry: orgQuotes.totalTry, status: orgQuotes.status, validUntil: orgQuotes.validUntil, appliedAt: orgQuotes.appliedAt, createdAt: orgQuotes.createdAt, updatedAt: orgQuotes.updatedAt }).from(orgQuotes).leftJoin(organizations, eq32(organizations.id, orgQuotes.orgId)).orderBy(desc19(orgQuotes.createdAt));
+}
+async function getQuote(id7) {
+  const db = await requireDb11();
+  const [row] = await db.select({ quote: orgQuotes, orgName: organizations.name, createdByName: users.name, createdByEmail: users.email }).from(orgQuotes).leftJoin(organizations, eq32(organizations.id, orgQuotes.orgId)).leftJoin(users, eq32(users.id, orgQuotes.createdByUserId)).where(eq32(orgQuotes.id, id7)).limit(1);
+  if (!row) return null;
+  const { linesJson, ...quote } = row.quote;
+  const lines = parseLines(linesJson);
+  return { ...quote, lines, totals: computeQuoteTotals(lines, quote.discountPercent, quote.vatRate), orgName: row.orgName, createdByName: row.createdByName, createdByEmail: row.createdByEmail };
+}
+async function createQuote(input, createdByUserId) {
+  const db = await requireDb11();
+  const [row] = await db.insert(orgQuotes).values({ ...toRow(input), createdByUserId }).returning({ id: orgQuotes.id });
+  return row.id;
+}
+async function updateQuote(id7, input) {
+  const db = await requireDb11();
+  await db.update(orgQuotes).set(toRow(input)).where(eq32(orgQuotes.id, id7));
+}
+async function setQuoteStatus(id7, status) {
+  const db = await requireDb11();
+  await db.update(orgQuotes).set({ status }).where(eq32(orgQuotes.id, id7));
+}
+async function markQuoteApplied(id7) {
+  const db = await requireDb11();
+  await db.update(orgQuotes).set({ appliedAt: /* @__PURE__ */ new Date() }).where(eq32(orgQuotes.id, id7));
+}
+async function deleteQuote(id7) {
+  const db = await requireDb11();
+  await db.delete(orgQuotes).where(eq32(orgQuotes.id, id7));
+}
+
+// server/routers/admin/quotes.ts
+var id6 = z28.number().int().positive();
+var day = z28.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+var quoteInput = z28.object({
+  orgId: id6.nullable(),
+  customerName: z28.string().trim().min(2).max(160),
+  contactName: z28.string().trim().max(120).nullable(),
+  contactEmail: z28.string().trim().email().max(160).nullable(),
+  plan: z28.enum(ORG_PLANS),
+  months: z28.number().int().min(1).max(60),
+  studentCount: z28.number().int().min(1).max(1e5).nullable(),
+  lines: z28.array(quoteLineSchema).min(1).max(30),
+  discountPercent: z28.number().int().min(0).max(100),
+  vatRate: z28.number().int().min(0).max(30),
+  validUntil: day.nullable(),
+  note: z28.string().trim().max(2e3).nullable()
+});
+async function requireQuote(quoteId) {
+  const quote = await getQuote(quoteId);
+  if (!quote) throw new TRPCError18({ code: "NOT_FOUND", message: "Teklif bulunamad\u0131." });
+  return quote;
+}
+var adminQuotesRouter = router({
+  list: adminProcedure.query(() => listQuotes()),
+  get: adminProcedure.input(z28.object({ id: id6 })).query(({ input }) => requireQuote(input.id)),
+  save: adminProcedure.input(quoteInput.extend({ id: id6.optional() })).mutation(async ({ ctx, input }) => {
+    if (input.orgId && !await getOrganization(input.orgId)) throw new TRPCError18({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+    const { id: quoteId, validUntil, ...rest } = input;
+    const values = { ...rest, contactName: rest.contactName || null, contactEmail: rest.contactEmail || null, note: rest.note || null, validUntil: validUntil ? /* @__PURE__ */ new Date(`${validUntil}T23:59:59`) : null };
+    if (!quoteId) return { id: await createQuote(values, ctx.user.id) };
+    const current = await requireQuote(quoteId);
+    if (current.status === "accepted" || current.status === "rejected") throw new TRPCError18({ code: "BAD_REQUEST", message: "Sonu\xE7lanm\u0131\u015F teklif de\u011Fi\u015Ftirilemez; kopyalay\u0131p yenisini haz\u0131rla." });
+    await updateQuote(quoteId, values);
+    return { id: quoteId };
+  }),
+  setStatus: adminProcedure.input(z28.object({ id: id6, status: z28.enum(QUOTE_STATUSES) })).mutation(async ({ ctx, input }) => {
+    const quote = await requireQuote(input.id);
+    if (quote.appliedAt) throw new TRPCError18({ code: "BAD_REQUEST", message: "Kuruma uygulanm\u0131\u015F teklifin durumu de\u011Fi\u015Fmez." });
+    await setQuoteStatus(input.id, input.status);
+    if (quote.orgId) await writeAudit({ orgId: quote.orgId, actorUserId: ctx.user.id, action: "platform.quote_status", targetType: "quote", targetId: input.id, metadata: { status: input.status, number: quoteNumber(quote.id, quote.createdAt) } });
+    return { ok: true };
+  }),
+  /** Kabul edilen teklifi bağlı kurumun üyeliğine uygular (bir kez). */
+  applyToOrg: adminProcedure.input(z28.object({ id: id6 })).mutation(async ({ ctx, input }) => {
+    const quote = await requireQuote(input.id);
+    if (quote.status !== "accepted") throw new TRPCError18({ code: "BAD_REQUEST", message: "\xD6nce teklifi kabul edildi olarak i\u015Faretle." });
+    if (quote.appliedAt) throw new TRPCError18({ code: "CONFLICT", message: "Bu teklif kuruma zaten uyguland\u0131." });
+    if (!quote.orgId) throw new TRPCError18({ code: "BAD_REQUEST", message: "Teklif bir kuruma ba\u011Fl\u0131 de\u011Fil; \xF6nce kurumu olu\u015Fturup teklife ba\u011Fla." });
+    const org = await getOrganization(quote.orgId);
+    if (!org) throw new TRPCError18({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+    const now = /* @__PURE__ */ new Date();
+    const expired = membershipState(org, now) !== "active";
+    await updateOrgMembership(org.id, { plan: quote.plan, membershipStartsAt: expired || !org.membershipStartsAt ? now : org.membershipStartsAt, membershipEndsAt: renewedMembershipEnd(expired ? null : org.membershipEndsAt, now, quote.months), aiCreditsMonthly: Math.max(org.aiCreditsMonthly, ORG_PLAN_DEFAULT_CREDITS[quote.plan]) });
+    await markQuoteApplied(quote.id);
+    await writeAudit({ orgId: org.id, actorUserId: ctx.user.id, action: "platform.quote_applied", targetType: "quote", targetId: quote.id, metadata: { plan: ORG_PLAN_LABELS[quote.plan], months: quote.months, number: quoteNumber(quote.id, quote.createdAt) } });
+    return { ok: true };
+  }),
+  delete: adminProcedure.input(z28.object({ id: id6 })).mutation(async ({ input }) => {
+    const quote = await requireQuote(input.id);
+    if (quote.status !== "draft") throw new TRPCError18({ code: "BAD_REQUEST", message: "Yaln\u0131zca taslak teklif silinebilir." });
+    await deleteQuote(input.id);
+    return { ok: true };
+  })
+});
+
 // server/routers/admin/index.ts
 var adminRouter = router({
   users: adminUsersRouter,
@@ -14117,22 +14281,23 @@ var adminRouter = router({
   payments: adminPaymentsRouter,
   system: adminSystemRouter,
   orgs: adminOrgsRouter,
+  quotes: adminQuotesRouter,
   errors: adminErrorsRouter,
   testimonials: adminTestimonialsRouter
 });
 
 // server/routers/testimonials.ts
-import { z as z27 } from "zod";
+import { z as z29 } from "zod";
 
 // shared/testimonials.ts
 var TESTIMONIAL_LIMITS = { displayName: 60, detail: 80, bodyMin: 20, body: 600 };
 
 // server/routers/testimonials.ts
-var testimonialInput = z27.object({
-  displayName: z27.string().trim().min(2, "G\xF6r\xFCnecek ad\u0131n\u0131 yaz.").max(TESTIMONIAL_LIMITS.displayName),
-  detail: z27.string().trim().max(TESTIMONIAL_LIMITS.detail).optional(),
-  rating: z27.number().int().min(1).max(5),
-  body: z27.string().trim().min(TESTIMONIAL_LIMITS.bodyMin, `Yorumun en az ${TESTIMONIAL_LIMITS.bodyMin} karakter olmal\u0131.`).max(TESTIMONIAL_LIMITS.body)
+var testimonialInput = z29.object({
+  displayName: z29.string().trim().min(2, "G\xF6r\xFCnecek ad\u0131n\u0131 yaz.").max(TESTIMONIAL_LIMITS.displayName),
+  detail: z29.string().trim().max(TESTIMONIAL_LIMITS.detail).optional(),
+  rating: z29.number().int().min(1).max(5),
+  body: z29.string().trim().min(TESTIMONIAL_LIMITS.bodyMin, `Yorumun en az ${TESTIMONIAL_LIMITS.bodyMin} karakter olmal\u0131.`).max(TESTIMONIAL_LIMITS.body)
 });
 var testimonialsRouter = router({
   published: publicProcedure.query(() => listPublishedTestimonials()),
@@ -14145,73 +14310,73 @@ var testimonialsRouter = router({
 });
 
 // server/routers.ts
-var planInput2 = z28.object({
-  topics: z28.array(z28.object({
-    topic: z28.string(),
-    subject: z28.string(),
-    exam: z28.enum(EXAM_KINDS),
-    progress: z28.number(),
-    status: z28.enum(["Zay\u0131f", "Orta", "\u0130yi"])
+var planInput2 = z30.object({
+  topics: z30.array(z30.object({
+    topic: z30.string(),
+    subject: z30.string(),
+    exam: z30.enum(EXAM_KINDS),
+    progress: z30.number(),
+    status: z30.enum(["Zay\u0131f", "Orta", "\u0130yi"])
   })).max(50),
-  exams: z28.array(z28.object({
-    title: z28.string(),
-    date: z28.string(),
-    net: z28.number(),
-    subjects: z28.record(z28.string(), z28.number()),
-    topicDetails: z28.array(z28.object({
-      subject: z28.string(),
-      topic: z28.string(),
-      questionCount: z28.number(),
-      correct: z28.number(),
-      wrong: z28.number(),
-      blank: z28.number(),
-      accuracy: z28.number(),
-      net: z28.number()
+  exams: z30.array(z30.object({
+    title: z30.string(),
+    date: z30.string(),
+    net: z30.number(),
+    subjects: z30.record(z30.string(), z30.number()),
+    topicDetails: z30.array(z30.object({
+      subject: z30.string(),
+      topic: z30.string(),
+      questionCount: z30.number(),
+      correct: z30.number(),
+      wrong: z30.number(),
+      blank: z30.number(),
+      accuracy: z30.number(),
+      net: z30.number()
     })).optional()
   })).max(10),
-  books: z28.array(z28.object({
-    id: z28.string(),
-    title: z28.string(),
-    subject: z28.string(),
-    exam: z28.enum(EXAM_KINDS),
-    level: z28.enum(["Kolay", "Orta", "Zor"]),
-    pageCount: z28.number().optional(),
-    totalQuestions: z28.number().optional(),
-    accuracy: z28.number().optional(),
-    activeDays: z28.number().optional(),
-    mappings: z28.array(z28.object({ topic: z28.string(), pageStart: z28.number().optional(), pageEnd: z28.number().optional(), testStart: z28.number().optional(), testEnd: z28.number().optional() })).max(50).optional()
+  books: z30.array(z30.object({
+    id: z30.string(),
+    title: z30.string(),
+    subject: z30.string(),
+    exam: z30.enum(EXAM_KINDS),
+    level: z30.enum(["Kolay", "Orta", "Zor"]),
+    pageCount: z30.number().optional(),
+    totalQuestions: z30.number().optional(),
+    accuracy: z30.number().optional(),
+    activeDays: z30.number().optional(),
+    mappings: z30.array(z30.object({ topic: z30.string(), pageStart: z30.number().optional(), pageEnd: z30.number().optional(), testStart: z30.number().optional(), testEnd: z30.number().optional() })).max(50).optional()
   })).max(30).default([]),
-  availableMinutes: z28.number().min(120).max(2400).default(600),
+  availableMinutes: z30.number().min(120).max(2400).default(600),
   // Öğrencinin yerel "bugün"ü (YYYY-MM-DD): plan bugünden başlayan 7 günü kapsar.
-  startDate: z28.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  goal: z28.string().max(120).default("YKS 2027"),
+  startDate: z30.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  goal: z30.string().max(120).default("YKS 2027"),
   // Onboarding'den gelen koçluk bağlamı — tamamen isteğe bağlı, eski
   // istemciler (veya onboarding'i henüz tamamlamamış kullanıcılar) bu alanı
   // hiç göndermeyebilir.
-  studentProfile: z28.object({
+  studentProfile: z30.object({
     // Hedef bilgileri — onboarding'in "Kullanıcı tanımlama" ve "Hedefler"
     // adımlarından. AI planı önceliklendirirken (örn. hedef net/sıralamaya
     // göre tempo) ve dilini kişiselleştirirken kullanır.
-    targetScoreType: z28.string().max(20).optional(),
-    examYear: z28.number().int().optional(),
-    targetUniversity: z28.string().max(180).optional(),
-    targetDepartment: z28.string().max(180).optional(),
-    targetRanking: z28.string().max(60).optional(),
-    dailyStudyDuration: z28.number().int().min(0).max(960).optional(),
-    preferredStudyMethods: z28.array(z28.string().max(40)).max(5).optional(),
-    studyObstacles: z28.string().max(500).optional(),
-    coachingStyle: z28.string().max(40).optional(),
-    mainGoal: z28.string().max(500).optional()
+    targetScoreType: z30.string().max(20).optional(),
+    examYear: z30.number().int().optional(),
+    targetUniversity: z30.string().max(180).optional(),
+    targetDepartment: z30.string().max(180).optional(),
+    targetRanking: z30.string().max(60).optional(),
+    dailyStudyDuration: z30.number().int().min(0).max(960).optional(),
+    preferredStudyMethods: z30.array(z30.string().max(40)).max(5).optional(),
+    studyObstacles: z30.string().max(500).optional(),
+    coachingStyle: z30.string().max(40).optional(),
+    mainGoal: z30.string().max(500).optional()
   }).optional()
 });
-var documentExtractionInput = z28.object({
-  dataUrl: z28.string().min(20).max(12e6),
-  mimeType: z28.enum(["application/pdf", "image/png", "image/jpeg", "image/webp"]),
-  fileName: z28.string().max(180).optional()
+var documentExtractionInput = z30.object({
+  dataUrl: z30.string().min(20).max(12e6),
+  mimeType: z30.enum(["application/pdf", "image/png", "image/jpeg", "image/webp"]),
+  fileName: z30.string().max(180).optional()
 });
-var bookPhotoInput = z28.object({
-  dataUrl: z28.string().min(20).max(12e6),
-  mimeType: z28.enum(["image/png", "image/jpeg", "image/webp"])
+var bookPhotoInput = z30.object({
+  dataUrl: z30.string().min(20).max(12e6),
+  mimeType: z30.enum(["image/png", "image/jpeg", "image/webp"])
 });
 var bookPhotoSchema = {
   type: "object",
@@ -14237,18 +14402,18 @@ var bookPhotoSchema = {
   additionalProperties: false
 };
 var clamp013 = (value) => typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
-var userExamInput = z28.object({
-  title: z28.string().min(1).max(180),
-  exam: z28.enum(EXAM_KINDS),
-  date: z28.string().min(8).max(30),
-  net: z28.number().min(-100).max(200),
-  delta: z28.number().min(-200).max(200),
-  subjects: z28.record(z28.string(), z28.number().min(-50).max(100)),
-  timeSpent: z28.record(z28.string(), z28.number().int().min(0).max(1e3)),
-  topicNets: z28.record(z28.string(), z28.number().min(-50).max(100)),
-  topicDetails: z28.array(z28.object({ subject: z28.string(), topic: z28.string(), questionCount: z28.number().int().min(0), correct: z28.number().int().min(0), wrong: z28.number().int().min(0), blank: z28.number().int().min(0), accuracy: z28.number().min(0).max(100), net: z28.number().min(-50).max(100) })).max(300),
-  importedFrom: z28.enum(["manual", "ocr", "pdf", "csv", "xlsx"]),
-  notes: z28.string().max(5e3).optional()
+var userExamInput = z30.object({
+  title: z30.string().min(1).max(180),
+  exam: z30.enum(EXAM_KINDS),
+  date: z30.string().min(8).max(30),
+  net: z30.number().min(-100).max(200),
+  delta: z30.number().min(-200).max(200),
+  subjects: z30.record(z30.string(), z30.number().min(-50).max(100)),
+  timeSpent: z30.record(z30.string(), z30.number().int().min(0).max(1e3)),
+  topicNets: z30.record(z30.string(), z30.number().min(-50).max(100)),
+  topicDetails: z30.array(z30.object({ subject: z30.string(), topic: z30.string(), questionCount: z30.number().int().min(0), correct: z30.number().int().min(0), wrong: z30.number().int().min(0), blank: z30.number().int().min(0), accuracy: z30.number().min(0).max(100), net: z30.number().min(-50).max(100) })).max(300),
+  importedFrom: z30.enum(["manual", "ocr", "pdf", "csv", "xlsx"]),
+  notes: z30.string().max(5e3).optional()
 });
 var documentExtractionSchema = {
   type: "object",
@@ -14314,17 +14479,17 @@ var appRouter = router({
     }),
     // Profil menüsündeki "Şifre değiştir". Tahmin denemelerine karşı kullanıcı
     // başına 15 dakikada 5 deneme.
-    changePassword: protectedProcedure.input(z28.object({ currentPassword: z28.string().min(1).max(200), newPassword: z28.string().min(1).max(200) })).mutation(async ({ ctx, input }) => {
+    changePassword: protectedProcedure.input(z30.object({ currentPassword: z30.string().min(1).max(200), newPassword: z30.string().min(1).max(200) })).mutation(async ({ ctx, input }) => {
       try {
         checkRateLimit(`change-password:${ctx.user.id}`, 5, 15 * 6e4);
       } catch {
-        throw new TRPCError18({ code: "TOO_MANY_REQUESTS", message: "\xC7ok fazla deneme yapt\u0131n. 15 dakika sonra tekrar dener misin?" });
+        throw new TRPCError19({ code: "TOO_MANY_REQUESTS", message: "\xC7ok fazla deneme yapt\u0131n. 15 dakika sonra tekrar dener misin?" });
       }
       try {
         await changeLocalPassword(ctx.user.id, input.currentPassword, input.newPassword);
         return { success: true };
       } catch (error) {
-        if (error instanceof PasswordChangeError) throw new TRPCError18({ code: "BAD_REQUEST", message: error.message });
+        if (error instanceof PasswordChangeError) throw new TRPCError19({ code: "BAD_REQUEST", message: error.message });
         throw error;
       }
     }),
@@ -14335,7 +14500,7 @@ var appRouter = router({
         return await sendVerificationEmail(ctx.user, ctx.req);
       } catch (error) {
         console.error("[EmailVerification] resend failed:", error instanceof Error ? error.message : error);
-        throw new TRPCError18({ code: "INTERNAL_SERVER_ERROR", message: "Do\u011Frulama maili \u015Fu an g\xF6nderilemedi. Birka\xE7 dakika sonra tekrar dener misin?" });
+        throw new TRPCError19({ code: "INTERNAL_SERVER_ERROR", message: "Do\u011Frulama maili \u015Fu an g\xF6nderilemedi. Birka\xE7 dakika sonra tekrar dener misin?" });
       }
     })
   }),
@@ -14350,20 +14515,20 @@ var appRouter = router({
       ]);
       return { inventory, logs, mappings, switches, customBooks };
     }),
-    addBook: protectedProcedure.input(z28.object({ bookId: z28.string().max(120) })).mutation(({ ctx, input }) => addBookToInventory(ctx.user.id, input.bookId)),
-    removeBook: protectedProcedure.input(z28.object({ bookId: z28.string().max(120) })).mutation(({ ctx, input }) => removeBookFromInventory(ctx.user.id, input.bookId)),
-    addLog: protectedProcedure.input(z28.object({ bookId: z28.string().max(120), topic: z28.string().max(180).optional(), sessionDate: z28.string(), minutes: z28.number().int().min(0).max(1440), questions: z28.number().int().min(0).max(2e3), correct: z28.number().int().min(0).max(2e3), wrong: z28.number().int().min(0).max(2e3), blank: z28.number().int().min(0).max(2e3), pageStart: z28.number().int().min(0).optional(), pageEnd: z28.number().int().min(0).optional(), testStart: z28.number().int().min(0).optional(), testEnd: z28.number().int().min(0).optional() })).mutation(({ ctx, input }) => addBookStudyLog(ctx.user.id, { ...input, sessionDate: new Date(input.sessionDate) })),
-    upsertMapping: protectedProcedure.input(z28.object({ bookId: z28.string().max(120), topic: z28.string().max(180), subject: z28.string().max(80), pageStart: z28.number().int().min(0).optional(), pageEnd: z28.number().int().min(0).optional(), testStart: z28.number().int().min(0).optional(), testEnd: z28.number().int().min(0).optional() })).mutation(({ ctx, input }) => upsertBookTopicMapping(ctx.user.id, input)),
-    addSwitch: protectedProcedure.input(z28.object({ fromBookId: z28.string().max(120).optional(), toBookId: z28.string().max(120), reason: z28.string().max(300) })).mutation(({ ctx, input }) => addSourceSwitch(ctx.user.id, { ...input, switchedAt: /* @__PURE__ */ new Date() })),
-    importBooks: protectedProcedure.input(z28.object({ books: z28.array(z28.object({ id: z28.string().max(120), title: z28.string().min(1).max(180), publisher: z28.string().max(120), subject: z28.string().max(80), exam: z28.enum(EXAM_KINDS), level: z28.enum(["Kolay", "Orta", "Zor"]), format: z28.string().max(120), reason: z28.string().max(1e3), sourceUrl: z28.string().max(500).optional(), pageCount: z28.number().int().min(0).optional(), tone: z28.string().max(20), authors: z28.string().max(300).optional(), isbn: z28.string().max(32).optional() })).min(1).max(500) })).mutation(({ ctx, input }) => addUserResourceBooks(ctx.user.id, input.books)),
+    addBook: protectedProcedure.input(z30.object({ bookId: z30.string().max(120) })).mutation(({ ctx, input }) => addBookToInventory(ctx.user.id, input.bookId)),
+    removeBook: protectedProcedure.input(z30.object({ bookId: z30.string().max(120) })).mutation(({ ctx, input }) => removeBookFromInventory(ctx.user.id, input.bookId)),
+    addLog: protectedProcedure.input(z30.object({ bookId: z30.string().max(120), topic: z30.string().max(180).optional(), sessionDate: z30.string(), minutes: z30.number().int().min(0).max(1440), questions: z30.number().int().min(0).max(2e3), correct: z30.number().int().min(0).max(2e3), wrong: z30.number().int().min(0).max(2e3), blank: z30.number().int().min(0).max(2e3), pageStart: z30.number().int().min(0).optional(), pageEnd: z30.number().int().min(0).optional(), testStart: z30.number().int().min(0).optional(), testEnd: z30.number().int().min(0).optional() })).mutation(({ ctx, input }) => addBookStudyLog(ctx.user.id, { ...input, sessionDate: new Date(input.sessionDate) })),
+    upsertMapping: protectedProcedure.input(z30.object({ bookId: z30.string().max(120), topic: z30.string().max(180), subject: z30.string().max(80), pageStart: z30.number().int().min(0).optional(), pageEnd: z30.number().int().min(0).optional(), testStart: z30.number().int().min(0).optional(), testEnd: z30.number().int().min(0).optional() })).mutation(({ ctx, input }) => upsertBookTopicMapping(ctx.user.id, input)),
+    addSwitch: protectedProcedure.input(z30.object({ fromBookId: z30.string().max(120).optional(), toBookId: z30.string().max(120), reason: z30.string().max(300) })).mutation(({ ctx, input }) => addSourceSwitch(ctx.user.id, { ...input, switchedAt: /* @__PURE__ */ new Date() })),
+    importBooks: protectedProcedure.input(z30.object({ books: z30.array(z30.object({ id: z30.string().max(120), title: z30.string().min(1).max(180), publisher: z30.string().max(120), subject: z30.string().max(80), exam: z30.enum(EXAM_KINDS), level: z30.enum(["Kolay", "Orta", "Zor"]), format: z30.string().max(120), reason: z30.string().max(1e3), sourceUrl: z30.string().max(500).optional(), pageCount: z30.number().int().min(0).optional(), tone: z30.string().max(20), authors: z30.string().max(300).optional(), isbn: z30.string().max(32).optional() })).min(1).max(500) })).mutation(({ ctx, input }) => addUserResourceBooks(ctx.user.id, input.books)),
     // Ortak kitap kaydında ad/yayınevi/ISBN ile arama: kitap kayıtlıysa kapak fotoğrafı (OCR) gerekmez.
-    searchSharedBooks: protectedProcedure.input(z28.object({ q: z28.string().trim().min(2).max(120) })).query(({ input }) => searchSharedBooks(input.q)),
+    searchSharedBooks: protectedProcedure.input(z30.object({ q: z30.string().trim().min(2).max(120) })).query(({ input }) => searchSharedBooks(input.q)),
     // Kitabı kütüphaneye ekler ve ortak kayda bağlar; öğrenci "Bu kitap" dediyse (sharedBookId)
     // onaylanmış içindekiler de kopyalanır, içindekiler fotoğrafı okunmaz.
-    addBookFromCover: protectedProcedure.input(z28.object({
-      sharedBookId: z28.number().int().positive().nullable(),
-      useSharedContents: z28.boolean(),
-      draft: z28.object({ title: z28.string().trim().min(1).max(180), publisher: z28.string().max(120), subject: z28.string().max(80), exam: z28.enum(EXAM_KINDS), level: z28.enum(["Kolay", "Orta", "Zor"]), authors: z28.string().max(300).optional(), isbn: z28.string().max(32).optional(), edition: z28.string().max(120).optional() })
+    addBookFromCover: protectedProcedure.input(z30.object({
+      sharedBookId: z30.number().int().positive().nullable(),
+      useSharedContents: z30.boolean(),
+      draft: z30.object({ title: z30.string().trim().min(1).max(180), publisher: z30.string().max(120), subject: z30.string().max(80), exam: z30.enum(EXAM_KINDS), level: z30.enum(["Kolay", "Orta", "Zor"]), authors: z30.string().max(300).optional(), isbn: z30.string().max(32).optional(), edition: z30.string().max(120).optional() })
     })).mutation(({ ctx, input }) => addBookToLibrary(ctx.user.id, input)),
     // Öğrenci elindeki fiziksel kitabın kapak fotoğrafını çeker (telefon
     // kamerası); LLM görselden kitap adı/yayınevi/ders tahmini çıkarır.
@@ -14408,23 +14573,23 @@ var appRouter = router({
   }),
   exams: router({
     snapshot: protectedProcedure.query(({ ctx }) => getUserMockExams(ctx.user.id)),
-    importMany: protectedProcedure.input(z28.object({ exams: z28.array(userExamInput).min(1).max(200) })).mutation(({ ctx, input }) => addUserMockExams(ctx.user.id, input.exams.map((exam) => ({ ...exam, examDate: new Date(exam.date) }))))
+    importMany: protectedProcedure.input(z30.object({ exams: z30.array(userExamInput).min(1).max(200) })).mutation(({ ctx, input }) => addUserMockExams(ctx.user.id, input.exams.map((exam) => ({ ...exam, examDate: new Date(exam.date) }))))
   }),
   calendar: router({
     snapshot: protectedProcedure.query(({ ctx }) => getStudyCalendar(ctx.user.id)),
-    savePlan: protectedProcedure.input(z28.object({ title: z28.string().max(180), weekStart: z28.string(), weekEnd: z28.string(), summary: z28.string().max(2e3), source: z28.enum(["ai", "manual"]).optional(), replacePrevious: z28.boolean().optional(), sessions: z28.array(z28.object({ sessionDate: z28.string(), title: z28.string().max(180), subject: z28.string().max(80), topic: z28.string().max(180), kind: z28.string().max(40), plannedMinutes: z28.number().int().min(0).max(1440), targetQuestions: z28.number().int().min(0).optional(), targetPages: z28.string().max(80).nullable().optional(), targetTests: z28.string().max(80).nullable().optional() })).max(100) })).mutation(({ ctx, input }) => saveStudyPlan(ctx.user.id, { ...input, weekStart: new Date(input.weekStart), weekEnd: new Date(input.weekEnd), sessions: input.sessions.map((session) => ({ ...session, sessionDate: new Date(session.sessionDate) })) })),
-    completeSession: protectedProcedure.input(z28.object({ sessionId: z28.number().int(), actualMinutes: z28.number().int().min(0).max(1440), actualQuestions: z28.number().int().min(0).max(5e3), correct: z28.number().int().min(0).max(5e3), wrong: z28.number().int().min(0).max(5e3), blank: z28.number().int().min(0).max(5e3), actualPages: z28.number().int().min(0).max(5e3).optional(), note: z28.string().max(1e3).optional() })).mutation(({ ctx, input }) => completeStudySession(ctx.user.id, input)),
-    coachSnapshot: protectedProcedure.input(z28.object({ periodStart: z28.string(), periodEnd: z28.string() })).query(async ({ ctx, input }) => {
+    savePlan: protectedProcedure.input(z30.object({ title: z30.string().max(180), weekStart: z30.string(), weekEnd: z30.string(), summary: z30.string().max(2e3), source: z30.enum(["ai", "manual"]).optional(), replacePrevious: z30.boolean().optional(), sessions: z30.array(z30.object({ sessionDate: z30.string(), title: z30.string().max(180), subject: z30.string().max(80), topic: z30.string().max(180), kind: z30.string().max(40), plannedMinutes: z30.number().int().min(0).max(1440), targetQuestions: z30.number().int().min(0).optional(), targetPages: z30.string().max(80).nullable().optional(), targetTests: z30.string().max(80).nullable().optional() })).max(100) })).mutation(({ ctx, input }) => saveStudyPlan(ctx.user.id, { ...input, weekStart: new Date(input.weekStart), weekEnd: new Date(input.weekEnd), sessions: input.sessions.map((session) => ({ ...session, sessionDate: new Date(session.sessionDate) })) })),
+    completeSession: protectedProcedure.input(z30.object({ sessionId: z30.number().int(), actualMinutes: z30.number().int().min(0).max(1440), actualQuestions: z30.number().int().min(0).max(5e3), correct: z30.number().int().min(0).max(5e3), wrong: z30.number().int().min(0).max(5e3), blank: z30.number().int().min(0).max(5e3), actualPages: z30.number().int().min(0).max(5e3).optional(), note: z30.string().max(1e3).optional() })).mutation(({ ctx, input }) => completeStudySession(ctx.user.id, input)),
+    coachSnapshot: protectedProcedure.input(z30.object({ periodStart: z30.string(), periodEnd: z30.string() })).query(async ({ ctx, input }) => {
       const { sessions, averageAccuracy } = await getPlanAdherenceInputs(ctx.user.id, new Date(input.periodStart), new Date(input.periodEnd));
       return { ...calculatePlanAdherence(sessions, averageAccuracy), averageAccuracy, alerts: await getCoachAlerts(ctx.user.id) };
     }),
-    refreshCoach: protectedProcedure.input(z28.object({ periodStart: z28.string(), periodEnd: z28.string() })).mutation(({ ctx, input }) => savePlanAdherence(ctx.user.id, new Date(input.periodStart), new Date(input.periodEnd))),
+    refreshCoach: protectedProcedure.input(z30.object({ periodStart: z30.string(), periodEnd: z30.string() })).mutation(({ ctx, input }) => savePlanAdherence(ctx.user.id, new Date(input.periodStart), new Date(input.periodEnd))),
     // Üst çubuktaki bildirim zili: okunmamış koç uyarıları (yalnızca okuma; uyarıları refreshCoach üretir).
     alerts: protectedProcedure.query(({ ctx }) => getCoachAlerts(ctx.user.id)),
-    readCoachAlert: protectedProcedure.input(z28.object({ alertId: z28.number().int() })).mutation(({ ctx, input }) => markCoachAlertRead(ctx.user.id, input.alertId)),
-    addFocusLog: protectedProcedure.input(z28.object({ subject: z28.string().max(80), topic: z28.string().max(180), studyDate: z28.string(), minutes: z28.number().int().min(1).max(1440), questions: z28.number().int().min(0).max(5e3), correct: z28.number().int().min(0).max(5e3), wrong: z28.number().int().min(0).max(5e3), blank: z28.number().int().min(0).max(5e3), note: z28.string().max(1e3).optional() })).mutation(({ ctx, input }) => addTopicStudyLog(ctx.user.id, { ...input, studyDate: new Date(input.studyDate), note: input.note ?? null, sessionId: null })),
+    readCoachAlert: protectedProcedure.input(z30.object({ alertId: z30.number().int() })).mutation(({ ctx, input }) => markCoachAlertRead(ctx.user.id, input.alertId)),
+    addFocusLog: protectedProcedure.input(z30.object({ subject: z30.string().max(80), topic: z30.string().max(180), studyDate: z30.string(), minutes: z30.number().int().min(1).max(1440), questions: z30.number().int().min(0).max(5e3), correct: z30.number().int().min(0).max(5e3), wrong: z30.number().int().min(0).max(5e3), blank: z30.number().int().min(0).max(5e3), note: z30.string().max(1e3).optional() })).mutation(({ ctx, input }) => addTopicStudyLog(ctx.user.id, { ...input, studyDate: new Date(input.studyDate), note: input.note ?? null, sessionId: null })),
     // Paragraf pratiği / gece okuması gibi "şimdi yaptım" alışkanlık kayıtları.
-    logRoutine: protectedProcedure.input(z28.object({ title: z28.string().max(180), subject: z28.string().max(80), topic: z28.string().max(180), kind: z28.string().max(40), plannedMinutes: z28.number().int().min(0).max(1440), actualMinutes: z28.number().int().min(0).max(1440), actualPages: z28.number().int().min(0).max(5e3).optional(), note: z28.string().max(1e3).optional(), readingBookId: z28.number().int().positive().optional() })).mutation(async ({ ctx, input }) => {
+    logRoutine: protectedProcedure.input(z30.object({ title: z30.string().max(180), subject: z30.string().max(80), topic: z30.string().max(180), kind: z30.string().max(40), plannedMinutes: z30.number().int().min(0).max(1440), actualMinutes: z30.number().int().min(0).max(1440), actualPages: z30.number().int().min(0).max(5e3).optional(), note: z30.string().max(1e3).optional(), readingBookId: z30.number().int().positive().optional() })).mutation(async ({ ctx, input }) => {
       const { readingBookId, ...routine } = input;
       const calendar = await logCompletedRoutineSession(ctx.user.id, routine);
       const readingBook = readingBookId && input.actualPages ? await recordReadingPages(ctx.user.id, readingBookId, input.actualPages) : null;
@@ -14517,14 +14682,14 @@ ${JSON.stringify(input.books)}${targetContext}${chosenSubjectsContext}${coaching
         const normalized = normalizeAiPlan(parsed, fallbackPlan);
         if (normalized === fallbackPlan) {
           console.warn("[AI Plan] Unusable AI response; keys:", parsed && typeof parsed === "object" ? Object.keys(parsed).join(",") : typeof parsed);
-          throw new TRPCError18({ code: "INTERNAL_SERVER_ERROR", message: "AI plan\u0131 okunamad\u0131. Tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi." });
+          throw new TRPCError19({ code: "INTERNAL_SERVER_ERROR", message: "AI plan\u0131 okunamad\u0131. Tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi." });
         }
         return normalized;
       } catch (error) {
-        if (error instanceof TRPCError18) throw error;
+        if (error instanceof TRPCError19) throw error;
         console.warn("[AI Plan] LLM failed:", error);
         const quota = error instanceof LlmUnavailableError && error.reason === "quota";
-        throw new TRPCError18({
+        throw new TRPCError19({
           code: quota ? "TOO_MANY_REQUESTS" : "INTERNAL_SERVER_ERROR",
           message: quota ? "Yapay zek\xE2 servisinin kotas\u0131 \u015Fu an dolu; AI plan\u0131n\u0131 birka\xE7 saat sonra tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi." : "AI plan\u0131 \u015Fu an haz\u0131rlanamad\u0131; biraz sonra tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi."
         });
@@ -15190,9 +15355,9 @@ var HeuristicHtmlExtractor = class {
     const pattern = new RegExp(CATEGORY_LINK_PATTERN.source, "g");
     let match;
     while (match = pattern.exec(html)) {
-      const [, id6, url, rawTitle] = match;
-      if (seen.has(id6)) continue;
-      seen.add(id6);
+      const [, id7, url, rawTitle] = match;
+      if (seen.has(id7)) continue;
+      seen.add(id7);
       const title = decodeEntities(rawTitle).trim();
       if (isYksCategory(title, url)) links.push({ url, title });
     }
