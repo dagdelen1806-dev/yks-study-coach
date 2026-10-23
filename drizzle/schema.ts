@@ -692,6 +692,18 @@ export const counselingNotes = pgTable("counseling_notes", {
   orgStudentIdx: index("counseling_notes_org_student_idx").on(table.orgId, table.studentUserId),
 }));
 
+// Kurum paketlerinin liste fiyatları (platform yöneticisi → Paketler). Boşsa "fiyat için iletişime geçin";
+// kurumun gerçek paketi/süresi/kredisi `organizations` satırında, bu tablo yalnızca vitrin fiyatıdır.
+export const orgPlanPrices = pgTable("org_plan_prices", {
+  plan: varchar("plan", { length: 20 }).primaryKey(),
+  monthlyPriceTry: integer("monthlyPriceTry"),
+  yearlyPriceTry: integer("yearlyPriceTry"),
+  /** Fiyatın birimi / açıklaması (ör. "öğrenci başına, aylık"). */
+  priceNote: varchar("priceNote", { length: 160 }),
+  updatedByUserId: integer("updatedByUserId"),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => new Date()).notNull(),
+});
+
 // ---------------------------------------------------------------------------
 // Novara Rehber — akademik takip dosyası. Bir dosya bir öğrenci için açılan "akademik inceleme"dir:
 // kanıt (açılış anının anlık görüntüsü), öğretmen eylemleri (inceleme, görüşme, kaynak, plan) ve

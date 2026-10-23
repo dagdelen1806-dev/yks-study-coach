@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "wouter";
 import { toast } from "sonner";
 import { Copy, Loader2 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
@@ -14,8 +15,9 @@ const slugify = (value: string) => value.toLocaleLowerCase("tr-TR").replace(/ı/
 
 /**
  * Admin "Kurumlar": pilot dershaneyi oluştur, ilk kurum yöneticisinin tek kullanımlık
- * davet kodunu al (kod bir kez gösterilir), gerekirse askıya al. Kurumun içini
- * (öğrenciler, sınıflar) kurum yöneticisi /kurum panelinden yönetir.
+ * davet kodunu al (kod bir kez gösterilir), gerekirse askıya al. Kurum adına tıklayınca
+ * kurum detayı açılır (/yonetim/kurum/:id: personel, sınıflar, akademik takip); öğrencileri
+ * ve sınıfları kurum yöneticisi /kurum panelinden yönetir.
  */
 export default function AdminOrgsPage() {
   const utils = trpc.useUtils();
@@ -99,7 +101,7 @@ export default function AdminOrgsPage() {
             <tbody>
               {orgs.data.map((org) => (
                 <tr key={org.id} className="border-b border-rule last:border-0">
-                  <td className="px-4 py-3"><p className="font-semibold text-ink">{org.name}</p><p className="text-[11px] text-ink-4">{org.slug}</p></td>
+                  <td className="px-4 py-3"><Link href={`/yonetim/kurum/${org.id}`} className="font-semibold text-brand hover:underline">{org.name}</Link><p className="text-[11px] text-ink-4">{org.slug}</p></td>
                   <td className="px-4 py-3"><p className="font-semibold text-ink">{ORG_PLAN_LABELS[org.plan]}</p><p className={`text-[11px] ${org.membershipState === "active" ? "text-ink-4" : "font-bold text-danger"}`}>{trDay(org.membershipStartsAt)} → {trDay(org.membershipEndsAt)}{org.membershipState === "expired" ? " · süresi doldu" : org.membershipState === "not_started" ? " · başlamadı" : ""}</p></td>
                   <td className="px-4 py-3">{org.creditsUsed.toLocaleString("tr-TR")} / {org.aiCreditsMonthly.toLocaleString("tr-TR")}</td>
                   <td className="px-4 py-3">{org.students}</td>

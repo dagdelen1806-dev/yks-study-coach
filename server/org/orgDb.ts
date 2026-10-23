@@ -9,6 +9,7 @@ import {
   organizationMembers,
   organizationUpgradeRequests,
   organizations,
+  orgPlanPrices,
   studentProfiles,
   studyPlanSessions,
   studyPlans,
@@ -140,6 +141,55 @@ export async function endMembership(orgId: number, userId: number, status: "left
   if (classes.length) await db.delete(classStudents).where(and(eq(classStudents.studentUserId, userId), inArray(classStudents.classId, classes.map((row) => row.id))));
   await db.update(organizationClasses).set({ advisorUserId: null }).where(and(eq(organizationClasses.orgId, orgId), eq(organizationClasses.advisorUserId, userId)));
   await db.update(classTimetableSlots).set({ teacherUserId: null }).where(and(eq(classTimetableSlots.orgId, orgId), eq(classTimetableSlots.teacherUserId, userId)));
+}
+
+// --- Platform yöneticisi: kurumsal bağlar -------------------------------------
+
+/** Bir kullanıcının bütün kurum üyelikleri (ayrıldığı/çıkarıldığı dahil), en yeni önce. */
+export async function listUserOrgMemberships(userId: number) {
+  const db = await requireDb();
+  return db.select({ orgId: organizations.id, orgName: organizations.name, orgStatus: organizations.status, role: organizationMembers.role, status: organizationMembers.status, subject: organizationMembers.subject, joinedAt: organizationMembers.joinedAt, leftAt: organizationMembers.leftAt })
+    .from(organizationMembers).innerJoin(organizations, eq(organizations.id, organizationMembers.orgId))
+    .where(eq(organizationMembers.userId, userId)).orderBy(desc(organizationMembers.joinedAt));
+}
+
+/** E-postayla kayıtlı hesap (büyük/küçük harf duyarsız). */
+export async function findUserByEmail(email: string) {
+  const db = await requireDb();
+  const [row] = await db.select({ id: users.id, name: users.name, email: users.email }).from(users).where(sql`lower(${users.email}) = ${email.trim().toLocaleLowerCase("en-US")}`).limit(1);
+  return row ?? null;
+}
+
+/** Kurumun aktif yönetici (owner/admin) sayısı: son yönetici çıkarılamaz ya da düşürülemez. */
+export async function countActiveOrgAdmins(orgId: number): Promise<number> {
+  const db = await requireDb();
+  const [row] = await db.select({ count: sql<number>`count(*)::int` }).from(organizationMembers)
+    .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.status, "active"), inArray(organizationMembers.role, ["owner", "admin"])));
+  return Number(row?.count ?? 0);
+}
+
+/**
+ * Platform yöneticisi var olan bir hesabı kuruma PERSONEL olarak ekler (öğrenci değil: öğrenci KVKK
+ * onayıyla, davet koduyla kendisi katılır). Daha önce ayrılmışsa üyeliği yeniden etkinleşir.
+ */
+export async function addStaffMember(input: { orgId: number; userId: number; role: Exclude<OrgRole, "student">; subject: string | null; invitedBy: number }): Promise<void> {
+  const db = await requireDb();
+  const now = new Date();
+  await db.insert(organizationMembers).values({ orgId: input.orgId, userId: input.userId, role: input.role, status: "active", subject: input.subject, invitedBy: input.invitedBy, joinedAt: now })
+    .onConflictDoUpdate({ target: [organizationMembers.orgId, organizationMembers.userId], set: { role: input.role, status: "active", subject: input.subject, invitedBy: input.invitedBy, joinedAt: now, leftAt: null } });
+}
+
+/** Kurum paketlerinin liste fiyatları; tanımlanmamış paket boş döner. */
+export async function listOrgPlanPrices() {
+  const db = await requireDb();
+  const rows = await db.select().from(orgPlanPrices);
+  return new Map(rows.map((row) => [row.plan, row]));
+}
+
+export async function upsertOrgPlanPrice(input: { plan: OrgPlan; monthlyPriceTry: number | null; yearlyPriceTry: number | null; priceNote: string | null; updatedByUserId: number }): Promise<void> {
+  const db = await requireDb();
+  const values = { monthlyPriceTry: input.monthlyPriceTry, yearlyPriceTry: input.yearlyPriceTry, priceNote: input.priceNote, updatedByUserId: input.updatedByUserId };
+  await db.insert(orgPlanPrices).values({ plan: input.plan, ...values }).onConflictDoUpdate({ target: orgPlanPrices.plan, set: values });
 }
 
 // --- Davet ------------------------------------------------------------------
@@ -403,7 +453,7 @@ export type OrganizationProfile = { name: string; kind: OrgKind; city: string | 
 export async function getOrganization(orgId: number) {
   const db = await requireDb();
   const [row] = await db.select({
-    id: organizations.id, name: organizations.name, slug: organizations.slug, kind: organizations.kind, city: organizations.city, district: organizations.district, address: organizations.address, phone: organizations.phone, contactEmail: organizations.contactEmail, createdAt: organizations.createdAt,
+    id: organizations.id, name: organizations.name, slug: organizations.slug, status: organizations.status, kind: organizations.kind, city: organizations.city, district: organizations.district, address: organizations.address, phone: organizations.phone, contactEmail: organizations.contactEmail, createdAt: organizations.createdAt,
     plan: organizations.plan, membershipStartsAt: organizations.membershipStartsAt, membershipEndsAt: organizations.membershipEndsAt, aiCreditsMonthly: organizations.aiCreditsMonthly, perStudentCreditCap: organizations.perStudentCreditCap,
     kvkkNotice: organizations.kvkkNotice, kvkkConsent: organizations.kvkkConsent, kvkkVersion: organizations.kvkkVersion, kvkkUpdatedAt: organizations.kvkkUpdatedAt,
   }).from(organizations).where(eq(organizations.id, orgId)).limit(1);

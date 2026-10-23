@@ -994,6 +994,15 @@ var counselingNotes = pgTable("counseling_notes", {
 }, (table) => ({
   orgStudentIdx: index("counseling_notes_org_student_idx").on(table.orgId, table.studentUserId)
 }));
+var orgPlanPrices = pgTable("org_plan_prices", {
+  plan: varchar("plan", { length: 20 }).primaryKey(),
+  monthlyPriceTry: integer("monthlyPriceTry"),
+  yearlyPriceTry: integer("yearlyPriceTry"),
+  /** Fiyatın birimi / açıklaması (ör. "öğrenci başına, aylık"). */
+  priceNote: varchar("priceNote", { length: 160 }),
+  updatedByUserId: integer("updatedByUserId"),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull()
+});
 var academicCases = pgTable("academic_cases", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   orgId: integer("orgId").notNull(),
@@ -5319,6 +5328,35 @@ async function endMembership(orgId, userId, status) {
   await db.update(organizationClasses).set({ advisorUserId: null }).where(and7(eq9(organizationClasses.orgId, orgId), eq9(organizationClasses.advisorUserId, userId)));
   await db.update(classTimetableSlots).set({ teacherUserId: null }).where(and7(eq9(classTimetableSlots.orgId, orgId), eq9(classTimetableSlots.teacherUserId, userId)));
 }
+async function listUserOrgMemberships(userId) {
+  const db = await requireDb4();
+  return db.select({ orgId: organizations.id, orgName: organizations.name, orgStatus: organizations.status, role: organizationMembers.role, status: organizationMembers.status, subject: organizationMembers.subject, joinedAt: organizationMembers.joinedAt, leftAt: organizationMembers.leftAt }).from(organizationMembers).innerJoin(organizations, eq9(organizations.id, organizationMembers.orgId)).where(eq9(organizationMembers.userId, userId)).orderBy(desc4(organizationMembers.joinedAt));
+}
+async function findUserByEmail(email) {
+  const db = await requireDb4();
+  const [row] = await db.select({ id: users.id, name: users.name, email: users.email }).from(users).where(sql6`lower(${users.email}) = ${email.trim().toLocaleLowerCase("en-US")}`).limit(1);
+  return row ?? null;
+}
+async function countActiveOrgAdmins(orgId) {
+  const db = await requireDb4();
+  const [row] = await db.select({ count: sql6`count(*)::int` }).from(organizationMembers).where(and7(eq9(organizationMembers.orgId, orgId), eq9(organizationMembers.status, "active"), inArray5(organizationMembers.role, ["owner", "admin"])));
+  return Number(row?.count ?? 0);
+}
+async function addStaffMember(input) {
+  const db = await requireDb4();
+  const now = /* @__PURE__ */ new Date();
+  await db.insert(organizationMembers).values({ orgId: input.orgId, userId: input.userId, role: input.role, status: "active", subject: input.subject, invitedBy: input.invitedBy, joinedAt: now }).onConflictDoUpdate({ target: [organizationMembers.orgId, organizationMembers.userId], set: { role: input.role, status: "active", subject: input.subject, invitedBy: input.invitedBy, joinedAt: now, leftAt: null } });
+}
+async function listOrgPlanPrices() {
+  const db = await requireDb4();
+  const rows = await db.select().from(orgPlanPrices);
+  return new Map(rows.map((row) => [row.plan, row]));
+}
+async function upsertOrgPlanPrice(input) {
+  const db = await requireDb4();
+  const values = { monthlyPriceTry: input.monthlyPriceTry, yearlyPriceTry: input.yearlyPriceTry, priceNote: input.priceNote, updatedByUserId: input.updatedByUserId };
+  await db.insert(orgPlanPrices).values({ plan: input.plan, ...values }).onConflictDoUpdate({ target: orgPlanPrices.plan, set: values });
+}
 async function createInvitation(input) {
   const db = await requireDb4();
   const result = await db.insert(organizationInvitations).values(input).returning({ id: organizationInvitations.id });
@@ -5504,6 +5542,7 @@ async function getOrganization(orgId) {
     id: organizations.id,
     name: organizations.name,
     slug: organizations.slug,
+    status: organizations.status,
     kind: organizations.kind,
     city: organizations.city,
     district: organizations.district,
@@ -11789,6 +11828,11 @@ var orgRouter = router({
     }),
     /** Paket yükseltme / süre uzatma talebi: kurum yöneticisi gönderir, platform yöneticisi onaylar. Süresi dolmuş kurumda da açık. */
     upgrades: orgProcedure("admin").query(({ ctx }) => listOrgUpgradeRequests(ctx.membership.orgId)),
+    // Paket kartlarında gösterilen liste fiyatları (platform yöneticisi belirler; boşsa "iletişime geçin").
+    planPrices: orgProcedure("admin", { allowInactive: true }).query(async () => {
+      const prices = await listOrgPlanPrices();
+      return Object.fromEntries(ORG_PLANS.map((plan) => [plan, { monthlyPriceTry: prices.get(plan)?.monthlyPriceTry ?? null, yearlyPriceTry: prices.get(plan)?.yearlyPriceTry ?? null, priceNote: prices.get(plan)?.priceNote ?? null }]));
+    }),
     requestUpgrade: orgProcedure("admin", { allowInactive: true }).input(z13.object({ plan: z13.enum(ORG_PLANS), note: z13.string().trim().max(300).optional() })).mutation(({ ctx, input }) => userFacing4(async () => {
       const org = await getOrganization(ctx.membership.orgId);
       if (!org) throw new TRPCError11({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
@@ -12046,6 +12090,61 @@ var adminOrgsRouter = router({
   }),
   setStatus: adminProcedure.input(z13.object({ orgId: id4, status: z13.enum(["active", "suspended"]) })).mutation(async ({ input }) => {
     await setOrganizationStatus(input.orgId, input.status);
+    return { ok: true };
+  }),
+  // --- Kurum detayı (Yönetim Paneli → Kurumlar → kurum) ---
+  get: adminProcedure.input(z13.object({ orgId: id4 })).query(async ({ input }) => {
+    const org = await getOrganization(input.orgId);
+    if (!org) throw new TRPCError11({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+    const [members, classes, used, casesEnabled] = await Promise.all([listMembers(input.orgId), listClasses(input.orgId), creditsUsedThisMonth([input.orgId]), isCasesEnabled(input.orgId)]);
+    return {
+      org: { ...org, membershipState: membershipState(org), creditsUsed: used.get(input.orgId) ?? 0, academicCasesEnabled: casesEnabled },
+      members: members.map((member) => ({ userId: member.userId, name: member.name, email: member.email, role: member.role, subject: member.subject, joinedAt: member.joinedAt, lastSignedIn: member.lastSignedIn })),
+      classes: classes.map((item) => ({ id: item.id, name: item.name, students: item.studentUserIds.length, advisorUserId: item.advisorUserId }))
+    };
+  }),
+  /** Var olan bir hesabı e-postasıyla kuruma personel olarak ekler (öğrenci kendi onayıyla, davet koduyla katılır). */
+  addStaff: adminProcedure.input(z13.object({ orgId: id4, email: z13.string().trim().email().max(160), role: z13.enum(["owner", "admin", "coordinator", "teacher"]), subject: z13.string().trim().max(60).nullable().optional() })).mutation(async ({ ctx, input }) => {
+    if (!await getOrganization(input.orgId)) throw new TRPCError11({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+    const user = await findUserByEmail(input.email);
+    if (!user) throw new TRPCError11({ code: "NOT_FOUND", message: "Bu e-postayla kay\u0131tl\u0131 hesap yok. Ki\u015Fi \xF6nce uygulamada hesap a\xE7mal\u0131." });
+    if (await getMemberRole(input.orgId, user.id) === "student") throw new TRPCError11({ code: "CONFLICT", message: "Bu hesap kurumda \xF6\u011Frenci olarak kay\u0131tl\u0131; personel yap\u0131lamaz." });
+    await addStaffMember({ orgId: input.orgId, userId: user.id, role: input.role, subject: input.subject ?? null, invitedBy: ctx.user.id });
+    await writeAudit({ orgId: input.orgId, actorUserId: ctx.user.id, action: "platform.member_add", targetType: "user", targetId: user.id, metadata: { role: input.role } });
+    return { userId: user.id };
+  }),
+  setMemberRole: adminProcedure.input(z13.object({ orgId: id4, userId: id4, role: z13.enum(["owner", "admin", "coordinator", "teacher"]) })).mutation(async ({ ctx, input }) => {
+    const current = await getMemberRole(input.orgId, input.userId);
+    if (!current) throw new TRPCError11({ code: "NOT_FOUND", message: "\xDCye bulunamad\u0131." });
+    if (current === "student") throw new TRPCError11({ code: "BAD_REQUEST", message: "\xD6\u011Frencinin rol\xFC de\u011Fi\u015Ftirilemez." });
+    const demotesLastAdmin = (current === "owner" || current === "admin") && input.role !== "owner" && input.role !== "admin" && await countActiveOrgAdmins(input.orgId) <= 1;
+    if (demotesLastAdmin) throw new TRPCError11({ code: "BAD_REQUEST", message: "Kurumun son y\xF6neticisi; \xF6nce ba\u015Fka birini y\xF6netici yap." });
+    await setMemberRole(input.orgId, input.userId, input.role);
+    await writeAudit({ orgId: input.orgId, actorUserId: ctx.user.id, action: "platform.member_role", targetType: "user", targetId: input.userId, metadata: { from: current, to: input.role } });
+    return { ok: true };
+  }),
+  removeMember: adminProcedure.input(z13.object({ orgId: id4, userId: id4 })).mutation(async ({ ctx, input }) => {
+    const current = await getMemberRole(input.orgId, input.userId);
+    if (!current) throw new TRPCError11({ code: "NOT_FOUND", message: "\xDCye bulunamad\u0131." });
+    if ((current === "owner" || current === "admin") && await countActiveOrgAdmins(input.orgId) <= 1) throw new TRPCError11({ code: "BAD_REQUEST", message: "Kurumun son y\xF6neticisi \xE7\u0131kar\u0131lamaz; \xF6nce ba\u015Fka birini y\xF6netici yap." });
+    await endMembership(input.orgId, input.userId, "removed");
+    await writeAudit({ orgId: input.orgId, actorUserId: ctx.user.id, action: "platform.member_remove", targetType: "user", targetId: input.userId, metadata: { role: current } });
+    return { ok: true };
+  }),
+  setCasesEnabled: adminProcedure.input(z13.object({ orgId: id4, enabled: z13.boolean() })).mutation(async ({ ctx, input }) => {
+    await setCasesEnabled(input.orgId, input.enabled);
+    await writeAudit({ orgId: input.orgId, actorUserId: ctx.user.id, action: "cases.enable", targetType: "organization", targetId: input.orgId, metadata: { enabled: input.enabled, by: "platform" } });
+    return { ok: true };
+  }),
+  /** Bir kullanıcının kurum bağları (Yönetim Paneli → Üyeler → üye). */
+  userMemberships: adminProcedure.input(z13.object({ userId: id4 })).query(({ input }) => listUserOrgMemberships(input.userId)),
+  // --- Kurum paketlerinin liste fiyatları ---
+  planPrices: adminProcedure.query(async () => {
+    const prices = await listOrgPlanPrices();
+    return ORG_PLANS.map((plan) => ({ plan, label: ORG_PLAN_LABELS[plan], defaultCredits: ORG_PLAN_DEFAULT_CREDITS[plan], monthlyPriceTry: prices.get(plan)?.monthlyPriceTry ?? null, yearlyPriceTry: prices.get(plan)?.yearlyPriceTry ?? null, priceNote: prices.get(plan)?.priceNote ?? null, updatedAt: prices.get(plan)?.updatedAt ?? null }));
+  }),
+  setPlanPrice: adminProcedure.input(z13.object({ plan: z13.enum(ORG_PLANS), monthlyPriceTry: z13.number().int().min(0).max(1e7).nullable(), yearlyPriceTry: z13.number().int().min(0).max(1e8).nullable(), priceNote: z13.string().trim().max(160).nullable() })).mutation(async ({ ctx, input }) => {
+    await upsertOrgPlanPrice({ ...input, priceNote: input.priceNote || null, updatedByUserId: ctx.user.id });
     return { ok: true };
   })
 });

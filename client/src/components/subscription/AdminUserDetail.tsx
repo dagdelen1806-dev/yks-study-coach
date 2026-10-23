@@ -5,6 +5,8 @@ import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { COACHING_EXPECTATION_LABELS, COACHING_STYLE_LABELS, GRADE_LEVEL_LABELS, MOCK_EXAM_FREQUENCY_LABELS, NOTIFICATION_PREFERENCE_LABELS, STUDY_METHOD_LABELS, STUDY_TIME_LABELS, TARGET_SCORE_TYPE_LABELS } from "@shared/onboarding";
 import { EXAM_TRACK_LABELS } from "@shared/exams";
+import { ROLE_LABELS } from "@shared/org";
+import { Link } from "wouter";
 import EmailVerifiedBadge from "./EmailVerifiedBadge";
 import { accountStatusLabel, accountStatusTone, approvalLabel, approvalTone, formatDate, formatDateTime, paymentStatusLabel, subscriptionStatusLabel, subscriptionStatusTone } from "./adminFormat";
 
@@ -12,7 +14,7 @@ const FEATURE_LABELS: Record<string, string> = { AI_STUDY_PLAN: "AI Çalışma P
 const LOGIN_METHOD_LABELS: Record<string, string> = { dev_email: "E-posta + şifre", dev_phone: "Telefon + şifre", dev: "İsim + şifre (eski)" };
 const labelOf = (labels: Record<string, string>, value: string | null) => (value ? labels[value] ?? value : "—");
 const listOf = (values: string[], labels?: Record<string, string>) => (values.length ? values.map((value) => labels?.[value] ?? value).join(", ") : "—");
-const TAB_LABELS = ["Genel Bakış", "Profil", "Abonelik", "Kullanım", "İlerleme", "Denemeler", "Konular", "Kitaplar", "Ödemeler", "Denetim"] as const;
+const TAB_LABELS = ["Genel Bakış", "Profil", "Abonelik", "Kurum bağları", "Kullanım", "İlerleme", "Denemeler", "Konular", "Kitaplar", "Ödemeler", "Denetim"] as const;
 type Tab = (typeof TAB_LABELS)[number];
 
 /**
@@ -156,6 +158,8 @@ export default function AdminUserDetail({ userId, onClose }: { userId: number; o
                 </div>
               )}
 
+              {tab === "Kurum bağları" && <OrgLinks userId={userId} />}
+
               {tab === "Abonelik" && detail.data.subscriptions.length > 0 && (
                 <Section title="Sınavlara göre abonelikler">
                   <div className="space-y-2 text-[13px]">
@@ -270,6 +274,28 @@ function StatBox({ label, value }: { label: string; value: string }) {
 function Row({ label, value }: { label: string; value: string }) {
   return <div className="flex items-center justify-between border-b border-ink/[0.05] py-2"><span className="text-ink-3">{label}</span><span className="font-medium text-ink-2">{value}</span></div>;
 }
+/** Kullanıcının üye olduğu ve ayrıldığı kurumlar; kuruma tıklayınca Yönetim Paneli'nde kurum detayı açılır. */
+function OrgLinks({ userId }: { userId: number }) {
+  const links = trpc.admin.orgs.userMemberships.useQuery({ userId });
+  if (links.isLoading) return <div className="flex justify-center p-6"><Loader2 className="animate-spin text-brand" size={18} /></div>;
+  if (!links.data?.length) return <p className="text-[13px] text-ink-3">Hiçbir kuruma bağlı değil.</p>;
+  return (
+    <Section title="Kurum bağları">
+      <div className="space-y-2 text-[13px]">
+        {links.data.map((row) => (
+          <div key={row.orgId} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-paper px-3 py-2">
+            <div>
+              <Link href={`/yonetim/kurum/${row.orgId}`} className="font-semibold text-brand hover:underline">{row.orgName}</Link>
+              <span className="ml-2 text-ink-3">{ROLE_LABELS[row.role]}{row.subject ? ` · ${row.subject}` : ""} · {formatDate(row.joinedAt)}{row.leftAt ? ` → ${formatDate(row.leftAt)}` : ""}</span>
+            </div>
+            <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${row.status === "active" ? "bg-success-soft text-success" : "bg-paper text-ink-4"}`}>{row.status === "active" ? (row.orgStatus === "active" ? "Aktif" : "Kurum askıda") : "Ayrıldı"}</span>
+          </div>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return <div><div className="mb-1 text-[12px] font-bold text-ink-4">{title}</div>{children}</div>;
 }

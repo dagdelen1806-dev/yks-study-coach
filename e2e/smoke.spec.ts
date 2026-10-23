@@ -438,3 +438,38 @@ test("kurum yöneticisi Kurum Paneli'nde öğrencilerini görür", async ({ page
   await expect(page.getByText("Kerem").first()).toBeVisible();
   await expect(page.getByText("Zeynep").first()).toBeVisible();
 });
+
+test("Yönetim Paneli: platform yöneticisi kurumu açar, personel ekler, kurum paketi fiyatı kurum panelinde görünür; öğrenci giremez", async ({ page, browser }) => {
+  await signIn(page, "platform.admin@test.local");
+  // Öğrenci anketini yapmamış platform yöneticisi doğrudan Yönetim Paneli'ne gider.
+  await page.goto("/");
+  await expect(page).toHaveURL(/\/yonetim$/);
+  await expect(page.locator("main h1").first()).toHaveText("Genel bakış");
+  const adminNav = (label: string) => page.locator('nav[aria-label="Yönetim bölümleri"] button', { hasText: label }).first();
+
+  await adminNav("Kurumlar").click();
+  await page.getByRole("link", { name: "Test Dershanesi" }).click();
+  await expect(page).toHaveURL(/\/yonetim\/kurum\/\d+$/);
+  await expect(page.locator("main h1").first()).toHaveText("Test Dershanesi");
+  await expect(page.getByText("Murat Hoca")).toBeVisible();
+  // Öğrenci personel yapılamaz.
+  await page.getByLabel("Personel e-postası").fill("ogrenci1@test.local");
+  await page.getByRole("button", { name: "Ekle", exact: true }).click();
+  await expect(page.getByText("öğrenci olarak kayıtlı")).toBeVisible();
+
+  const price = String(4000 + (Date.now() % 1000));
+  await adminNav("Paketler ve fiyatlar").click();
+  const standard = page.getByRole("region", { name: "Standart kurum paketi" });
+  await standard.getByLabel("Aylık (TL)").fill(price);
+  await standard.getByRole("button", { name: "Kaydet" }).click();
+  await expect(page.getByText("Kurum paketi fiyatı kaydedildi.")).toBeVisible();
+
+  const orgAdmin = await browser.newPage({ baseURL: test.info().project.use.baseURL });
+  await signIn(orgAdmin, ORG_ADMIN);
+  await orgAdmin.goto("/kurum/ayarlar");
+  await orgAdmin.getByRole("tab", { name: "Üyelik ve krediler" }).click();
+  await expect(orgAdmin.getByText(`${Number(price).toLocaleString("tr-TR")} TL / ay`)).toBeVisible();
+  await orgAdmin.goto("/yonetim");
+  await expect(orgAdmin.getByText("Bu bölüm yalnızca platform yöneticisi içindir.")).toBeVisible();
+  await orgAdmin.close();
+});

@@ -6,7 +6,6 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { EXAM_TRACK_LABELS } from "@shared/exams";
 import { formatDate, subscriptionStatusLabel } from "./adminFormat";
-import AdminPricesPanel from "./AdminPricesPanel";
 
 /**
  * /admin/subscriptions (spec §26). NOT: bu liste (mevcut abonelik kaydı olan
@@ -54,7 +53,6 @@ export default function AdminSubscriptionsPage() {
         </div>
       </Card>
 
-      <AdminPricesPanel />
 
       <Card className="soft-card overflow-hidden">
         {list.isLoading ? (

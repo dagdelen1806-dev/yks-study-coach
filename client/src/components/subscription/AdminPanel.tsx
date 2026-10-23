@@ -1,64 +1,11 @@
-import { useState } from "react";
-import { Loader2, ShieldCheck } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { Card } from "@/components/ui/card";
-import AdminUsersPage from "./AdminUsersPage";
-import AdminPendingPage from "./AdminPendingPage";
-import AdminSubscriptionsPage from "./AdminSubscriptionsPage";
-import AdminPaymentsPage from "./AdminPaymentsPage";
-import AdminAuditPage from "./AdminAuditPage";
-import AdminCatalogPage from "./AdminCatalogPage";
-import AdminOrgsPage from "./AdminOrgsPage";
-import AdminErrorsPage from "./AdminErrorsPage";
-import AdminTestimonialsPage from "./AdminTestimonialsPage";
-
-const TABS = [
-  { key: "dashboard", label: "Panel" },
-  { key: "users", label: "Üyeler" },
-  { key: "pending", label: "Onay Bekleyenler" },
-  { key: "subscriptions", label: "Abonelikler" },
-  { key: "payments", label: "Ödemeler" },
-  { key: "catalog", label: "Kaynak Kataloğu" },
-  { key: "orgs", label: "Kurumlar" },
-  { key: "testimonials", label: "Yorumlar" },
-  { key: "audit", label: "Denetim Kayıtları" },
-  { key: "errors", label: "Hatalar" },
-] as const;
-type TabKey = (typeof TABS)[number]["key"];
 
 /**
- * Admin Command Center (PHASE 3) — yalnızca `role === "admin"` kullanıcılara
- * Sidebar'da görünür (bkz. Home.tsx) ve her uç nokta zaten `adminProcedure`
- * ile korunuyor (server/_core/trpc.ts: ctx.user.role — client "admin"
- * göndererek kendini admin yapamaz). Gerçek URL router olmadığı için
- * (bkz. audit) alt sayfalar burada sekme durumu olarak yönetiliyor —
- * spec §2'nin izin verdiği şekilde mevcut mimariye uyarlandı.
+ * Yönetim Paneli → Genel bakış: KPI'lar ve yapay zekâ bağlantı testi. Panelin kabuğu ve diğer
+ * bölümler client/src/pages/admin/AdminApp.tsx'te (/yonetim); her uç nokta `adminProcedure` ile korunur.
  */
-export default function AdminPanel() {
-  const [tab, setTab] = useState<TabKey>("dashboard");
-
-  return (
-    <div className="space-y-6 animate-page-in">
-      <div><div className="eyebrow mb-2 flex items-center gap-1.5"><ShieldCheck size={13} /> Yönetim</div><h1 className="page-heading">Admin Command Center</h1><p className="page-subtitle">Üyelik onayı, abonelik yönetimi ve gerçek kullanım/ilerleme verisi tek merkezde.</p></div>
-
-      <div className="flex gap-1 overflow-x-auto rounded-2xl bg-paper p-1">
-        {TABS.map((item) => <button key={item.key} onClick={() => setTab(item.key)} className={`whitespace-nowrap rounded-xl px-3.5 py-2 text-[12px] font-semibold transition ${tab === item.key ? "bg-white text-ink shadow-sm" : "text-ink-3"}`}>{item.label}</button>)}
-      </div>
-
-      {tab === "dashboard" && <AdminDashboard />}
-      {tab === "users" && <AdminUsersPage />}
-      {tab === "pending" && <AdminPendingPage />}
-      {tab === "subscriptions" && <AdminSubscriptionsPage />}
-      {tab === "payments" && <AdminPaymentsPage />}
-      {tab === "catalog" && <AdminCatalogPage />}
-      {tab === "orgs" && <AdminOrgsPage />}
-      {tab === "testimonials" && <AdminTestimonialsPage />}
-      {tab === "audit" && <AdminAuditPage />}
-      {tab === "errors" && <AdminErrorsPage />}
-    </div>
-  );
-}
-
 const KPI_CARDS: Array<{ key: string; label: string; tone: string }> = [
   { key: "totalUsers", label: "Toplam Üye", tone: "bg-brand-soft text-brand" },
   { key: "pendingApproval", label: "Onay Bekleyen", tone: "bg-warn-soft text-warn" },
@@ -74,7 +21,7 @@ const KPI_CARDS: Array<{ key: string; label: string; tone: string }> = [
   { key: "canceledSubscriptions", label: "İptal Edilmiş", tone: "bg-paper text-ink-3" },
 ];
 
-function AdminDashboard() {
+export function AdminDashboard() {
   const kpis = trpc.admin.analytics.overview.useQuery();
 
   if (kpis.isLoading) return <Card className="soft-card p-10"><div className="flex justify-center"><Loader2 className="animate-spin text-brand" size={22} /></div></Card>;

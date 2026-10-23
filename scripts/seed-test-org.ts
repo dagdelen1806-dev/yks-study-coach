@@ -41,6 +41,7 @@ const LGS_STUDENT = { email: "lgs1@test.local", name: "Mert" };
 const PARENT = { email: "veli1@test.local", name: "Ayten Veli" };
 const KPSS_CANDIDATE = { email: "kpss1@test.local", name: "Burak Aday" };
 const AGS_CANDIDATE = { email: "ags1@test.local", name: "Elif Öğretmen Adayı" };
+const PLATFORM_ADMIN = { email: "platform.admin@test.local", name: "Platform Yöneticisi" };
 
 // localAuth.ts ile aynı scrypt biçimi (tuz:anahtar).
 const hashPassword = (password: string) => { const salt = randomBytes(16).toString("hex"); return `${salt}:${scryptSync(password, salt, 64).toString("hex")}`; };
@@ -154,6 +155,14 @@ async function main() {
     { userId: agsId, track: "KPSS", gradeLevel: "lisans_mezun", examYear: agsYear + (agsYear % 2) },
     { userId: agsId, track: "MEB_AGS", gradeLevel: "lisans_mezun", examYear: agsYear },
   ]);
+
+  // Yalnızca yerel e2e için platform yöneticisi (Yönetim Paneli testi); canlı veritabanında asla açılmaz.
+  if (process.env.SEED_PLATFORM_ADMIN === "1") {
+    if (/supabase\.(co|com)/.test(process.env.DATABASE_URL ?? "")) throw new Error("SEED_PLATFORM_ADMIN canlı veritabanında kullanılamaz.");
+    const platformAdminId = await ensureUser(PLATFORM_ADMIN.email, PLATFORM_ADMIN.name);
+    await db.update(users).set({ role: "admin" }).where(eq(users.id, platformAdminId));
+    console.log(`Platform yöneticisi (yalnızca yerel): ${PLATFORM_ADMIN.email}`);
+  }
 
   if (process.env.SEED_NO_EMAIL === "1") {
     // Deneme hesapları @test.local: hiçbir haftalık özet e-postası denenmesin (geri dönen mail gönderici itibarını bozar).

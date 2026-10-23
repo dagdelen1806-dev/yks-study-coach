@@ -10,6 +10,8 @@ import { useLocation } from "wouter";
 const OnboardingFlow = lazy(() => import("@/components/onboarding/OnboardingFlow"));
 // Kurum Paneli ayrı bir arayüz: yalnızca /kurum adreslerinde yüklenir.
 const OrgApp = lazy(() => import("./pages/org/OrgApp"));
+// Yönetim Paneli (platform yöneticisi): yalnızca /yonetim adreslerinde yüklenir.
+const AdminApp = lazy(() => import("./pages/admin/AdminApp"));
 
 function OrgSignIn() {
   return (
@@ -204,6 +206,8 @@ function AppGate() {
   const isOrgPath = location === "/kurum" || location.startsWith("/kurum/");
   // Veli paneli: /veli öğrenci anketine takılmadan açılır (veli öğrenci değildir).
   const isParentPath = location === "/veli" || location.startsWith("/veli/");
+  // Yönetim Paneli: platform yöneticisinin ayrı arayüzü (yetki AdminApp'te ve sunucuda denetlenir).
+  const isAdminPath = location === "/yonetim" || location.startsWith("/yonetim/");
   const memberships = trpc.org.mine.useQuery(undefined, { enabled: approvedUser, retry: false });
   const isStaff = (memberships.data ?? []).some((membership) => membership.role !== "student");
   const parentLinks = trpc.parent.myStudents.useQuery(undefined, { enabled: approvedUser && !isParentPath && !isOrgPath, retry: false });
@@ -235,6 +239,8 @@ function AppGate() {
     return <Suspense fallback={<DashboardLayoutSkeleton />}><OrgApp /></Suspense>;
   }
 
+  if (isAdminPath && user) return <Suspense fallback={<DashboardLayoutSkeleton />}><AdminApp /></Suspense>;
+
   if (isParentPath) {
     if (!user) return <Suspense fallback={<div className="min-h-screen bg-paper" />}><ParentSignIn /></Suspense>;
     return <Suspense fallback={<DashboardLayoutSkeleton />}><ParentApp /></Suspense>;
@@ -244,6 +250,11 @@ function AppGate() {
 
   if (user && (onboarding.isLoading || !onboarding.data || memberships.isLoading)) return <DashboardLayoutSkeleton />;
 
+  // Öğrenci anketini yapmamış platform yöneticisi Yönetim Paneli'ne gider.
+  if (user.role === "admin" && onboarding.data && !onboarding.data.onboardingCompleted) {
+    setTimeout(() => setLocation("/yonetim", { replace: true }), 0);
+    return <DashboardLayoutSkeleton />;
+  }
   // Öğrenci onboarding'ini yapmamış kurum personeli öğrenci anketine değil Kurum Paneli'ne gider.
   if (user && isStaff && onboarding.data && !onboarding.data.onboardingCompleted) {
     setTimeout(() => setLocation("/kurum", { replace: true }), 0);

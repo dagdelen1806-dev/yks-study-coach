@@ -7,7 +7,7 @@ import { busyOn, describeInterval, findTaskConflict, suggestStart } from "../../
 import { effectiveKvkk } from "../../shared/kvkk";
 import { MAX_TIMETABLE_SLOTS_PER_CLASS, branchMismatch, describeConflict, findCrossClassConflicts, sortSlots, validateClassTimetable } from "../../shared/orgTimetable";
 import { EXAM_KINDS, type ExamKind } from "../../shared/exams";
-import { CLASS_GRADES, CLASS_TRACKS, INVITABLE_ROLES, ORG_KINDS, ORG_PLANS, ORG_PLAN_DEFAULT_CREDITS, ORG_PLAN_LABELS, ORG_ROLES, canRequestPlan, membershipState, renewedMembershipEnd, canAssignRole, canInviteRole, generateInviteCode, hasRole, invitationProblem, isStaffRole, normalizeInviteCode, seesAllStudents, summarizeStudent, type RiskKey, type StudentSummary } from "../../shared/org";
+import { CLASS_GRADES, CLASS_TRACKS, INVITABLE_ROLES, ORG_KINDS, ORG_PLANS, ORG_PLAN_DEFAULT_CREDITS, ORG_PLAN_LABELS, ORG_ROLES, canRequestPlan, membershipState, renewedMembershipEnd, canAssignRole, canInviteRole, generateInviteCode, hasRole, invitationProblem, isStaffRole, normalizeInviteCode, seesAllStudents, summarizeStudent, type OrgPlan, type RiskKey, type StudentSummary } from "../../shared/org";
 import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 import { getStudentProfile, getUserMockExams, getUserTopicProgress } from "../db";
 import { audit, assertCanViewStudent, orgProcedure, type OrgContext } from "../org/orgAccess";
@@ -25,6 +25,12 @@ import {
   getMemberRole,
   getNote,
   getOrganization,
+  addStaffMember,
+  countActiveOrgAdmins,
+  findUserByEmail,
+  listOrgPlanPrices,
+  listUserOrgMemberships,
+  upsertOrgPlanPrice,
   getStudentCalendarReadOnly,
   insertAssignedTask,
   listAssignments,
@@ -62,7 +68,7 @@ import {
   updateOrganization,
 } from "../org/orgDb";
 import { getClassSchedule, getCourseBlocks } from "../schedule/classScheduleDb";
-import { canReadNotes, filterPrivateNotes, notifyStudentOfTasks } from "../org/caseDb";
+import { canReadNotes, filterPrivateNotes, isCasesEnabled, notifyStudentOfTasks, setCasesEnabled } from "../org/caseDb";
 import { orgCasesRouter } from "./orgCases";
 import { creditsUsedThisMonth, orgCreditReport } from "../org/orgCredits";
 
@@ -267,6 +273,11 @@ export const orgRouter = router({
     }),
     /** Paket yükseltme / süre uzatma talebi: kurum yöneticisi gönderir, platform yöneticisi onaylar. Süresi dolmuş kurumda da açık. */
     upgrades: orgProcedure("admin").query(({ ctx }) => listOrgUpgradeRequests(ctx.membership.orgId)),
+    // Paket kartlarında gösterilen liste fiyatları (platform yöneticisi belirler; boşsa "iletişime geçin").
+    planPrices: orgProcedure("admin", { allowInactive: true }).query(async () => {
+      const prices = await listOrgPlanPrices();
+      return Object.fromEntries(ORG_PLANS.map((plan) => [plan, { monthlyPriceTry: prices.get(plan)?.monthlyPriceTry ?? null, yearlyPriceTry: prices.get(plan)?.yearlyPriceTry ?? null, priceNote: prices.get(plan)?.priceNote ?? null }])) as Record<OrgPlan, { monthlyPriceTry: number | null; yearlyPriceTry: number | null; priceNote: string | null }>;
+    }),
     requestUpgrade: orgProcedure("admin", { allowInactive: true }).input(z.object({ plan: z.enum(ORG_PLANS), note: z.string().trim().max(300).optional() })).mutation(({ ctx, input }) => userFacing(async () => {
       const org = await getOrganization(ctx.membership.orgId);
       if (!org) throw new TRPCError({ code: "NOT_FOUND", message: "Kurum bulunamadı." });
@@ -554,4 +565,61 @@ export const adminOrgsRouter = router({
     return { adminCode: code };
   }),
   setStatus: adminProcedure.input(z.object({ orgId: id, status: z.enum(["active", "suspended"]) })).mutation(async ({ input }) => { await setOrganizationStatus(input.orgId, input.status); return { ok: true }; }),
+
+  // --- Kurum detayı (Yönetim Paneli → Kurumlar → kurum) ---
+  get: adminProcedure.input(z.object({ orgId: id })).query(async ({ input }) => {
+    const org = await getOrganization(input.orgId);
+    if (!org) throw new TRPCError({ code: "NOT_FOUND", message: "Kurum bulunamadı." });
+    const [members, classes, used, casesEnabled] = await Promise.all([listMembers(input.orgId), listClasses(input.orgId), creditsUsedThisMonth([input.orgId]), isCasesEnabled(input.orgId)]);
+    return {
+      org: { ...org, membershipState: membershipState(org), creditsUsed: used.get(input.orgId) ?? 0, academicCasesEnabled: casesEnabled },
+      members: members.map((member) => ({ userId: member.userId, name: member.name, email: member.email, role: member.role, subject: member.subject, joinedAt: member.joinedAt, lastSignedIn: member.lastSignedIn })),
+      classes: classes.map((item) => ({ id: item.id, name: item.name, students: item.studentUserIds.length, advisorUserId: item.advisorUserId })),
+    };
+  }),
+  /** Var olan bir hesabı e-postasıyla kuruma personel olarak ekler (öğrenci kendi onayıyla, davet koduyla katılır). */
+  addStaff: adminProcedure.input(z.object({ orgId: id, email: z.string().trim().email().max(160), role: z.enum(["owner", "admin", "coordinator", "teacher"]), subject: z.string().trim().max(60).nullable().optional() })).mutation(async ({ ctx, input }) => {
+    if (!(await getOrganization(input.orgId))) throw new TRPCError({ code: "NOT_FOUND", message: "Kurum bulunamadı." });
+    const user = await findUserByEmail(input.email);
+    if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "Bu e-postayla kayıtlı hesap yok. Kişi önce uygulamada hesap açmalı." });
+    if ((await getMemberRole(input.orgId, user.id)) === "student") throw new TRPCError({ code: "CONFLICT", message: "Bu hesap kurumda öğrenci olarak kayıtlı; personel yapılamaz." });
+    await addStaffMember({ orgId: input.orgId, userId: user.id, role: input.role, subject: input.subject ?? null, invitedBy: ctx.user.id });
+    await writeAudit({ orgId: input.orgId, actorUserId: ctx.user.id, action: "platform.member_add", targetType: "user", targetId: user.id, metadata: { role: input.role } });
+    return { userId: user.id };
+  }),
+  setMemberRole: adminProcedure.input(z.object({ orgId: id, userId: id, role: z.enum(["owner", "admin", "coordinator", "teacher"]) })).mutation(async ({ ctx, input }) => {
+    const current = await getMemberRole(input.orgId, input.userId);
+    if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "Üye bulunamadı." });
+    if (current === "student") throw new TRPCError({ code: "BAD_REQUEST", message: "Öğrencinin rolü değiştirilemez." });
+    const demotesLastAdmin = (current === "owner" || current === "admin") && input.role !== "owner" && input.role !== "admin" && (await countActiveOrgAdmins(input.orgId)) <= 1;
+    if (demotesLastAdmin) throw new TRPCError({ code: "BAD_REQUEST", message: "Kurumun son yöneticisi; önce başka birini yönetici yap." });
+    await setMemberRole(input.orgId, input.userId, input.role);
+    await writeAudit({ orgId: input.orgId, actorUserId: ctx.user.id, action: "platform.member_role", targetType: "user", targetId: input.userId, metadata: { from: current, to: input.role } });
+    return { ok: true };
+  }),
+  removeMember: adminProcedure.input(z.object({ orgId: id, userId: id })).mutation(async ({ ctx, input }) => {
+    const current = await getMemberRole(input.orgId, input.userId);
+    if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "Üye bulunamadı." });
+    if ((current === "owner" || current === "admin") && (await countActiveOrgAdmins(input.orgId)) <= 1) throw new TRPCError({ code: "BAD_REQUEST", message: "Kurumun son yöneticisi çıkarılamaz; önce başka birini yönetici yap." });
+    await endMembership(input.orgId, input.userId, "removed");
+    await writeAudit({ orgId: input.orgId, actorUserId: ctx.user.id, action: "platform.member_remove", targetType: "user", targetId: input.userId, metadata: { role: current } });
+    return { ok: true };
+  }),
+  setCasesEnabled: adminProcedure.input(z.object({ orgId: id, enabled: z.boolean() })).mutation(async ({ ctx, input }) => {
+    await setCasesEnabled(input.orgId, input.enabled);
+    await writeAudit({ orgId: input.orgId, actorUserId: ctx.user.id, action: "cases.enable", targetType: "organization", targetId: input.orgId, metadata: { enabled: input.enabled, by: "platform" } });
+    return { ok: true };
+  }),
+  /** Bir kullanıcının kurum bağları (Yönetim Paneli → Üyeler → üye). */
+  userMemberships: adminProcedure.input(z.object({ userId: id })).query(({ input }) => listUserOrgMemberships(input.userId)),
+
+  // --- Kurum paketlerinin liste fiyatları ---
+  planPrices: adminProcedure.query(async () => {
+    const prices = await listOrgPlanPrices();
+    return ORG_PLANS.map((plan) => ({ plan, label: ORG_PLAN_LABELS[plan], defaultCredits: ORG_PLAN_DEFAULT_CREDITS[plan], monthlyPriceTry: prices.get(plan)?.monthlyPriceTry ?? null, yearlyPriceTry: prices.get(plan)?.yearlyPriceTry ?? null, priceNote: prices.get(plan)?.priceNote ?? null, updatedAt: prices.get(plan)?.updatedAt ?? null }));
+  }),
+  setPlanPrice: adminProcedure.input(z.object({ plan: z.enum(ORG_PLANS), monthlyPriceTry: z.number().int().min(0).max(10_000_000).nullable(), yearlyPriceTry: z.number().int().min(0).max(100_000_000).nullable(), priceNote: z.string().trim().max(160).nullable() })).mutation(async ({ ctx, input }) => {
+    await upsertOrgPlanPrice({ ...input, priceNote: input.priceNote || null, updatedByUserId: ctx.user.id });
+    return { ok: true };
+  }),
 });

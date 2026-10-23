@@ -97,6 +97,7 @@ function PlanUpgrade({ scope, currentPlan, state }: { scope: OrgScope; currentPl
   const utils = trpc.useUtils();
   const isAdmin = hasRole(scope.role, "admin");
   const requests = trpc.org.settings.upgrades.useQuery({ orgId: scope.orgId }, { enabled: isAdmin, retry: false });
+  const prices = trpc.org.settings.planPrices.useQuery({ orgId: scope.orgId }, { enabled: isAdmin, retry: false, staleTime: 5 * 60_000 });
   const [choice, setChoice] = useState<OrgPlan | null>(null);
   const [note, setNote] = useState("");
   const refresh = () => utils.org.settings.upgrades.invalidate();
@@ -124,6 +125,7 @@ function PlanUpgrade({ scope, currentPlan, state }: { scope: OrgScope; currentPl
             <section key={plan} className={`flex flex-col rounded-2xl border p-4 ${isCurrent ? "border-brand bg-brand-soft/40" : "border-rule"} ${choice === plan ? "ring-2 ring-brand/40" : ""}`}>
               <div className="flex items-center justify-between gap-2"><h3 className="text-[16px] font-extrabold text-ink">{ORG_PLAN_LABELS[plan]}</h3>{isCurrent && <span className="rounded-full bg-brand px-2 py-0.5 text-[11px] font-bold text-white">Mevcut paket</span>}</div>
               <p className="mt-1 text-[22px] font-extrabold text-ink">{ORG_PLAN_DEFAULT_CREDITS[plan].toLocaleString("tr-TR")} <span className="text-[12px] font-semibold text-ink-3">AI kredisi / ay</span></p>
+              {plan !== "trial" && <PlanPrice price={prices.data?.[plan]} />}
               <ul className="mt-2 flex-1 space-y-1 text-[12.5px] text-ink-2">{ORG_PLAN_DESCRIPTIONS[plan].map((line) => <li key={line} className="flex gap-2"><Check size={14} className="mt-0.5 shrink-0 text-success" />{line}</li>)}</ul>
               {isAdmin && allowed && label && <button onClick={() => setChoice(choice === plan ? null : plan)} disabled={Boolean(pending)} className={`${isCurrent ? secondaryButton : primaryButton} mt-3 w-full justify-center`}>{label}</button>}
             </section>
@@ -141,6 +143,18 @@ function PlanUpgrade({ scope, currentPlan, state }: { scope: OrgScope; currentPl
         </div>
       )}
     </Panel>
+  );
+}
+
+/** Liste fiyatı Yönetim Paneli → Paketler'den gelir; tanımlı değilse fiyat uydurulmaz. */
+function PlanPrice({ price }: { price?: { monthlyPriceTry: number | null; yearlyPriceTry: number | null; priceNote: string | null } }) {
+  const money = (value: number) => `${value.toLocaleString("tr-TR")} TL`;
+  if (!price || (price.monthlyPriceTry === null && price.yearlyPriceTry === null)) return <p className="mt-1 text-[12px] font-semibold text-ink-3">Fiyat için iletişime geçin</p>;
+  return (
+    <p className="mt-1 text-[13px] font-semibold text-ink-2">
+      {[price.monthlyPriceTry !== null && `${money(price.monthlyPriceTry)} / ay`, price.yearlyPriceTry !== null && `${money(price.yearlyPriceTry)} / yıl`].filter(Boolean).join(" · ")}
+      {price.priceNote && <span className="block text-[11.5px] font-normal text-ink-3">{price.priceNote}</span>}
+    </p>
   );
 }
 
