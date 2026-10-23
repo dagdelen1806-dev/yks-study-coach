@@ -1,6 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { computeQuoteTotals, quoteNumber } from "../shared/orgQuote";
 import { renewedMembershipEnd } from "../shared/org";
+import { companyInfoSchema, formatIban } from "../shared/platformCompany";
+
+describe("şirket bilgileri", () => {
+  it("IBAN boşluksuz büyük harfe çevrilir ve dörtlü yazılır; hatalı vergi no / IBAN reddedilir; boş alanlar serbest", () => {
+    const info = companyInfoSchema.parse({ legalName: "Örnek Ltd. Şti.", iban: "tr12 0006 2000 0000 0000 0000 01", taxNumber: "1234567890" });
+    expect(info.iban).toBe("TR120006200000000000000001");
+    expect(formatIban(info.iban)).toBe("TR12 0006 2000 0000 0000 0000 01");
+    expect(info.address).toBe("");
+    expect(companyInfoSchema.safeParse({ taxNumber: "12345" }).success).toBe(false);
+    expect(companyInfoSchema.safeParse({ iban: "DE89370400440532013000" }).success).toBe(false);
+    expect(companyInfoSchema.safeParse({}).success).toBe(true);
+  });
+});
 
 describe("kurumsal fiyat teklifi hesabı", () => {
   it("indirim ara toplama, KDV indirimli tutara uygulanır", () => {

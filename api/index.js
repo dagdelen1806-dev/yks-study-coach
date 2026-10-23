@@ -1003,6 +1003,12 @@ var orgPlanPrices = pgTable("org_plan_prices", {
   updatedByUserId: integer("updatedByUserId"),
   updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull()
 });
+var platformSettings = pgTable("platform_settings", {
+  key: varchar("key", { length: 60 }).primaryKey(),
+  valueJson: text("valueJson").notNull(),
+  updatedByUserId: integer("updatedByUserId"),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull()
+});
 var orgQuotes = pgTable("org_quotes", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   orgId: integer("orgId"),
@@ -2407,8 +2413,8 @@ function describeErrorMapForPlan(map, limit = 5) {
   if (!focus.length) return null;
   return focus.map((item) => `${item.subject}${item.topic ? ` / ${item.topic}` : ""}: ${item.open} \xE7\xF6z\xFClemeyen soru${item.topErrorType ? ` (en s\u0131k i\u015Faretlenen hata t\xFCr\xFC: ${ERROR_TYPES[item.topErrorType].label})` : ""}`).join("\n");
 }
-var paragraph = (text3) => text3?.trim() ? { type: "paragraph", content: [{ type: "text", text: text3.trim() }] } : { type: "paragraph" };
-var heading = (text3) => ({ type: "heading", attrs: { level: 3 }, content: [{ type: "text", text: text3 }] });
+var paragraph = (text4) => text4?.trim() ? { type: "paragraph", content: [{ type: "text", text: text4.trim() }] } : { type: "paragraph" };
+var heading = (text4) => ({ type: "heading", attrs: { level: 3 }, content: [{ type: "text", text: text4 }] });
 function buildQuestionDoc(input) {
   const content = [];
   if (input.questionImageId) content.push({ type: "noteImage", attrs: { attachmentId: input.questionImageId, ...input.questionOcrText ? { ocrText: input.questionOcrText } : {} } });
@@ -3039,7 +3045,7 @@ var escapeHtml = (value) => value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;",
 function buildVerifyEmail({ to, name, verifyUrl, expiresInMinutes }) {
   const greeting = name ? `Merhaba ${name},` : "Merhaba,";
   const subject2 = "Pusula YKS hesab\u0131n\u0131 do\u011Frula";
-  const text3 = [
+  const text4 = [
     greeting,
     "",
     "Pusula YKS'ye ho\u015F geldin! Hesab\u0131n\u0131 kullanmaya ba\u015Flamak i\xE7in e-posta adresini do\u011Frulaman gerekiyor.",
@@ -3090,7 +3096,7 @@ function buildVerifyEmail({ to, name, verifyUrl, expiresInMinutes }) {
 </table>
 </body>
 </html>`;
-  return { to, subject: subject2, html, text: text3 };
+  return { to, subject: subject2, html, text: text4 };
 }
 
 // server/_core/env.ts
@@ -3729,9 +3735,9 @@ var databaseAttachmentStorage = {
     if (!row.storageKey || !store) return null;
     return { mimeType: row.mimeType, url: await store.signedUrl(row.storageKey, SIGNED_URL_TTL_SEC) };
   },
-  async setOcrText(userId, id7, text3) {
+  async setOcrText(userId, id7, text4) {
     const db = await requireDb();
-    await db.update(noteAttachments).set({ ocrText: text3 }).where(and2(eq4(noteAttachments.id, id7), eq4(noteAttachments.userId, userId)));
+    await db.update(noteAttachments).set({ ocrText: text4 }).where(and2(eq4(noteAttachments.id, id7), eq4(noteAttachments.userId, userId)));
   },
   async syncNoteLinks(userId, noteId, referencedIds) {
     const db = await requireDb();
@@ -3857,7 +3863,7 @@ function buildWeeklyDigestEmail({ to, name, digest, start, end, appUrl, unsubscr
     ["\xC7\xF6z\xFClen soru", digest.accuracy !== null ? `${digest.questions} \xB7 %${digest.accuracy} do\u011Fru` : String(digest.questions)],
     ["\xC7al\u0131\u015Ft\u0131\u011F\u0131n g\xFCn", `${digest.activeDays} / 7`]
   ];
-  const text3 = [
+  const text4 = [
     greeting,
     "",
     `${range} haftan: ${digest.headline}`,
@@ -3920,7 +3926,7 @@ function buildWeeklyDigestEmail({ to, name, digest, start, end, appUrl, unsubscr
 </table>
 </body>
 </html>`;
-  return { to, subject: subject2, html, text: text3 };
+  return { to, subject: subject2, html, text: text4 };
 }
 
 // server/notes/questionsDb.ts
@@ -4203,13 +4209,13 @@ var NOTE_AI_ACTIONS = {
   review: { label: "Tekrar etmem gerekenler", menu: "Tekrar etmem gerekenleri bul" }
 };
 function aiResultToNodes(action, items) {
-  const text3 = (value) => value.trim() ? [{ type: "text", text: value.trim() }] : [];
+  const text4 = (value) => value.trim() ? [{ type: "text", text: value.trim() }] : [];
   const listType = action === "questions" ? "orderedList" : "bulletList";
   const list = {
     type: listType,
     content: items.map((item) => ({
       type: "listItem",
-      content: action === "flashcards" && item.back ? [{ type: "paragraph", content: [{ type: "text", text: "S: ", marks: [{ type: "bold" }] }, ...text3(item.front)] }, { type: "paragraph", content: [{ type: "text", text: "C: ", marks: [{ type: "bold" }] }, ...text3(item.back)] }] : [{ type: "paragraph", content: text3(item.front) }]
+      content: action === "flashcards" && item.back ? [{ type: "paragraph", content: [{ type: "text", text: "S: ", marks: [{ type: "bold" }] }, ...text4(item.front)] }, { type: "paragraph", content: [{ type: "text", text: "C: ", marks: [{ type: "bold" }] }, ...text4(item.back)] }] : [{ type: "paragraph", content: text4(item.front) }]
     }))
   };
   return [{ type: "blockquote", content: [{ type: "paragraph", content: [{ type: "text", text: `\u2728 AI \xB7 ${NOTE_AI_ACTIONS[action].label}`, marks: [{ type: "bold" }] }] }, list] }];
@@ -4941,7 +4947,7 @@ function buildTeacherDigestEmail({ to, name, orgName, digest, rangeLabel: rangeL
     ["Ortalama plan uyumu", digest.averageAdherence !== null ? `%${digest.averageAdherence}` : "\u2014"],
     ["Takip bekleyen", String(digest.followUps.length)]
   ];
-  const text3 = [
+  const text4 = [
     greeting,
     "",
     `${orgName} \xB7 ${rangeLabel2}: ${digest.headline}`,
@@ -5001,7 +5007,7 @@ function buildTeacherDigestEmail({ to, name, orgName, digest, rangeLabel: rangeL
 </table>
 </body>
 </html>`;
-  return { to, subject: subject2, html, text: text3 };
+  return { to, subject: subject2, html, text: text4 };
 }
 
 // server/org/caseDb.ts
@@ -6150,7 +6156,7 @@ var button = (href, label) => `<a href="${escapeHtml4(href)}" style="display:inl
 function buildParentInviteEmail({ to, studentName, code, joinUrl, expiresAt }) {
   const subject2 = `${studentName} seni Pusula'da veli olarak ekledi`;
   const until = expiresAt.toLocaleDateString("tr-TR", { day: "numeric", month: "long", timeZone: "Europe/Istanbul" });
-  const text3 = [
+  const text4 = [
     "Merhaba,",
     "",
     `${studentName}, s\u0131nav haz\u0131rl\u0131\u011F\u0131n\u0131 Pusula'da takip ediyor ve seni veli olarak eklemek istiyor. Ba\u011Fland\u0131\u011F\u0131nda \xE7al\u0131\u015Fma s\xFCresini, plan\u0131n\u0131, deneme sonu\xE7lar\u0131n\u0131 ve zay\u0131f konular\u0131n\u0131 g\xF6rebilirsin; notlar\u0131n\u0131 ve soru defterini g\xF6remezsin.`,
@@ -6167,7 +6173,7 @@ function buildParentInviteEmail({ to, studentName, code, joinUrl, expiresAt }) {
 <p style="margin:0 0 18px 0;">${button(joinUrl, "Veli olarak ba\u011Flan")}</p>
 <p style="margin:0 0 6px 0;font-size:13px;color:#5d6670;">Veli kodu: <strong style="font-size:16px;color:#18202a;letter-spacing:1px;">${escapeHtml4(code)}</strong> \xB7 ${escapeHtml4(until)} tarihine kadar ge\xE7erli</p>
 <p style="margin:12px 0 0 0;font-size:12px;line-height:1.6;color:#7c858e;">Pusula hesab\u0131n yoksa ba\u011Flant\u0131dan \xFCcretsiz hesap a\xE7abilirsin. Kodu girdikten sonra \xF6\u011Frencinin de onaylamas\u0131 gerekir. Bu daveti beklemiyorsan bu e-postay\u0131 g\xF6rmezden gelebilirsin.</p>`;
-  return { to, subject: subject2, text: text3, html: shell(subject2, `${studentName} seni veli olarak eklemek istiyor.`, body, "Pusula \xB7 Ki\u015Fisel \xE7al\u0131\u015Fma ko\xE7u") };
+  return { to, subject: subject2, text: text4, html: shell(subject2, `${studentName} seni veli olarak eklemek istiyor.`, body, "Pusula \xB7 Ki\u015Fisel \xE7al\u0131\u015Fma ko\xE7u") };
 }
 function buildParentDigestEmail({ to, studentName, digest, start, end, appUrl, unsubscribeUrl, lastExam }) {
   const range = rangeLabel(start, end);
@@ -6179,7 +6185,7 @@ function buildParentDigestEmail({ to, studentName, digest, start, end, appUrl, u
     ["\xC7al\u0131\u015Ft\u0131\u011F\u0131 g\xFCn", `${digest.activeDays} / 7`]
   ];
   const examLine = lastExam ? `Son deneme: ${lastExam.title} (${lastExam.exam}) \xB7 ${lastExam.net.toFixed(2)} net${lastExam.estimatedScore !== null ? ` \xB7 tahmini ~${lastExam.estimatedScore.toFixed(0)} puan (resm\xEE de\u011Fil)` : ""}` : null;
-  const text3 = [
+  const text4 = [
     "Merhaba,",
     "",
     `${studentName} i\xE7in ${range} haftas\u0131n\u0131n \xF6zeti:`,
@@ -6203,7 +6209,7 @@ ${examLine ? `<p style="margin:8px 0 0 0;font-size:14px;color:#3f4753;">${escape
 ${weakRows ? `<p style="margin:18px 0 4px 0;font-size:14px;font-weight:700;">G\xFC\xE7lendirmesi gereken konular</p><table role="presentation" width="100%" cellpadding="0" cellspacing="0">${weakRows}</table>` : ""}
 <p style="margin:22px 0 0 0;">${button(`${appUrl}/veli`, "Ayr\u0131nt\u0131lar\u0131 g\xF6r")}</p>`;
   const footer = `Pusula \xB7 Veli eri\u015Fimi<br>Bu \xF6zeti her pazar al\u0131yorsun. <a href="${escapeHtml4(unsubscribeUrl)}" style="color:#7c858e;">Almak istemiyorum</a>`;
-  return { to, subject: subject2, text: text3, html: shell(subject2, `${studentName} bu hafta ${formatMinutes(digest.minutes)} \xE7al\u0131\u015Ft\u0131.`, body, footer) };
+  return { to, subject: subject2, text: text4, html: shell(subject2, `${studentName} bu hafta ${formatMinutes(digest.minutes)} \xE7al\u0131\u015Ft\u0131.`, body, footer) };
 }
 
 // server/digest/parentDigest.ts
@@ -7972,7 +7978,7 @@ function validateDataUrl(dataUrl, declaredMimeType) {
 }
 
 // server/routers.ts
-import { z as z30 } from "zod";
+import { z as z32 } from "zod";
 
 // server/routers/topics.ts
 import { z as z3 } from "zod";
@@ -8144,8 +8150,8 @@ function curriculumSubjectsFor(subject2, category) {
 // server/bookContent/curriculumMatcher.ts
 init_turkishText();
 var STOPWORDS = /* @__PURE__ */ new Set(["ve", "ile", "de", "da", "test", "testi", "testleri", "soru", "sorulari", "konu", "konulari", "unite", "bolum", "tyt", "ayt", "yks", "yeni", "nesil"]);
-var contentTokens = (text3) => normalizeForComparison(text3).split(" ").filter((token) => token.length > 1 && !STOPWORDS.has(token));
-var stems = (text3, length) => new Set(contentTokens(text3).map((token) => token.slice(0, length)));
+var contentTokens = (text4) => normalizeForComparison(text4).split(" ").filter((token) => token.length > 1 && !STOPWORDS.has(token));
+var stems = (text4, length) => new Set(contentTokens(text4).map((token) => token.slice(0, length)));
 function dice(a, b) {
   if (a.size === 0 || b.size === 0) return 0;
   let shared = 0;
@@ -8595,20 +8601,20 @@ var DIGIT_LOOKALIKES = { I: "1", l: "1", "|": "1", i: "1", "!": "1", O: "0", o: 
 function parsePageNumber(raw) {
   if (raw === null || raw === void 0) return { value: null, corrected: false, raw: "" };
   if (typeof raw === "number") return { value: Number.isInteger(raw) && raw > 0 && raw < 2e3 ? raw : null, corrected: false, raw: String(raw) };
-  const text3 = raw.trim();
-  const inParens = /\(\s*([^)]{1,6})\s*\)/.exec(text3)?.[1];
-  const token = (inParens ?? text3.split(/[\s.…·_-]+/).filter(Boolean).pop() ?? "").trim();
-  if (!token || token.length > 4) return { value: null, corrected: false, raw: text3 };
+  const text4 = raw.trim();
+  const inParens = /\(\s*([^)]{1,6})\s*\)/.exec(text4)?.[1];
+  const token = (inParens ?? text4.split(/[\s.…·_-]+/).filter(Boolean).pop() ?? "").trim();
+  if (!token || token.length > 4) return { value: null, corrected: false, raw: text4 };
   if (/^\d+$/.test(token)) {
     const value2 = Number(token);
-    return { value: value2 > 0 && value2 < 2e3 ? value2 : null, corrected: false, raw: text3 };
+    return { value: value2 > 0 && value2 < 2e3 ? value2 : null, corrected: false, raw: text4 };
   }
   const letters = token.replace(/\d/g, "");
-  if (!/\d/.test(token) || letters.length > token.length - letters.length) return { value: null, corrected: false, raw: text3 };
+  if (!/\d/.test(token) || letters.length > token.length - letters.length) return { value: null, corrected: false, raw: text4 };
   const mapped = token.split("").map((char) => /\d/.test(char) ? char : DIGIT_LOOKALIKES[char] ?? "?").join("");
-  if (!/^\d+$/.test(mapped)) return { value: null, corrected: false, raw: text3 };
+  if (!/^\d+$/.test(mapped)) return { value: null, corrected: false, raw: text4 };
   const value = Number(mapped);
-  return { value: value > 0 && value < 2e3 ? value : null, corrected: true, raw: text3 };
+  return { value: value > 0 && value < 2e3 ? value : null, corrected: true, raw: text4 };
 }
 function splitTrailingPage(title) {
   const match = /^(.*?)[\s.…·_]{3,}\s*\(?\s*([0-9IlOoZS|]{1,4})\s*\)?\s*$/.exec(title);
@@ -8635,34 +8641,34 @@ function textSimilarity(a, b) {
 var TURKISH_LETTERS = /[A-Za-zÇĞİÖŞÜçğıöşüÂâÎîÛû]/;
 var TURKISH_SPECIFIC = /[ÇĞİÖŞÜçğıöşü]/g;
 var VOWELS = /[AEIİOÖUÜaeıioöuüâîû]/;
-function turkishPlausibility(text3) {
-  const compact = text3.replace(/\s+/g, "");
+function turkishPlausibility(text4) {
+  const compact = text4.replace(/\s+/g, "");
   if (!compact) return 0;
   const letters = compact.split("").filter((char) => TURKISH_LETTERS.test(char)).length;
   const digits = compact.split("").filter((char) => /\d/.test(char)).length;
   const symbols = compact.length - letters - digits - (compact.match(/[.,;:()'’\-–—/&]/g)?.length ?? 0);
-  const words = text3.split(/\s+/).filter((word) => word.replace(/[^A-Za-zÇĞİÖŞÜçğıöşü]/g, "").length >= 2);
+  const words = text4.split(/\s+/).filter((word) => word.replace(/[^A-Za-zÇĞİÖŞÜçğıöşü]/g, "").length >= 2);
   const wordsWithVowel = words.filter((word) => VOWELS.test(word)).length;
   const letterRatio = letters / Math.max(1, compact.length - digits);
   const vowelRatio = words.length ? wordsWithVowel / words.length : 0.5;
   return Math.max(0, Math.min(1, 0.6 * letterRatio + 0.4 * vowelRatio - 0.15 * Math.max(0, symbols)));
 }
-var turkishCharCount = (text3) => text3.match(TURKISH_SPECIFIC)?.length ?? 0;
+var turkishCharCount = (text4) => text4.match(TURKISH_SPECIFIC)?.length ?? 0;
 
 // server/bookContent/tocPostprocess.ts
 var HEADING_WORDS = /* @__PURE__ */ new Set(["icindekiler", "icerik", "icerikler", "kitap bitirme plani", "konular", "konu listesi", "konu takip cizelgesi", "sayfa", "test", "unite"]);
 function noiseReason(item, context) {
-  const text3 = `${item.label ?? ""} ${item.title}`.trim();
-  const normalized = normalizeForComparison(text3);
+  const text4 = `${item.label ?? ""} ${item.title}`.trim();
+  const normalized = normalizeForComparison(text4);
   if (!normalized) return "decorative";
-  if (/\bisbn\b/.test(normalized) || /\b97[89][\d\s-]{10,}/.test(text3)) return "isbn";
-  if (/\d{8,}/.test(text3.replace(/[\s-]/g, "")) && !/[a-zçğıöşü]{3,}/i.test(text3)) return "barcode";
-  if (/(www\.|https?:\/\/|\.com\b|\.com\.tr\b|@)/i.test(text3)) return "url";
-  if (/©|\bcopyright\b|tum haklari|yayin hakki|baski\s*:|matbaa/.test(`${text3} ${normalized}`.toLowerCase())) return "copyright";
+  if (/\bisbn\b/.test(normalized) || /\b97[89][\d\s-]{10,}/.test(text4)) return "isbn";
+  if (/\d{8,}/.test(text4.replace(/[\s-]/g, "")) && !/[a-zçğıöşü]{3,}/i.test(text4)) return "barcode";
+  if (/(www\.|https?:\/\/|\.com\b|\.com\.tr\b|@)/i.test(text4)) return "url";
+  if (/©|\bcopyright\b|tum haklari|yayin hakki|baski\s*:|matbaa/.test(`${text4} ${normalized}`.toLowerCase())) return "copyright";
   if (HEADING_WORDS.has(normalized)) return "heading";
   if (context.publisher && normalizeForComparison(context.publisher) === normalized) return "publisher";
   if (context.title && item.type !== "unit" && normalizeForComparison(context.title) === normalized) return "book_title";
-  if (!/[a-zçğıöşü]/i.test(text3) && item.page === null) return "decorative";
+  if (!/[a-zçğıöşü]/i.test(text4) && item.page === null) return "decorative";
   return null;
 }
 function repairPageNumbers(items) {
@@ -9753,16 +9759,16 @@ function looksLikeTopicList(page2) {
 var UNIT_ONLY = /^\d+\s*\.?\s*unite$/;
 function classify(label, title) {
   if (label && /^\d+\s*[.)]?$/.test(label.trim())) return { contentType: "topic", testNumber: null };
-  const text3 = normalizeForComparison(`${label ?? ""} ${label ? "" : title}`);
+  const text4 = normalizeForComparison(`${label ?? ""} ${label ? "" : title}`);
   const lastNumber = (() => {
-    const all = text3.match(/\d+/g);
+    const all = text4.match(/\d+/g);
     return all ? Number(all[all.length - 1]) : null;
   })();
-  const testMatch = text3.match(/^test\s*(\d+)/);
+  const testMatch = text4.match(/^test\s*(\d+)/);
   if (testMatch) return { contentType: "topic_test", testNumber: Number(testMatch[1]) };
-  if (text3.includes("egitim kontrol") || text3.startsWith("osym")) return { contentType: "osym_type", testNumber: lastNumber };
-  if (text3.includes("sarmal") || text3.includes("karma") || text3.includes("genel tekrar")) return { contentType: "review", testNumber: lastNumber };
-  if (text3.includes("simulasyon") || text3.includes("deneme")) return { contentType: "simulation", testNumber: lastNumber };
+  if (text4.includes("egitim kontrol") || text4.startsWith("osym")) return { contentType: "osym_type", testNumber: lastNumber };
+  if (text4.includes("sarmal") || text4.includes("karma") || text4.includes("genel tekrar")) return { contentType: "review", testNumber: lastNumber };
+  if (text4.includes("simulasyon") || text4.includes("deneme")) return { contentType: "simulation", testNumber: lastNumber };
   return { contentType: label ? "topic_test" : "topic", testNumber: lastNumber };
 }
 var cleanTitle = (value) => value.replace(/\s+/g, " ").replace(/^[\s\-–—:.]+|[\s\-–—:.]+$/g, "").trim();
@@ -10017,7 +10023,7 @@ async function matchEntries(userId, entries, subject2) {
   const unresolvedTexts = Array.from(new Set(matched.filter((entry) => entry.tier === "manual" && entry.matchText).map((entry) => entry.matchText)));
   if (unresolvedTexts.length > 0) {
     const candidates = topics.filter((topic) => !subject2 || topic.subject === subject2);
-    const ai = await suggestTopicsWithAi(unresolvedTexts.map((text3, key) => ({ key, text: text3, unitTitle: matched.find((entry) => entry.matchText === text3)?.unitTitle ?? "" })), candidates);
+    const ai = await suggestTopicsWithAi(unresolvedTexts.map((text4, key) => ({ key, text: text4, unitTitle: matched.find((entry) => entry.matchText === text4)?.unitTitle ?? "" })), candidates);
     const byText = new Map(ai.map((answer) => [unresolvedTexts[answer.key], answer]));
     for (const entry of matched) {
       const answer = entry.tier === "manual" && entry.matchText ? byText.get(entry.matchText) : void 0;
@@ -10260,8 +10266,8 @@ async function transcribeWithGemini(audio, mimeType, key, model, options, fetchI
   } catch {
     return { error: "Invalid transcription response", code: "SERVICE_ERROR" };
   }
-  const text3 = parsed.hasSpeech === true && typeof parsed.text === "string" ? parsed.text.trim() : "";
-  return { task: "transcribe", language: options.language, text: text3 };
+  const text4 = parsed.hasSpeech === true && typeof parsed.text === "string" ? parsed.text.trim() : "";
+  return { task: "transcribe", language: options.language, text: text4 };
 }
 async function transcribeAudioBuffer(audio, mimeType, options = {}, fetchImpl = fetch) {
   const target = resolveLlmTarget();
@@ -10405,17 +10411,17 @@ var notesRouter = router({
     const provider = getSpeechProvider();
     if (!provider) throw new NoteError("Ses \u2192 metin \u015Fu an kapal\u0131.");
     const { mimeType, data } = decodeAttachment(input.dataUrl, "audio");
-    let text3;
+    let text4;
     try {
-      ({ text: text3 } = await provider.transcribe(data, mimeType));
+      ({ text: text4 } = await provider.transcribe(data, mimeType));
     } catch (error) {
       if (error instanceof SpeechToTextError) throw new NoteError(error.message);
       throw error;
     }
-    if (!text3) throw new NoteError("Kay\u0131tta konu\u015Fma alg\u0131lanamad\u0131. Mikrofona biraz daha yak\u0131n konu\u015Fup tekrar dener misin?");
+    if (!text4) throw new NoteError("Kay\u0131tta konu\u015Fma alg\u0131lanamad\u0131. Mikrofona biraz daha yak\u0131n konu\u015Fup tekrar dener misin?");
     const durationSec = Math.round(input.durationSec);
     const attachment = input.keepAudio ? await getAttachmentStorage().put(userId, { kind: "audio", mimeType, data, durationSec }) : null;
-    return { text: text3, durationSec, attachmentId: attachment?.id ?? null };
+    return { text: text4, durationSec, attachmentId: attachment?.id ?? null };
   })),
   // Fotoğraftaki metni çıkar (kitap OCR'ıyla aynı sağlayıcı).
   extractText: metredFeatureProcedure("NOTE_OCR").input(z5.object({ attachmentId: z5.number().int().positive() })).mutation(({ ctx, input }) => userFacing(async () => {
@@ -10423,16 +10429,16 @@ var notesRouter = router({
     const storage = getAttachmentStorage();
     const attachment = await storage.get(userId, input.attachmentId);
     if (!attachment || attachment.kind !== "image") throw new NoteError("Foto\u011Fraf bulunamad\u0131.");
-    let text3;
+    let text4;
     try {
-      text3 = await extractPlainTextFromImage(`data:${attachment.mimeType};base64,${attachment.data.toString("base64")}`);
+      text4 = await extractPlainTextFromImage(`data:${attachment.mimeType};base64,${attachment.data.toString("base64")}`);
     } catch (error) {
       console.warn("[Notes] OCR failed:", error instanceof Error ? error.message : error);
       throw new NoteError(llmUnavailableMessage(error) ?? "Foto\u011Fraftaki metin okunamad\u0131. Daha net bir foto\u011Frafla tekrar dener misin?");
     }
-    if (!text3) throw new NoteError("Foto\u011Frafta okunabilir bir yaz\u0131 bulunamad\u0131.");
-    await storage.setOcrText(userId, input.attachmentId, text3);
-    return { text: text3 };
+    if (!text4) throw new NoteError("Foto\u011Frafta okunabilir bir yaz\u0131 bulunamad\u0131.");
+    await storage.setOcrText(userId, input.attachmentId, text4);
+    return { text: text4 };
   })),
   // AI araçları: sonuç notun ÜZERİNE YAZILMAZ; eklenecek blok olarak döner.
   ai: metredFeatureProcedure("NOTE_AI").input(z5.object({ id: z5.number().int().positive(), action: z5.enum(Object.keys(NOTE_AI_ACTIONS)) })).mutation(({ ctx, input }) => userFacing(async () => {
@@ -11422,8 +11428,8 @@ async function readScheduleFromImage(dataUrl, invoke = invokeLLM, track = "YKS")
     response_format: { type: "json_schema", json_schema: { name: "class_schedule", strict: true, schema: SCHEMA } }
   });
   const content = response.choices[0]?.message?.content;
-  const text3 = typeof content === "string" ? content : content?.map((part) => part.type === "text" ? part.text : "").join("") ?? "";
-  const result = parseScheduleImport(JSON.parse(text3.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "") || "{}"), track);
+  const text4 = typeof content === "string" ? content : content?.map((part) => part.type === "text" ? part.text : "").join("") ?? "";
+  const result = parseScheduleImport(JSON.parse(text4.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "") || "{}"), track);
   if (!result.periods.length || !result.blocks.length) throw new Error("Programdan ders saati ya da ders okunamad\u0131.");
   return result;
 }
@@ -13730,7 +13736,7 @@ var adminSubscriptionsRouter = router({
 });
 
 // server/routers/admin/system.ts
-var redact = (text3) => text3.replace(/\b(sk-[A-Za-z0-9_*.\-]{4,}|AIza[0-9A-Za-z_\-]{10,}|Bearer\s+\S+)/g, "[redacted]");
+var redact = (text4) => text4.replace(/\b(sk-[A-Za-z0-9_*.\-]{4,}|AIza[0-9A-Za-z_\-]{10,}|Bearer\s+\S+)/g, "[redacted]");
 async function check(run) {
   const started = Date.now();
   try {
@@ -13773,7 +13779,7 @@ var adminSystemRouter = router({
     if (!target) return { config, hints: ["LLM_API_KEY (ya da OPENAI_API_KEY) tan\u0131ml\u0131 de\u011Fil ya da bu deploy'a ula\u015Fmad\u0131 \u2014 Vercel'de ekledikten sonra Redeploy gerekir."], checks: null };
     const hints = configHints(target.baseUrl, target.model);
     if (config.keyHasWhitespace) hints.push("LLM_API_KEY de\u011Ferinde bo\u015Fluk/sat\u0131r sonu var; Vercel'de yeniden, bo\u015Fluksuz yap\u0131\u015Ft\u0131r.");
-    const text3 = await check(() => invokeLLM({ messages: [{ role: "user", content: "Yaln\u0131zca OK yaz." }], max_tokens: 5 }));
+    const text4 = await check(() => invokeLLM({ messages: [{ role: "user", content: "Yaln\u0131zca OK yaz." }], max_tokens: 5 }));
     const json = await check(() => invokeLLM({
       messages: [{ role: "user", content: '{"sonuc": "tamam", "sayi": null} d\xF6nd\xFCr.' }],
       response_format: { type: "json_schema", json_schema: { name: "health", strict: true, schema: { type: "object", properties: { sonuc: { type: "string" }, sayi: { type: ["integer", "null"] } }, required: ["sonuc", "sayi"], additionalProperties: false } } }
@@ -13782,7 +13788,7 @@ var adminSystemRouter = router({
     const vision = await check(() => invokeLLM({ messages: [{ role: "user", content: [{ type: "text", text: "Bu g\xF6rselin rengi ne? Tek kelime." }, { type: "image_url", image_url: { url: image, detail: "low" } }] }], max_tokens: 10 }));
     const strongModel = modelForTier("strong");
     const strong = strongModel && strongModel !== target.model ? { model: strongModel, ...await check(() => invokeLLM({ model: strongModel, reasoningEffort: "low", messages: [{ role: "user", content: "Yaln\u0131zca OK yaz." }], max_tokens: 200 })) } : null;
-    return { config, hints, checks: { text: text3, json, vision, strong } };
+    return { config, hints, checks: { text: text4, json, vision, strong } };
   }),
   // Soru çözümü kademelerinin (LLM_MODEL_LIGHT / LLM_MODEL / LLM_MODEL_STRONG) sağlayıcıda var olup olmadığı.
   // Yalnızca model listesini okur: üretim kotası harcamaz.
@@ -14271,6 +14277,68 @@ var adminQuotesRouter = router({
   })
 });
 
+// server/routers/admin/settings.ts
+import { eq as eq34 } from "drizzle-orm";
+import { z as z30 } from "zod";
+
+// shared/platformCompany.ts
+import { z as z29 } from "zod";
+var text3 = (max) => z29.string().trim().max(max).default("");
+var companyInfoSchema = z29.object({
+  brandName: text3(80),
+  legalName: text3(200),
+  taxOffice: text3(80),
+  taxNumber: z29.string().trim().regex(/^(\d{10,11})?$/, "Vergi / TC kimlik numaras\u0131 10 ya da 11 haneli olmal\u0131.").default(""),
+  mersisNo: z29.string().trim().regex(/^(\d{16})?$/, "MERS\u0130S numaras\u0131 16 haneli olmal\u0131.").default(""),
+  address: text3(300),
+  phone: text3(40),
+  email: z29.union([z29.literal(""), z29.string().trim().email("Ge\xE7erli bir e-posta yaz.").max(160)]).default(""),
+  website: text3(160),
+  bankName: text3(80),
+  iban: z29.string().trim().transform((value) => value.replace(/\s+/g, "").toUpperCase()).pipe(z29.string().regex(/^(TR\d{24})?$/, "IBAN TR ile ba\u015Flayan 26 karakter olmal\u0131.")).default(""),
+  quoteTerms: text3(2e3)
+});
+var EMPTY_COMPANY = companyInfoSchema.parse({});
+
+// server/admin/platformSettings.ts
+import { eq as eq33 } from "drizzle-orm";
+async function requireDb12() {
+  const db = await getDb();
+  if (!db) throw new Error("Veritaban\u0131na ula\u015F\u0131lamad\u0131.");
+  return db;
+}
+async function getCompanyInfo() {
+  const db = await requireDb12();
+  const [row] = await db.select({ valueJson: platformSettings.valueJson }).from(platformSettings).where(eq33(platformSettings.key, "company")).limit(1);
+  if (!row) return EMPTY_COMPANY;
+  try {
+    return companyInfoSchema.parse(JSON.parse(row.valueJson));
+  } catch {
+    return EMPTY_COMPANY;
+  }
+}
+async function saveCompanyInfo(info, updatedByUserId) {
+  const db = await requireDb12();
+  const values = { valueJson: JSON.stringify(info), updatedByUserId };
+  await db.insert(platformSettings).values({ key: "company", ...values }).onConflictDoUpdate({ target: platformSettings.key, set: values });
+}
+
+// server/routers/admin/settings.ts
+var adminSettingsRouter = router({
+  company: adminProcedure.query(() => getCompanyInfo()),
+  saveCompany: adminProcedure.input(companyInfoSchema).mutation(async ({ ctx, input }) => {
+    await saveCompanyInfo(input, ctx.user.id);
+    await writeAuditLog({ userId: ctx.user.id, adminId: ctx.user.id, action: "company_info_updated", newState: { legalName: input.legalName, taxNumber: input.taxNumber } });
+    return { ok: true };
+  }),
+  updateMyName: adminProcedure.input(z30.object({ name: z30.string().trim().min(2).max(120) })).mutation(async ({ ctx, input }) => {
+    const db = await getDb();
+    if (!db) throw new Error("Veritaban\u0131na ula\u015F\u0131lamad\u0131.");
+    await db.update(users).set({ name: input.name }).where(eq34(users.id, ctx.user.id));
+    return { ok: true };
+  })
+});
+
 // server/routers/admin/index.ts
 var adminRouter = router({
   users: adminUsersRouter,
@@ -14282,22 +14350,23 @@ var adminRouter = router({
   system: adminSystemRouter,
   orgs: adminOrgsRouter,
   quotes: adminQuotesRouter,
+  settings: adminSettingsRouter,
   errors: adminErrorsRouter,
   testimonials: adminTestimonialsRouter
 });
 
 // server/routers/testimonials.ts
-import { z as z29 } from "zod";
+import { z as z31 } from "zod";
 
 // shared/testimonials.ts
 var TESTIMONIAL_LIMITS = { displayName: 60, detail: 80, bodyMin: 20, body: 600 };
 
 // server/routers/testimonials.ts
-var testimonialInput = z29.object({
-  displayName: z29.string().trim().min(2, "G\xF6r\xFCnecek ad\u0131n\u0131 yaz.").max(TESTIMONIAL_LIMITS.displayName),
-  detail: z29.string().trim().max(TESTIMONIAL_LIMITS.detail).optional(),
-  rating: z29.number().int().min(1).max(5),
-  body: z29.string().trim().min(TESTIMONIAL_LIMITS.bodyMin, `Yorumun en az ${TESTIMONIAL_LIMITS.bodyMin} karakter olmal\u0131.`).max(TESTIMONIAL_LIMITS.body)
+var testimonialInput = z31.object({
+  displayName: z31.string().trim().min(2, "G\xF6r\xFCnecek ad\u0131n\u0131 yaz.").max(TESTIMONIAL_LIMITS.displayName),
+  detail: z31.string().trim().max(TESTIMONIAL_LIMITS.detail).optional(),
+  rating: z31.number().int().min(1).max(5),
+  body: z31.string().trim().min(TESTIMONIAL_LIMITS.bodyMin, `Yorumun en az ${TESTIMONIAL_LIMITS.bodyMin} karakter olmal\u0131.`).max(TESTIMONIAL_LIMITS.body)
 });
 var testimonialsRouter = router({
   published: publicProcedure.query(() => listPublishedTestimonials()),
@@ -14310,73 +14379,73 @@ var testimonialsRouter = router({
 });
 
 // server/routers.ts
-var planInput2 = z30.object({
-  topics: z30.array(z30.object({
-    topic: z30.string(),
-    subject: z30.string(),
-    exam: z30.enum(EXAM_KINDS),
-    progress: z30.number(),
-    status: z30.enum(["Zay\u0131f", "Orta", "\u0130yi"])
+var planInput2 = z32.object({
+  topics: z32.array(z32.object({
+    topic: z32.string(),
+    subject: z32.string(),
+    exam: z32.enum(EXAM_KINDS),
+    progress: z32.number(),
+    status: z32.enum(["Zay\u0131f", "Orta", "\u0130yi"])
   })).max(50),
-  exams: z30.array(z30.object({
-    title: z30.string(),
-    date: z30.string(),
-    net: z30.number(),
-    subjects: z30.record(z30.string(), z30.number()),
-    topicDetails: z30.array(z30.object({
-      subject: z30.string(),
-      topic: z30.string(),
-      questionCount: z30.number(),
-      correct: z30.number(),
-      wrong: z30.number(),
-      blank: z30.number(),
-      accuracy: z30.number(),
-      net: z30.number()
+  exams: z32.array(z32.object({
+    title: z32.string(),
+    date: z32.string(),
+    net: z32.number(),
+    subjects: z32.record(z32.string(), z32.number()),
+    topicDetails: z32.array(z32.object({
+      subject: z32.string(),
+      topic: z32.string(),
+      questionCount: z32.number(),
+      correct: z32.number(),
+      wrong: z32.number(),
+      blank: z32.number(),
+      accuracy: z32.number(),
+      net: z32.number()
     })).optional()
   })).max(10),
-  books: z30.array(z30.object({
-    id: z30.string(),
-    title: z30.string(),
-    subject: z30.string(),
-    exam: z30.enum(EXAM_KINDS),
-    level: z30.enum(["Kolay", "Orta", "Zor"]),
-    pageCount: z30.number().optional(),
-    totalQuestions: z30.number().optional(),
-    accuracy: z30.number().optional(),
-    activeDays: z30.number().optional(),
-    mappings: z30.array(z30.object({ topic: z30.string(), pageStart: z30.number().optional(), pageEnd: z30.number().optional(), testStart: z30.number().optional(), testEnd: z30.number().optional() })).max(50).optional()
+  books: z32.array(z32.object({
+    id: z32.string(),
+    title: z32.string(),
+    subject: z32.string(),
+    exam: z32.enum(EXAM_KINDS),
+    level: z32.enum(["Kolay", "Orta", "Zor"]),
+    pageCount: z32.number().optional(),
+    totalQuestions: z32.number().optional(),
+    accuracy: z32.number().optional(),
+    activeDays: z32.number().optional(),
+    mappings: z32.array(z32.object({ topic: z32.string(), pageStart: z32.number().optional(), pageEnd: z32.number().optional(), testStart: z32.number().optional(), testEnd: z32.number().optional() })).max(50).optional()
   })).max(30).default([]),
-  availableMinutes: z30.number().min(120).max(2400).default(600),
+  availableMinutes: z32.number().min(120).max(2400).default(600),
   // Öğrencinin yerel "bugün"ü (YYYY-MM-DD): plan bugünden başlayan 7 günü kapsar.
-  startDate: z30.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  goal: z30.string().max(120).default("YKS 2027"),
+  startDate: z32.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  goal: z32.string().max(120).default("YKS 2027"),
   // Onboarding'den gelen koçluk bağlamı — tamamen isteğe bağlı, eski
   // istemciler (veya onboarding'i henüz tamamlamamış kullanıcılar) bu alanı
   // hiç göndermeyebilir.
-  studentProfile: z30.object({
+  studentProfile: z32.object({
     // Hedef bilgileri — onboarding'in "Kullanıcı tanımlama" ve "Hedefler"
     // adımlarından. AI planı önceliklendirirken (örn. hedef net/sıralamaya
     // göre tempo) ve dilini kişiselleştirirken kullanır.
-    targetScoreType: z30.string().max(20).optional(),
-    examYear: z30.number().int().optional(),
-    targetUniversity: z30.string().max(180).optional(),
-    targetDepartment: z30.string().max(180).optional(),
-    targetRanking: z30.string().max(60).optional(),
-    dailyStudyDuration: z30.number().int().min(0).max(960).optional(),
-    preferredStudyMethods: z30.array(z30.string().max(40)).max(5).optional(),
-    studyObstacles: z30.string().max(500).optional(),
-    coachingStyle: z30.string().max(40).optional(),
-    mainGoal: z30.string().max(500).optional()
+    targetScoreType: z32.string().max(20).optional(),
+    examYear: z32.number().int().optional(),
+    targetUniversity: z32.string().max(180).optional(),
+    targetDepartment: z32.string().max(180).optional(),
+    targetRanking: z32.string().max(60).optional(),
+    dailyStudyDuration: z32.number().int().min(0).max(960).optional(),
+    preferredStudyMethods: z32.array(z32.string().max(40)).max(5).optional(),
+    studyObstacles: z32.string().max(500).optional(),
+    coachingStyle: z32.string().max(40).optional(),
+    mainGoal: z32.string().max(500).optional()
   }).optional()
 });
-var documentExtractionInput = z30.object({
-  dataUrl: z30.string().min(20).max(12e6),
-  mimeType: z30.enum(["application/pdf", "image/png", "image/jpeg", "image/webp"]),
-  fileName: z30.string().max(180).optional()
+var documentExtractionInput = z32.object({
+  dataUrl: z32.string().min(20).max(12e6),
+  mimeType: z32.enum(["application/pdf", "image/png", "image/jpeg", "image/webp"]),
+  fileName: z32.string().max(180).optional()
 });
-var bookPhotoInput = z30.object({
-  dataUrl: z30.string().min(20).max(12e6),
-  mimeType: z30.enum(["image/png", "image/jpeg", "image/webp"])
+var bookPhotoInput = z32.object({
+  dataUrl: z32.string().min(20).max(12e6),
+  mimeType: z32.enum(["image/png", "image/jpeg", "image/webp"])
 });
 var bookPhotoSchema = {
   type: "object",
@@ -14402,18 +14471,18 @@ var bookPhotoSchema = {
   additionalProperties: false
 };
 var clamp013 = (value) => typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
-var userExamInput = z30.object({
-  title: z30.string().min(1).max(180),
-  exam: z30.enum(EXAM_KINDS),
-  date: z30.string().min(8).max(30),
-  net: z30.number().min(-100).max(200),
-  delta: z30.number().min(-200).max(200),
-  subjects: z30.record(z30.string(), z30.number().min(-50).max(100)),
-  timeSpent: z30.record(z30.string(), z30.number().int().min(0).max(1e3)),
-  topicNets: z30.record(z30.string(), z30.number().min(-50).max(100)),
-  topicDetails: z30.array(z30.object({ subject: z30.string(), topic: z30.string(), questionCount: z30.number().int().min(0), correct: z30.number().int().min(0), wrong: z30.number().int().min(0), blank: z30.number().int().min(0), accuracy: z30.number().min(0).max(100), net: z30.number().min(-50).max(100) })).max(300),
-  importedFrom: z30.enum(["manual", "ocr", "pdf", "csv", "xlsx"]),
-  notes: z30.string().max(5e3).optional()
+var userExamInput = z32.object({
+  title: z32.string().min(1).max(180),
+  exam: z32.enum(EXAM_KINDS),
+  date: z32.string().min(8).max(30),
+  net: z32.number().min(-100).max(200),
+  delta: z32.number().min(-200).max(200),
+  subjects: z32.record(z32.string(), z32.number().min(-50).max(100)),
+  timeSpent: z32.record(z32.string(), z32.number().int().min(0).max(1e3)),
+  topicNets: z32.record(z32.string(), z32.number().min(-50).max(100)),
+  topicDetails: z32.array(z32.object({ subject: z32.string(), topic: z32.string(), questionCount: z32.number().int().min(0), correct: z32.number().int().min(0), wrong: z32.number().int().min(0), blank: z32.number().int().min(0), accuracy: z32.number().min(0).max(100), net: z32.number().min(-50).max(100) })).max(300),
+  importedFrom: z32.enum(["manual", "ocr", "pdf", "csv", "xlsx"]),
+  notes: z32.string().max(5e3).optional()
 });
 var documentExtractionSchema = {
   type: "object",
@@ -14479,7 +14548,7 @@ var appRouter = router({
     }),
     // Profil menüsündeki "Şifre değiştir". Tahmin denemelerine karşı kullanıcı
     // başına 15 dakikada 5 deneme.
-    changePassword: protectedProcedure.input(z30.object({ currentPassword: z30.string().min(1).max(200), newPassword: z30.string().min(1).max(200) })).mutation(async ({ ctx, input }) => {
+    changePassword: protectedProcedure.input(z32.object({ currentPassword: z32.string().min(1).max(200), newPassword: z32.string().min(1).max(200) })).mutation(async ({ ctx, input }) => {
       try {
         checkRateLimit(`change-password:${ctx.user.id}`, 5, 15 * 6e4);
       } catch {
@@ -14515,20 +14584,20 @@ var appRouter = router({
       ]);
       return { inventory, logs, mappings, switches, customBooks };
     }),
-    addBook: protectedProcedure.input(z30.object({ bookId: z30.string().max(120) })).mutation(({ ctx, input }) => addBookToInventory(ctx.user.id, input.bookId)),
-    removeBook: protectedProcedure.input(z30.object({ bookId: z30.string().max(120) })).mutation(({ ctx, input }) => removeBookFromInventory(ctx.user.id, input.bookId)),
-    addLog: protectedProcedure.input(z30.object({ bookId: z30.string().max(120), topic: z30.string().max(180).optional(), sessionDate: z30.string(), minutes: z30.number().int().min(0).max(1440), questions: z30.number().int().min(0).max(2e3), correct: z30.number().int().min(0).max(2e3), wrong: z30.number().int().min(0).max(2e3), blank: z30.number().int().min(0).max(2e3), pageStart: z30.number().int().min(0).optional(), pageEnd: z30.number().int().min(0).optional(), testStart: z30.number().int().min(0).optional(), testEnd: z30.number().int().min(0).optional() })).mutation(({ ctx, input }) => addBookStudyLog(ctx.user.id, { ...input, sessionDate: new Date(input.sessionDate) })),
-    upsertMapping: protectedProcedure.input(z30.object({ bookId: z30.string().max(120), topic: z30.string().max(180), subject: z30.string().max(80), pageStart: z30.number().int().min(0).optional(), pageEnd: z30.number().int().min(0).optional(), testStart: z30.number().int().min(0).optional(), testEnd: z30.number().int().min(0).optional() })).mutation(({ ctx, input }) => upsertBookTopicMapping(ctx.user.id, input)),
-    addSwitch: protectedProcedure.input(z30.object({ fromBookId: z30.string().max(120).optional(), toBookId: z30.string().max(120), reason: z30.string().max(300) })).mutation(({ ctx, input }) => addSourceSwitch(ctx.user.id, { ...input, switchedAt: /* @__PURE__ */ new Date() })),
-    importBooks: protectedProcedure.input(z30.object({ books: z30.array(z30.object({ id: z30.string().max(120), title: z30.string().min(1).max(180), publisher: z30.string().max(120), subject: z30.string().max(80), exam: z30.enum(EXAM_KINDS), level: z30.enum(["Kolay", "Orta", "Zor"]), format: z30.string().max(120), reason: z30.string().max(1e3), sourceUrl: z30.string().max(500).optional(), pageCount: z30.number().int().min(0).optional(), tone: z30.string().max(20), authors: z30.string().max(300).optional(), isbn: z30.string().max(32).optional() })).min(1).max(500) })).mutation(({ ctx, input }) => addUserResourceBooks(ctx.user.id, input.books)),
+    addBook: protectedProcedure.input(z32.object({ bookId: z32.string().max(120) })).mutation(({ ctx, input }) => addBookToInventory(ctx.user.id, input.bookId)),
+    removeBook: protectedProcedure.input(z32.object({ bookId: z32.string().max(120) })).mutation(({ ctx, input }) => removeBookFromInventory(ctx.user.id, input.bookId)),
+    addLog: protectedProcedure.input(z32.object({ bookId: z32.string().max(120), topic: z32.string().max(180).optional(), sessionDate: z32.string(), minutes: z32.number().int().min(0).max(1440), questions: z32.number().int().min(0).max(2e3), correct: z32.number().int().min(0).max(2e3), wrong: z32.number().int().min(0).max(2e3), blank: z32.number().int().min(0).max(2e3), pageStart: z32.number().int().min(0).optional(), pageEnd: z32.number().int().min(0).optional(), testStart: z32.number().int().min(0).optional(), testEnd: z32.number().int().min(0).optional() })).mutation(({ ctx, input }) => addBookStudyLog(ctx.user.id, { ...input, sessionDate: new Date(input.sessionDate) })),
+    upsertMapping: protectedProcedure.input(z32.object({ bookId: z32.string().max(120), topic: z32.string().max(180), subject: z32.string().max(80), pageStart: z32.number().int().min(0).optional(), pageEnd: z32.number().int().min(0).optional(), testStart: z32.number().int().min(0).optional(), testEnd: z32.number().int().min(0).optional() })).mutation(({ ctx, input }) => upsertBookTopicMapping(ctx.user.id, input)),
+    addSwitch: protectedProcedure.input(z32.object({ fromBookId: z32.string().max(120).optional(), toBookId: z32.string().max(120), reason: z32.string().max(300) })).mutation(({ ctx, input }) => addSourceSwitch(ctx.user.id, { ...input, switchedAt: /* @__PURE__ */ new Date() })),
+    importBooks: protectedProcedure.input(z32.object({ books: z32.array(z32.object({ id: z32.string().max(120), title: z32.string().min(1).max(180), publisher: z32.string().max(120), subject: z32.string().max(80), exam: z32.enum(EXAM_KINDS), level: z32.enum(["Kolay", "Orta", "Zor"]), format: z32.string().max(120), reason: z32.string().max(1e3), sourceUrl: z32.string().max(500).optional(), pageCount: z32.number().int().min(0).optional(), tone: z32.string().max(20), authors: z32.string().max(300).optional(), isbn: z32.string().max(32).optional() })).min(1).max(500) })).mutation(({ ctx, input }) => addUserResourceBooks(ctx.user.id, input.books)),
     // Ortak kitap kaydında ad/yayınevi/ISBN ile arama: kitap kayıtlıysa kapak fotoğrafı (OCR) gerekmez.
-    searchSharedBooks: protectedProcedure.input(z30.object({ q: z30.string().trim().min(2).max(120) })).query(({ input }) => searchSharedBooks(input.q)),
+    searchSharedBooks: protectedProcedure.input(z32.object({ q: z32.string().trim().min(2).max(120) })).query(({ input }) => searchSharedBooks(input.q)),
     // Kitabı kütüphaneye ekler ve ortak kayda bağlar; öğrenci "Bu kitap" dediyse (sharedBookId)
     // onaylanmış içindekiler de kopyalanır, içindekiler fotoğrafı okunmaz.
-    addBookFromCover: protectedProcedure.input(z30.object({
-      sharedBookId: z30.number().int().positive().nullable(),
-      useSharedContents: z30.boolean(),
-      draft: z30.object({ title: z30.string().trim().min(1).max(180), publisher: z30.string().max(120), subject: z30.string().max(80), exam: z30.enum(EXAM_KINDS), level: z30.enum(["Kolay", "Orta", "Zor"]), authors: z30.string().max(300).optional(), isbn: z30.string().max(32).optional(), edition: z30.string().max(120).optional() })
+    addBookFromCover: protectedProcedure.input(z32.object({
+      sharedBookId: z32.number().int().positive().nullable(),
+      useSharedContents: z32.boolean(),
+      draft: z32.object({ title: z32.string().trim().min(1).max(180), publisher: z32.string().max(120), subject: z32.string().max(80), exam: z32.enum(EXAM_KINDS), level: z32.enum(["Kolay", "Orta", "Zor"]), authors: z32.string().max(300).optional(), isbn: z32.string().max(32).optional(), edition: z32.string().max(120).optional() })
     })).mutation(({ ctx, input }) => addBookToLibrary(ctx.user.id, input)),
     // Öğrenci elindeki fiziksel kitabın kapak fotoğrafını çeker (telefon
     // kamerası); LLM görselden kitap adı/yayınevi/ders tahmini çıkarır.
@@ -14573,23 +14642,23 @@ var appRouter = router({
   }),
   exams: router({
     snapshot: protectedProcedure.query(({ ctx }) => getUserMockExams(ctx.user.id)),
-    importMany: protectedProcedure.input(z30.object({ exams: z30.array(userExamInput).min(1).max(200) })).mutation(({ ctx, input }) => addUserMockExams(ctx.user.id, input.exams.map((exam) => ({ ...exam, examDate: new Date(exam.date) }))))
+    importMany: protectedProcedure.input(z32.object({ exams: z32.array(userExamInput).min(1).max(200) })).mutation(({ ctx, input }) => addUserMockExams(ctx.user.id, input.exams.map((exam) => ({ ...exam, examDate: new Date(exam.date) }))))
   }),
   calendar: router({
     snapshot: protectedProcedure.query(({ ctx }) => getStudyCalendar(ctx.user.id)),
-    savePlan: protectedProcedure.input(z30.object({ title: z30.string().max(180), weekStart: z30.string(), weekEnd: z30.string(), summary: z30.string().max(2e3), source: z30.enum(["ai", "manual"]).optional(), replacePrevious: z30.boolean().optional(), sessions: z30.array(z30.object({ sessionDate: z30.string(), title: z30.string().max(180), subject: z30.string().max(80), topic: z30.string().max(180), kind: z30.string().max(40), plannedMinutes: z30.number().int().min(0).max(1440), targetQuestions: z30.number().int().min(0).optional(), targetPages: z30.string().max(80).nullable().optional(), targetTests: z30.string().max(80).nullable().optional() })).max(100) })).mutation(({ ctx, input }) => saveStudyPlan(ctx.user.id, { ...input, weekStart: new Date(input.weekStart), weekEnd: new Date(input.weekEnd), sessions: input.sessions.map((session) => ({ ...session, sessionDate: new Date(session.sessionDate) })) })),
-    completeSession: protectedProcedure.input(z30.object({ sessionId: z30.number().int(), actualMinutes: z30.number().int().min(0).max(1440), actualQuestions: z30.number().int().min(0).max(5e3), correct: z30.number().int().min(0).max(5e3), wrong: z30.number().int().min(0).max(5e3), blank: z30.number().int().min(0).max(5e3), actualPages: z30.number().int().min(0).max(5e3).optional(), note: z30.string().max(1e3).optional() })).mutation(({ ctx, input }) => completeStudySession(ctx.user.id, input)),
-    coachSnapshot: protectedProcedure.input(z30.object({ periodStart: z30.string(), periodEnd: z30.string() })).query(async ({ ctx, input }) => {
+    savePlan: protectedProcedure.input(z32.object({ title: z32.string().max(180), weekStart: z32.string(), weekEnd: z32.string(), summary: z32.string().max(2e3), source: z32.enum(["ai", "manual"]).optional(), replacePrevious: z32.boolean().optional(), sessions: z32.array(z32.object({ sessionDate: z32.string(), title: z32.string().max(180), subject: z32.string().max(80), topic: z32.string().max(180), kind: z32.string().max(40), plannedMinutes: z32.number().int().min(0).max(1440), targetQuestions: z32.number().int().min(0).optional(), targetPages: z32.string().max(80).nullable().optional(), targetTests: z32.string().max(80).nullable().optional() })).max(100) })).mutation(({ ctx, input }) => saveStudyPlan(ctx.user.id, { ...input, weekStart: new Date(input.weekStart), weekEnd: new Date(input.weekEnd), sessions: input.sessions.map((session) => ({ ...session, sessionDate: new Date(session.sessionDate) })) })),
+    completeSession: protectedProcedure.input(z32.object({ sessionId: z32.number().int(), actualMinutes: z32.number().int().min(0).max(1440), actualQuestions: z32.number().int().min(0).max(5e3), correct: z32.number().int().min(0).max(5e3), wrong: z32.number().int().min(0).max(5e3), blank: z32.number().int().min(0).max(5e3), actualPages: z32.number().int().min(0).max(5e3).optional(), note: z32.string().max(1e3).optional() })).mutation(({ ctx, input }) => completeStudySession(ctx.user.id, input)),
+    coachSnapshot: protectedProcedure.input(z32.object({ periodStart: z32.string(), periodEnd: z32.string() })).query(async ({ ctx, input }) => {
       const { sessions, averageAccuracy } = await getPlanAdherenceInputs(ctx.user.id, new Date(input.periodStart), new Date(input.periodEnd));
       return { ...calculatePlanAdherence(sessions, averageAccuracy), averageAccuracy, alerts: await getCoachAlerts(ctx.user.id) };
     }),
-    refreshCoach: protectedProcedure.input(z30.object({ periodStart: z30.string(), periodEnd: z30.string() })).mutation(({ ctx, input }) => savePlanAdherence(ctx.user.id, new Date(input.periodStart), new Date(input.periodEnd))),
+    refreshCoach: protectedProcedure.input(z32.object({ periodStart: z32.string(), periodEnd: z32.string() })).mutation(({ ctx, input }) => savePlanAdherence(ctx.user.id, new Date(input.periodStart), new Date(input.periodEnd))),
     // Üst çubuktaki bildirim zili: okunmamış koç uyarıları (yalnızca okuma; uyarıları refreshCoach üretir).
     alerts: protectedProcedure.query(({ ctx }) => getCoachAlerts(ctx.user.id)),
-    readCoachAlert: protectedProcedure.input(z30.object({ alertId: z30.number().int() })).mutation(({ ctx, input }) => markCoachAlertRead(ctx.user.id, input.alertId)),
-    addFocusLog: protectedProcedure.input(z30.object({ subject: z30.string().max(80), topic: z30.string().max(180), studyDate: z30.string(), minutes: z30.number().int().min(1).max(1440), questions: z30.number().int().min(0).max(5e3), correct: z30.number().int().min(0).max(5e3), wrong: z30.number().int().min(0).max(5e3), blank: z30.number().int().min(0).max(5e3), note: z30.string().max(1e3).optional() })).mutation(({ ctx, input }) => addTopicStudyLog(ctx.user.id, { ...input, studyDate: new Date(input.studyDate), note: input.note ?? null, sessionId: null })),
+    readCoachAlert: protectedProcedure.input(z32.object({ alertId: z32.number().int() })).mutation(({ ctx, input }) => markCoachAlertRead(ctx.user.id, input.alertId)),
+    addFocusLog: protectedProcedure.input(z32.object({ subject: z32.string().max(80), topic: z32.string().max(180), studyDate: z32.string(), minutes: z32.number().int().min(1).max(1440), questions: z32.number().int().min(0).max(5e3), correct: z32.number().int().min(0).max(5e3), wrong: z32.number().int().min(0).max(5e3), blank: z32.number().int().min(0).max(5e3), note: z32.string().max(1e3).optional() })).mutation(({ ctx, input }) => addTopicStudyLog(ctx.user.id, { ...input, studyDate: new Date(input.studyDate), note: input.note ?? null, sessionId: null })),
     // Paragraf pratiği / gece okuması gibi "şimdi yaptım" alışkanlık kayıtları.
-    logRoutine: protectedProcedure.input(z30.object({ title: z30.string().max(180), subject: z30.string().max(80), topic: z30.string().max(180), kind: z30.string().max(40), plannedMinutes: z30.number().int().min(0).max(1440), actualMinutes: z30.number().int().min(0).max(1440), actualPages: z30.number().int().min(0).max(5e3).optional(), note: z30.string().max(1e3).optional(), readingBookId: z30.number().int().positive().optional() })).mutation(async ({ ctx, input }) => {
+    logRoutine: protectedProcedure.input(z32.object({ title: z32.string().max(180), subject: z32.string().max(80), topic: z32.string().max(180), kind: z32.string().max(40), plannedMinutes: z32.number().int().min(0).max(1440), actualMinutes: z32.number().int().min(0).max(1440), actualPages: z32.number().int().min(0).max(5e3).optional(), note: z32.string().max(1e3).optional(), readingBookId: z32.number().int().positive().optional() })).mutation(async ({ ctx, input }) => {
       const { readingBookId, ...routine } = input;
       const calendar = await logCompletedRoutineSession(ctx.user.id, routine);
       const readingBook = readingBookId && input.actualPages ? await recordReadingPages(ctx.user.id, readingBookId, input.actualPages) : null;
@@ -14885,8 +14954,8 @@ var HARD_PHRASES = ["ileri", "zor", "extreme", "advanced", "master", "pro", "ile
 var normalizedPhrases = (phrases) => phrases.map((phrase) => normalizeKeepingTurkish(phrase));
 var EASY = normalizedPhrases(EASY_PHRASES);
 var HARD = normalizedPhrases(HARD_PHRASES);
-var countPhraseMatches = (text3, phrases) => {
-  const padded = ` ${normalizeKeepingTurkish(text3)} `;
+var countPhraseMatches = (text4, phrases) => {
+  const padded = ` ${normalizeKeepingTurkish(text4)} `;
   return phrases.filter((phrase) => padded.includes(` ${phrase} `));
 };
 var BOOK_TYPE_MODIFIER = {
@@ -15368,8 +15437,8 @@ async function isCrawlingAllowed() {
   try {
     const response = await fetch(`${BASE_URL}/robots.txt`);
     if (!response.ok) return true;
-    const text3 = await response.text();
-    const blanketDisallow = /User-agent:\s*\*[\s\S]*?Disallow:\s*\/\s*$/im.test(text3);
+    const text4 = await response.text();
+    const blanketDisallow = /User-agent:\s*\*[\s\S]*?Disallow:\s*\/\s*$/im.test(text4);
     return !blanketDisallow;
   } catch {
     return true;

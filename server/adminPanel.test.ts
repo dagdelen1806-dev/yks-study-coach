@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq, inArray } from "drizzle-orm";
 import type { User } from "../drizzle/schema";
-import { orgPlanPrices, orgQuotes, organizationAuditLogs, organizationMembers, organizations, users } from "../drizzle/schema";
+import { orgPlanPrices, orgQuotes, organizationAuditLogs, platformSettings, organizationMembers, organizations, users } from "../drizzle/schema";
 import type { TrpcContext } from "./_core/context";
 import { appRouter } from "./routers";
 import { getDb } from "./db";
@@ -15,6 +15,7 @@ describe.skipIf(!hasDb)("yönetim paneli (router + veritabanı)", () => {
   let orgId = 0;
   let savedPrices: Array<typeof orgPlanPrices.$inferSelect> = [];
   const createdQuoteIds: number[] = [];
+  let savedSettings: Array<typeof platformSettings.$inferSelect> = [];
   const caller = (id: number, role: "admin" | "user" = "user") => appRouter.createCaller({ user: { id, role, approvalStatus: "approved", accountStatus: "active", emailVerifiedAt: new Date(), loginMethod: "dev_email" } as unknown as User, req: { protocol: "https", headers: { host: "localhost" } } as TrpcContext["req"], res: {} as TrpcContext["res"] } as TrpcContext);
   const platform = () => caller(ids.platform, "admin");
 
@@ -31,12 +32,15 @@ describe.skipIf(!hasDb)("yönetim paneli (router + veritabanı)", () => {
       { orgId, userId: ids.student, role: "student", consentAt: new Date() },
     ]);
     savedPrices = await db.select().from(orgPlanPrices);
+    savedSettings = await db.select().from(platformSettings);
   });
 
   afterAll(async () => {
     const db = (await getDb())!;
     await db.delete(orgPlanPrices);
     if (savedPrices.length) await db.insert(orgPlanPrices).values(savedPrices);
+    await db.delete(platformSettings);
+    if (savedSettings.length) await db.insert(platformSettings).values(savedSettings);
     if (createdQuoteIds.length) await db.delete(orgQuotes).where(inArray(orgQuotes.id, createdQuoteIds));
     await db.delete(organizationAuditLogs).where(eq(organizationAuditLogs.orgId, orgId));
     await db.delete(organizationMembers).where(eq(organizationMembers.orgId, orgId));
@@ -83,6 +87,17 @@ describe.skipIf(!hasDb)("yönetim paneli (router + veritabanı)", () => {
     expect(seen.standard).toEqual({ monthlyPriceTry: 4990, yearlyPriceTry: null, priceNote: "50 öğrenciye kadar" });
     // Koordinatör yönetici değil: kurum uçları yetkisiz role kurumu hiç göstermez.
     await expect(caller(ids.newcomer).org.settings.planPrices({ orgId })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("şirket bilgileri yalnızca platform yöneticisince kaydedilir; yönetici adını değiştirir", async () => {
+    await expect(caller(ids.orgAdmin).admin.settings.saveCompany({ legalName: "Sahte" } as never)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await platform().admin.settings.saveCompany({ brandName: "Pusula", legalName: "Panel Test Ltd. Şti.", taxOffice: "Çankaya", taxNumber: "1234567890", mersisNo: "", address: "Ankara", phone: "", email: "", website: "", bankName: "Test Bank", iban: "TR120006200000000000000001", quoteTerms: "Peşin ödeme." });
+    expect(await platform().admin.settings.company()).toMatchObject({ legalName: "Panel Test Ltd. Şti.", iban: "TR120006200000000000000001", quoteTerms: "Peşin ödeme." });
+    await expect(platform().admin.settings.saveCompany({ taxNumber: "12" } as never)).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await platform().admin.settings.updateMyName({ name: "Yeni Ad" });
+    const db = (await getDb())!;
+    const [me] = await db.select({ name: users.name }).from(users).where(eq(users.id, ids.platform));
+    expect(me.name).toBe("Yeni Ad");
   });
 
   it("fiyat teklifi: yalnızca platform yöneticisi; kabul edilmeden ve iki kez uygulanmaz; sonuçlanan değişmez", async () => {

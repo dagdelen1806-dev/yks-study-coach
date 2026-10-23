@@ -1,6 +1,6 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
-import { BadgeCheck, BookOpen, Building2, ClipboardList, CreditCard, FileText, LayoutDashboard, LogOut, Menu, MessageSquareQuote, Package, ShieldCheck, TriangleAlert, UserCheck, Users, X } from "lucide-react";
+import { BadgeCheck, BookOpen, Building2, ClipboardList, CreditCard, FileText, LayoutDashboard, LogOut, Menu, MessageSquareQuote, Package, Settings, ShieldCheck, TriangleAlert, UserCheck, Users, X } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useLocation } from "wouter";
 
@@ -16,6 +16,7 @@ const AdminAuditPage = lazy(() => import("@/components/subscription/AdminAuditPa
 const AdminErrorsPage = lazy(() => import("@/components/subscription/AdminErrorsPage"));
 const AdminPackagesPage = lazy(() => import("./AdminPackagesPage"));
 const AdminOrgDetail = lazy(() => import("./AdminOrgDetail"));
+const AdminSettingsPage = lazy(() => import("./AdminSettingsPage"));
 const AdminQuotesPage = lazy(() => import("./AdminQuotesPage"));
 const AdminQuoteEditor = lazy(() => import("./AdminQuotesPage").then((module) => ({ default: module.AdminQuoteEditor })));
 const AdminQuotePrint = lazy(() => import("./AdminQuotesPage").then((module) => ({ default: module.AdminQuotePrint })));
@@ -33,6 +34,7 @@ export const ADMIN_PATHS = {
   testimonials: "/yonetim/yorumlar",
   audit: "/yonetim/kayitlar",
   errors: "/yonetim/hatalar",
+  settings: "/yonetim/ayarlar",
 } as const;
 export type AdminSection = keyof typeof ADMIN_PATHS;
 export const adminOrgPath = (orgId: number) => `/yonetim/kurum/${orgId}`;
@@ -50,6 +52,7 @@ const NAV: Array<{ key: AdminSection; label: string; icon: typeof Users; group: 
   { key: "testimonials", label: "Yorumlar", icon: MessageSquareQuote, group: "İçerik" },
   { key: "audit", label: "Denetim kayıtları", icon: ClipboardList, group: "Sistem" },
   { key: "errors", label: "Hatalar", icon: TriangleAlert, group: "Sistem" },
+  { key: "settings", label: "Ayarlar", icon: Settings, group: "Sistem" },
 ];
 
 const TITLES: Record<AdminSection, { title: string; description: string }> = {
@@ -65,6 +68,7 @@ const TITLES: Record<AdminSection, { title: string; description: string }> = {
   testimonials: { title: "Yorumlar", description: "Tanıtım sayfasındaki öğrenci yorumlarını onayla." },
   audit: { title: "Denetim kayıtları", description: "Yönetim işlemlerinin kaydı." },
   errors: { title: "Hatalar", description: "Uygulamada yakalanan hatalar." },
+  settings: { title: "Ayarlar", description: "Şirket bilgileri, adın ve şifren." },
 };
 
 type AdminRoute = { section: AdminSection | "org" | "quote"; orgId?: number; quoteId?: number | null; print?: boolean };
@@ -177,6 +181,7 @@ export default function AdminApp() {
             {route.section === "testimonials" && <AdminTestimonialsPage />}
             {route.section === "audit" && <AdminAuditPage />}
             {route.section === "errors" && <AdminErrorsPage />}
+            {route.section === "settings" && <AdminSettingsPage />}
           </Suspense>
         </div>
       </main>

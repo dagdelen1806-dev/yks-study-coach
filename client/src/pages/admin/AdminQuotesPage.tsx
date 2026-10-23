@@ -6,6 +6,7 @@ import { trpc } from "@/lib/trpc";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ORG_PLANS, ORG_PLAN_DEFAULT_CREDITS, ORG_PLAN_LABELS, type OrgPlan } from "@shared/org";
+import { EMPTY_COMPANY, formatIban } from "@shared/platformCompany";
 import { QUOTE_STATUS_LABELS, computeQuoteTotals, formatTry, quoteNumber, type QuoteLine, type QuoteStatus } from "@shared/orgQuote";
 
 export const quotePath = (id: number | "yeni") => `/yonetim/teklif/${id}`;
@@ -74,6 +75,13 @@ export function AdminQuoteEditor({ quoteId }: { quoteId: number | null }) {
     const data = quote.data;
     setForm({ orgId: data.orgId, customerName: data.customerName, contactName: data.contactName ?? "", contactEmail: data.contactEmail ?? "", plan: data.plan, months: String(data.months), studentCount: data.studentCount ? String(data.studentCount) : "", lines: data.lines.map((line) => ({ description: line.description, quantity: String(line.quantity), unitPriceTry: String(line.unitPriceTry) })), discountPercent: String(data.discountPercent), vatRate: String(data.vatRate), validUntil: isoDay(data.validUntil), note: data.note ?? "" });
   }, [quote.data]);
+  // Yeni teklifin "Not ve koşullar" alanına Ayarlar'daki standart koşullar gelir.
+  const company = trpc.admin.settings.company.useQuery();
+  useEffect(() => {
+    if (quoteId !== null || !company.data?.quoteTerms) return;
+    const terms = company.data.quoteTerms;
+    setForm((current) => (current.note ? current : { ...current, note: terms }));
+  }, [quoteId, company.data]);
   // Kurumdan gelinince müşteri adı kurumun adıyla dolar.
   useEffect(() => {
     if (!form.orgId || form.customerName || !orgs.data) return;
@@ -217,16 +225,26 @@ export function QuoteTotalsBox({ totals, discountPercent, vatRate }: { totals: R
 /** Yazdırılabilir teklif (/yonetim/teklif/:id/yazdir): tarayıcının "PDF olarak kaydet"iyle paylaşılır. */
 export function AdminQuotePrint({ quoteId }: { quoteId: number }) {
   const quote = trpc.admin.quotes.get.useQuery({ id: quoteId }, { retry: false });
+  const company = trpc.admin.settings.company.useQuery();
   useEffect(() => { if (quote.data) document.title = `Fiyat Teklifi ${quoteNumber(quote.data.id, quote.data.createdAt)}`; }, [quote.data]);
-  if (quote.isLoading) return <div className="flex min-h-screen items-center justify-center"><Loader2 className="animate-spin text-brand" /></div>;
+  if (quote.isLoading || company.isLoading) return <div className="flex min-h-screen items-center justify-center"><Loader2 className="animate-spin text-brand" /></div>;
   if (!quote.data) return <p className="p-10 text-center text-danger">{quote.error?.message ?? "Teklif bulunamadı."}</p>;
   const data = quote.data;
+  const firm = company.data ?? EMPTY_COMPANY;
+  const taxLine = [firm.taxOffice && `${firm.taxOffice} V.D.`, firm.taxNumber && `VKN/TCKN ${firm.taxNumber}`, firm.mersisNo && `MERSİS ${firm.mersisNo}`].filter(Boolean).join(" · ");
+  const contactLine = [firm.phone, firm.email, firm.website].filter(Boolean).join(" · ");
   return (
     <div className="min-h-screen bg-white text-ink print:min-h-0">
       <div className="mx-auto max-w-[800px] p-8 print:p-0">
         <div className="mb-6 flex justify-end gap-2 print:hidden"><Button onClick={() => window.print()}><Printer size={14} /> Yazdır / PDF kaydet</Button></div>
         <header className="flex items-start justify-between gap-6 border-b border-rule pb-5">
-          <div><p className="text-[22px] font-extrabold">Pusula</p><p className="text-[13px] text-ink-3">Kurumsal abonelik</p></div>
+          <div className="text-[12px] leading-5 text-ink-3">
+            <p className="text-[22px] font-extrabold leading-tight text-ink">{firm.brandName || "Pusula"}</p>
+            {firm.legalName && <p className="font-semibold text-ink-2">{firm.legalName}</p>}
+            {firm.address && <p className="max-w-[340px]">{firm.address}</p>}
+            {taxLine && <p>{taxLine}</p>}
+            {contactLine && <p>{contactLine}</p>}
+          </div>
           <div className="text-right text-[13px]"><p className="text-[18px] font-extrabold">Fiyat Teklifi</p><p className="font-mono">{quoteNumber(data.id, data.createdAt)}</p><p className="text-ink-3">Tarih: {trDay(data.updatedAt)}</p>{data.validUntil && <p className="text-ink-3">Geçerlilik: {trDay(data.validUntil)}</p>}</div>
         </header>
         <section className="mt-5 text-[14px]">
@@ -241,7 +259,8 @@ export function AdminQuotePrint({ quoteId }: { quoteId: number }) {
         </table>
         <div className="mt-4 flex justify-end"><div className="w-full max-w-[300px]"><QuoteTotalsBox totals={data.totals} discountPercent={data.discountPercent} vatRate={data.vatRate} /></div></div>
         {data.note && <section className="mt-6 whitespace-pre-line text-[13px] leading-6 text-ink-2"><p className="text-[12px] font-semibold uppercase tracking-wide text-ink-4">Not ve koşullar</p>{data.note}</section>}
-        <footer className="mt-10 border-t border-rule pt-4 text-[12px] text-ink-3">Teklifi hazırlayan: {data.createdByName ?? "Pusula"}{data.createdByEmail ? ` · ${data.createdByEmail}` : ""}. Fiyatlar Türk lirasıdır; KDV ayrıca gösterilmiştir.</footer>
+        {firm.iban && <section className="mt-6 rounded-xl bg-paper p-4 text-[13px]"><p className="text-[12px] font-semibold uppercase tracking-wide text-ink-4">Ödeme bilgileri</p><p className="mt-1">{[firm.bankName, firm.legalName].filter(Boolean).join(" · ")}</p><p className="font-mono">{formatIban(firm.iban)}</p></section>}
+        <footer className="mt-10 border-t border-rule pt-4 text-[12px] text-ink-3">Teklifi hazırlayan: {data.createdByName ?? (firm.brandName || "Pusula")}{data.createdByEmail ? ` · ${data.createdByEmail}` : ""}. Fiyatlar Türk lirasıdır; KDV ayrıca gösterilmiştir.</footer>
       </div>
     </div>
   );

@@ -704,6 +704,14 @@ export const orgPlanPrices = pgTable("org_plan_prices", {
   updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => new Date()).notNull(),
 });
 
+/** Platform ayarları (Yönetim Paneli → Ayarlar): anahtar başına bir JSON değer (ör. "company" = şirket bilgileri). */
+export const platformSettings = pgTable("platform_settings", {
+  key: varchar("key", { length: 60 }).primaryKey(),
+  valueJson: text("valueJson").notNull(),
+  updatedByUserId: integer("updatedByUserId"),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => new Date()).notNull(),
+});
+
 /**
  * Kurumsal abonelik fiyat teklifi (Yönetim Paneli → Teklifler). Var olan bir kuruma ya da henüz
  * kurumu açılmamış bir adaya hazırlanır; kalemler KDV hariç TL, toplamlar kayıt anında hesaplanıp saklanır.

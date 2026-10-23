@@ -476,11 +476,20 @@ test("Yönetim Paneli: platform yöneticisi kurumu açar, personel ekler, kurum 
 
 test("Yönetim Paneli: kuruma fiyat teklifi hazırlanır, yazdırılır, kabul edilince kuruma uygulanır", async ({ page }) => {
   await signIn(page, "platform.admin@test.local");
+  // Ayarlar'daki şirket bilgileri teklif belgesine, standart koşullar yeni teklife gelir.
+  await page.goto("/yonetim/ayarlar");
+  await page.getByLabel("Ticari unvan").fill("E2E Eğitim Teknolojileri Ltd. Şti.");
+  await page.getByLabel("IBAN").fill("tr12 0006 2000 0000 0000 0000 01");
+  await page.getByLabel("Tekliflerde standart koşullar").fill("E2E koşul: peşin ödeme.");
+  await page.getByRole("button", { name: "Kaydet" }).click();
+  await expect(page.getByText("Şirket bilgileri kaydedildi.")).toBeVisible();
+
   await page.goto("/yonetim/kurumlar");
   await page.getByRole("link", { name: "Test Dershanesi" }).click();
   await page.getByRole("link", { name: "Teklif hazırla" }).click();
   await expect(page.locator("main h1").first()).toHaveText("Yeni teklif");
   await expect(page.getByLabel("Teklifteki ad")).toHaveValue("Test Dershanesi");
+  await expect(page.getByLabel("Not ve koşullar")).toHaveValue("E2E koşul: peşin ödeme.");
 
   await page.getByRole("button", { name: "Kalem ekle" }).click();
   await page.getByLabel("Kalem 1 açıklaması").fill("Standart kurum paketi — aylık");
@@ -505,5 +514,25 @@ test("Yönetim Paneli: kuruma fiyat teklifi hazırlanır, yazdırılır, kabul e
   await expect(page.getByText("Fiyat Teklifi")).toBeVisible();
   await expect(page.getByText("Standart kurum paketi — aylık")).toBeVisible();
   await expect(page.getByText("12.960 TL")).toBeVisible();
+  await expect(page.getByText("E2E Eğitim Teknolojileri Ltd. Şti.").first()).toBeVisible();
+  await expect(page.getByText("TR12 0006 2000 0000 0000 0000 01")).toBeVisible();
   await expect(page.locator(".app-sidebar")).toHaveCount(0);
+});
+
+test("Yönetim Paneli Ayarlar: yönetici şifresini değiştirir, yeni şifreyle girer", async ({ page }) => {
+  await signIn(page, "platform.admin@test.local");
+  await page.goto("/yonetim/ayarlar");
+  await page.getByRole("tab", { name: "Hesabım" }).click();
+  const changePassword = async (from: string, to: string) => {
+    await page.getByLabel("Mevcut şifre").fill(from);
+    await page.getByLabel(/^Yeni şifre \(en az/).fill(to);
+    await page.getByLabel("Yeni şifre (tekrar)").fill(to);
+    await page.getByRole("button", { name: "Şifreyi değiştir" }).click();
+    await expect(page.getByText("Şifren değiştirildi.").last()).toBeVisible();
+  };
+  await changePassword(PASSWORD, "YeniSifre-2026");
+  const fresh = await page.request.post("/api/auth/login", { data: { identifier: "platform.admin@test.local", password: "YeniSifre-2026", mode: "login" } });
+  expect(fresh.ok()).toBeTruthy();
+  // Sonraki koşular için eski şifreye dön.
+  await changePassword("YeniSifre-2026", PASSWORD);
 });
