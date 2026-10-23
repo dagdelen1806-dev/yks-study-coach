@@ -14,6 +14,8 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // Sunucu canlıda Türkiye saatinde çalışır (server/_core/timezone.ts); testler her makinede aynı saatte koşsun.
+    env: { TZ: "Europe/Istanbul" },
     include: ["server/**/*.test.ts", "server/**/*.spec.ts"],
   },
 });

@@ -14,7 +14,7 @@ Her madde ya ✅ (yapıldı ve doğrulandı) ya da ☐ (pilottan önce yapılmal
 |---|---|---|---|
 | 1.1 | **Supabase geçişi:** veritabanı (`DATABASE_URL`, havuzlayıcı 6543) ve migration'lar `0000 → 0002` sırayla | Kurucu + Claude | ☐ |
 | 1.2 | **Supabase Storage:** Vercel'e `SUPABASE_URL` ve `SUPABASE_SERVICE_ROLE_KEY`; ilk fotoğraf yüklenip açılarak denenmeli (bucket kendiliğinden özel oluşur) | Kurucu | ☐ |
-| 1.3 | **Saat dilimi:** sunucu tarihleri yerel saatle hesaplıyor; Vercel UTC'de çalışır. Öğretmenin 17:00'ye koyduğu görev öğrenciye 20:00 görünebilir. Öneri: sunucu başlangıcında `process.env.TZ = "Europe/Istanbul"` (tek satır, tüm tarih hesaplarını Türkiye saatine sabitler) + canlıda bir görev atayıp saatin doğrulanması | Karar: kurucu · uygulama: Claude | ☐ |
+| 1.3 | **Saat dilimi:** ✅ sunucu açılışta Türkiye saatine sabitleniyor (`server/_core/timezone.ts`, isteğe bağlı `APP_TIMEZONE`); UTC'de derlenmiş paketle doğrulandı. ☐ Kalan: canlıda bir görev atayıp öğrencide aynı saatte göründüğünü görmek | Kurucu + Claude | ☐ (yalnızca canlı doğrulama) |
 | 1.4 | **Hukuk:** KVKK aydınlatma ve veli rıza metinleri (taslak: `shared/parent.ts`, kurum KVKK şablonu). Akademik takip ve **mahrem not kuralı** aydınlatma metnine eklenmeli: "Öğretmen notlarını yalnızca yazan ve öğrencinin sorumlu öğretmenleri görür; kurum yöneticisi ve veli görmez." | Kurucu + hukuk | ☐ |
 | 1.5 | **E-posta sağlayıcısı:** `BREVO_API_KEY` (ya da `RESEND_API_KEY`) ve doğrulanmış `MAIL_FROM`; öğretmen özetinin pazar gönderimi için şart | Kurucu | ☐ |
 | 1.6 | **Marka:** uygulama ve e-postalar hâlâ "Pusula YKS". Pilotta hangi ad görünecek? | Kurucu | ☐ |

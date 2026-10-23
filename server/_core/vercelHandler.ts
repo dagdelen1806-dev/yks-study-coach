@@ -1,4 +1,6 @@
 import "dotenv/config";
+// Saat dilimi diğer her şeyden önce sabitlenir: Vercel UTC'de çalışır (bkz. timezone.ts).
+import "./timezone";
 import { createApiApp } from "./app";
 import { seedSubscriptionPlans } from "../subscriptions/seedPlans";
 

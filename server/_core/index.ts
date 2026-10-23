@@ -1,4 +1,6 @@
 import "dotenv/config";
+// Saat dilimi diğer her şeyden önce sabitlenir (bkz. timezone.ts).
+import "./timezone";
 import { createServer } from "http";
 import net from "net";
 import { createApiApp } from "./app";

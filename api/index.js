@@ -86,6 +86,21 @@ var init_publisherNormalizer = __esm({
 // server/_core/vercelHandler.ts
 import "dotenv/config";
 
+// server/_core/timezone.ts
+var DEFAULT_TIMEZONE = "Europe/Istanbul";
+function resolveTimezone(requested) {
+  const value = requested?.trim();
+  if (!value) return DEFAULT_TIMEZONE;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value });
+    return value;
+  } catch {
+    console.warn(`[timezone] APP_TIMEZONE="${value}" ge\xE7ersiz; ${DEFAULT_TIMEZONE} kullan\u0131l\u0131yor.`);
+    return DEFAULT_TIMEZONE;
+  }
+}
+process.env.TZ = resolveTimezone(process.env.APP_TIMEZONE);
+
 // server/_core/app.ts
 import express2 from "express";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
