@@ -9,6 +9,7 @@ import { startLogin } from "./const";
 import "./lib/installPrompt";
 import "./lib/modalEscape";
 import "./lib/errorReporter";
+import "./lib/staleChunkReload";
 import { registerServiceWorker } from "./lib/push";
 import "./index.css";
 
