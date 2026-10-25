@@ -519,6 +519,31 @@ test("Yönetim Paneli: kuruma fiyat teklifi hazırlanır, yazdırılır, kabul e
   await expect(page.locator(".app-sidebar")).toHaveCount(0);
 });
 
+test("Yönetim Paneli Konular: yönetici LGS Matematik'e konu ekler, LGS öğrencisinin deneme formunda görünür; gizleyince kalkar", async ({ page, browser }) => {
+  const topic = `E2E Konu ${Date.now()}`;
+  await signIn(page, "platform.admin@test.local");
+  await page.goto("/yonetim/konular");
+  await page.getByLabel("Sınav").selectOption("LGS");
+  await page.getByRole("tab", { name: /^Matematik/ }).click();
+  await page.getByLabel("Ünite", { exact: true }).fill("E2E Ünitesi");
+  await page.getByLabel("Konu adı", { exact: true }).fill(topic);
+  await page.getByRole("button", { name: "Ekle", exact: true }).click();
+  await expect(page.getByText("Konu eklendi.")).toBeVisible();
+  await expect(page.getByRole("region", { name: "E2E Ünitesi ünitesi" }).getByText(topic)).toBeVisible();
+
+  const student = await browser.newPage({ baseURL: test.info().project.use.baseURL });
+  await signIn(student, LGS_STUDENT);
+  await student.goto("/denemeler");
+  await student.locator("main").getByRole("button", { name: "Deneme ekle" }).first().click();
+  await expect(student.locator(".modal-card").getByText(topic)).toBeVisible();
+  await student.close();
+
+  page.once("dialog", (dialog) => void dialog.accept());
+  await page.getByRole("button", { name: `${topic} gizle` }).click();
+  await expect(page.getByText("Konu gizlendi.")).toBeVisible();
+  await expect(page.getByText(topic)).toHaveCount(0);
+});
+
 test("Yönetim Paneli Ayarlar: yönetici şifresini değiştirir, yeni şifreyle girer", async ({ page }) => {
   await signIn(page, "platform.admin@test.local");
   await page.goto("/yonetim/ayarlar");

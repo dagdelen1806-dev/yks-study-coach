@@ -7,7 +7,7 @@ import { defaultKindOf, type ExamTrack, type ExamKind } from "../shared/exams";
 import { calculatePlanAdherence, dedupeAlerts, type AdherenceSession } from "../shared/planAdherence";
 import { rescheduleOverdueSessions, buildSessionCompletion } from "../shared/calendarLogic";
 import { normalizeIsbn } from "../shared/bookIdentity";
-import { CURRICULUM, isCurriculumOnlySlug } from "../shared/curriculum";
+import { CURRICULUM, isAdminTopicSlug, isCurriculumOnlySlug } from "../shared/curriculum";
 import { deriveTopicStatus, statusAfterAbandonedSession } from "../shared/topicStatus";
 import { topicSeeds, type ExamType, type TopicStatus } from "../shared/yksData";
 import { toLocalDateKey } from "../shared/dates";
@@ -725,17 +725,43 @@ async function findOrCreateTopic(db: NonNullable<Awaited<ReturnType<typeof getDb
   // Aynı ad iki sınavda olabilir (müfredatta TYT ve AYT "Olasılık"): önce aynı sınavın kaydı.
   const existing = await db.select().from(yksTopics).where(and(eq(yksTopics.subject, subject), eq(yksTopics.topic, topic))).orderBy(sql`${yksTopics.exam} = ${exam} DESC`, yksTopics.id).limit(1);
   if (existing[0]) return existing[0];
+  // Yönetim Paneli'nde yeniden adlandırılmış konu: eski adla gelen veri (TYT şablonu, eski kayıt) aynı konuya bağlanır.
+  const renamed = await db.select().from(yksTopics).where(and(eq(yksTopics.subject, subject), sql`${yksTopics.previousNames} LIKE ${`%${JSON.stringify(topic)}%`}`)).orderBy(sql`${yksTopics.exam} = ${exam} DESC`, yksTopics.id).limit(1);
+  if (renamed[0]) return renamed[0];
   const slug = `${exam}-${slugify(subject)}-${slugify(topic)}` || `topic-${Date.now()}`;
   const result = await db.insert(yksTopics).values({ slug, exam, subject, topic, unit: subject }).onConflictDoUpdate({ target: yksTopics.slug, set: { subject } }).returning({ id: yksTopics.id });
   const inserted = await db.select().from(yksTopics).where(eq(yksTopics.slug, slug)).limit(1);
   return inserted[0] ?? { id: Number(result[0].id), slug, exam, subject, topic, unit: subject, sourceUrl: null, createdAt: new Date() };
 }
 
-export async function getTopicCatalog() {
+/** Konu kataloğu; Yönetim Paneli'nde gizlenen konular yalnızca `includeHidden` ile gelir. */
+export async function getTopicCatalog(options: { includeHidden?: boolean } = {}) {
   await ensureTopicCatalogSeeded();
   const db = await getDb();
-  if (!db) return topicSeeds.map((seed, index) => ({ id: -1 - index, slug: seed.id, exam: seed.exam, subject: seed.subject, topic: seed.topic, unit: seed.unit, sourceUrl: null as string | null, createdAt: new Date() }));
-  return db.select().from(yksTopics);
+  if (!db) return topicSeeds.map((seed, index) => ({ id: -1 - index, slug: seed.id, exam: seed.exam, subject: seed.subject, topic: seed.topic, unit: seed.unit, sourceUrl: null as string | null, hidden: 0, previousNames: "[]", createdAt: new Date(), updatedAt: new Date() }));
+  return options.includeHidden ? db.select().from(yksTopics) : db.select().from(yksTopics).where(eq(yksTopics.hidden, 0));
+}
+
+/**
+ * Müfredat tabanlı deneme şablonunun canlı hali: müfredat konuları (yöneticinin verdiği adlarla, gizlenenler hariç)
+ * shared/curriculum.ts sırasıyla; Yönetim Paneli'nde eklenen konular aynı ünitenin sonuna (ünite yeniyse dersin sonuna) girer.
+ */
+export async function getLiveCurriculum(): Promise<Array<{ exam: ExamKind; subject: string; unit: string; topic: string }>> {
+  const catalog = await getTopicCatalog();
+  const bySlug = new Map(catalog.map((row) => [row.slug, row]));
+  const rows: Array<{ exam: ExamKind; subject: string; unit: string; topic: string }> = [];
+  for (const def of CURRICULUM) {
+    const row = bySlug.get(def.slug);
+    if (row) rows.push({ exam: row.exam, subject: row.subject, unit: row.unit, topic: row.topic });
+  }
+  for (const added of catalog.filter((row) => isAdminTopicSlug(row.slug)).sort((a, b) => a.id - b.id)) {
+    const entry = { exam: added.exam, subject: added.subject, unit: added.unit, topic: added.topic };
+    const sameUnit = rows.map((row, index) => ({ row, index })).filter(({ row }) => row.exam === added.exam && row.subject === added.subject && row.unit === added.unit).pop();
+    const sameSubject = rows.map((row, index) => ({ row, index })).filter(({ row }) => row.exam === added.exam && row.subject === added.subject).pop();
+    const at = (sameUnit ?? sameSubject)?.index;
+    if (at === undefined) rows.push(entry); else rows.splice(at + 1, 0, entry);
+  }
+  return rows;
 }
 
 export type UserTopicProgress = {
@@ -752,17 +778,19 @@ export type UserTopicProgress = {
 
 /** Kullanıcının konu ilerleme kaydı; katalogla birleştirilir, hiç çalışılmamış konular %0/veri yetersiz döner. */
 export async function getUserTopicProgress(userId: number): Promise<UserTopicProgress[]> {
-  const catalog = await getTopicCatalog();
+  const catalog = (await getTopicCatalog({ includeHidden: true }));
   const db = await getDb();
   if (!db) return catalog.map((topic) => ({ ...topic, progress: 0, status: "Zayıf" as TopicStatus, insufficientData: true, lastReviewedAt: null }));
   const rows = await db.select().from(topicProgress).where(eq(topicProgress.userId, userId));
   const byTopicId = new Map(rows.map((row) => [row.topicId, row]));
+  // Gizlenen konu yalnızca öğrencinin verisi varsa listede kalır.
+  const visible = catalog.filter((topic) => !topic.hidden || byTopicId.has(topic.id));
   // Müfredattan gelen ~250 konu, öğrenci onlarda hiç veri üretmeden listeye
   // girerse hepsi "Zayıf / veri yetersiz" görünür (aşağıdaki varsayılan) —
   // Konu Haritası, zayıf konu listeleri ve AI planı bununla dolardı. Bu yüzden
   // yalnızca öğrencinin gerçekten verisi olan müfredat konuları dahil edilir;
   // eski davranış (eski tohum konular + kullanıcı verisinden doğan konular) aynen korunur.
-  return catalog.filter((topic) => !isCurriculumOnlySlug(topic.slug) || byTopicId.has(topic.id)).map((topic) => {
+  return visible.filter((topic) => !isCurriculumOnlySlug(topic.slug) || byTopicId.has(topic.id)).map((topic) => {
     const row = byTopicId.get(topic.id);
     if (!row) return { ...topic, progress: 0, status: "Zayıf" as TopicStatus, insufficientData: true, lastReviewedAt: null };
     return { ...topic, progress: row.progress, status: statusFromDb[row.status], insufficientData: false, lastReviewedAt: row.lastReviewedAt };

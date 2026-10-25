@@ -77,7 +77,7 @@ import { DEFAULT_FOCUS_AURA_CONFIG } from "@/lib/focusAura";
 import { useFocusClock } from "@/hooks/useFocusClock";
 import { calculatePlanAdherence, type AdherenceDecision, type AdherenceResult } from "../../../shared/planAdherence";
 import { buildTytTemplateTopicDetails, groupTopicDetailsBySubject, TYT_TEMPLATE_MISSING_NOTE } from "../../../shared/tytExamTemplate";
-import { buildCurriculumTemplateTopicDetails } from "@shared/curriculumExamTemplate";
+import { buildCurriculumTemplateTopicDetails, type CurriculumRow } from "@shared/curriculumExamTemplate";
 import { EXAM_KIND_DEFS, EXAM_TRACK_DEFS, isExamKind, kindsOf, subjectNamesOf, targetSummary, trackSubjects, type ExamKind } from "@shared/exams";
 import { useExamTrack } from "@/hooks/useExamTrack";
 import { FOCUS_BREAK_MINUTES, selectTopicsForAiPlan, buildSubjectTopicMap, findCurrentAndNextSession, generateDailyFocusPlan, type SubjectTopicMap } from "../../../shared/focusPlan";
@@ -165,10 +165,11 @@ type ExamForm = {
 // satırlar müfredattan gelir (shared/curriculumExamTemplate.ts); S'yi öğrenci girer.
 // Hangisinin kullanılacağı shared/exams.ts EXAM_KIND_DEFS[...].formRows'ta.
 // `subjects`: öğrencinin dersleri (ders seçtiren sınavda yalnızca seçtiği alan testleri).
+let liveCurriculum: CurriculumRow[] | null = null;
 const buildTopicDetailsForExam = (examType: ExamKind, allTopics: Topic[], subjects: readonly string[] = subjectNamesOf(examType)): ExamTopicResult[] => {
   const rows = EXAM_KIND_DEFS[examType].formRows;
   if (rows === "dershaneTemplate") return buildTytTemplateTopicDetails();
-  if (rows === "curriculum") return buildCurriculumTemplateTopicDetails(examType).filter((row) => subjects.includes(row.subject));
+  if (rows === "curriculum") return buildCurriculumTemplateTopicDetails(examType, liveCurriculum ?? undefined).filter((row) => subjects.includes(row.subject));
   return allTopics.filter((item) => item.exam === examType).map(({ subject, topic }) => ({ subject, topic, questionCount: 0, correct: 0, wrong: 0, blank: 0, accuracy: 0, net: 0 }));
 };
 /** Şablonlu satırlar ders > kategori > konu gruplu tabloda gösterilir. */
@@ -317,10 +318,13 @@ function Exams({ topics, exams, setExams, setTopics, persistExams }: { topics: T
   const [open, setOpen] = useState(false);
   const { kinds: examKinds, subjectsOf, trackSubjectList, selectedSubjects } = useExamTrack();
   const scanSubjects = trackSubjectList;
+  // Müfredat tabanlı şablonun canlı hali (Yönetim Paneli → Konular düzenlemeleri); gelene kadar koddaki müfredat.
+  const curriculum = trpc.topics.curriculum.useQuery(undefined, { staleTime: 10 * 60_000, retry: false });
+  if (curriculum.data) liveCurriculum = curriculum.data;
   const blankForm = () => createBlankExamForm(topics, examKinds[0], subjectsOf(examKinds[0]));
   const [form, setForm] = useState<ExamForm>(blankForm);
-  // Profil (sınav ya da seçili alanlar) sonradan yüklenirse boş form ona göre yeniden kurulur.
-  useEffect(() => { if (!examKinds.includes(form.exam) || !form.topicDetails.some((row) => row.questionCount > 0)) setForm(blankForm()); }, [examKinds[0], selectedSubjects.join("|")]);
+  // Profil (sınav ya da seçili alanlar) ya da canlı müfredat sonradan yüklenirse boş form ona göre yeniden kurulur.
+  useEffect(() => { if (!examKinds.includes(form.exam) || !form.topicDetails.some((row) => row.questionCount > 0)) setForm(blankForm()); }, [examKinds[0], selectedSubjects.join("|"), curriculum.data]);
   // Sınav türü değişince konu satırları o türün (TYT/AYT) gerçek konularıyla
   // yeniden kurulur — henüz hiçbir satıra veri girilmediyse (sıfırdan
   // başlıyorsa) veri kaybı olmaz.

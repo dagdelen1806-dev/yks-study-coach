@@ -43,6 +43,13 @@
       "when": 1792754505719,
       "tag": "0005_platform_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792756000203,
+      "tag": "0006_topic_admin",
+      "breakpoints": true
     }
   ]
 }

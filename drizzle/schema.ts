@@ -45,7 +45,12 @@ export const yksTopics = pgTable("yks_topics", {
   topic: varchar("topic", { length: 180 }).notNull(),
   unit: varchar("unit", { length: 120 }).notNull(),
   sourceUrl: varchar("sourceUrl", { length: 500 }),
+  /** Yönetim Paneli → Konular'da gizlenen konu yeni listelere/şablonlara girmez; öğrencinin eski verisi kalır, tohum geri eklemez. */
+  hidden: integer("hidden").default(0).notNull(),
+  /** Yeniden adlandırılan konunun eski adları (JSON dizi): eski adla gelen veri (TYT şablonu, eski kayıtlar) aynı konuya bağlanır. */
+  previousNames: text("previousNames").default("[]").notNull(),
   createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => new Date()).notNull(),
 });
 
 export const topicProgress = pgTable("topic_progress", {

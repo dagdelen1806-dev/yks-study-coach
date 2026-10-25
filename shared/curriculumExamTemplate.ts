@@ -8,9 +8,12 @@ import type { ExamTopicResult } from "./yksData";
  * yayınevine göre değiştiği için uydurulmaz — 0 başlar, öğrenci kendi denemesinden girer;
  * S'si 0 kalan satır kaydedilmez.
  */
-export function buildCurriculumTemplateTopicDetails(kind: ExamKind): ExamTopicResult[] {
+export type CurriculumRow = { exam: ExamKind; subject: string; unit: string; topic: string };
+
+/** `rows`: sunucudaki canlı liste (topics.curriculum — Yönetim Paneli düzenlemeleriyle); yoksa koddaki müfredat. */
+export function buildCurriculumTemplateTopicDetails(kind: ExamKind, rows: readonly CurriculumRow[] = CURRICULUM): ExamTopicResult[] {
   const order = subjectNamesOf(kind);
-  return CURRICULUM.filter((def) => def.exam === kind)
+  return rows.filter((def) => def.exam === kind)
     .sort((a, b) => order.indexOf(a.subject) - order.indexOf(b.subject))
     .map((def) => ({ subject: def.subject, category: def.unit, topic: def.topic, questionCount: 0, correct: 0, wrong: 0, blank: 0, accuracy: 0, net: 0 }));
 }

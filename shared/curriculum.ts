@@ -438,3 +438,7 @@ export const CURRICULUM: CurriculumTopicDef[] = (Object.keys(TREES) as Curriculu
 /** Müfredattan gelip öğrenci henüz hiç çalışmadığı için konu listelerinde
  * gösterilmeyecek konuları ayırt etmek için (bkz. server/db.ts getUserTopicProgress). */
 export const isCurriculumOnlySlug = (slug: string) => slug.startsWith("cur-");
+
+/** Yönetim Paneli → Konular'da eklenen konu (müfredat konusu gibi davranır: veri yokken listelerde görünmez). */
+export const ADMIN_TOPIC_SLUG_PREFIX = "cur-adm-";
+export const isAdminTopicSlug = (slug: string) => slug.startsWith(ADMIN_TOPIC_SLUG_PREFIX);

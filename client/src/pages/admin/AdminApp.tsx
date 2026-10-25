@@ -1,6 +1,6 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
-import { BadgeCheck, BookOpen, Building2, ClipboardList, CreditCard, FileText, LayoutDashboard, LogOut, Menu, MessageSquareQuote, Package, Settings, ShieldCheck, TriangleAlert, UserCheck, Users, X } from "lucide-react";
+import { BadgeCheck, BookOpen, Building2, ClipboardList, CreditCard, FileText, LayoutDashboard, ListTree, LogOut, Menu, MessageSquareQuote, Package, Settings, ShieldCheck, TriangleAlert, UserCheck, Users, X } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useLocation } from "wouter";
 
@@ -17,6 +17,7 @@ const AdminErrorsPage = lazy(() => import("@/components/subscription/AdminErrors
 const AdminPackagesPage = lazy(() => import("./AdminPackagesPage"));
 const AdminOrgDetail = lazy(() => import("./AdminOrgDetail"));
 const AdminSettingsPage = lazy(() => import("./AdminSettingsPage"));
+const AdminTopicsPage = lazy(() => import("./AdminTopicsPage"));
 const AdminQuotesPage = lazy(() => import("./AdminQuotesPage"));
 const AdminQuoteEditor = lazy(() => import("./AdminQuotesPage").then((module) => ({ default: module.AdminQuoteEditor })));
 const AdminQuotePrint = lazy(() => import("./AdminQuotesPage").then((module) => ({ default: module.AdminQuotePrint })));
@@ -30,6 +31,7 @@ export const ADMIN_PATHS = {
   orgs: "/yonetim/kurumlar",
   quotes: "/yonetim/teklifler",
   payments: "/yonetim/odemeler",
+  topics: "/yonetim/konular",
   catalog: "/yonetim/katalog",
   testimonials: "/yonetim/yorumlar",
   audit: "/yonetim/kayitlar",
@@ -48,6 +50,7 @@ const NAV: Array<{ key: AdminSection; label: string; icon: typeof Users; group: 
   { key: "payments", label: "Ödemeler", icon: CreditCard, group: "Üyelik" },
   { key: "orgs", label: "Kurumlar", icon: Building2, group: "Kurumsal" },
   { key: "quotes", label: "Fiyat teklifleri", icon: FileText, group: "Kurumsal" },
+  { key: "topics", label: "Sınav konuları", icon: ListTree, group: "İçerik" },
   { key: "catalog", label: "Kaynak kataloğu", icon: BookOpen, group: "İçerik" },
   { key: "testimonials", label: "Yorumlar", icon: MessageSquareQuote, group: "İçerik" },
   { key: "audit", label: "Denetim kayıtları", icon: ClipboardList, group: "Sistem" },
@@ -64,6 +67,7 @@ const TITLES: Record<AdminSection, { title: string; description: string }> = {
   orgs: { title: "Kurumlar", description: "Kurumları oluştur, paket ve süresini yönet; üyelerini ve bağlarını gör." },
   quotes: { title: "Fiyat teklifleri", description: "Kurumlara ve aday kurumlara abonelik teklifi hazırla, yazdır; kabul edileni kuruma uygula." },
   payments: { title: "Ödemeler", description: "Ödeme kayıtları." },
+  topics: { title: "Sınav konuları", description: "YKS, LGS ve diğer sınavların derslere göre konuları: ekle, yeniden adlandır, gizle." },
   catalog: { title: "Kaynak kataloğu", description: "Kitap kataloğu ve senkron." },
   testimonials: { title: "Yorumlar", description: "Tanıtım sayfasındaki öğrenci yorumlarını onayla." },
   audit: { title: "Denetim kayıtları", description: "Yönetim işlemlerinin kaydı." },
@@ -177,6 +181,7 @@ export default function AdminApp() {
             {route.section === "quotes" && <AdminQuotesPage />}
             {route.section === "quote" && <AdminQuoteEditor key={route.quoteId ?? "yeni"} quoteId={route.quoteId ?? null} />}
             {route.section === "payments" && <AdminPaymentsPage />}
+            {route.section === "topics" && <AdminTopicsPage />}
             {route.section === "catalog" && <AdminCatalogPage />}
             {route.section === "testimonials" && <AdminTestimonialsPage />}
             {route.section === "audit" && <AdminAuditPage />}

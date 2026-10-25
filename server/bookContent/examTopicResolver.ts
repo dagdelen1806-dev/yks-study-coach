@@ -1,11 +1,13 @@
-import { CURRICULUM } from "../../shared/curriculum";
+import { CURRICULUM, isAdminTopicSlug } from "../../shared/curriculum";
 import { EXAM_TOPIC_LINKS, curriculumSubjectsFor, examTopicKey } from "../../shared/examTopicLinks";
 import { bookContentConfig } from "./config";
 import { matchTopic, type MatchableTopic } from "./curriculumMatcher";
 import type { WeakTopicInput } from "./bookStudyAllocation";
 import type { ExamKind } from "../../shared/exams";
 
-const CURRICULUM_SLUGS = new Set(CURRICULUM.map((def) => def.slug));
+const CURRICULUM_SET = new Set(CURRICULUM.map((def) => def.slug));
+// Yönetim Paneli'nde eklenen konular da müfredat konusu sayılır.
+const CURRICULUM_SLUGS = { has: (slug: string) => CURRICULUM_SET.has(slug) || isAdminTopicSlug(slug) };
 
 export type ResolvableTopic = MatchableTopic & { slug: string };
 
