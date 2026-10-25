@@ -1008,6 +1008,44 @@ var orgPlanPrices = pgTable("org_plan_prices", {
   updatedByUserId: integer("updatedByUserId"),
   updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull()
 });
+var intentionAffirmations = pgTable("intention_affirmations", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
+  text: varchar("text", { length: 200 }).notNull(),
+  /** Hazır sözden seçildiyse anahtarı (shared/intentionJar.ts PRESET_AFFIRMATIONS); kendi sözüyse boş. */
+  presetKey: varchar("presetKey", { length: 40 }),
+  isActive: integer("isActive").default(1).notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+  archivedAt: timestamp("archivedAt", { withTimezone: true })
+}, (table) => ({
+  userIdx: index("intention_affirmations_user_idx").on(table.userId),
+  oneActive: uniqueIndex("intention_affirmations_one_active").on(table.userId).where(sql`"isActive" = 1`)
+}));
+var intentionGrains = pgTable("intention_grains", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
+  /** Türkiye saatine göre takvim günü (YYYY-AA-GG). */
+  dayKey: varchar("dayKey", { length: 10 }).notNull(),
+  affirmationId: integer("affirmationId"),
+  affirmationText: varchar("affirmationText", { length: 200 }).notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull()
+}, (table) => ({
+  userDayUnique: uniqueIndex("intention_grains_user_day_unique").on(table.userId, table.dayKey)
+}));
+var intentionJars = pgTable("intention_jars", {
+  userId: integer("userId").primaryKey(),
+  totalGrains: integer("totalGrains").default(0).notNull(),
+  firstGrainAt: timestamp("firstGrainAt", { withTimezone: true }),
+  lastGrainAt: timestamp("lastGrainAt", { withTimezone: true }),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull()
+});
+var gardenProgress = pgTable("garden_progress", {
+  userId: integer("userId").primaryKey(),
+  highestStage: integer("highestStage").default(1).notNull(),
+  /** JSON: { "2": "2026-10-25T…", … } — her aşamaya ilk ulaşma anı. */
+  stageReachedJson: text("stageReachedJson").default("{}").notNull(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull()
+});
 var platformSettings = pgTable("platform_settings", {
   key: varchar("key", { length: 60 }).primaryKey(),
   valueJson: text("valueJson").notNull(),
@@ -7349,7 +7387,7 @@ function registerWebhookRoutes(app2) {
 }
 
 // server/routers.ts
-import { TRPCError as TRPCError20 } from "@trpc/server";
+import { TRPCError as TRPCError21 } from "@trpc/server";
 
 // server/_core/systemRouter.ts
 import { z as z2 } from "zod";
@@ -8006,7 +8044,7 @@ function validateDataUrl(dataUrl, declaredMimeType) {
 }
 
 // server/routers.ts
-import { z as z33 } from "zod";
+import { z as z34 } from "zod";
 
 // server/routers/topics.ts
 import { z as z3 } from "zod";
@@ -10810,20 +10848,241 @@ var wallRouter = router({
   })
 });
 
-// server/routers/orgCases.ts
-import { TRPCError as TRPCError6 } from "@trpc/server";
-import { z as z8 } from "zod";
-
-// server/org/orgAccess.ts
+// server/routers/personal.ts
 import { TRPCError as TRPCError5 } from "@trpc/server";
 import { z as z7 } from "zod";
-var notFound = (message = "Bulunamad\u0131.") => new TRPCError5({ code: "NOT_FOUND", message });
+
+// shared/intentionJar.ts
+var AFFIRMATION_MIN = 8;
+var AFFIRMATION_MAX = 200;
+var PRESET_AFFIRMATIONS = [
+  { key: "gelisiyorum", text: "Her g\xFCn biraz daha geli\u015Fiyor ve hedefime yakla\u015F\u0131yorum." },
+  { key: "adim-adim", text: "B\xFCy\xFCk hedefime k\xFC\xE7\xFCk ama kararl\u0131 ad\u0131mlarla ilerliyorum." },
+  { key: "hata-ogretir", text: "Yanl\u0131\u015Flar\u0131m bana neyi \xE7al\u0131\u015Faca\u011F\u0131m\u0131 g\xF6steriyor; onlardan \xF6\u011Freniyorum." },
+  { key: "emek", text: "Bug\xFCn verdi\u011Fim emek yar\u0131nki bana bir hediye." },
+  { key: "sakin", text: "Sakin bir zihinle \xE7al\u0131\u015F\u0131yor, s\u0131navda bildiklerimi g\xF6steriyorum." },
+  { key: "kendimle", text: "Kendimi ba\u015Fkalar\u0131yla de\u011Fil, d\xFCnk\xFC h\xE2limle kar\u015F\u0131la\u015Ft\u0131r\u0131yorum." },
+  { key: "dinlenme", text: "Dinlenmek de \xE7al\u0131\u015Fman\u0131n bir par\xE7as\u0131; kendime iyi bak\u0131yorum." },
+  { key: "sabir", text: "Zor konular zamanla kolayla\u015F\u0131yor; sab\u0131rla tekrar ediyorum." },
+  { key: "odak", text: "\xC7al\u0131\u015F\u0131rken tek bir i\u015Fe odaklan\u0131yor, dikkatimi koruyorum." },
+  { key: "yapabilirim", text: "Bir konuyu anlamad\u0131\u011F\u0131mda yard\u0131m istiyor ve yeniden deniyorum." },
+  { key: "tesekkur", text: "Bug\xFCn \xF6\u011Frendi\u011Fim her \u015Fey i\xE7in kendime te\u015Fekk\xFCr ediyorum." },
+  { key: "hedef", text: "Hedefimi hat\u0131rl\u0131yor, ona bug\xFCn bir ad\u0131m daha yakla\u015F\u0131yorum." }
+];
+var normalizeAffirmation = (text4) => text4.toLocaleLowerCase("tr").replace(/ı/g, "i").replace(/â/g, "a").replace(/î/g, "i").replace(/û/g, "u").replace(/[^0-9a-zçğöşü]+/g, " ").trim();
+var matchesAffirmation = (typed, active) => normalizeAffirmation(typed) === normalizeAffirmation(active) && normalizeAffirmation(active).length > 0;
+var JAR_CAPACITY = 365;
+function jarView(totalGrains) {
+  const total = Math.max(0, Math.floor(totalGrains));
+  const fullJars = Math.floor(total / JAR_CAPACITY);
+  const inCurrent = total - fullJars * JAR_CAPACITY;
+  return { total, fullJars, inCurrent, fillRatio: inCurrent / JAR_CAPACITY };
+}
+
+// server/personal/gardenDb.ts
+import { and as and21, eq as eq24, sql as sql13 } from "drizzle-orm";
+
+// shared/effortGarden.ts
+var GARDEN_STAGES = [
+  { stage: 1, label: "K\xFC\xE7\xFCk filiz" },
+  { stage: 2, label: "\u0130lk yapraklar" },
+  { stage: 3, label: "Gen\xE7 fidan" },
+  { stage: 4, label: "B\xFCy\xFCyen a\u011Fa\xE7" },
+  { stage: 5, label: "\xC7i\xE7ek a\xE7an a\u011Fa\xE7" },
+  { stage: 6, label: "Geli\u015Fmi\u015F bah\xE7e" }
+];
+var gardenThemeFor = (track) => track === "LGS" ? "playful" : track === "YKS" ? "youth" : "calm";
+var BASE_THRESHOLDS = [0, 40, 150, 400, 800, 1500];
+var DEFAULT_GOAL_MINUTES = 120;
+var stageThresholds = (profile) => BASE_THRESHOLDS.map((value) => Math.round(value * (profile.examTrack === "LGS" ? 0.75 : 1)));
+function gardenPoints(inputs, profile) {
+  const goal = Math.max(20, profile.dailyStudyDuration || DEFAULT_GOAL_MINUTES);
+  const study = inputs.dailyMinutes.reduce((sum, minutes) => sum + Math.min(1, Math.max(0, minutes) / goal) * 10, 0);
+  const reading = inputs.readingPages / 5 + inputs.finishedBooks * 10;
+  const paragraph2 = inputs.paragraphSessions * 2 + inputs.paragraphQuestions / 5;
+  return { study: Math.floor(study), reading: Math.floor(reading), paragraph: Math.floor(paragraph2), total: Math.floor(study + reading + paragraph2) };
+}
+function computeGarden(inputs, profile, storedHighestStage = 1) {
+  const points = gardenPoints(inputs, profile);
+  const thresholds = stageThresholds(profile);
+  const earned = thresholds.reduce((stage2, threshold, index2) => points.total >= threshold ? index2 + 1 : stage2, 1);
+  const stage = Math.min(6, Math.max(earned, storedHighestStage));
+  const nextThreshold = stage < 6 ? thresholds[stage] : null;
+  const previous = thresholds[stage - 1];
+  return {
+    stage,
+    label: GARDEN_STAGES[stage - 1].label,
+    points,
+    nextThreshold,
+    nextLabel: stage < 6 ? GARDEN_STAGES[stage].label : null,
+    progressToNext: nextThreshold === null ? 1 : Math.min(1, Math.max(0, (points.total - previous) / (nextThreshold - previous))),
+    /** Yaprak: her 10 sayfa okuma bir yaprak (görselde en çok 90). */
+    leaves: Math.min(90, Math.floor(inputs.readingPages / 10)),
+    /** Çiçek: her paragraf pratiği ve her 10 paragraf sorusu bir çiçek (görselde en çok 40). */
+    flowers: Math.min(40, inputs.paragraphSessions + Math.floor(inputs.paragraphQuestions / 10)),
+    /** Bitirilen kitap: ağaçta meyve (en çok 12). */
+    fruits: Math.min(12, inputs.finishedBooks),
+    theme: gardenThemeFor(profile.examTrack),
+    activeDaysLast7: inputs.activeDaysLast7,
+    studyDays: inputs.dailyMinutes.length
+  };
+}
+
+// server/personal/gardenDb.ts
+var READING_ROUTINE_KIND = "Kitap Okuma";
+var PARAGRAPH_ROUTINE_KIND = "Paragraf";
+var DAY4 = sql13`to_char((${topicStudyLogs.studyDate} AT TIME ZONE 'Europe/Istanbul'), 'YYYY-MM-DD')`;
+async function loadGardenInputs(userId) {
+  const db = await getDb();
+  if (!db) return { readingPages: 0, readingSessions: 0, finishedBooks: 0, paragraphSessions: 0, paragraphQuestions: 0, dailyMinutes: [], activeDaysLast7: 0 };
+  const [routines, paragraphQuestions, finished, days] = await Promise.all([
+    db.select({ kind: studyPlanSessions.kind, sessions: sql13`COUNT(*)::int`, pages: sql13`COALESCE(SUM(${studyPlanSessions.actualPages}), 0)::int` }).from(studyPlanSessions).where(and21(eq24(studyPlanSessions.userId, userId), eq24(studyPlanSessions.status, "completed"), sql13`${studyPlanSessions.kind} IN (${READING_ROUTINE_KIND}, ${PARAGRAPH_ROUTINE_KIND})`)).groupBy(studyPlanSessions.kind),
+    // Paragraf konularında çözülen sorular (odak oturumu, plan görevi, deneme dışı konu kaydı).
+    db.select({ questions: sql13`COALESCE(SUM(${topicStudyLogs.questions}), 0)::int` }).from(topicStudyLogs).where(and21(eq24(topicStudyLogs.userId, userId), sql13`lower(${topicStudyLogs.topic}) LIKE '%paragraf%'`)),
+    db.select({ count: sql13`COUNT(*)::int` }).from(readingBooks).where(and21(eq24(readingBooks.userId, userId), eq24(readingBooks.status, "finished"))),
+    // Her konu çalışma kaydı (oturum tamamlama, odak kaydı, rutin) günün çalışma süresine eklenir.
+    db.select({ day: DAY4, minutes: sql13`COALESCE(SUM(${topicStudyLogs.minutes}), 0)::int` }).from(topicStudyLogs).where(eq24(topicStudyLogs.userId, userId)).groupBy(DAY4)
+  ]);
+  const reading = routines.find((row) => row.kind === READING_ROUTINE_KIND);
+  const paragraph2 = routines.find((row) => row.kind === PARAGRAPH_ROUTINE_KIND);
+  const studyDays = days.filter((row) => Number(row.minutes) > 0);
+  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1e3).toLocaleDateString("sv-SE", { timeZone: "Europe/Istanbul" });
+  return {
+    readingPages: Number(reading?.pages ?? 0),
+    readingSessions: Number(reading?.sessions ?? 0),
+    finishedBooks: Number(finished[0]?.count ?? 0),
+    paragraphSessions: Number(paragraph2?.sessions ?? 0),
+    paragraphQuestions: Number(paragraphQuestions[0]?.questions ?? 0),
+    dailyMinutes: studyDays.map((row) => Number(row.minutes)),
+    activeDaysLast7: studyDays.filter((row) => row.day > weekAgo).length
+  };
+}
+async function getEffortGarden(userId) {
+  const [inputs, profile] = await Promise.all([loadGardenInputs(userId), getStudentProfile(userId)]);
+  const db = await getDb();
+  const [stored] = db ? await db.select().from(gardenProgress).where(eq24(gardenProgress.userId, userId)).limit(1) : [];
+  const gardenProfile = { examTrack: profile.examTrack, dailyStudyDuration: profile.dailyStudyDuration };
+  const garden = computeGarden(inputs, gardenProfile, stored?.highestStage ?? 1);
+  let reached = {};
+  try {
+    reached = JSON.parse(stored?.stageReachedJson ?? "{}");
+  } catch {
+    reached = {};
+  }
+  let newlyReached = null;
+  if (db && garden.stage > (stored?.highestStage ?? 1)) {
+    for (let stage = (stored?.highestStage ?? 1) + 1; stage <= garden.stage; stage += 1) reached[String(stage)] = (/* @__PURE__ */ new Date()).toISOString();
+    newlyReached = garden.stage;
+    const values = { highestStage: garden.stage, stageReachedJson: JSON.stringify(reached) };
+    await db.insert(gardenProgress).values({ userId, ...values }).onConflictDoUpdate({ target: gardenProgress.userId, set: { highestStage: sql13`GREATEST(${gardenProgress.highestStage}, ${garden.stage})`, stageReachedJson: values.stageReachedJson } });
+  }
+  return { ...garden, inputs, thresholds: stageThresholds(gardenProfile), stageReachedAt: reached, newlyReached, dailyGoalMinutes: profile.dailyStudyDuration };
+}
+
+// server/personal/intentionJarDb.ts
+import { and as and22, desc as desc15, eq as eq25, sql as sql14 } from "drizzle-orm";
+var IntentionJarError = class extends Error {
+};
+async function requireDb10() {
+  const db = await getDb();
+  if (!db) throw new IntentionJarError("Veritaban\u0131na ula\u015F\u0131lamad\u0131.");
+  return db;
+}
+async function getIntentionJar(userId) {
+  const db = await requireDb10();
+  const todayKey = toLocalDateKey(/* @__PURE__ */ new Date());
+  const [affirmations, jar, recent] = await Promise.all([
+    db.select({ id: intentionAffirmations.id, text: intentionAffirmations.text, presetKey: intentionAffirmations.presetKey, isActive: intentionAffirmations.isActive, createdAt: intentionAffirmations.createdAt, archivedAt: intentionAffirmations.archivedAt }).from(intentionAffirmations).where(eq25(intentionAffirmations.userId, userId)).orderBy(desc15(intentionAffirmations.createdAt)).limit(20),
+    db.select().from(intentionJars).where(eq25(intentionJars.userId, userId)).limit(1),
+    db.select({ dayKey: intentionGrains.dayKey }).from(intentionGrains).where(eq25(intentionGrains.userId, userId)).orderBy(desc15(intentionGrains.dayKey)).limit(31)
+  ]);
+  const active = affirmations.find((row) => row.isActive === 1) ?? null;
+  const total = jar[0]?.totalGrains ?? 0;
+  return {
+    active: active ? { id: active.id, text: active.text, presetKey: active.presetKey, since: active.createdAt } : null,
+    previous: affirmations.filter((row) => row.isActive !== 1).map((row) => ({ id: row.id, text: row.text, createdAt: row.createdAt, archivedAt: row.archivedAt })),
+    todayKey,
+    doneToday: recent.some((row) => row.dayKey === todayKey),
+    recentDays: recent.map((row) => row.dayKey),
+    firstGrainAt: jar[0]?.firstGrainAt ?? null,
+    ...jarView(total)
+  };
+}
+async function setAffirmation(userId, input) {
+  const preset = input.presetKey ? PRESET_AFFIRMATIONS.find((item) => item.key === input.presetKey) : null;
+  if (input.presetKey && !preset) throw new IntentionJarError("Bu haz\u0131r s\xF6z bulunamad\u0131.");
+  const text4 = (preset?.text ?? input.text ?? "").replace(/\s+/g, " ").trim();
+  if (text4.length < AFFIRMATION_MIN) throw new IntentionJarError(`S\xF6z\xFCn en az ${AFFIRMATION_MIN} karakter olsun.`);
+  if (text4.length > AFFIRMATION_MAX) throw new IntentionJarError(`S\xF6z\xFCn en fazla ${AFFIRMATION_MAX} karakter olabilir.`);
+  const db = await requireDb10();
+  try {
+    await db.transaction(async (tx) => {
+      const [current] = await tx.select({ id: intentionAffirmations.id, text: intentionAffirmations.text }).from(intentionAffirmations).where(and22(eq25(intentionAffirmations.userId, userId), eq25(intentionAffirmations.isActive, 1))).limit(1);
+      if (current?.text === text4) return;
+      if (current) await tx.update(intentionAffirmations).set({ isActive: 0, archivedAt: /* @__PURE__ */ new Date() }).where(eq25(intentionAffirmations.id, current.id));
+      await tx.insert(intentionAffirmations).values({ userId, text: text4, presetKey: preset?.key ?? null, isActive: 1 });
+    });
+  } catch (error) {
+    if (/intention_affirmations_one_active|duplicate key/i.test(String(error?.message ?? error))) throw new IntentionJarError("S\xF6z\xFCn az \xF6nce de\u011Fi\u015Fti; sayfay\u0131 yenileyip tekrar dener misin?");
+    throw error;
+  }
+  return getIntentionJar(userId);
+}
+async function performRitual(userId, typed) {
+  const db = await requireDb10();
+  const [active] = await db.select({ id: intentionAffirmations.id, text: intentionAffirmations.text }).from(intentionAffirmations).where(and22(eq25(intentionAffirmations.userId, userId), eq25(intentionAffirmations.isActive, 1))).limit(1);
+  if (!active) throw new IntentionJarError("\xD6nce kendine bir s\xF6z se\xE7 ya da yaz.");
+  if (!matchesAffirmation(typed, active.text)) throw new IntentionJarError("Yazd\u0131\u011F\u0131n c\xFCmle s\xF6z\xFCnle ayn\u0131 de\u011Fil; bir kez daha dener misin?");
+  const dayKey2 = toLocalDateKey(/* @__PURE__ */ new Date());
+  const now = /* @__PURE__ */ new Date();
+  const added = await db.transaction(async (tx) => {
+    const inserted = await tx.insert(intentionGrains).values({ userId, dayKey: dayKey2, affirmationId: active.id, affirmationText: active.text }).onConflictDoNothing({ target: [intentionGrains.userId, intentionGrains.dayKey] }).returning({ id: intentionGrains.id });
+    if (!inserted.length) return false;
+    await tx.insert(intentionJars).values({ userId, totalGrains: 1, firstGrainAt: now, lastGrainAt: now }).onConflictDoUpdate({ target: intentionJars.userId, set: { totalGrains: sql14`${intentionJars.totalGrains} + 1`, lastGrainAt: now } });
+    return true;
+  });
+  return { added, jar: await getIntentionJar(userId) };
+}
+
+// server/routers/personal.ts
+async function userFacing2(work) {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof IntentionJarError) throw new TRPCError5({ code: "BAD_REQUEST", message: error.message });
+    throw error;
+  }
+}
+var jarRouter = router({
+  get: protectedProcedure.query(({ ctx }) => getIntentionJar(ctx.user.id)),
+  setAffirmation: protectedProcedure.input(z7.object({ text: z7.string().max(AFFIRMATION_MAX + 50).nullable().optional(), presetKey: z7.string().max(40).nullable().optional() })).mutation(({ ctx, input }) => userFacing2(() => setAffirmation(ctx.user.id, input))),
+  ritual: protectedProcedure.input(z7.object({ typed: z7.string().max(AFFIRMATION_MAX + 50) })).mutation(({ ctx, input }) => userFacing2(async () => {
+    try {
+      checkRateLimit(`jar-ritual:${ctx.user.id}`, 20, 6e4);
+    } catch {
+      throw new TRPCError5({ code: "TOO_MANY_REQUESTS", message: "Biraz yava\u015Fla; bir dakika sonra tekrar dene." });
+    }
+    return performRitual(ctx.user.id, input.typed);
+  }))
+});
+var gardenRouter = router({
+  get: protectedProcedure.query(({ ctx }) => getEffortGarden(ctx.user.id))
+});
+
+// server/routers/orgCases.ts
+import { TRPCError as TRPCError7 } from "@trpc/server";
+import { z as z9 } from "zod";
+
+// server/org/orgAccess.ts
+import { TRPCError as TRPCError6 } from "@trpc/server";
+import { z as z8 } from "zod";
+var notFound = (message = "Bulunamad\u0131.") => new TRPCError6({ code: "NOT_FOUND", message });
 function orgProcedure(minRole, options = {}) {
-  return protectedProcedure.input(z7.object({ orgId: z7.number().int().positive() })).use(async ({ ctx, input, next, type }) => {
+  return protectedProcedure.input(z8.object({ orgId: z8.number().int().positive() })).use(async ({ ctx, input, next, type }) => {
     const membership = await getActiveMembership(ctx.user.id, input.orgId);
     if (!membership || !hasRole(membership.role, minRole)) throw notFound("Kurum bulunamad\u0131.");
     if (type === "mutation" && !options.allowInactive && membership.state && membership.state !== "active") {
-      throw new TRPCError5({ code: "FORBIDDEN", message: membership.state === "expired" ? "Kurum \xFCyeli\u011Finin s\xFCresi doldu; panel salt okunur. Yenilemek i\xE7in platform y\xF6neticisiyle g\xF6r\xFC\u015F\xFCn." : "Kurum \xFCyeli\u011Fi hen\xFCz ba\u015Flamad\u0131." });
+      throw new TRPCError6({ code: "FORBIDDEN", message: membership.state === "expired" ? "Kurum \xFCyeli\u011Finin s\xFCresi doldu; panel salt okunur. Yenilemek i\xE7in platform y\xF6neticisiyle g\xF6r\xFC\u015F\xFCn." : "Kurum \xFCyeli\u011Fi hen\xFCz ba\u015Flamad\u0131." });
     }
     return next({ ctx: { ...ctx, membership } });
   });
@@ -10840,21 +11099,21 @@ function audit(ctx, action, target, metadata) {
 }
 
 // server/routers/orgCases.ts
-var id = z8.number().int().positive();
-var examKind = z8.enum(EXAM_KINDS);
-var planItem = z8.object({ subject: z8.string().trim().min(1).max(80), topicId: id.nullable(), topic: z8.string().trim().min(1).max(180), minutes: z8.number().int().min(10).max(180), targetQuestions: z8.number().int().min(0).max(200).optional(), bookId: z8.string().max(120).optional(), bookContentId: id.optional(), pages: z8.string().max(80).optional() });
-var planInput = z8.object({ caseId: id, items: z8.array(planItem).min(1).max(14), from: z8.string().regex(/^\d{4}-\d{2}-\d{2}$/), days: z8.number().int().min(1).max(14) });
+var id = z9.number().int().positive();
+var examKind = z9.enum(EXAM_KINDS);
+var planItem = z9.object({ subject: z9.string().trim().min(1).max(80), topicId: id.nullable(), topic: z9.string().trim().min(1).max(180), minutes: z9.number().int().min(10).max(180), targetQuestions: z9.number().int().min(0).max(200).optional(), bookId: z9.string().max(120).optional(), bookContentId: id.optional(), pages: z9.string().max(80).optional() });
+var planInput = z9.object({ caseId: id, items: z9.array(planItem).min(1).max(14), from: z9.string().regex(/^\d{4}-\d{2}-\d{2}$/), days: z9.number().int().min(1).max(14) });
 var dayOf = (value) => /* @__PURE__ */ new Date(`${value}T12:00:00`);
 async function wrap(work) {
   try {
     return await work();
   } catch (error) {
-    if (error instanceof CaseError) throw new TRPCError6({ code: error.code, message: error.message });
+    if (error instanceof CaseError) throw new TRPCError7({ code: error.code, message: error.message });
     throw error;
   }
 }
 async function requireEnabled(orgId) {
-  if (!await isCasesEnabled(orgId)) throw new TRPCError6({ code: "FORBIDDEN", message: "Akademik takip dosyalar\u0131 bu kurumda a\xE7\u0131k de\u011Fil." });
+  if (!await isCasesEnabled(orgId)) throw new TRPCError7({ code: "FORBIDDEN", message: "Akademik takip dosyalar\u0131 bu kurumda a\xE7\u0131k de\u011Fil." });
 }
 async function caseFor(ctx, caseId) {
   const row = await wrap(() => getCaseRow(ctx.membership.orgId, caseId));
@@ -10867,7 +11126,7 @@ async function visibleStudentIds(ctx) {
 }
 var orgCasesRouter = router({
   status: orgProcedure("teacher").query(async ({ ctx }) => ({ enabled: await isCasesEnabled(ctx.membership.orgId), title: ACADEMIC_REVIEW_TITLE, text: ACADEMIC_REVIEW_TEXT, confidenceText: CONFIDENCE_TEXT })),
-  setEnabled: orgProcedure("admin").input(z8.object({ enabled: z8.boolean() })).mutation(async ({ ctx, input }) => {
+  setEnabled: orgProcedure("admin").input(z9.object({ enabled: z9.boolean() })).mutation(async ({ ctx, input }) => {
     await setCasesEnabled(ctx.membership.orgId, input.enabled);
     await audit(ctx, "cases.enable", { type: "organization", id: ctx.membership.orgId }, { enabled: input.enabled });
     return { enabled: input.enabled };
@@ -10880,25 +11139,25 @@ var orgCasesRouter = router({
     const names = new Map((await listMembers(ctx.membership.orgId, { role: "student" })).map((member) => [member.userId, member.name]));
     return (await listSignals(ctx.membership.orgId, students)).map((signal) => ({ ...signal, studentName: names.get(signal.studentUserId) ?? "\xD6\u011Frenci" }));
   }),
-  queue: orgProcedure("teacher").input(z8.object({ status: z8.enum(["open", "in_progress", "evaluating", "closed"]).optional() })).query(async ({ ctx, input }) => {
+  queue: orgProcedure("teacher").input(z9.object({ status: z9.enum(["open", "in_progress", "evaluating", "closed"]).optional() })).query(async ({ ctx, input }) => {
     await requireEnabled(ctx.membership.orgId);
     return listCases(ctx.membership.orgId, { studentUserIds: await visibleStudentIds(ctx), status: input.status });
   }),
-  open: orgProcedure("teacher").input(z8.object({ studentUserId: id, ruleKey: z8.enum(["trend_decline", "manual"]), examKind: examKind.nullable() })).mutation(async ({ ctx, input }) => {
+  open: orgProcedure("teacher").input(z9.object({ studentUserId: id, ruleKey: z9.enum(["trend_decline", "manual"]), examKind: examKind.nullable() })).mutation(async ({ ctx, input }) => {
     await requireEnabled(ctx.membership.orgId);
     await assertCanViewStudent(ctx, input.studentUserId);
     const result = await wrap(() => openCase({ orgId: ctx.membership.orgId, studentUserId: input.studentUserId, ruleKey: input.ruleKey, examKind: input.examKind, actorUserId: ctx.user.id }));
     if (result.created) await audit(ctx, "case.open", { type: "case", id: result.caseId }, { studentUserId: input.studentUserId, ruleKey: input.ruleKey, examKind: input.examKind });
     return result;
   }),
-  get: orgProcedure("teacher").input(z8.object({ caseId: id })).query(async ({ ctx, input }) => {
+  get: orgProcedure("teacher").input(z9.object({ caseId: id })).query(async ({ ctx, input }) => {
     await requireEnabled(ctx.membership.orgId);
     const row = await caseFor(ctx, input.caseId);
     const detail = await wrap(() => getCaseDetail(ctx.membership.orgId, input.caseId));
     const responsible = await canReadNotes(ctx.membership.orgId, ctx.user.id, row.studentUserId);
     return { ...detail, notes: filterPrivateNotes(detail.notes, ctx.user.id, responsible), canReadNotes: responsible };
   }),
-  addAction: orgProcedure("teacher").input(z8.object({ caseId: id, type: z8.enum(["review", "meeting"]), note: z8.string().trim().max(2e3).optional(), meetingAt: z8.string().max(40).optional(), place: z8.string().trim().max(120).optional(), idempotencyKey: z8.string().min(8).max(64) })).mutation(async ({ ctx, input }) => {
+  addAction: orgProcedure("teacher").input(z9.object({ caseId: id, type: z9.enum(["review", "meeting"]), note: z9.string().trim().max(2e3).optional(), meetingAt: z9.string().max(40).optional(), place: z9.string().trim().max(120).optional(), idempotencyKey: z9.string().min(8).max(64) })).mutation(async ({ ctx, input }) => {
     await requireEnabled(ctx.membership.orgId);
     await caseFor(ctx, input.caseId);
     const payload = input.type === "meeting" ? { meetingAt: input.meetingAt ?? null, place: input.place ?? null } : {};
@@ -10907,14 +11166,14 @@ var orgCasesRouter = router({
     if (result.created) await audit(ctx, `case.${input.type}`, { type: "case", id: input.caseId }, { actionId: result.actionId });
     return result;
   }),
-  addNote: orgProcedure("teacher").input(z8.object({ caseId: id, body: z8.string().trim().min(1).max(4e3), visibility: z8.enum(["staff", "student"]) })).mutation(async ({ ctx, input }) => {
+  addNote: orgProcedure("teacher").input(z9.object({ caseId: id, body: z9.string().trim().min(1).max(4e3), visibility: z9.enum(["staff", "student"]) })).mutation(async ({ ctx, input }) => {
     await requireEnabled(ctx.membership.orgId);
     await caseFor(ctx, input.caseId);
     const noteId = await wrap(() => addCaseNote({ orgId: ctx.membership.orgId, caseId: input.caseId, authorUserId: ctx.user.id, body: input.body, visibility: input.visibility }));
     await audit(ctx, "case.note", { type: "case", id: input.caseId }, { noteId, visibility: input.visibility });
     return { noteId };
   }),
-  suggestResources: orgProcedure("teacher").input(z8.object({ caseId: id, topicIds: z8.array(id).min(1).max(10) })).query(async ({ ctx, input }) => {
+  suggestResources: orgProcedure("teacher").input(z9.object({ caseId: id, topicIds: z9.array(id).min(1).max(10) })).query(async ({ ctx, input }) => {
     await requireEnabled(ctx.membership.orgId);
     const row = await caseFor(ctx, input.caseId);
     return suggestOwnedResources(row.studentUserId, input.topicIds);
@@ -10925,21 +11184,21 @@ var orgCasesRouter = router({
     const placements = await previewCasePlan(row.studentUserId, input.items, dayOf(input.from), input.days);
     return placements.map((placement) => placement.date ? { itemIndex: placement.index, date: placement.date, start: placement.start } : { itemIndex: placement.index, date: null, reason: placement.reason });
   }),
-  assignPlan: orgProcedure("teacher").input(planInput.extend({ idempotencyKey: z8.string().min(8).max(64) })).mutation(async ({ ctx, input }) => {
+  assignPlan: orgProcedure("teacher").input(planInput.extend({ idempotencyKey: z9.string().min(8).max(64) })).mutation(async ({ ctx, input }) => {
     await requireEnabled(ctx.membership.orgId);
     await caseFor(ctx, input.caseId);
     const result = await wrap(() => assignCasePlan({ orgId: ctx.membership.orgId, caseId: input.caseId, actorUserId: ctx.user.id, items: input.items, from: dayOf(input.from), days: input.days, idempotencyKey: input.idempotencyKey }));
     if (!result.duplicate) await audit(ctx, "case.plan", { type: "case", id: input.caseId }, { actionId: result.actionId, sessions: result.sessionIds.length, skipped: result.skipped.length });
     return result;
   }),
-  evaluate: orgProcedure("teacher").input(z8.object({ caseId: id, outcome: z8.enum(["completed", "ongoing", "reassess"]), note: z8.string().trim().max(2e3).optional() })).mutation(async ({ ctx, input }) => {
+  evaluate: orgProcedure("teacher").input(z9.object({ caseId: id, outcome: z9.enum(["completed", "ongoing", "reassess"]), note: z9.string().trim().max(2e3).optional() })).mutation(async ({ ctx, input }) => {
     await requireEnabled(ctx.membership.orgId);
     await caseFor(ctx, input.caseId);
     const result = await wrap(() => evaluateCase({ orgId: ctx.membership.orgId, caseId: input.caseId, actorUserId: ctx.user.id, outcome: input.outcome, note: input.note }));
     await audit(ctx, input.outcome === "completed" ? "case.close" : "case.evaluate", { type: "case", id: input.caseId }, { outcome: input.outcome, limitedEvidence: result.limitedEvidence });
     return result;
   }),
-  reopen: orgProcedure("teacher").input(z8.object({ caseId: id, reason: z8.string().trim().min(3).max(500) })).mutation(async ({ ctx, input }) => {
+  reopen: orgProcedure("teacher").input(z9.object({ caseId: id, reason: z9.string().trim().min(3).max(500) })).mutation(async ({ ctx, input }) => {
     await requireEnabled(ctx.membership.orgId);
     await caseFor(ctx, input.caseId);
     await wrap(() => reopenCase({ orgId: ctx.membership.orgId, caseId: input.caseId, actorUserId: ctx.user.id, reason: input.reason }));
@@ -10954,15 +11213,15 @@ var orgCasesRouter = router({
 });
 var studyTasksRouter = router({
   thisWeek: protectedProcedure.query(({ ctx }) => listStudentAssignedTasks(ctx.user.id)),
-  feedback: protectedProcedure.input(z8.object({ sessionId: id, feedback: z8.enum(["done", "struggled", "needs_review"]) })).mutation(async ({ ctx, input }) => {
-    if (!await setStudentFeedback(ctx.user.id, input.sessionId, input.feedback)) throw new TRPCError6({ code: "NOT_FOUND", message: "G\xF6rev bulunamad\u0131." });
+  feedback: protectedProcedure.input(z9.object({ sessionId: id, feedback: z9.enum(["done", "struggled", "needs_review"]) })).mutation(async ({ ctx, input }) => {
+    if (!await setStudentFeedback(ctx.user.id, input.sessionId, input.feedback)) throw new TRPCError7({ code: "NOT_FOUND", message: "G\xF6rev bulunamad\u0131." });
     return { ok: true };
   })
 });
 
 // server/routers/questions.ts
-import { TRPCError as TRPCError7 } from "@trpc/server";
-import { z as z9 } from "zod";
+import { TRPCError as TRPCError8 } from "@trpc/server";
+import { z as z10 } from "zod";
 
 // server/notes/questionAi.ts
 async function suggestQuestionDetails(input, invoke = invokeLLM) {
@@ -11198,15 +11457,15 @@ ${input.solution.steps.map((step, index2) => `${index2 + 1}) ${step.work}`).join
 }
 
 // server/routers/questions.ts
-async function userFacing2(work) {
+async function userFacing3(work) {
   try {
     return await work();
   } catch (error) {
-    if (error instanceof NoteError || error instanceof AttachmentError || error instanceof PlanTaskError) throw new TRPCError7({ code: "BAD_REQUEST", message: error.message });
+    if (error instanceof NoteError || error instanceof AttachmentError || error instanceof PlanTaskError) throw new TRPCError8({ code: "BAD_REQUEST", message: error.message });
     throw error;
   }
 }
-var id2 = z9.number().int().positive();
+var id2 = z10.number().int().positive();
 async function loadQuestionForAi(userId, questionId) {
   const context = await getSolveContext(userId, questionId);
   let imageDataUrl = null;
@@ -11218,56 +11477,56 @@ async function loadQuestionForAi(userId, questionId) {
   const { examTrack: track } = await getStudentProfile(userId);
   return { context, imageDataUrl, track };
 }
-var subjectScope = z9.string().max(80).nullable().optional();
+var subjectScope = z10.string().max(80).nullable().optional();
 var optionalId2 = id2.nullable().optional();
 var fields = {
-  subject: z9.string().max(80).nullable().optional(),
+  subject: z10.string().max(80).nullable().optional(),
   topicId: optionalId2,
-  stuckPoint: z9.string().max(4e3).nullable().optional(),
-  solutionText: z9.string().max(4e3).nullable().optional(),
+  stuckPoint: z10.string().max(4e3).nullable().optional(),
+  solutionText: z10.string().max(4e3).nullable().optional(),
   solutionImageId: optionalId2,
-  errorType: z9.enum(ERROR_TYPE_KEYS).nullable().optional(),
-  errorTypeSource: z9.enum(["student", "ai"]).nullable().optional(),
-  difficulty: z9.enum(DIFFICULTY_KEYS).nullable().optional()
+  errorType: z10.enum(ERROR_TYPE_KEYS).nullable().optional(),
+  errorTypeSource: z10.enum(["student", "ai"]).nullable().optional(),
+  difficulty: z10.enum(DIFFICULTY_KEYS).nullable().optional()
 };
 var questionsRouter = router({
-  list: protectedProcedure.input(z9.object({ status: z9.enum(["open", "mastered", "all"]).optional(), due: z9.boolean().optional(), subject: subjectScope, topicId: optionalId2, cursor: optionalId2, limit: z9.number().int().min(1).max(100).optional() })).query(({ ctx, input }) => userFacing2(() => listQuestions(ctx.user.id, input))),
-  get: protectedProcedure.input(z9.object({ id: id2 })).query(async ({ ctx, input }) => {
+  list: protectedProcedure.input(z10.object({ status: z10.enum(["open", "mastered", "all"]).optional(), due: z10.boolean().optional(), subject: subjectScope, topicId: optionalId2, cursor: optionalId2, limit: z10.number().int().min(1).max(100).optional() })).query(({ ctx, input }) => userFacing3(() => listQuestions(ctx.user.id, input))),
+  get: protectedProcedure.input(z10.object({ id: id2 })).query(async ({ ctx, input }) => {
     const question = await getQuestion(ctx.user.id, input.id);
-    if (!question) throw new TRPCError7({ code: "NOT_FOUND", message: "Soru bulunamad\u0131." });
+    if (!question) throw new TRPCError8({ code: "NOT_FOUND", message: "Soru bulunamad\u0131." });
     return question;
   }),
-  byNote: protectedProcedure.input(z9.object({ noteId: id2 })).query(({ ctx, input }) => userFacing2(async () => ({ id: await getQuestionIdByNote(ctx.user.id, input.noteId) }))),
-  create: protectedProcedure.input(z9.object({
-    clientId: z9.string().min(8).max(40).regex(/^[A-Za-z0-9_-]+$/),
+  byNote: protectedProcedure.input(z10.object({ noteId: id2 })).query(({ ctx, input }) => userFacing3(async () => ({ id: await getQuestionIdByNote(ctx.user.id, input.noteId) }))),
+  create: protectedProcedure.input(z10.object({
+    clientId: z10.string().min(8).max(40).regex(/^[A-Za-z0-9_-]+$/),
     questionImageId: optionalId2,
-    questionOcrText: z9.string().max(5e3).nullable().optional(),
+    questionOcrText: z10.string().max(5e3).nullable().optional(),
     voiceAttachmentId: optionalId2,
-    voiceDuration: z9.number().min(0).max(700).nullable().optional(),
+    voiceDuration: z10.number().min(0).max(700).nullable().optional(),
     aiTopicId: optionalId2,
-    bookId: z9.string().max(120).nullable().optional(),
+    bookId: z10.string().max(120).nullable().optional(),
     studySessionId: optionalId2,
     ...fields
-  })).mutation(({ ctx, input }) => userFacing2(() => createQuestion(ctx.user.id, input))),
-  update: protectedProcedure.input(z9.object({ id: id2, ...fields })).mutation(({ ctx, input }) => userFacing2(() => {
+  })).mutation(({ ctx, input }) => userFacing3(() => createQuestion(ctx.user.id, input))),
+  update: protectedProcedure.input(z10.object({ id: id2, ...fields })).mutation(({ ctx, input }) => userFacing3(() => {
     const { id: questionId, ...patch } = input;
     return updateQuestion(ctx.user.id, questionId, patch);
   })),
-  delete: protectedProcedure.input(z9.object({ id: id2 })).mutation(({ ctx, input }) => userFacing2(() => deleteQuestion(ctx.user.id, input.id))),
-  attempt: protectedProcedure.input(z9.object({ id: id2, result: z9.enum(ATTEMPT_RESULT_KEYS), sawSolution: z9.boolean(), hintLevel: z9.number().int().min(HINT_LEVELS.none).max(HINT_LEVELS.solution).optional(), seconds: z9.number().min(0).max(7200).nullable().optional() })).mutation(({ ctx, input }) => userFacing2(() => recordAttempt(ctx.user.id, input.id, input))),
+  delete: protectedProcedure.input(z10.object({ id: id2 })).mutation(({ ctx, input }) => userFacing3(() => deleteQuestion(ctx.user.id, input.id))),
+  attempt: protectedProcedure.input(z10.object({ id: id2, result: z10.enum(ATTEMPT_RESULT_KEYS), sawSolution: z10.boolean(), hintLevel: z10.number().int().min(HINT_LEVELS.none).max(HINT_LEVELS.solution).optional(), seconds: z10.number().min(0).max(7200).nullable().optional() })).mutation(({ ctx, input }) => userFacing3(() => recordAttempt(ctx.user.id, input.id, input))),
   // subject: verilmezse tüm dersler, null ise derssiz ("Genel"), metinse o dersin defteri.
-  summary: protectedProcedure.input(z9.object({ subject: subjectScope }).optional()).query(({ ctx, input }) => userFacing2(() => getReviewSummary(ctx.user.id, input?.subject))),
-  errorMap: protectedProcedure.input(z9.object({ days: z9.number().int().min(1).max(365).nullable(), subject: subjectScope })).query(({ ctx, input }) => userFacing2(() => getErrorMap(ctx.user.id, input.days, input.subject))),
+  summary: protectedProcedure.input(z10.object({ subject: subjectScope }).optional()).query(({ ctx, input }) => userFacing3(() => getReviewSummary(ctx.user.id, input?.subject))),
+  errorMap: protectedProcedure.input(z10.object({ days: z10.number().int().min(1).max(365).nullable(), subject: subjectScope })).query(({ ctx, input }) => userFacing3(() => getErrorMap(ctx.user.id, input.days, input.subject))),
   /** Ders sekmeleri: ders başına not / soru / tekrar bekleyen sayısı. */
-  subjectSummary: protectedProcedure.query(({ ctx }) => userFacing2(() => getSubjectSummary(ctx.user.id))),
+  subjectSummary: protectedProcedure.query(({ ctx }) => userFacing3(() => getSubjectSummary(ctx.user.id))),
   /** Notu ya da soru kartını bir ders defterine koy (null: "Genel"e döndür). */
-  moveToSubject: protectedProcedure.input(z9.object({ noteId: id2, subject: z9.string().trim().min(1).max(80).nullable() })).mutation(({ ctx, input }) => userFacing2(() => moveNoteToSubject(ctx.user.id, input.noteId, input.subject))),
-  addReviewTask: protectedProcedure.mutation(({ ctx }) => userFacing2(() => addReviewTask(ctx.user.id))),
-  finishReview: protectedProcedure.input(z9.object({ minutes: z9.number().min(0).max(600), solved: z9.number().int().min(0).max(100), partial: z9.number().int().min(0).max(100), failed: z9.number().int().min(0).max(100) })).mutation(({ ctx, input }) => userFacing2(() => finishReviewSession(ctx.user.id, input))),
+  moveToSubject: protectedProcedure.input(z10.object({ noteId: id2, subject: z10.string().trim().min(1).max(80).nullable() })).mutation(({ ctx, input }) => userFacing3(() => moveNoteToSubject(ctx.user.id, input.noteId, input.subject))),
+  addReviewTask: protectedProcedure.mutation(({ ctx }) => userFacing3(() => addReviewTask(ctx.user.id))),
+  finishReview: protectedProcedure.input(z10.object({ minutes: z10.number().min(0).max(600), solved: z10.number().int().min(0).max(100), partial: z10.number().int().min(0).max(100), failed: z10.number().int().min(0).max(100) })).mutation(({ ctx, input }) => userFacing3(() => finishReviewSession(ctx.user.id, input))),
   // ✨ Adım adım çöz: kartı AI ile çözer ve karta kaydeder (AI not araçları kotasından sayılır).
   // İstemci kayıtlı çözümü `get` ile zaten alır; bu uç yalnızca ilk çözüm ya da "Yeniden çöz" için çağrılır.
   // Model kademesi kartın zorluk/ders/sınav sinyallerinden seçilir; `escalate` = öğrenci "daha güçlü modelle çöz" dedi.
-  solve: metredFeatureProcedure("NOTE_AI").input(z9.object({ id: id2, escalate: z9.boolean().optional() })).mutation(({ ctx, input }) => userFacing2(async () => {
+  solve: metredFeatureProcedure("NOTE_AI").input(z10.object({ id: id2, escalate: z10.boolean().optional() })).mutation(({ ctx, input }) => userFacing3(async () => {
     const { context, imageDataUrl, track } = await loadQuestionForAi(ctx.user.id, input.id);
     const tier = chooseSolveTier({ difficulty: context.difficulty, subject: context.subject, exam: context.exam, lastResult: context.lastResult, escalate: input.escalate });
     let routed;
@@ -11282,7 +11541,7 @@ var questionsRouter = router({
     return saveAiSolution(ctx.user.id, input.id, routed.solution, tag);
   })),
   // 🔁 Benzer soru: aynı yöntemi ölçen yeni alıştırma (YKS 5, LGS 4 şıklı); kaydedilmez, her üretim AI not hakkından sayılır.
-  similar: metredFeatureProcedure("NOTE_AI").input(z9.object({ id: id2 })).mutation(({ ctx, input }) => userFacing2(async () => {
+  similar: metredFeatureProcedure("NOTE_AI").input(z10.object({ id: id2 })).mutation(({ ctx, input }) => userFacing3(async () => {
     const { context, imageDataUrl, track } = await loadQuestionForAi(ctx.user.id, input.id);
     try {
       const tier = atLeastMedium(tierOfTag(context.aiSolutionModel) ?? chooseSolveTier({ difficulty: context.difficulty, subject: context.subject, exam: context.exam, lastResult: context.lastResult }));
@@ -11293,7 +11552,7 @@ var questionsRouter = router({
     }
   })),
   // ✨ Öner: fotoğrafı okur, müfredattan konu + zorluk + olası hata türü önerir (fotoğraf okuma kotasından sayılır).
-  suggest: metredFeatureProcedure("NOTE_OCR").input(z9.object({ attachmentId: optionalId2, stuckPoint: z9.string().max(4e3).nullable().optional() })).mutation(({ ctx, input }) => userFacing2(async () => {
+  suggest: metredFeatureProcedure("NOTE_OCR").input(z10.object({ attachmentId: optionalId2, stuckPoint: z10.string().max(4e3).nullable().optional() })).mutation(({ ctx, input }) => userFacing3(async () => {
     let imageDataUrl = null;
     if (input.attachmentId) {
       const attachment = await getAttachmentStorage().get(ctx.user.id, input.attachmentId);
@@ -11314,8 +11573,8 @@ var questionsRouter = router({
 });
 
 // server/routers/classSchedule.ts
-import { TRPCError as TRPCError8 } from "@trpc/server";
-import { z as z10 } from "zod";
+import { TRPCError as TRPCError9 } from "@trpc/server";
+import { z as z11 } from "zod";
 
 // server/schedule/scheduleImport.ts
 var LESSON_RULES = {
@@ -11466,78 +11725,78 @@ async function readScheduleFromImage(dataUrl, invoke = invokeLLM, track = "YKS")
 }
 
 // server/routers/classSchedule.ts
-var time = z10.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Saat SS:dd bi\xE7iminde olmal\u0131.");
+var time = z11.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Saat SS:dd bi\xE7iminde olmal\u0131.");
 var classScheduleRouter = router({
   // `courseBlocks`: kurumun (dershane) sınıf programı; salt okunur, kaydedilen programa girmez.
   get: protectedProcedure.query(async ({ ctx }) => {
     const [schedule, courseBlocks] = await Promise.all([getClassSchedule(ctx.user.id), getCourseBlocks(ctx.user.id)]);
     return { ...schedule, courseBlocks };
   }),
-  save: protectedProcedure.input(z10.object({
-    periods: z10.array(z10.object({ start: time, end: time })).max(MAX_SCHOOL_PERIODS),
-    blocks: z10.array(z10.object({
-      source: z10.enum(SCHEDULE_SOURCES),
-      dayOfWeek: z10.number().int().min(1).max(7),
+  save: protectedProcedure.input(z11.object({
+    periods: z11.array(z11.object({ start: time, end: time })).max(MAX_SCHOOL_PERIODS),
+    blocks: z11.array(z11.object({
+      source: z11.enum(SCHEDULE_SOURCES),
+      dayOfWeek: z11.number().int().min(1).max(7),
       startTime: time,
       endTime: time,
-      subject: z10.enum(SCHEDULE_SUBJECTS).nullable(),
-      label: z10.string().max(80)
+      subject: z11.enum(SCHEDULE_SUBJECTS).nullable(),
+      label: z11.string().max(80)
     })).max(MAX_SCHEDULE_BLOCKS)
   })).mutation(async ({ ctx, input }) => {
     try {
       return await saveClassSchedule(ctx.user.id, input);
     } catch (error) {
-      if (error instanceof ScheduleError) throw new TRPCError8({ code: "BAD_REQUEST", message: error.message });
+      if (error instanceof ScheduleError) throw new TRPCError9({ code: "BAD_REQUEST", message: error.message });
       throw error;
     }
   }),
   // 📷 Fotoğraftan aktar: program okunur ama KAYDEDİLMEZ; düzenleyiciye dolar, öğrenci kontrol edip kaydeder.
   // Kota: fotoğraf okuma (NOTE_OCR); yalnızca başarılı okumada sayılır.
-  importPhoto: metredFeatureProcedure("NOTE_OCR").input(z10.object({ dataUrl: z10.string().max(12e6).regex(/^data:image\/(jpeg|png|webp);base64,/, "Foto\u011Fraf JPEG, PNG ya da WEBP olmal\u0131.") })).mutation(async ({ ctx, input }) => {
+  importPhoto: metredFeatureProcedure("NOTE_OCR").input(z11.object({ dataUrl: z11.string().max(12e6).regex(/^data:image\/(jpeg|png|webp);base64,/, "Foto\u011Fraf JPEG, PNG ya da WEBP olmal\u0131.") })).mutation(async ({ ctx, input }) => {
     try {
       const examTrack = ctx.user ? (await getStudentProfile(ctx.user.id)).examTrack : "YKS";
       return await readScheduleFromImage(input.dataUrl, void 0, examTrack);
     } catch (error) {
       console.warn("[Class Schedule] Photo import failed:", error);
-      throw new TRPCError8({ code: "BAD_REQUEST", message: llmUnavailableMessage(error) ?? "Program\u0131 foto\u011Fraftan okuyamad\u0131m. Tablonun tamam\u0131 g\xF6r\xFCnecek \u015Fekilde, d\xFCz ve net bir foto\u011Frafla tekrar dener misin? \u0130stersen tabloya elle de girebilirsin." });
+      throw new TRPCError9({ code: "BAD_REQUEST", message: llmUnavailableMessage(error) ?? "Program\u0131 foto\u011Fraftan okuyamad\u0131m. Tablonun tamam\u0131 g\xF6r\xFCnecek \u015Fekilde, d\xFCz ve net bir foto\u011Frafla tekrar dener misin? \u0130stersen tabloya elle de girebilirsin." });
     }
   })
 });
 
 // server/routers/push.ts
-import { TRPCError as TRPCError9 } from "@trpc/server";
-import { z as z11 } from "zod";
-var subscriptionInput = z11.object({
-  endpoint: z11.string().url().max(600),
-  keys: z11.object({ p256dh: z11.string().min(1).max(200), auth: z11.string().min(1).max(100) })
+import { TRPCError as TRPCError10 } from "@trpc/server";
+import { z as z12 } from "zod";
+var subscriptionInput = z12.object({
+  endpoint: z12.string().url().max(600),
+  keys: z12.object({ p256dh: z12.string().min(1).max(200), auth: z12.string().min(1).max(100) })
 });
 var pushRouter = router({
   // VAPID anahtarı yoksa null: istemci hatırlatma seçeneğini hiç göstermez.
   config: publicProcedure.query(() => ({ publicKey: pushPublicKey() })),
   // Bu cihazın aboneliği sunucuda kayıtlı mı (tarayıcıda abonelik olup sunucuda silinmiş olabilir).
-  status: protectedProcedure.input(z11.object({ endpoint: z11.string().max(600) })).query(async ({ ctx, input }) => ({ subscribed: await hasSubscription(ctx.user.id, input.endpoint) })),
+  status: protectedProcedure.input(z12.object({ endpoint: z12.string().max(600) })).query(async ({ ctx, input }) => ({ subscribed: await hasSubscription(ctx.user.id, input.endpoint) })),
   subscribe: protectedProcedure.input(subscriptionInput).mutation(async ({ ctx, input }) => {
-    if (!pushPublicKey()) throw new TRPCError9({ code: "PRECONDITION_FAILED", message: "Bildirimler \u015Fu an kullan\u0131lam\u0131yor." });
+    if (!pushPublicKey()) throw new TRPCError10({ code: "PRECONDITION_FAILED", message: "Bildirimler \u015Fu an kullan\u0131lam\u0131yor." });
     await saveSubscription(ctx.user.id, input, ctx.req.headers["user-agent"] ?? null);
     return { subscribed: true };
   }),
-  unsubscribe: protectedProcedure.input(z11.object({ endpoint: z11.string().max(600) })).mutation(async ({ ctx, input }) => {
+  unsubscribe: protectedProcedure.input(z12.object({ endpoint: z12.string().max(600) })).mutation(async ({ ctx, input }) => {
     await removeSubscription(ctx.user.id, input.endpoint);
     return { subscribed: false };
   }),
   test: protectedProcedure.mutation(async ({ ctx }) => {
     const outcome = await sendToUser(ctx.user.id, { title: "Hat\u0131rlatmalar a\xE7\u0131k", body: "Plan\u0131ndaki her oturumdan birka\xE7 dakika \xF6nce burada haber verece\u011Fim.", url: "/takvim", tag: "test" });
-    if (!outcome.delivered) throw new TRPCError9({ code: "BAD_REQUEST", message: "Bildirim g\xF6nderilemedi. Bildirim iznini kontrol edip tekrar dener misin?" });
+    if (!outcome.delivered) throw new TRPCError10({ code: "BAD_REQUEST", message: "Bildirim g\xF6nderilemedi. Bildirim iznini kontrol edip tekrar dener misin?" });
     return outcome;
   })
 });
 
 // server/routers/reading.ts
-import { TRPCError as TRPCError10 } from "@trpc/server";
-import { z as z12 } from "zod";
+import { TRPCError as TRPCError11 } from "@trpc/server";
+import { z as z13 } from "zod";
 
 // server/reading/readingDb.ts
-import { and as and21, count, desc as desc15, eq as eq24 } from "drizzle-orm";
+import { and as and23, count, desc as desc16, eq as eq26 } from "drizzle-orm";
 
 // shared/reading.ts
 var MAX_READING_BOOKS = 50;
@@ -11556,16 +11815,16 @@ var columns = { id: readingBooks.id, title: readingBooks.title, author: readingB
 async function listReadingBooks(userId) {
   const db = await getDb();
   if (!db) return [];
-  const rows = await db.select(columns).from(readingBooks).where(eq24(readingBooks.userId, userId)).orderBy(desc15(readingBooks.updatedAt));
+  const rows = await db.select(columns).from(readingBooks).where(eq26(readingBooks.userId, userId)).orderBy(desc16(readingBooks.updatedAt));
   return [...rows.filter((row) => row.status === "reading"), ...rows.filter((row) => row.status === "finished")];
 }
 async function addReadingBook(userId, input) {
   const db = await getDb();
   if (!db) throw new ReadingError("Veritaban\u0131na ula\u015F\u0131lamad\u0131.");
-  const [{ total }] = await db.select({ total: count() }).from(readingBooks).where(eq24(readingBooks.userId, userId));
+  const [{ total }] = await db.select({ total: count() }).from(readingBooks).where(eq26(readingBooks.userId, userId));
   if (total >= MAX_READING_BOOKS) throw new ReadingError(`En fazla ${MAX_READING_BOOKS} okuma kitab\u0131 eklenebilir.`);
   const result = await db.insert(readingBooks).values({ userId, title: input.title.trim(), author: input.author?.trim() || null, totalPages: input.totalPages || null }).returning({ id: readingBooks.id });
-  const [row] = await db.select(columns).from(readingBooks).where(and21(eq24(readingBooks.id, Number(result[0].id)), eq24(readingBooks.userId, userId))).limit(1);
+  const [row] = await db.select(columns).from(readingBooks).where(and23(eq26(readingBooks.id, Number(result[0].id)), eq26(readingBooks.userId, userId))).limit(1);
   return row;
 }
 async function updateReadingBook(userId, id8, patch) {
@@ -11577,48 +11836,48 @@ async function updateReadingBook(userId, id8, patch) {
     values.status = patch.status;
     values.finishedAt = patch.status === "finished" ? /* @__PURE__ */ new Date() : null;
   }
-  if (Object.keys(values).length) await db.update(readingBooks).set(values).where(and21(eq24(readingBooks.id, id8), eq24(readingBooks.userId, userId)));
-  const [row] = await db.select(columns).from(readingBooks).where(and21(eq24(readingBooks.id, id8), eq24(readingBooks.userId, userId))).limit(1);
+  if (Object.keys(values).length) await db.update(readingBooks).set(values).where(and23(eq26(readingBooks.id, id8), eq26(readingBooks.userId, userId)));
+  const [row] = await db.select(columns).from(readingBooks).where(and23(eq26(readingBooks.id, id8), eq26(readingBooks.userId, userId))).limit(1);
   if (!row) throw new ReadingError("Kitap bulunamad\u0131.");
   return row;
 }
 async function removeReadingBook(userId, id8) {
   const db = await getDb();
   if (!db) return;
-  await db.delete(readingBooks).where(and21(eq24(readingBooks.id, id8), eq24(readingBooks.userId, userId)));
+  await db.delete(readingBooks).where(and23(eq26(readingBooks.id, id8), eq26(readingBooks.userId, userId)));
 }
 async function recordReadingPages(userId, id8, pages2) {
   const db = await getDb();
   if (!db) return null;
-  const [book] = await db.select(columns).from(readingBooks).where(and21(eq24(readingBooks.id, id8), eq24(readingBooks.userId, userId))).limit(1);
+  const [book] = await db.select(columns).from(readingBooks).where(and23(eq26(readingBooks.id, id8), eq26(readingBooks.userId, userId))).limit(1);
   if (!book) return null;
   const next = applyReadingProgress(book, pages2);
-  await db.update(readingBooks).set({ pagesRead: next.pagesRead, status: next.status, ...next.justFinished ? { finishedAt: /* @__PURE__ */ new Date() } : {} }).where(and21(eq24(readingBooks.id, id8), eq24(readingBooks.userId, userId)));
+  await db.update(readingBooks).set({ pagesRead: next.pagesRead, status: next.status, ...next.justFinished ? { finishedAt: /* @__PURE__ */ new Date() } : {} }).where(and23(eq26(readingBooks.id, id8), eq26(readingBooks.userId, userId)));
   return { ...book, pagesRead: next.pagesRead, status: next.status, justFinished: next.justFinished };
 }
 
 // server/routers/reading.ts
-var id3 = z12.number().int().positive();
-var pages = z12.number().int().min(1).max(1e4).nullable().optional();
-async function userFacing3(work) {
+var id3 = z13.number().int().positive();
+var pages = z13.number().int().min(1).max(1e4).nullable().optional();
+async function userFacing4(work) {
   try {
     return await work();
   } catch (error) {
-    if (error instanceof ReadingError) throw new TRPCError10({ code: "BAD_REQUEST", message: error.message });
+    if (error instanceof ReadingError) throw new TRPCError11({ code: "BAD_REQUEST", message: error.message });
     throw error;
   }
 }
 var readingRouter = router({
   list: protectedProcedure.query(({ ctx }) => listReadingBooks(ctx.user.id)),
-  add: protectedProcedure.input(z12.object({ title: z12.string().trim().min(1, "Kitap ad\u0131n\u0131 yaz.").max(180), author: z12.string().trim().max(120).nullable().optional(), totalPages: pages })).mutation(({ ctx, input }) => userFacing3(() => addReadingBook(ctx.user.id, input))),
-  update: protectedProcedure.input(z12.object({ id: id3, status: z12.enum(["reading", "finished"]).optional(), totalPages: pages })).mutation(({ ctx, input }) => userFacing3(() => updateReadingBook(ctx.user.id, input.id, { status: input.status, totalPages: input.totalPages }))),
-  remove: protectedProcedure.input(z12.object({ id: id3 })).mutation(({ ctx, input }) => removeReadingBook(ctx.user.id, input.id))
+  add: protectedProcedure.input(z13.object({ title: z13.string().trim().min(1, "Kitap ad\u0131n\u0131 yaz.").max(180), author: z13.string().trim().max(120).nullable().optional(), totalPages: pages })).mutation(({ ctx, input }) => userFacing4(() => addReadingBook(ctx.user.id, input))),
+  update: protectedProcedure.input(z13.object({ id: id3, status: z13.enum(["reading", "finished"]).optional(), totalPages: pages })).mutation(({ ctx, input }) => userFacing4(() => updateReadingBook(ctx.user.id, input.id, { status: input.status, totalPages: input.totalPages }))),
+  remove: protectedProcedure.input(z13.object({ id: id3 })).mutation(({ ctx, input }) => removeReadingBook(ctx.user.id, input.id))
 });
 
 // server/routers/org.ts
-import { TRPCError as TRPCError11 } from "@trpc/server";
+import { TRPCError as TRPCError12 } from "@trpc/server";
 import { createHash as createHash4, randomInt } from "node:crypto";
-import { z as z13 } from "zod";
+import { z as z14 } from "zod";
 
 // shared/kvkk.ts
 var DEFAULT_KVKK_NOTICE = `K\u0130\u015E\u0130SEL VER\u0130LER\u0130N \u0130\u015ELENMES\u0130NE \u0130L\u0130\u015EK\u0130N AYDINLATMA METN\u0130
@@ -11716,14 +11975,14 @@ function sameBranch(subject2, branch) {
 var sortSlots = (slots) => slots.slice().sort((a, b) => a.dayOfWeek - b.dayOfWeek || toMinutes(a.startTime) - toMinutes(b.startTime));
 
 // server/routers/org.ts
-var id4 = z13.number().int().positive();
+var id4 = z14.number().int().positive();
 var hashCode = (code) => createHash4("sha256").update(normalizeInviteCode(code)).digest("hex");
-var DAY4 = 24 * 60 * 60 * 1e3;
-async function userFacing4(work) {
+var DAY5 = 24 * 60 * 60 * 1e3;
+async function userFacing5(work) {
   try {
     return await work();
   } catch (error) {
-    if (error instanceof OrgError) throw new TRPCError11({ code: "BAD_REQUEST", message: error.message });
+    if (error instanceof OrgError) throw new TRPCError12({ code: "BAD_REQUEST", message: error.message });
     throw error;
   }
 }
@@ -11739,45 +11998,45 @@ async function visibleStudentsWithSummary(ctx) {
   const { orgId, role } = ctx.membership;
   const students = await listMembers(orgId, seesAllStudents(role) ? { role: "student" } : { role: "student", teacherUserId: ctx.user.id });
   const { start, end } = currentWeek();
-  const signals = await loadStudentSignals(students.map((student) => student.userId), start, end, new Date(Date.now() - 30 * DAY4));
+  const signals = await loadStudentSignals(students.map((student) => student.userId), start, end, new Date(Date.now() - 30 * DAY5));
   return students.map((student) => ({ ...student, summary: summarizeStudent(signals.get(student.userId)) }));
 }
-var optionalText = (max) => z13.string().trim().max(max).optional().transform((value) => value || null);
-var classInput = z13.object({ name: z13.string().trim().min(1).max(80), gradeLevel: z13.enum(CLASS_GRADES).nullable().optional(), track: z13.enum(CLASS_TRACKS).nullable().optional(), advisorUserId: id4.nullable().optional() });
+var optionalText = (max) => z14.string().trim().max(max).optional().transform((value) => value || null);
+var classInput = z14.object({ name: z14.string().trim().min(1).max(80), gradeLevel: z14.enum(CLASS_GRADES).nullable().optional(), track: z14.enum(CLASS_TRACKS).nullable().optional(), advisorUserId: id4.nullable().optional() });
 async function classFields(orgId, input) {
   if (input.advisorUserId) {
     const role = await getMemberRole(orgId, input.advisorUserId);
-    if (!role || !isStaffRole(role)) throw new TRPCError11({ code: "NOT_FOUND", message: "Sorumlu \xF6\u011Fretmen bulunamad\u0131." });
+    if (!role || !isStaffRole(role)) throw new TRPCError12({ code: "NOT_FOUND", message: "Sorumlu \xF6\u011Fretmen bulunamad\u0131." });
   }
   return { name: input.name, gradeLevel: input.gradeLevel ?? null, track: input.track ?? null, advisorUserId: input.advisorUserId ?? null };
 }
-var timetableSlotInput = z13.object({
-  dayOfWeek: z13.number().int().min(1).max(7),
-  startTime: z13.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
-  endTime: z13.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
-  subject: z13.string().trim().min(1).max(60),
+var timetableSlotInput = z14.object({
+  dayOfWeek: z14.number().int().min(1).max(7),
+  startTime: z14.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  endTime: z14.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  subject: z14.string().trim().min(1).max(60),
   teacherUserId: id4.nullable(),
   room: optionalText(40)
 });
 async function saveTimetables(ctx, plans) {
   const orgId = ctx.membership.orgId;
   const prepared = plans.map((plan) => ({ classId: plan.classId, slots: sortSlots(plan.slots.map((slot) => ({ ...slot, room: slot.room ?? null }))) }));
-  if (new Set(prepared.map((plan) => plan.classId)).size !== prepared.length) throw new TRPCError11({ code: "BAD_REQUEST", message: "Bir s\u0131n\u0131f iki kez g\xF6nderildi." });
+  if (new Set(prepared.map((plan) => plan.classId)).size !== prepared.length) throw new TRPCError12({ code: "BAD_REQUEST", message: "Bir s\u0131n\u0131f iki kez g\xF6nderildi." });
   const [members, classes, current] = await Promise.all([listMembers(orgId), listClasses(orgId), listOrgTimetable(orgId)]);
   const staff = new Map(members.filter((member) => isStaffRole(member.role)).map((member) => [member.userId, member]));
   const className = (classId) => classes.find((item) => item.id === classId)?.name ?? "ba\u015Fka bir";
   for (const plan of prepared) {
-    if (!classes.some((item) => item.id === plan.classId)) throw new TRPCError11({ code: "NOT_FOUND", message: "S\u0131n\u0131f bulunamad\u0131." });
+    if (!classes.some((item) => item.id === plan.classId)) throw new TRPCError12({ code: "NOT_FOUND", message: "S\u0131n\u0131f bulunamad\u0131." });
     const problem = validateClassTimetable(plan.slots);
-    if (problem) throw new TRPCError11({ code: "BAD_REQUEST", message: prepared.length > 1 ? `${className(plan.classId)}: ${problem}` : problem });
-    if (plan.slots.some((slot) => slot.teacherUserId && !staff.has(slot.teacherUserId))) throw new TRPCError11({ code: "NOT_FOUND", message: "\xD6\u011Fretmen bulunamad\u0131." });
+    if (problem) throw new TRPCError12({ code: "BAD_REQUEST", message: prepared.length > 1 ? `${className(plan.classId)}: ${problem}` : problem });
+    if (plan.slots.some((slot) => slot.teacherUserId && !staff.has(slot.teacherUserId))) throw new TRPCError12({ code: "NOT_FOUND", message: "\xD6\u011Fretmen bulunamad\u0131." });
   }
   const replaced = new Set(prepared.map((plan) => plan.classId));
   const placed = [...current.filter((slot) => !replaced.has(slot.classId)).map((slot) => ({ ...slot, room: slot.room ?? null })), ...prepared.flatMap((plan) => plan.slots.map((slot) => ({ ...slot, classId: plan.classId })))];
   const conflicts = prepared.flatMap((plan) => findCrossClassConflicts(plan.classId, plan.slots, placed));
   if (conflicts.length) {
     const names = { teacher: (userId) => staff.get(userId)?.name ?? "\xD6\u011Fretmen", className };
-    throw new TRPCError11({ code: "CONFLICT", message: conflicts.slice(0, 3).map((conflict) => describeConflict(conflict, names)).join(" ") });
+    throw new TRPCError12({ code: "CONFLICT", message: conflicts.slice(0, 3).map((conflict) => describeConflict(conflict, names)).join(" ") });
   }
   await replaceClassTimetables(orgId, prepared);
   for (const plan of prepared) await audit(ctx, "timetable.update", { type: "class", id: plan.classId }, { slots: plan.slots.length, auto: prepared.length > 1 });
@@ -11790,7 +12049,7 @@ var orgRouter = router({
   mine: protectedProcedure.query(({ ctx }) => listMyMemberships(ctx.user.id)),
   /** Personelin pazar akşamı aldığı sınıf özeti (server/digest/teacherDigest.ts); üyelik başına. */
   myDigest: orgProcedure("teacher").query(async ({ ctx }) => ({ enabled: await getStaffDigestEnabled(ctx.user.id, ctx.membership.orgId) })),
-  setMyDigest: orgProcedure("teacher", { allowInactive: true }).input(z13.object({ enabled: z13.boolean() })).mutation(async ({ ctx, input }) => ({ enabled: await setStaffDigestEnabled(ctx.user.id, ctx.membership.orgId, input.enabled) })),
+  setMyDigest: orgProcedure("teacher", { allowInactive: true }).input(z14.object({ enabled: z14.boolean() })).mutation(async ({ ctx, input }) => ({ enabled: await setStaffDigestEnabled(ctx.user.id, ctx.membership.orgId, input.enabled) })),
   overview: orgProcedure("teacher").query(async ({ ctx }) => {
     const students = await visibleStudentsWithSummary(ctx);
     const classes = await listClasses(ctx.membership.orgId);
@@ -11819,7 +12078,7 @@ var orgRouter = router({
       })
     };
   }),
-  students: orgProcedure("teacher").input(z13.object({ classId: id4.optional(), teacherUserId: id4.optional(), risk: z13.enum(["inactive", "low_adherence", "net_drop", "any"]).optional(), q: z13.string().max(80).optional() })).query(async ({ ctx, input }) => {
+  students: orgProcedure("teacher").input(z14.object({ classId: id4.optional(), teacherUserId: id4.optional(), risk: z14.enum(["inactive", "low_adherence", "net_drop", "any"]).optional(), q: z14.string().max(80).optional() })).query(async ({ ctx, input }) => {
     const students = await visibleStudentsWithSummary(ctx);
     const [classes, assignments, teachers] = await Promise.all([listClasses(ctx.membership.orgId), listAssignments(ctx.membership.orgId), listMembers(ctx.membership.orgId, { role: "teacher" })]);
     const query = input.q?.trim().toLocaleLowerCase("tr") ?? "";
@@ -11832,9 +12091,9 @@ var orgRouter = router({
       summary: student.summary
     })).filter((student) => (!input.classId || student.classes.some((item) => item.id === input.classId)) && (!input.teacherUserId || student.teachers.some((teacher) => teacher.userId === input.teacherUserId)) && (!input.risk || (input.risk === "any" ? student.summary.risks.length > 0 : student.summary.risks.includes(input.risk))) && (!query || student.name.toLocaleLowerCase("tr").includes(query)));
   }),
-  student: orgProcedure("teacher").input(z13.object({ studentUserId: id4 })).query(async ({ ctx, input }) => {
+  student: orgProcedure("teacher").input(z14.object({ studentUserId: id4 })).query(async ({ ctx, input }) => {
     await assertCanViewStudent(ctx, input.studentUserId);
-    const since = new Date(Date.now() - 42 * DAY4);
+    const since = new Date(Date.now() - 42 * DAY5);
     const { start, end } = currentWeek();
     const [profile, exams, topics, calendar, notes2, signals, classes, assignments, teachers] = await Promise.all([
       getStudentProfile(input.studentUserId),
@@ -11842,7 +12101,7 @@ var orgRouter = router({
       getUserTopicProgress(input.studentUserId),
       getStudentCalendarReadOnly(input.studentUserId, since),
       listNotes2(ctx.membership.orgId, input.studentUserId),
-      loadStudentSignals([input.studentUserId], start, end, new Date(Date.now() - 30 * DAY4)),
+      loadStudentSignals([input.studentUserId], start, end, new Date(Date.now() - 30 * DAY5)),
       listClasses(ctx.membership.orgId),
       listAssignments(ctx.membership.orgId),
       listMembers(ctx.membership.orgId, { role: "teacher" })
@@ -11867,23 +12126,23 @@ var orgRouter = router({
   settings: router({
     get: orgProcedure("teacher").query(async ({ ctx }) => {
       const org = await getOrganization(ctx.membership.orgId);
-      if (!org) throw new TRPCError11({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+      if (!org) throw new TRPCError12({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
       return { ...org, membershipState: membershipState(org), kvkk: effectiveKvkk(org) };
     }),
     /** Kurum yöneticisi: öğrenci başına aylık AI kredi üst sınırı (null = sınırsız). */
-    setCreditCap: orgProcedure("admin").input(z13.object({ cap: z13.number().int().min(1).max(1e6).nullable() })).mutation(async ({ ctx, input }) => {
+    setCreditCap: orgProcedure("admin").input(z14.object({ cap: z14.number().int().min(1).max(1e6).nullable() })).mutation(async ({ ctx, input }) => {
       await setPerStudentCreditCap(ctx.membership.orgId, input.cap);
       await audit(ctx, "org.credit_cap", { type: "organization", id: ctx.membership.orgId }, { cap: input.cap });
       return { ok: true };
     }),
     credits: orgProcedure("coordinator").query(async ({ ctx }) => {
       const org = await getOrganization(ctx.membership.orgId);
-      if (!org) throw new TRPCError11({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+      if (!org) throw new TRPCError12({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
       const report = await orgCreditReport(ctx.membership.orgId);
       return { monthly: org.aiCreditsMonthly, cap: org.perStudentCreditCap, remaining: Math.max(0, org.aiCreditsMonthly - report.used), ...report };
     }),
     /** KVKK metinleri: boş gönderilen metin platform şablonuna döner. Her kayıtta sürüm artar. */
-    updateKvkk: orgProcedure("admin").input(z13.object({ notice: z13.string().trim().max(2e4).nullable(), consent: z13.string().trim().max(5e3).nullable() })).mutation(async ({ ctx, input }) => {
+    updateKvkk: orgProcedure("admin").input(z14.object({ notice: z14.string().trim().max(2e4).nullable(), consent: z14.string().trim().max(5e3).nullable() })).mutation(async ({ ctx, input }) => {
       await updateKvkk(ctx.membership.orgId, input.notice || null, input.consent || null);
       await audit(ctx, "org.kvkk", { type: "organization", id: ctx.membership.orgId }, { custom: Boolean(input.notice || input.consent) });
       return { ok: true };
@@ -11895,17 +12154,17 @@ var orgRouter = router({
       const prices = await listOrgPlanPrices();
       return Object.fromEntries(ORG_PLANS.map((plan) => [plan, { monthlyPriceTry: prices.get(plan)?.monthlyPriceTry ?? null, yearlyPriceTry: prices.get(plan)?.yearlyPriceTry ?? null, priceNote: prices.get(plan)?.priceNote ?? null }]));
     }),
-    requestUpgrade: orgProcedure("admin", { allowInactive: true }).input(z13.object({ plan: z13.enum(ORG_PLANS), note: z13.string().trim().max(300).optional() })).mutation(({ ctx, input }) => userFacing4(async () => {
+    requestUpgrade: orgProcedure("admin", { allowInactive: true }).input(z14.object({ plan: z14.enum(ORG_PLANS), note: z14.string().trim().max(300).optional() })).mutation(({ ctx, input }) => userFacing5(async () => {
       const org = await getOrganization(ctx.membership.orgId);
-      if (!org) throw new TRPCError11({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+      if (!org) throw new TRPCError12({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
       if (!canRequestPlan(org.plan, input.plan)) throw new OrgError("Bu pakete ge\xE7i\u015F talep edilemez; yaln\u0131zca \xFCst pakete y\xFCkseltme ya da s\xFCre uzatma istenebilir.");
       if ((await listOrgUpgradeRequests(ctx.membership.orgId)).some((row) => row.status === "pending")) throw new OrgError("Zaten bekleyen bir talebin var; sonu\xE7lanmas\u0131n\u0131 bekle ya da iptal et.");
       const requestId = await createUpgradeRequest({ orgId: ctx.membership.orgId, requestedBy: ctx.user.id, currentPlan: org.plan, requestedPlan: input.plan, note: input.note || null });
       await audit(ctx, "org.upgrade_request", { type: "upgrade", id: requestId }, { from: org.plan, to: input.plan });
       return { id: requestId };
     })),
-    cancelUpgrade: orgProcedure("admin", { allowInactive: true }).input(z13.object({ requestId: id4 })).mutation(async ({ ctx, input }) => {
-      if (!await cancelUpgradeRequest(ctx.membership.orgId, input.requestId)) throw new TRPCError11({ code: "NOT_FOUND", message: "Bekleyen talep bulunamad\u0131." });
+    cancelUpgrade: orgProcedure("admin", { allowInactive: true }).input(z14.object({ requestId: id4 })).mutation(async ({ ctx, input }) => {
+      if (!await cancelUpgradeRequest(ctx.membership.orgId, input.requestId)) throw new TRPCError12({ code: "NOT_FOUND", message: "Bekleyen talep bulunamad\u0131." });
       await audit(ctx, "org.upgrade_cancel", { type: "upgrade", id: input.requestId });
       return { ok: true };
     }),
@@ -11914,7 +12173,7 @@ var orgRouter = router({
       const current = org?.kvkkVersion ?? 1;
       return { current, students: versions.length, onCurrent: versions.filter((version) => version === current).length, onOlder: versions.filter((version) => version !== null && version !== current).length, missing: versions.filter((version) => version === null).length };
     }),
-    update: orgProcedure("admin").input(z13.object({ name: z13.string().trim().min(2).max(160), kind: z13.enum(ORG_KINDS), city: optionalText(80), district: optionalText(80), address: optionalText(300), phone: optionalText(40), contactEmail: z13.union([z13.literal(""), z13.string().trim().email("Ge\xE7erli bir e-posta yaz.").max(160)]).optional().transform((value) => value || null) })).mutation(async ({ ctx, input }) => {
+    update: orgProcedure("admin").input(z14.object({ name: z14.string().trim().min(2).max(160), kind: z14.enum(ORG_KINDS), city: optionalText(80), district: optionalText(80), address: optionalText(300), phone: optionalText(40), contactEmail: z14.union([z14.literal(""), z14.string().trim().email("Ge\xE7erli bir e-posta yaz.").max(160)]).optional().transform((value) => value || null) })).mutation(async ({ ctx, input }) => {
       await updateOrganization(ctx.membership.orgId, input);
       await audit(ctx, "org.update", { type: "organization", id: ctx.membership.orgId }, { name: input.name });
       return { ok: true };
@@ -11925,17 +12184,17 @@ var orgRouter = router({
       const rows = await listInvitations(ctx.membership.orgId);
       return hasRole(ctx.membership.role, "coordinator") ? rows : rows.filter((row) => row.role === "student");
     }),
-    create: orgProcedure("teacher").input(z13.object({ role: z13.enum(INVITABLE_ROLES), note: z13.string().trim().max(160).optional(), subject: z13.string().trim().max(60).optional(), days: z13.number().int().min(1).max(60).default(14), maxUses: z13.number().int().min(1).max(500).default(1) })).mutation(({ ctx, input }) => userFacing4(async () => {
-      if (!canInviteRole(ctx.membership.role, input.role)) throw new TRPCError11({ code: "FORBIDDEN", message: "Bu rol i\xE7in davet olu\u015Fturma yetkin yok." });
+    create: orgProcedure("teacher").input(z14.object({ role: z14.enum(INVITABLE_ROLES), note: z14.string().trim().max(160).optional(), subject: z14.string().trim().max(60).optional(), days: z14.number().int().min(1).max(60).default(14), maxUses: z14.number().int().min(1).max(500).default(1) })).mutation(({ ctx, input }) => userFacing5(async () => {
+      if (!canInviteRole(ctx.membership.role, input.role)) throw new TRPCError12({ code: "FORBIDDEN", message: "Bu rol i\xE7in davet olu\u015Fturma yetkin yok." });
       const code = generateInviteCode((max) => randomInt(max));
-      const invitationId = await createInvitation({ orgId: ctx.membership.orgId, role: input.role, codeHash: hashCode(code), note: input.note || null, subject: input.role === "student" ? null : input.subject || null, expiresAt: new Date(Date.now() + input.days * DAY4), maxUses: input.maxUses, createdBy: ctx.user.id });
+      const invitationId = await createInvitation({ orgId: ctx.membership.orgId, role: input.role, codeHash: hashCode(code), note: input.note || null, subject: input.role === "student" ? null : input.subject || null, expiresAt: new Date(Date.now() + input.days * DAY5), maxUses: input.maxUses, createdBy: ctx.user.id });
       await audit(ctx, "invitation.create", { type: "invitation", id: invitationId }, { role: input.role, maxUses: input.maxUses, days: input.days });
       return { id: invitationId, code };
     })),
-    revoke: orgProcedure("teacher").input(z13.object({ invitationId: id4 })).mutation(async ({ ctx, input }) => {
+    revoke: orgProcedure("teacher").input(z14.object({ invitationId: id4 })).mutation(async ({ ctx, input }) => {
       const rows = await listInvitations(ctx.membership.orgId);
       const target = rows.find((row) => row.id === input.invitationId);
-      if (!target || !hasRole(ctx.membership.role, "coordinator") && target.role !== "student") throw new TRPCError11({ code: "NOT_FOUND", message: "Davet bulunamad\u0131." });
+      if (!target || !hasRole(ctx.membership.role, "coordinator") && target.role !== "student") throw new TRPCError12({ code: "NOT_FOUND", message: "Davet bulunamad\u0131." });
       await revokeInvitation(ctx.membership.orgId, input.invitationId);
       await audit(ctx, "invitation.revoke", { type: "invitation", id: input.invitationId });
       return { ok: true };
@@ -11943,23 +12202,23 @@ var orgRouter = router({
   }),
   members: router({
     list: orgProcedure("coordinator").query(async ({ ctx }) => (await listMembers(ctx.membership.orgId)).filter((member) => isStaffRole(member.role))),
-    setRole: orgProcedure("admin").input(z13.object({ userId: id4, role: z13.enum(ORG_ROLES) })).mutation(async ({ ctx, input }) => {
+    setRole: orgProcedure("admin").input(z14.object({ userId: id4, role: z14.enum(ORG_ROLES) })).mutation(async ({ ctx, input }) => {
       const current = await getMemberRole(ctx.membership.orgId, input.userId);
-      if (!current || input.userId === ctx.user.id) throw new TRPCError11({ code: "NOT_FOUND", message: "\xDCye bulunamad\u0131." });
-      if (!canAssignRole(ctx.membership.role, current, input.role)) throw new TRPCError11({ code: "FORBIDDEN", message: "Bu rol de\u011Fi\u015Fikli\u011Fini yapma yetkin yok." });
-      if (current === "student" !== (input.role === "student")) throw new TRPCError11({ code: "BAD_REQUEST", message: "\xD6\u011Frenci ve personel rolleri birbirine \xE7evrilemez." });
+      if (!current || input.userId === ctx.user.id) throw new TRPCError12({ code: "NOT_FOUND", message: "\xDCye bulunamad\u0131." });
+      if (!canAssignRole(ctx.membership.role, current, input.role)) throw new TRPCError12({ code: "FORBIDDEN", message: "Bu rol de\u011Fi\u015Fikli\u011Fini yapma yetkin yok." });
+      if (current === "student" !== (input.role === "student")) throw new TRPCError12({ code: "BAD_REQUEST", message: "\xD6\u011Frenci ve personel rolleri birbirine \xE7evrilemez." });
       await setMemberRole(ctx.membership.orgId, input.userId, input.role);
       await audit(ctx, "member.role", { type: "user", id: input.userId }, { from: current, to: input.role });
       return { ok: true };
     }),
-    setSubject: orgProcedure("coordinator").input(z13.object({ userId: id4, subject: optionalText(60) })).mutation(async ({ ctx, input }) => {
-      if (!await setMemberSubject(ctx.membership.orgId, input.userId, input.subject)) throw new TRPCError11({ code: "NOT_FOUND", message: "Personel bulunamad\u0131." });
+    setSubject: orgProcedure("coordinator").input(z14.object({ userId: id4, subject: optionalText(60) })).mutation(async ({ ctx, input }) => {
+      if (!await setMemberSubject(ctx.membership.orgId, input.userId, input.subject)) throw new TRPCError12({ code: "NOT_FOUND", message: "Personel bulunamad\u0131." });
       await audit(ctx, "member.subject", { type: "user", id: input.userId }, { subject: input.subject });
       return { ok: true };
     }),
-    remove: orgProcedure("admin").input(z13.object({ userId: id4 })).mutation(async ({ ctx, input }) => {
+    remove: orgProcedure("admin").input(z14.object({ userId: id4 })).mutation(async ({ ctx, input }) => {
       const current = await getMemberRole(ctx.membership.orgId, input.userId);
-      if (!current || input.userId === ctx.user.id || !canAssignRole(ctx.membership.role, current, current === "student" ? "student" : "teacher")) throw new TRPCError11({ code: "NOT_FOUND", message: "\xDCye bulunamad\u0131." });
+      if (!current || input.userId === ctx.user.id || !canAssignRole(ctx.membership.role, current, current === "student" ? "student" : "teacher")) throw new TRPCError12({ code: "NOT_FOUND", message: "\xDCye bulunamad\u0131." });
       await endMembership(ctx.membership.orgId, input.userId, "removed");
       await audit(ctx, "member.remove", { type: "user", id: input.userId }, { role: current });
       return { ok: true };
@@ -11973,17 +12232,17 @@ var orgRouter = router({
       return { id: classId };
     }),
     update: orgProcedure("coordinator").input(classInput.extend({ classId: id4 })).mutation(async ({ ctx, input }) => {
-      if (!await updateClass(ctx.membership.orgId, input.classId, await classFields(ctx.membership.orgId, input))) throw new TRPCError11({ code: "NOT_FOUND", message: "S\u0131n\u0131f bulunamad\u0131." });
+      if (!await updateClass(ctx.membership.orgId, input.classId, await classFields(ctx.membership.orgId, input))) throw new TRPCError12({ code: "NOT_FOUND", message: "S\u0131n\u0131f bulunamad\u0131." });
       await audit(ctx, "class.update", { type: "class", id: input.classId }, { name: input.name });
       return { ok: true };
     }),
-    remove: orgProcedure("coordinator").input(z13.object({ classId: id4 })).mutation(async ({ ctx, input }) => {
-      if (!await deleteClass(ctx.membership.orgId, input.classId)) throw new TRPCError11({ code: "NOT_FOUND", message: "S\u0131n\u0131f bulunamad\u0131." });
+    remove: orgProcedure("coordinator").input(z14.object({ classId: id4 })).mutation(async ({ ctx, input }) => {
+      if (!await deleteClass(ctx.membership.orgId, input.classId)) throw new TRPCError12({ code: "NOT_FOUND", message: "S\u0131n\u0131f bulunamad\u0131." });
       await audit(ctx, "class.remove", { type: "class", id: input.classId });
       return { ok: true };
     }),
-    setStudents: orgProcedure("coordinator").input(z13.object({ classId: id4, studentUserIds: z13.array(id4).max(500) })).mutation(async ({ ctx, input }) => {
-      if (!await setClassStudents(ctx.membership.orgId, input.classId, input.studentUserIds)) throw new TRPCError11({ code: "NOT_FOUND", message: "S\u0131n\u0131f bulunamad\u0131." });
+    setStudents: orgProcedure("coordinator").input(z14.object({ classId: id4, studentUserIds: z14.array(id4).max(500) })).mutation(async ({ ctx, input }) => {
+      if (!await setClassStudents(ctx.membership.orgId, input.classId, input.studentUserIds)) throw new TRPCError12({ code: "NOT_FOUND", message: "S\u0131n\u0131f bulunamad\u0131." });
       await audit(ctx, "class.students", { type: "class", id: input.classId }, { count: input.studentUserIds.length });
       return { ok: true };
     })
@@ -12002,24 +12261,24 @@ var orgRouter = router({
         teachers: members.filter((member) => isStaffRole(member.role)).map((member) => ({ userId: member.userId, name: member.name, role: member.role, subject: member.subject }))
       };
     }),
-    saveClass: orgProcedure("coordinator").input(z13.object({ classId: id4, slots: z13.array(timetableSlotInput).max(MAX_TIMETABLE_SLOTS_PER_CLASS) })).mutation(({ ctx, input }) => saveTimetables(ctx, [input])),
+    saveClass: orgProcedure("coordinator").input(z14.object({ classId: id4, slots: z14.array(timetableSlotInput).max(MAX_TIMETABLE_SLOTS_PER_CLASS) })).mutation(({ ctx, input }) => saveTimetables(ctx, [input])),
     // Otomatik dağıtımın sonucu: seçilen sınıfların programı birlikte, tek işlemde kaydedilir.
-    saveClasses: orgProcedure("coordinator").input(z13.object({ classes: z13.array(z13.object({ classId: id4, slots: z13.array(timetableSlotInput).max(MAX_TIMETABLE_SLOTS_PER_CLASS) })).min(1).max(100) })).mutation(({ ctx, input }) => saveTimetables(ctx, input.classes))
+    saveClasses: orgProcedure("coordinator").input(z14.object({ classes: z14.array(z14.object({ classId: id4, slots: z14.array(timetableSlotInput).max(MAX_TIMETABLE_SLOTS_PER_CLASS) })).min(1).max(100) })).mutation(({ ctx, input }) => saveTimetables(ctx, input.classes))
   }),
   assignments: router({
     list: orgProcedure("coordinator").query(({ ctx }) => listAssignments(ctx.membership.orgId)),
-    setTeacherStudents: orgProcedure("coordinator").input(z13.object({ teacherUserId: id4, studentUserIds: z13.array(id4).max(500) })).mutation(async ({ ctx, input }) => {
-      if (await getMemberRole(ctx.membership.orgId, input.teacherUserId) !== "teacher") throw new TRPCError11({ code: "NOT_FOUND", message: "\xD6\u011Fretmen bulunamad\u0131." });
+    setTeacherStudents: orgProcedure("coordinator").input(z14.object({ teacherUserId: id4, studentUserIds: z14.array(id4).max(500) })).mutation(async ({ ctx, input }) => {
+      if (await getMemberRole(ctx.membership.orgId, input.teacherUserId) !== "teacher") throw new TRPCError12({ code: "NOT_FOUND", message: "\xD6\u011Fretmen bulunamad\u0131." });
       const assigned = await setTeacherStudents(ctx.membership.orgId, input.teacherUserId, input.studentUserIds);
       await audit(ctx, "assignment.set", { type: "user", id: input.teacherUserId }, { count: assigned.length });
       return { assigned: assigned.length };
     })
   }),
   tasks: router({
-    assign: orgProcedure("teacher").input(z13.object({ studentUserId: id4, date: z13.string().regex(/^\d{4}-\d{2}-\d{2}$/), time: z13.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), subject: z13.string().trim().min(1).max(80), topic: z13.string().trim().min(1).max(180), kind: z13.enum(["Soru \xE7\xF6z\xFCm\xFC", "Konu tekrar\u0131", "Konu \xE7al\u0131\u015Fmas\u0131"]), minutes: z13.number().int().min(10).max(240), targetQuestions: z13.number().int().min(0).max(300).optional(), note: z13.string().trim().max(300).optional() })).mutation(async ({ ctx, input }) => {
+    assign: orgProcedure("teacher").input(z14.object({ studentUserId: id4, date: z14.string().regex(/^\d{4}-\d{2}-\d{2}$/), time: z14.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), subject: z14.string().trim().min(1).max(80), topic: z14.string().trim().min(1).max(180), kind: z14.enum(["Soru \xE7\xF6z\xFCm\xFC", "Konu tekrar\u0131", "Konu \xE7al\u0131\u015Fmas\u0131"]), minutes: z14.number().int().min(10).max(240), targetQuestions: z14.number().int().min(0).max(300).optional(), note: z14.string().trim().max(300).optional() })).mutation(async ({ ctx, input }) => {
       await assertCanViewStudent(ctx, input.studentUserId);
       const start = toMinutes(input.time);
-      if (start + input.minutes > 23 * 60 + 30) throw new TRPCError11({ code: "BAD_REQUEST", message: "G\xF6rev 23:30'dan \xF6nce bitmeli." });
+      if (start + input.minutes > 23 * 60 + 30) throw new TRPCError12({ code: "BAD_REQUEST", message: "G\xF6rev 23:30'dan \xF6nce bitmeli." });
       const day2 = /* @__PURE__ */ new Date(`${input.date}T12:00:00`);
       const [schedule, courseBlocks, sessions] = await Promise.all([getClassSchedule(input.studentUserId), getCourseBlocks(input.studentUserId), listPlannedSessionsOn(input.studentUserId, day2)]);
       const busy = busyOn(day2, { blocks: schedule.blocks, courseBlocks, sessions });
@@ -12027,7 +12286,7 @@ var orgRouter = router({
       if (conflict) {
         const suggestion = suggestStart(busy, input.minutes, { from: start });
         const what = conflict.kind === "session" ? `planl\u0131 \xE7al\u0131\u015Fmas\u0131yla: ${describeInterval(conflict)}` : `${describeInterval(conflict)} dersiyle`;
-        throw new TRPCError11({ code: "BAD_REQUEST", message: `\xD6\u011Frencinin ${what} \xE7ak\u0131\u015F\u0131yor. ${suggestion !== null ? `Ayn\u0131 g\xFCn uygun ilk saat: ${fromMinutes(suggestion)}.` : "Bu g\xFCn uygun saat yok; ba\u015Fka bir g\xFCn se\xE7."}` });
+        throw new TRPCError12({ code: "BAD_REQUEST", message: `\xD6\u011Frencinin ${what} \xE7ak\u0131\u015F\u0131yor. ${suggestion !== null ? `Ayn\u0131 g\xFCn uygun ilk saat: ${fromMinutes(suggestion)}.` : "Bu g\xFCn uygun saat yok; ba\u015Fka bir g\xFCn se\xE7."}` });
       }
       const sessionId = await insertAssignedTask({ orgId: ctx.membership.orgId, studentUserId: input.studentUserId, teacherUserId: ctx.user.id, sessionDate: /* @__PURE__ */ new Date(`${input.date}T${input.time}:00`), title: `${input.subject} \xB7 ${input.topic}`, subject: input.subject, topic: input.topic, kind: input.kind, plannedMinutes: input.minutes, targetQuestions: input.targetQuestions || null, summary: input.note || `${ctx.membership.orgName} \xF6\u011Fretmeninin atad\u0131\u011F\u0131 g\xF6rev.` });
       await audit(ctx, "task.assign", { type: "user", id: input.studentUserId }, { sessionId, subject: input.subject, topic: input.topic });
@@ -12037,17 +12296,17 @@ var orgRouter = router({
     })
   }),
   notes: router({
-    create: orgProcedure("teacher").input(z13.object({ studentUserId: id4, body: z13.string().trim().min(1).max(4e3), visibility: z13.enum(["staff", "student"]) })).mutation(async ({ ctx, input }) => {
+    create: orgProcedure("teacher").input(z14.object({ studentUserId: id4, body: z14.string().trim().min(1).max(4e3), visibility: z14.enum(["staff", "student"]) })).mutation(async ({ ctx, input }) => {
       await assertCanViewStudent(ctx, input.studentUserId);
       const noteId = await createNote({ orgId: ctx.membership.orgId, studentUserId: input.studentUserId, authorUserId: ctx.user.id, body: input.body, visibility: input.visibility });
       await audit(ctx, "note.create", { type: "user", id: input.studentUserId }, { noteId, visibility: input.visibility });
       return { id: noteId };
     }),
-    remove: orgProcedure("teacher").input(z13.object({ noteId: id4 })).mutation(async ({ ctx, input }) => {
+    remove: orgProcedure("teacher").input(z14.object({ noteId: id4 })).mutation(async ({ ctx, input }) => {
       const note = await getNote2(ctx.membership.orgId, input.noteId);
-      if (!note) throw new TRPCError11({ code: "NOT_FOUND", message: "Not bulunamad\u0131." });
+      if (!note) throw new TRPCError12({ code: "NOT_FOUND", message: "Not bulunamad\u0131." });
       await assertCanViewStudent(ctx, note.studentUserId);
-      if (note.authorUserId !== ctx.user.id) throw new TRPCError11({ code: "FORBIDDEN", message: "Notu yaln\u0131zca yazan \xF6\u011Fretmen silebilir." });
+      if (note.authorUserId !== ctx.user.id) throw new TRPCError12({ code: "FORBIDDEN", message: "Notu yaln\u0131zca yazan \xF6\u011Fretmen silebilir." });
       await deleteNote2(ctx.membership.orgId, input.noteId);
       await audit(ctx, "note.remove", { type: "user", id: note.studentUserId }, { noteId: input.noteId });
       return { ok: true };
@@ -12058,15 +12317,15 @@ var orgRouter = router({
   cases: orgCasesRouter,
   // --- Öğrenci (ve personel) tarafı: davet kodu ile katılma, ayrılma ---------------
   /** Davet kodunu doğrular, kurum adını ve rolü gösterir (katılmadan önce). */
-  previewInvitation: protectedProcedure.input(z13.object({ code: z13.string().trim().min(4).max(20) })).mutation(async ({ input }) => {
+  previewInvitation: protectedProcedure.input(z14.object({ code: z14.string().trim().min(4).max(20) })).mutation(async ({ input }) => {
     const invitation = await findInvitationByHash(hashCode(input.code));
     const problem = !invitation || invitation.orgStatus !== "active" ? "Davet kodu bulunamad\u0131." : invitationProblem(invitation);
-    if (problem) throw new TRPCError11({ code: "BAD_REQUEST", message: problem });
-    if (membershipState(invitation) === "expired") throw new TRPCError11({ code: "BAD_REQUEST", message: "Bu kurumun \xFCyelik s\xFCresi dolmu\u015F; yeni kat\u0131l\u0131m al\u0131nm\u0131yor." });
+    if (problem) throw new TRPCError12({ code: "BAD_REQUEST", message: problem });
+    if (membershipState(invitation) === "expired") throw new TRPCError12({ code: "BAD_REQUEST", message: "Bu kurumun \xFCyelik s\xFCresi dolmu\u015F; yeni kat\u0131l\u0131m al\u0131nm\u0131yor." });
     const org = invitation.role === "student" ? await getOrganization(invitation.orgId) : null;
     return { orgName: invitation.orgName, role: invitation.role, kvkk: org ? effectiveKvkk(org) : null };
   }),
-  join: protectedProcedure.input(z13.object({ code: z13.string().trim().min(4).max(20), consent: z13.literal(true), kvkkVersion: z13.number().int().positive().optional() })).mutation(({ ctx, input }) => userFacing4(async () => {
+  join: protectedProcedure.input(z14.object({ code: z14.string().trim().min(4).max(20), consent: z14.literal(true), kvkkVersion: z14.number().int().positive().optional() })).mutation(({ ctx, input }) => userFacing5(async () => {
     const invitation = await findInvitationByHash(hashCode(input.code));
     const problem = !invitation || invitation.orgStatus !== "active" ? "Davet kodu bulunamad\u0131." : invitationProblem(invitation);
     if (problem) throw new OrgError(problem);
@@ -12084,11 +12343,11 @@ var orgRouter = router({
     await audit({ user: { id: ctx.user.id }, membership: { orgId: invitation.orgId, orgName: invitation.orgName, role: invitation.role } }, "member.join", { type: "user", id: ctx.user.id }, { role: invitation.role });
     return { orgId: invitation.orgId, orgName: invitation.orgName, role: invitation.role };
   })),
-  leave: protectedProcedure.input(z13.object({ orgId: id4 })).mutation(async ({ ctx, input }) => {
+  leave: protectedProcedure.input(z14.object({ orgId: id4 })).mutation(async ({ ctx, input }) => {
     const memberships = await listMyMemberships(ctx.user.id);
     const membership = memberships.find((row) => row.orgId === input.orgId);
-    if (!membership) throw new TRPCError11({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
-    if (membership.role === "owner") throw new TRPCError11({ code: "BAD_REQUEST", message: "Kurum sahibi kurumdan ayr\u0131lamaz." });
+    if (!membership) throw new TRPCError12({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+    if (membership.role === "owner") throw new TRPCError12({ code: "BAD_REQUEST", message: "Kurum sahibi kurumdan ayr\u0131lamaz." });
     await endMembership(input.orgId, ctx.user.id, "left");
     await audit({ user: { id: ctx.user.id }, membership }, "member.leave", { type: "user", id: ctx.user.id }, { role: membership.role });
     return { ok: true };
@@ -12097,10 +12356,10 @@ var orgRouter = router({
   /** Öğrencinin dershane programı (sınıflarının dersleri). */
   myTimetable: protectedProcedure.query(({ ctx }) => listStudentTimetable(ctx.user.id)),
   /** Üyenin bağlı olduğu kurumun KVKK metinleri ve kendi onayladığı sürüm ("Kurumum"). */
-  myKvkk: protectedProcedure.input(z13.object({ orgId: id4 })).query(async ({ ctx, input }) => {
+  myKvkk: protectedProcedure.input(z14.object({ orgId: id4 })).query(async ({ ctx, input }) => {
     const membership = (await listMyMemberships(ctx.user.id)).find((row) => row.orgId === input.orgId);
     const org = membership ? await getOrganization(input.orgId) : null;
-    if (!membership || !org) throw new TRPCError11({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+    if (!membership || !org) throw new TRPCError12({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
     return { ...effectiveKvkk(org), acceptedVersion: membership.kvkkVersion ?? null, consentAt: membership.consentAt ?? null };
   })
 });
@@ -12112,12 +12371,12 @@ var adminOrgsRouter = router({
   }),
   upgradeRequests: adminProcedure.query(() => listPendingUpgradeRequests()),
   /** Onay: paket talep edilene geçer, kredi en az paketin varsayılanı olur, süre 1 yıl uzar (bitmemişse üstüne). */
-  resolveUpgrade: adminProcedure.input(z13.object({ requestId: id4, approve: z13.boolean() })).mutation(async ({ ctx, input }) => {
+  resolveUpgrade: adminProcedure.input(z14.object({ requestId: id4, approve: z14.boolean() })).mutation(async ({ ctx, input }) => {
     const request = await getUpgradeRequest(input.requestId);
-    if (!request || request.status !== "pending") throw new TRPCError11({ code: "NOT_FOUND", message: "Bekleyen talep bulunamad\u0131." });
+    if (!request || request.status !== "pending") throw new TRPCError12({ code: "NOT_FOUND", message: "Bekleyen talep bulunamad\u0131." });
     const org = await getOrganization(request.orgId);
-    if (!org) throw new TRPCError11({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
-    if (!await resolveUpgradeRequest(input.requestId, input.approve ? "approved" : "rejected", ctx.user.id)) throw new TRPCError11({ code: "CONFLICT", message: "Talep az \xF6nce sonu\xE7land\u0131r\u0131ld\u0131." });
+    if (!org) throw new TRPCError12({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+    if (!await resolveUpgradeRequest(input.requestId, input.approve ? "approved" : "rejected", ctx.user.id)) throw new TRPCError12({ code: "CONFLICT", message: "Talep az \xF6nce sonu\xE7land\u0131r\u0131ld\u0131." });
     if (input.approve) {
       const now = /* @__PURE__ */ new Date();
       const expired = membershipState(org, now) !== "active";
@@ -12126,13 +12385,13 @@ var adminOrgsRouter = router({
     await writeAudit({ orgId: org.id, actorUserId: ctx.user.id, action: input.approve ? "org.upgrade_approved" : "org.upgrade_rejected", targetType: "upgrade", targetId: input.requestId, metadata: { plan: ORG_PLAN_LABELS[request.requestedPlan] } });
     return { ok: true };
   }),
-  setMembership: adminProcedure.input(z13.object({ orgId: id4, plan: z13.enum(ORG_PLANS), startsAt: z13.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), endsAt: z13.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), aiCreditsMonthly: z13.number().int().min(0).max(1e7) })).mutation(async ({ input }) => {
-    if (input.startsAt && input.endsAt && input.endsAt < input.startsAt) throw new TRPCError11({ code: "BAD_REQUEST", message: "Biti\u015F tarihi ba\u015Flang\u0131\xE7tan \xF6nce olamaz." });
+  setMembership: adminProcedure.input(z14.object({ orgId: id4, plan: z14.enum(ORG_PLANS), startsAt: z14.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), endsAt: z14.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), aiCreditsMonthly: z14.number().int().min(0).max(1e7) })).mutation(async ({ input }) => {
+    if (input.startsAt && input.endsAt && input.endsAt < input.startsAt) throw new TRPCError12({ code: "BAD_REQUEST", message: "Biti\u015F tarihi ba\u015Flang\u0131\xE7tan \xF6nce olamaz." });
     const day2 = (value) => value ? /* @__PURE__ */ new Date(`${value}T00:00:00`) : null;
     await updateOrgMembership(input.orgId, { plan: input.plan, membershipStartsAt: day2(input.startsAt), membershipEndsAt: day2(input.endsAt), aiCreditsMonthly: input.aiCreditsMonthly });
     return { ok: true };
   }),
-  create: adminProcedure.input(z13.object({ name: z13.string().trim().min(2).max(160), slug: z13.string().trim().regex(/^[a-z0-9-]{3,80}$/, "K\u0131sa ad k\xFC\xE7\xFCk harf, rakam ve tire i\xE7ermeli.") })).mutation(({ ctx, input }) => userFacing4(async () => {
+  create: adminProcedure.input(z14.object({ name: z14.string().trim().min(2).max(160), slug: z14.string().trim().regex(/^[a-z0-9-]{3,80}$/, "K\u0131sa ad k\xFC\xE7\xFCk harf, rakam ve tire i\xE7ermeli.") })).mutation(({ ctx, input }) => userFacing5(async () => {
     let orgId;
     try {
       orgId = await createOrganization(input.name, input.slug);
@@ -12140,24 +12399,24 @@ var adminOrgsRouter = router({
       if (/Duplicate/i.test(String(error?.message ?? error))) throw new OrgError("Bu k\u0131sa ad kullan\u0131l\u0131yor.");
       throw error;
     }
-    await updateOrgMembership(orgId, { plan: "trial", membershipStartsAt: /* @__PURE__ */ new Date(), membershipEndsAt: new Date(Date.now() + 30 * DAY4), aiCreditsMonthly: ORG_PLAN_DEFAULT_CREDITS.trial });
+    await updateOrgMembership(orgId, { plan: "trial", membershipStartsAt: /* @__PURE__ */ new Date(), membershipEndsAt: new Date(Date.now() + 30 * DAY5), aiCreditsMonthly: ORG_PLAN_DEFAULT_CREDITS.trial });
     const code = generateInviteCode((max) => randomInt(max));
-    await createInvitation({ orgId, role: "admin", codeHash: hashCode(code), note: "Kurum y\xF6neticisi daveti", expiresAt: new Date(Date.now() + 30 * DAY4), maxUses: 1, createdBy: ctx.user.id });
+    await createInvitation({ orgId, role: "admin", codeHash: hashCode(code), note: "Kurum y\xF6neticisi daveti", expiresAt: new Date(Date.now() + 30 * DAY5), maxUses: 1, createdBy: ctx.user.id });
     return { orgId, adminCode: code };
   })),
-  inviteAdmin: adminProcedure.input(z13.object({ orgId: id4 })).mutation(async ({ ctx, input }) => {
+  inviteAdmin: adminProcedure.input(z14.object({ orgId: id4 })).mutation(async ({ ctx, input }) => {
     const code = generateInviteCode((max) => randomInt(max));
-    await createInvitation({ orgId: input.orgId, role: "admin", codeHash: hashCode(code), note: "Kurum y\xF6neticisi daveti (platform)", expiresAt: new Date(Date.now() + 30 * DAY4), maxUses: 1, createdBy: ctx.user.id });
+    await createInvitation({ orgId: input.orgId, role: "admin", codeHash: hashCode(code), note: "Kurum y\xF6neticisi daveti (platform)", expiresAt: new Date(Date.now() + 30 * DAY5), maxUses: 1, createdBy: ctx.user.id });
     return { adminCode: code };
   }),
-  setStatus: adminProcedure.input(z13.object({ orgId: id4, status: z13.enum(["active", "suspended"]) })).mutation(async ({ input }) => {
+  setStatus: adminProcedure.input(z14.object({ orgId: id4, status: z14.enum(["active", "suspended"]) })).mutation(async ({ input }) => {
     await setOrganizationStatus(input.orgId, input.status);
     return { ok: true };
   }),
   // --- Kurum detayı (Yönetim Paneli → Kurumlar → kurum) ---
-  get: adminProcedure.input(z13.object({ orgId: id4 })).query(async ({ input }) => {
+  get: adminProcedure.input(z14.object({ orgId: id4 })).query(async ({ input }) => {
     const org = await getOrganization(input.orgId);
-    if (!org) throw new TRPCError11({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+    if (!org) throw new TRPCError12({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
     const [members, classes, used, casesEnabled] = await Promise.all([listMembers(input.orgId), listClasses(input.orgId), creditsUsedThisMonth([input.orgId]), isCasesEnabled(input.orgId)]);
     return {
       org: { ...org, membershipState: membershipState(org), creditsUsed: used.get(input.orgId) ?? 0, academicCasesEnabled: casesEnabled },
@@ -12166,63 +12425,63 @@ var adminOrgsRouter = router({
     };
   }),
   /** Var olan bir hesabı e-postasıyla kuruma personel olarak ekler (öğrenci kendi onayıyla, davet koduyla katılır). */
-  addStaff: adminProcedure.input(z13.object({ orgId: id4, email: z13.string().trim().email().max(160), role: z13.enum(["owner", "admin", "coordinator", "teacher"]), subject: z13.string().trim().max(60).nullable().optional() })).mutation(async ({ ctx, input }) => {
-    if (!await getOrganization(input.orgId)) throw new TRPCError11({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+  addStaff: adminProcedure.input(z14.object({ orgId: id4, email: z14.string().trim().email().max(160), role: z14.enum(["owner", "admin", "coordinator", "teacher"]), subject: z14.string().trim().max(60).nullable().optional() })).mutation(async ({ ctx, input }) => {
+    if (!await getOrganization(input.orgId)) throw new TRPCError12({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
     const user = await findUserByEmail(input.email);
-    if (!user) throw new TRPCError11({ code: "NOT_FOUND", message: "Bu e-postayla kay\u0131tl\u0131 hesap yok. Ki\u015Fi \xF6nce uygulamada hesap a\xE7mal\u0131." });
-    if (await getMemberRole(input.orgId, user.id) === "student") throw new TRPCError11({ code: "CONFLICT", message: "Bu hesap kurumda \xF6\u011Frenci olarak kay\u0131tl\u0131; personel yap\u0131lamaz." });
+    if (!user) throw new TRPCError12({ code: "NOT_FOUND", message: "Bu e-postayla kay\u0131tl\u0131 hesap yok. Ki\u015Fi \xF6nce uygulamada hesap a\xE7mal\u0131." });
+    if (await getMemberRole(input.orgId, user.id) === "student") throw new TRPCError12({ code: "CONFLICT", message: "Bu hesap kurumda \xF6\u011Frenci olarak kay\u0131tl\u0131; personel yap\u0131lamaz." });
     await addStaffMember({ orgId: input.orgId, userId: user.id, role: input.role, subject: input.subject ?? null, invitedBy: ctx.user.id });
     await writeAudit({ orgId: input.orgId, actorUserId: ctx.user.id, action: "platform.member_add", targetType: "user", targetId: user.id, metadata: { role: input.role } });
     return { userId: user.id };
   }),
-  setMemberRole: adminProcedure.input(z13.object({ orgId: id4, userId: id4, role: z13.enum(["owner", "admin", "coordinator", "teacher"]) })).mutation(async ({ ctx, input }) => {
+  setMemberRole: adminProcedure.input(z14.object({ orgId: id4, userId: id4, role: z14.enum(["owner", "admin", "coordinator", "teacher"]) })).mutation(async ({ ctx, input }) => {
     const current = await getMemberRole(input.orgId, input.userId);
-    if (!current) throw new TRPCError11({ code: "NOT_FOUND", message: "\xDCye bulunamad\u0131." });
-    if (current === "student") throw new TRPCError11({ code: "BAD_REQUEST", message: "\xD6\u011Frencinin rol\xFC de\u011Fi\u015Ftirilemez." });
+    if (!current) throw new TRPCError12({ code: "NOT_FOUND", message: "\xDCye bulunamad\u0131." });
+    if (current === "student") throw new TRPCError12({ code: "BAD_REQUEST", message: "\xD6\u011Frencinin rol\xFC de\u011Fi\u015Ftirilemez." });
     const demotesLastAdmin = (current === "owner" || current === "admin") && input.role !== "owner" && input.role !== "admin" && await countActiveOrgAdmins(input.orgId) <= 1;
-    if (demotesLastAdmin) throw new TRPCError11({ code: "BAD_REQUEST", message: "Kurumun son y\xF6neticisi; \xF6nce ba\u015Fka birini y\xF6netici yap." });
+    if (demotesLastAdmin) throw new TRPCError12({ code: "BAD_REQUEST", message: "Kurumun son y\xF6neticisi; \xF6nce ba\u015Fka birini y\xF6netici yap." });
     await setMemberRole(input.orgId, input.userId, input.role);
     await writeAudit({ orgId: input.orgId, actorUserId: ctx.user.id, action: "platform.member_role", targetType: "user", targetId: input.userId, metadata: { from: current, to: input.role } });
     return { ok: true };
   }),
-  removeMember: adminProcedure.input(z13.object({ orgId: id4, userId: id4 })).mutation(async ({ ctx, input }) => {
+  removeMember: adminProcedure.input(z14.object({ orgId: id4, userId: id4 })).mutation(async ({ ctx, input }) => {
     const current = await getMemberRole(input.orgId, input.userId);
-    if (!current) throw new TRPCError11({ code: "NOT_FOUND", message: "\xDCye bulunamad\u0131." });
-    if ((current === "owner" || current === "admin") && await countActiveOrgAdmins(input.orgId) <= 1) throw new TRPCError11({ code: "BAD_REQUEST", message: "Kurumun son y\xF6neticisi \xE7\u0131kar\u0131lamaz; \xF6nce ba\u015Fka birini y\xF6netici yap." });
+    if (!current) throw new TRPCError12({ code: "NOT_FOUND", message: "\xDCye bulunamad\u0131." });
+    if ((current === "owner" || current === "admin") && await countActiveOrgAdmins(input.orgId) <= 1) throw new TRPCError12({ code: "BAD_REQUEST", message: "Kurumun son y\xF6neticisi \xE7\u0131kar\u0131lamaz; \xF6nce ba\u015Fka birini y\xF6netici yap." });
     await endMembership(input.orgId, input.userId, "removed");
     await writeAudit({ orgId: input.orgId, actorUserId: ctx.user.id, action: "platform.member_remove", targetType: "user", targetId: input.userId, metadata: { role: current } });
     return { ok: true };
   }),
-  setCasesEnabled: adminProcedure.input(z13.object({ orgId: id4, enabled: z13.boolean() })).mutation(async ({ ctx, input }) => {
+  setCasesEnabled: adminProcedure.input(z14.object({ orgId: id4, enabled: z14.boolean() })).mutation(async ({ ctx, input }) => {
     await setCasesEnabled(input.orgId, input.enabled);
     await writeAudit({ orgId: input.orgId, actorUserId: ctx.user.id, action: "cases.enable", targetType: "organization", targetId: input.orgId, metadata: { enabled: input.enabled, by: "platform" } });
     return { ok: true };
   }),
   /** Bir kullanıcının kurum bağları (Yönetim Paneli → Üyeler → üye). */
-  userMemberships: adminProcedure.input(z13.object({ userId: id4 })).query(({ input }) => listUserOrgMemberships(input.userId)),
+  userMemberships: adminProcedure.input(z14.object({ userId: id4 })).query(({ input }) => listUserOrgMemberships(input.userId)),
   // --- Kurum paketlerinin liste fiyatları ---
   planPrices: adminProcedure.query(async () => {
     const prices = await listOrgPlanPrices();
     return ORG_PLANS.map((plan) => ({ plan, label: ORG_PLAN_LABELS[plan], defaultCredits: ORG_PLAN_DEFAULT_CREDITS[plan], monthlyPriceTry: prices.get(plan)?.monthlyPriceTry ?? null, yearlyPriceTry: prices.get(plan)?.yearlyPriceTry ?? null, priceNote: prices.get(plan)?.priceNote ?? null, updatedAt: prices.get(plan)?.updatedAt ?? null }));
   }),
-  setPlanPrice: adminProcedure.input(z13.object({ plan: z13.enum(ORG_PLANS), monthlyPriceTry: z13.number().int().min(0).max(1e7).nullable(), yearlyPriceTry: z13.number().int().min(0).max(1e8).nullable(), priceNote: z13.string().trim().max(160).nullable() })).mutation(async ({ ctx, input }) => {
+  setPlanPrice: adminProcedure.input(z14.object({ plan: z14.enum(ORG_PLANS), monthlyPriceTry: z14.number().int().min(0).max(1e7).nullable(), yearlyPriceTry: z14.number().int().min(0).max(1e8).nullable(), priceNote: z14.string().trim().max(160).nullable() })).mutation(async ({ ctx, input }) => {
     await upsertOrgPlanPrice({ ...input, priceNote: input.priceNote || null, updatedByUserId: ctx.user.id });
     return { ok: true };
   })
 });
 
 // server/routers/parent.ts
-import { TRPCError as TRPCError12 } from "@trpc/server";
+import { TRPCError as TRPCError13 } from "@trpc/server";
 import { createHash as createHash5, randomInt as randomInt2 } from "node:crypto";
-import { z as z14 } from "zod";
+import { z as z15 } from "zod";
 var DAY_MS9 = 24 * 60 * 60 * 1e3;
-var id5 = z14.number().int().positive();
+var id5 = z15.number().int().positive();
 var hashCode2 = (code) => createHash5("sha256").update(`parent:${normalizeInviteCode(code)}`).digest("hex");
-var userFacing5 = async (work) => {
+var userFacing6 = async (work) => {
   try {
     return await work();
   } catch (error) {
-    if (error instanceof ParentLinkError) throw new TRPCError12({ code: "BAD_REQUEST", message: error.message });
+    if (error instanceof ParentLinkError) throw new TRPCError13({ code: "BAD_REQUEST", message: error.message });
     throw error;
   }
 };
@@ -12238,7 +12497,7 @@ var parentRouter = router({
   consentText: protectedProcedure.query(() => ({ version: PARENT_CONSENT_VERSION, text: PARENT_CONSENT_TEXT })),
   // --- Öğrenci tarafı ---------------------------------------------------------
   myParents: protectedProcedure.query(({ ctx }) => listLinksForStudent(ctx.user.id)),
-  createInvite: protectedProcedure.input(z14.object({ parentEmail: z14.string().trim().email("Ge\xE7erli bir e-posta adresi yaz.").max(320).optional().or(z14.literal("")) }).optional()).mutation(({ ctx, input }) => userFacing5(async () => {
+  createInvite: protectedProcedure.input(z15.object({ parentEmail: z15.string().trim().email("Ge\xE7erli bir e-posta adresi yaz.").max(320).optional().or(z15.literal("")) }).optional()).mutation(({ ctx, input }) => userFacing6(async () => {
     const code = generateInviteCode((max) => randomInt2(max));
     const { expiresAt } = await createParentInvite(ctx.user.id, hashCode2(code));
     const joinUrl = `${appBaseUrl(ctx.req)}/veli?kod=${encodeURIComponent(code)}`;
@@ -12254,16 +12513,16 @@ var parentRouter = router({
     }
     return { code, expiresAt, joinUrl, emailed };
   })),
-  decide: protectedProcedure.input(z14.object({ linkId: id5, approve: z14.boolean() })).mutation(({ ctx, input }) => userFacing5(() => decideParentRequest(ctx.user.id, input.linkId, input.approve))),
-  removeParent: protectedProcedure.input(z14.object({ linkId: id5 })).mutation(({ ctx, input }) => userFacing5(() => revokeParentLink({ userId: ctx.user.id, side: "student" }, input.linkId))),
+  decide: protectedProcedure.input(z15.object({ linkId: id5, approve: z15.boolean() })).mutation(({ ctx, input }) => userFacing6(() => decideParentRequest(ctx.user.id, input.linkId, input.approve))),
+  removeParent: protectedProcedure.input(z15.object({ linkId: id5 })).mutation(({ ctx, input }) => userFacing6(() => revokeParentLink({ userId: ctx.user.id, side: "student" }, input.linkId))),
   // --- Veli tarafı ------------------------------------------------------------
   myStudents: protectedProcedure.query(({ ctx }) => listLinksForParent(ctx.user.id)),
-  redeem: protectedProcedure.input(z14.object({ code: z14.string().trim().min(4).max(20), consent: z14.literal(true, { message: "Devam etmek i\xE7in r\u0131za metnini onaylamal\u0131s\u0131n." }) })).mutation(({ ctx, input }) => userFacing5(() => redeemParentInvite(ctx.user.id, hashCode2(input.code)))),
-  unlink: protectedProcedure.input(z14.object({ linkId: id5 })).mutation(({ ctx, input }) => userFacing5(() => revokeParentLink({ userId: ctx.user.id, side: "parent" }, input.linkId))),
-  setDigest: protectedProcedure.input(z14.object({ linkId: id5, enabled: z14.boolean() })).mutation(({ ctx, input }) => userFacing5(async () => ({ enabled: await setParentDigestEnabled(ctx.user.id, input.linkId, input.enabled) }))),
+  redeem: protectedProcedure.input(z15.object({ code: z15.string().trim().min(4).max(20), consent: z15.literal(true, { message: "Devam etmek i\xE7in r\u0131za metnini onaylamal\u0131s\u0131n." }) })).mutation(({ ctx, input }) => userFacing6(() => redeemParentInvite(ctx.user.id, hashCode2(input.code)))),
+  unlink: protectedProcedure.input(z15.object({ linkId: id5 })).mutation(({ ctx, input }) => userFacing6(() => revokeParentLink({ userId: ctx.user.id, side: "parent" }, input.linkId))),
+  setDigest: protectedProcedure.input(z15.object({ linkId: id5, enabled: z15.boolean() })).mutation(({ ctx, input }) => userFacing6(async () => ({ enabled: await setParentDigestEnabled(ctx.user.id, input.linkId, input.enabled) }))),
   /** Velinin gördüğü öğrenci özeti: salt okunur; not, soru defteri, öğretmen notu, iletişim bilgisi yok. */
-  student: protectedProcedure.input(z14.object({ studentUserId: id5 })).query(async ({ ctx, input }) => {
-    if (!await findActiveLink(ctx.user.id, input.studentUserId)) throw new TRPCError12({ code: "FORBIDDEN", message: "Bu \xF6\u011Frencinin bilgilerini g\xF6rme iznin yok." });
+  student: protectedProcedure.input(z15.object({ studentUserId: id5 })).query(async ({ ctx, input }) => {
+    if (!await findActiveLink(ctx.user.id, input.studentUserId)) throw new TRPCError13({ code: "FORBIDDEN", message: "Bu \xF6\u011Frencinin bilgilerini g\xF6rme iznin yok." });
     const since = new Date(Date.now() - 42 * DAY_MS9);
     const { start, end } = currentWeek2();
     const [name2, profile, exams, topics, calendar, signals] = await Promise.all([
@@ -12365,11 +12624,11 @@ function normalizeAiPlan(raw, fallback) {
 }
 
 // server/routers/resourceCatalog.ts
-import { TRPCError as TRPCError14 } from "@trpc/server";
-import { z as z16 } from "zod";
+import { TRPCError as TRPCError15 } from "@trpc/server";
+import { z as z17 } from "zod";
 
 // server/resourceCatalog/catalogQueries.ts
-import { and as and22, asc as asc4, desc as desc16, eq as eq25, inArray as inArray11, isNull as isNull15, ilike as ilike4, sql as sql13 } from "drizzle-orm";
+import { and as and24, asc as asc4, desc as desc17, eq as eq27, inArray as inArray11, isNull as isNull15, ilike as ilike4, sql as sql15 } from "drizzle-orm";
 var DEFAULT_PAGE_SIZE = 24;
 var MAX_PAGE_SIZE = 60;
 async function listCatalogBooks(filters, page2) {
@@ -12377,23 +12636,23 @@ async function listCatalogBooks(filters, page2) {
   if (!db) return { items: [], total: 0 };
   const pageSize = Math.max(1, Math.min(page2.pageSize || DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE));
   const offset = Math.max(0, (page2.page - 1) * pageSize);
-  const conditions = [eq25(catalogBooks.active, 1)];
-  if (filters.exam) conditions.push(eq25(catalogBooks.examScope, filters.exam));
-  if (filters.subject) conditions.push(eq25(catalogBooks.subject, filters.subject));
-  if (filters.publisherId) conditions.push(eq25(catalogBooks.publisherId, filters.publisherId));
-  if (filters.bookType) conditions.push(eq25(catalogBooks.bookType, filters.bookType));
-  if (filters.difficulty) conditions.push(eq25(catalogBooks.difficultyLabel, filters.difficulty));
+  const conditions = [eq27(catalogBooks.active, 1)];
+  if (filters.exam) conditions.push(eq27(catalogBooks.examScope, filters.exam));
+  if (filters.subject) conditions.push(eq27(catalogBooks.subject, filters.subject));
+  if (filters.publisherId) conditions.push(eq27(catalogBooks.publisherId, filters.publisherId));
+  if (filters.bookType) conditions.push(eq27(catalogBooks.bookType, filters.bookType));
+  if (filters.difficulty) conditions.push(eq27(catalogBooks.difficultyLabel, filters.difficulty));
   if (filters.search) conditions.push(ilike4(catalogBooks.name, `%${filters.search}%`));
   let bookIdsForTopic = null;
   if (filters.topic) {
-    const topicRows = await db.select({ bookId: bookCurriculumTopics.bookId }).from(bookCurriculumTopics).innerJoin(yksTopics, eq25(bookCurriculumTopics.topicId, yksTopics.id)).where(eq25(yksTopics.topic, filters.topic));
+    const topicRows = await db.select({ bookId: bookCurriculumTopics.bookId }).from(bookCurriculumTopics).innerJoin(yksTopics, eq27(bookCurriculumTopics.topicId, yksTopics.id)).where(eq27(yksTopics.topic, filters.topic));
     bookIdsForTopic = topicRows.map((r) => r.bookId);
     if (bookIdsForTopic.length === 0) return { items: [], total: 0 };
     conditions.push(inArray11(catalogBooks.id, bookIdsForTopic));
   }
-  const where = and22(...conditions);
-  const [{ count: count4 }] = await db.select({ count: sql13`count(*)::int` }).from(catalogBooks).where(where);
-  let rows = await db.select().from(catalogBooks).where(where).orderBy(desc16(catalogBooks.createdAt)).limit(pageSize).offset(offset);
+  const where = and24(...conditions);
+  const [{ count: count4 }] = await db.select({ count: sql15`count(*)::int` }).from(catalogBooks).where(where);
+  let rows = await db.select().from(catalogBooks).where(where).orderBy(desc17(catalogBooks.createdAt)).limit(pageSize).offset(offset);
   if (filters.minPrice !== void 0 || filters.maxPrice !== void 0) {
     const ids = rows.map((r) => r.id);
     const offerRows2 = ids.length ? await db.select().from(bookOffers).where(inArray11(bookOffers.bookId, ids)) : [];
@@ -12444,13 +12703,13 @@ async function listCatalogBooksForAdmin(filters, page2) {
   const pageSize = Math.max(1, Math.min(page2.pageSize || DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE));
   const offset = Math.max(0, (page2.page - 1) * pageSize);
   const conditions = [];
-  if (filters.active !== void 0) conditions.push(eq25(catalogBooks.active, filters.active ? 1 : 0));
-  if (filters.subject) conditions.push(eq25(catalogBooks.subject, filters.subject));
+  if (filters.active !== void 0) conditions.push(eq27(catalogBooks.active, filters.active ? 1 : 0));
+  if (filters.subject) conditions.push(eq27(catalogBooks.subject, filters.subject));
   if (filters.search) conditions.push(ilike4(catalogBooks.name, `%${filters.search}%`));
-  const where = conditions.length ? and22(...conditions) : void 0;
-  const countQuery = db.select({ count: sql13`count(*)::int` }).from(catalogBooks);
+  const where = conditions.length ? and24(...conditions) : void 0;
+  const countQuery = db.select({ count: sql15`count(*)::int` }).from(catalogBooks);
   const [{ count: count4 }] = await (where ? countQuery.where(where) : countQuery);
-  const rowsQuery = db.select().from(catalogBooks).orderBy(desc16(catalogBooks.createdAt)).limit(pageSize).offset(offset);
+  const rowsQuery = db.select().from(catalogBooks).orderBy(desc17(catalogBooks.createdAt)).limit(pageSize).offset(offset);
   const rows = await (where ? rowsQuery.where(where) : rowsQuery);
   const publisherIds = Array.from(new Set(rows.map((r) => r.publisherId).filter((id8) => id8 !== null)));
   const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray11(publishers.id, publisherIds)) : [];
@@ -12474,13 +12733,13 @@ async function listCatalogBooksForAdmin(filters, page2) {
 async function getCatalogBookBySlug(slug) {
   const db = await getDb();
   if (!db) return null;
-  const rows = await db.select().from(catalogBooks).where(eq25(catalogBooks.slug, slug)).limit(1);
+  const rows = await db.select().from(catalogBooks).where(eq27(catalogBooks.slug, slug)).limit(1);
   const book = rows[0];
   if (!book) return null;
   const [publisherRow, offerRows, topicRows] = await Promise.all([
-    book.publisherId ? db.select().from(publishers).where(eq25(publishers.id, book.publisherId)).limit(1) : Promise.resolve([]),
-    db.select().from(bookOffers).where(eq25(bookOffers.bookId, book.id)),
-    db.select({ topic: yksTopics.topic, subject: yksTopics.subject, confidence: bookCurriculumTopics.confidence, isVerified: bookCurriculumTopics.isVerified }).from(bookCurriculumTopics).innerJoin(yksTopics, eq25(bookCurriculumTopics.topicId, yksTopics.id)).where(eq25(bookCurriculumTopics.bookId, book.id))
+    book.publisherId ? db.select().from(publishers).where(eq27(publishers.id, book.publisherId)).limit(1) : Promise.resolve([]),
+    db.select().from(bookOffers).where(eq27(bookOffers.bookId, book.id)),
+    db.select({ topic: yksTopics.topic, subject: yksTopics.subject, confidence: bookCurriculumTopics.confidence, isVerified: bookCurriculumTopics.isVerified }).from(bookCurriculumTopics).innerJoin(yksTopics, eq27(bookCurriculumTopics.topicId, yksTopics.id)).where(eq27(bookCurriculumTopics.bookId, book.id))
   ]);
   return {
     id: book.id,
@@ -12500,16 +12759,16 @@ async function getCatalogBookBySlug(slug) {
 async function listPublishersForFilter() {
   const db = await getDb();
   if (!db) return [];
-  return db.select({ id: publishers.id, name: publishers.name }).from(publishers).where(eq25(publishers.isActive, 1)).orderBy(asc4(publishers.name));
+  return db.select({ id: publishers.id, name: publishers.name }).from(publishers).where(eq27(publishers.isActive, 1)).orderBy(asc4(publishers.name));
 }
 async function listCatalogBooksForRecommendation(subject2) {
   const db = await getDb();
   if (!db) return [];
-  const conditions = [eq25(catalogBooks.active, 1)];
-  if (subject2) conditions.push(eq25(catalogBooks.subject, subject2));
-  const rows = await db.select().from(catalogBooks).where(and22(...conditions));
+  const conditions = [eq27(catalogBooks.active, 1)];
+  if (subject2) conditions.push(eq27(catalogBooks.subject, subject2));
+  const rows = await db.select().from(catalogBooks).where(and24(...conditions));
   const bookIds = rows.map((r) => r.id);
-  const topicRows = bookIds.length ? await db.select({ bookId: bookCurriculumTopics.bookId, topic: yksTopics.topic }).from(bookCurriculumTopics).innerJoin(yksTopics, eq25(bookCurriculumTopics.topicId, yksTopics.id)).where(inArray11(bookCurriculumTopics.bookId, bookIds)) : [];
+  const topicRows = bookIds.length ? await db.select({ bookId: bookCurriculumTopics.bookId, topic: yksTopics.topic }).from(bookCurriculumTopics).innerJoin(yksTopics, eq27(bookCurriculumTopics.topicId, yksTopics.id)).where(inArray11(bookCurriculumTopics.bookId, bookIds)) : [];
   const topicsByBook = /* @__PURE__ */ new Map();
   for (const row of topicRows) {
     const list = topicsByBook.get(row.bookId) ?? [];
@@ -12532,12 +12791,12 @@ async function listCatalogBooksForRecommendation(subject2) {
 async function listMyLibraryCatalogBooks(userId) {
   const db = await getDb();
   if (!db) return [];
-  const inventoryRows = await db.select().from(bookInventory).where(and22(eq25(bookInventory.userId, userId), isNull15(bookInventory.removedAt)));
+  const inventoryRows = await db.select().from(bookInventory).where(and24(eq27(bookInventory.userId, userId), isNull15(bookInventory.removedAt)));
   const numericIds = Array.from(new Set(inventoryRows.map((row) => row.bookId).filter((id8) => /^\d+$/.test(id8)).map(Number)));
   if (numericIds.length === 0) return [];
   const [books, topicRows] = await Promise.all([
     db.select().from(catalogBooks).where(inArray11(catalogBooks.id, numericIds)),
-    db.select({ bookId: bookCurriculumTopics.bookId, topicId: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject, isVerified: bookCurriculumTopics.isVerified, confidence: bookCurriculumTopics.confidence }).from(bookCurriculumTopics).innerJoin(yksTopics, eq25(bookCurriculumTopics.topicId, yksTopics.id)).where(inArray11(bookCurriculumTopics.bookId, numericIds))
+    db.select({ bookId: bookCurriculumTopics.bookId, topicId: yksTopics.id, topic: yksTopics.topic, subject: yksTopics.subject, isVerified: bookCurriculumTopics.isVerified, confidence: bookCurriculumTopics.confidence }).from(bookCurriculumTopics).innerJoin(yksTopics, eq27(bookCurriculumTopics.topicId, yksTopics.id)).where(inArray11(bookCurriculumTopics.bookId, numericIds))
   ]);
   const publisherIds = Array.from(new Set(books.map((b) => b.publisherId).filter((id8) => id8 !== null)));
   const publisherRows = publisherIds.length ? await db.select().from(publishers).where(inArray11(publishers.id, publisherIds)) : [];
@@ -12694,11 +12953,11 @@ function recommendForStudent(topics, books, options = {}, config = resourceCatal
 }
 
 // server/routers/resourceCatalogAdmin.ts
-import { TRPCError as TRPCError13 } from "@trpc/server";
-import { z as z15 } from "zod";
+import { TRPCError as TRPCError14 } from "@trpc/server";
+import { z as z16 } from "zod";
 
 // server/resourceCatalog/catalogDb.ts
-import { and as and23, eq as eq26, inArray as inArray12 } from "drizzle-orm";
+import { and as and25, eq as eq28, inArray as inArray12 } from "drizzle-orm";
 var toCatalogBookRow = (row) => ({
   id: row.id,
   isbn: row.isbn,
@@ -12722,7 +12981,7 @@ var catalogDb = {
   async findPublisherByNormalizedName(normalizedName) {
     const db = await getDb();
     if (!db) return null;
-    const rows = await db.select().from(publishers).where(eq26(publishers.normalizedName, normalizedName)).limit(1);
+    const rows = await db.select().from(publishers).where(eq28(publishers.normalizedName, normalizedName)).limit(1);
     return rows[0] ? { id: rows[0].id, name: rows[0].name, slug: rows[0].slug, normalizedName: rows[0].normalizedName } : null;
   },
   async createPublisher(input) {
@@ -12735,13 +12994,13 @@ var catalogDb = {
   async findExternalSource(source, sourceProductId) {
     const db = await getDb();
     if (!db) return null;
-    const rows = await db.select().from(externalBookSources).where(and23(eq26(externalBookSources.source, source), eq26(externalBookSources.sourceProductId, sourceProductId))).limit(1);
+    const rows = await db.select().from(externalBookSources).where(and25(eq28(externalBookSources.source, source), eq28(externalBookSources.sourceProductId, sourceProductId))).limit(1);
     return rows[0] ? { id: rows[0].id, source: rows[0].source, sourceProductId: rows[0].sourceProductId, matchedBookId: rows[0].matchedBookId, syncStatus: rows[0].syncStatus } : null;
   },
   async upsertExternalSource(row) {
     const db = await getDb();
     if (!db) throw new Error("Database not available");
-    const existing = await db.select().from(externalBookSources).where(and23(eq26(externalBookSources.source, row.source), eq26(externalBookSources.sourceProductId, row.sourceProductId))).limit(1);
+    const existing = await db.select().from(externalBookSources).where(and25(eq28(externalBookSources.source, row.source), eq28(externalBookSources.sourceProductId, row.sourceProductId))).limit(1);
     const values = {
       source: row.source,
       sourceProductId: row.sourceProductId,
@@ -12757,7 +13016,7 @@ var catalogDb = {
       rawMetadata: row.rawMetadata ? JSON.stringify(row.rawMetadata) : null
     };
     if (existing[0]) {
-      await db.update(externalBookSources).set(values).where(eq26(externalBookSources.id, existing[0].id));
+      await db.update(externalBookSources).set(values).where(eq28(externalBookSources.id, existing[0].id));
       return { id: existing[0].id, source: row.source, sourceProductId: row.sourceProductId, matchedBookId: existing[0].matchedBookId, syncStatus: existing[0].syncStatus };
     }
     const result = await db.insert(externalBookSources).values(values).returning({ id: externalBookSources.id });
@@ -12767,24 +13026,24 @@ var catalogDb = {
   async markExternalSourceOutcome(id8, patch) {
     const db = await getDb();
     if (!db) return;
-    await db.update(externalBookSources).set({ matchedBookId: patch.matchedBookId, syncStatus: patch.syncStatus, lastSyncedAt: /* @__PURE__ */ new Date(), errorMessage: patch.errorMessage ?? null }).where(eq26(externalBookSources.id, id8));
+    await db.update(externalBookSources).set({ matchedBookId: patch.matchedBookId, syncStatus: patch.syncStatus, lastSyncedAt: /* @__PURE__ */ new Date(), errorMessage: patch.errorMessage ?? null }).where(eq28(externalBookSources.id, id8));
   },
   async findCatalogBookByIsbn(isbn) {
     const db = await getDb();
     if (!db) return null;
-    const rows = await db.select().from(catalogBooks).where(eq26(catalogBooks.isbn, isbn)).limit(1);
+    const rows = await db.select().from(catalogBooks).where(eq28(catalogBooks.isbn, isbn)).limit(1);
     return rows[0] ? toCatalogBookRow(rows[0]) : null;
   },
   async listCatalogBooksByPublisher(publisherId) {
     const db = await getDb();
     if (!db) return [];
-    const rows = await db.select().from(catalogBooks).where(eq26(catalogBooks.publisherId, publisherId));
+    const rows = await db.select().from(catalogBooks).where(eq28(catalogBooks.publisherId, publisherId));
     return rows.map((row) => ({ id: row.id, isbn: row.isbn, publisherId: row.publisherId, name: row.name, editionYear: row.editionYear }));
   },
   async getCatalogBookById(id8) {
     const db = await getDb();
     if (!db) return null;
-    const rows = await db.select().from(catalogBooks).where(eq26(catalogBooks.id, id8)).limit(1);
+    const rows = await db.select().from(catalogBooks).where(eq28(catalogBooks.id, id8)).limit(1);
     return rows[0] ? toCatalogBookRow(rows[0]) : null;
   },
   async createCatalogBook(input) {
@@ -12823,7 +13082,7 @@ var catalogDb = {
     if (patch.subject !== void 0) values.subject = patch.subject;
     if (patch.metadata !== void 0) values.metadata = patch.metadata ? JSON.stringify(patch.metadata) : null;
     if (Object.keys(values).length > 0) {
-      await db.update(catalogBooks).set(values).where(eq26(catalogBooks.id, id8));
+      await db.update(catalogBooks).set(values).where(eq28(catalogBooks.id, id8));
     }
     const row = await this.getCatalogBookById(id8);
     if (!row) throw new Error(`Catalog book ${id8} not found after update`);
@@ -12839,15 +13098,15 @@ var catalogDb = {
       classificationMethod: patch.classificationMethod,
       needsReview: patch.needsReview ? 1 : 0,
       classifiedAt: patch.classifiedAt
-    }).where(eq26(catalogBooks.id, id8));
+    }).where(eq28(catalogBooks.id, id8));
   },
   async upsertBookOffer(input) {
     const db = await getDb();
     if (!db) return;
-    const existing = await db.select().from(bookOffers).where(and23(eq26(bookOffers.bookId, input.bookId), eq26(bookOffers.source, input.source))).limit(1);
+    const existing = await db.select().from(bookOffers).where(and25(eq28(bookOffers.bookId, input.bookId), eq28(bookOffers.source, input.source))).limit(1);
     const values = { price: input.price !== null ? String(input.price) : null, currency: input.currency, productUrl: input.productUrl, lastSyncedAt: /* @__PURE__ */ new Date() };
     if (existing[0]) {
-      await db.update(bookOffers).set(values).where(eq26(bookOffers.id, existing[0].id));
+      await db.update(bookOffers).set(values).where(eq28(bookOffers.id, existing[0].id));
     } else {
       await db.insert(bookOffers).values({ bookId: input.bookId, source: input.source, ...values });
     }
@@ -12861,10 +13120,10 @@ var catalogDb = {
   async upsertBookCurriculumMapping(input) {
     const db = await getDb();
     if (!db) return;
-    const existing = await db.select().from(bookCurriculumTopics).where(and23(eq26(bookCurriculumTopics.bookId, input.bookId), eq26(bookCurriculumTopics.topicId, input.topicId))).limit(1);
+    const existing = await db.select().from(bookCurriculumTopics).where(and25(eq28(bookCurriculumTopics.bookId, input.bookId), eq28(bookCurriculumTopics.topicId, input.topicId))).limit(1);
     if (existing[0]) {
       if (existing[0].isVerified === 1) return;
-      await db.update(bookCurriculumTopics).set({ confidence: String(input.confidence), mappingMethod: "rule" }).where(eq26(bookCurriculumTopics.id, existing[0].id));
+      await db.update(bookCurriculumTopics).set({ confidence: String(input.confidence), mappingMethod: "rule" }).where(eq28(bookCurriculumTopics.id, existing[0].id));
     } else {
       await db.insert(bookCurriculumTopics).values({ bookId: input.bookId, topicId: input.topicId, confidence: String(input.confidence), mappingMethod: "rule" });
     }
@@ -12889,7 +13148,7 @@ var catalogDb = {
       needsReview: patch.needsReview,
       statsJson: patch.statsJson,
       errorLog: patch.errorLog
-    }).where(eq26(resourceCatalogSyncLogs.id, id8));
+    }).where(eq28(resourceCatalogSyncLogs.id, id8));
   }
 };
 async function listResourceCatalogSyncLogs(limit = 20) {
@@ -12900,27 +13159,27 @@ async function listResourceCatalogSyncLogs(limit = 20) {
 async function listNeedsReviewBooks() {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(catalogBooks).where(eq26(catalogBooks.needsReview, 1));
+  return db.select().from(catalogBooks).where(eq28(catalogBooks.needsReview, 1));
 }
 async function setManualDifficulty(bookId, input) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(catalogBooks).set({ difficultyLabel: input.label, difficultyScore: input.score, difficultyConfidence: "1", classificationMethod: "manual", manualOverride: 1, needsReview: 0, classifiedAt: /* @__PURE__ */ new Date() }).where(eq26(catalogBooks.id, bookId));
+  await db.update(catalogBooks).set({ difficultyLabel: input.label, difficultyScore: input.score, difficultyConfidence: "1", classificationMethod: "manual", manualOverride: 1, needsReview: 0, classifiedAt: /* @__PURE__ */ new Date() }).where(eq28(catalogBooks.id, bookId));
 }
 async function approveCatalogBookClassification(bookId) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(catalogBooks).set({ needsReview: 0 }).where(eq26(catalogBooks.id, bookId));
+  await db.update(catalogBooks).set({ needsReview: 0 }).where(eq28(catalogBooks.id, bookId));
 }
 async function markCatalogBookNeedsReview(bookId, needsReview) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(catalogBooks).set({ needsReview: needsReview ? 1 : 0 }).where(eq26(catalogBooks.id, bookId));
+  await db.update(catalogBooks).set({ needsReview: needsReview ? 1 : 0 }).where(eq28(catalogBooks.id, bookId));
 }
 async function setCatalogBookActive(bookId, active) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(catalogBooks).set({ active: active ? 1 : 0 }).where(eq26(catalogBooks.id, bookId));
+  await db.update(catalogBooks).set({ active: active ? 1 : 0 }).where(eq28(catalogBooks.id, bookId));
 }
 async function resolveOrCreatePublisherByName(rawName) {
   const trimmed = rawName.trim();
@@ -12998,26 +13257,26 @@ function slugForBook(name2, publisherName) {
 }
 
 // server/routers/resourceCatalogAdmin.ts
-var bookTypeEnum = z15.enum(["question_bank", "topic_explanation", "topic_explanation_question_bank", "mock_exam", "fasikul", "past_questions", "camp", "test_book", "reference", "other"]);
-var examScopeEnum = z15.enum(CATALOG_EXAM_SCOPES);
-var catalogBookInput = z15.object({
-  name: z15.string().trim().min(1).max(300),
-  publisherName: z15.string().trim().max(120).optional(),
-  isbn: z15.string().trim().max(32).optional(),
-  editionYear: z15.number().int().min(1990).max(2100).optional(),
-  description: z15.string().trim().max(2e3).optional(),
-  imageUrl: z15.string().trim().max(500).optional(),
+var bookTypeEnum = z16.enum(["question_bank", "topic_explanation", "topic_explanation_question_bank", "mock_exam", "fasikul", "past_questions", "camp", "test_book", "reference", "other"]);
+var examScopeEnum = z16.enum(CATALOG_EXAM_SCOPES);
+var catalogBookInput = z16.object({
+  name: z16.string().trim().min(1).max(300),
+  publisherName: z16.string().trim().max(120).optional(),
+  isbn: z16.string().trim().max(32).optional(),
+  editionYear: z16.number().int().min(1990).max(2100).optional(),
+  description: z16.string().trim().max(2e3).optional(),
+  imageUrl: z16.string().trim().max(500).optional(),
   bookType: bookTypeEnum,
   examScope: examScopeEnum,
-  subject: z15.string().trim().max(80).optional()
+  subject: z16.string().trim().max(80).optional()
 });
 var resourceCatalogAdminRouter = router({
   needsReview: adminProcedure.query(() => listNeedsReviewBooks()),
-  syncLogs: adminProcedure.input(z15.object({ limit: z15.number().int().min(1).max(100).default(20) }).optional()).query(({ input }) => listResourceCatalogSyncLogs(input?.limit ?? 20)),
-  approve: adminProcedure.input(z15.object({ bookId: z15.number().int() })).mutation(({ input }) => approveCatalogBookClassification(input.bookId)),
-  setDifficulty: adminProcedure.input(z15.object({ bookId: z15.number().int(), label: z15.enum(["easy", "medium", "hard"]), score: z15.number().int().min(0).max(100) })).mutation(({ input }) => setManualDifficulty(input.bookId, { label: input.label, score: input.score })),
-  markNeedsReview: adminProcedure.input(z15.object({ bookId: z15.number().int(), needsReview: z15.boolean() })).mutation(({ input }) => markCatalogBookNeedsReview(input.bookId, input.needsReview)),
-  list: adminProcedure.input(z15.object({ page: z15.number().int().min(1).default(1), pageSize: z15.number().int().min(1).max(100).default(30), search: z15.string().max(120).optional(), subject: z15.string().max(80).optional(), active: z15.boolean().optional() })).query(async ({ input }) => {
+  syncLogs: adminProcedure.input(z16.object({ limit: z16.number().int().min(1).max(100).default(20) }).optional()).query(({ input }) => listResourceCatalogSyncLogs(input?.limit ?? 20)),
+  approve: adminProcedure.input(z16.object({ bookId: z16.number().int() })).mutation(({ input }) => approveCatalogBookClassification(input.bookId)),
+  setDifficulty: adminProcedure.input(z16.object({ bookId: z16.number().int(), label: z16.enum(["easy", "medium", "hard"]), score: z16.number().int().min(0).max(100) })).mutation(({ input }) => setManualDifficulty(input.bookId, { label: input.label, score: input.score })),
+  markNeedsReview: adminProcedure.input(z16.object({ bookId: z16.number().int(), needsReview: z16.boolean() })).mutation(({ input }) => markCatalogBookNeedsReview(input.bookId, input.needsReview)),
+  list: adminProcedure.input(z16.object({ page: z16.number().int().min(1).default(1), pageSize: z16.number().int().min(1).max(100).default(30), search: z16.string().max(120).optional(), subject: z16.string().max(80).optional(), active: z16.boolean().optional() })).query(async ({ input }) => {
     const { page: page2, pageSize, ...filters } = input;
     const { items, total } = await listCatalogBooksForAdmin(filters, { page: page2, pageSize });
     return { items, total, page: page2, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
@@ -13056,22 +13315,22 @@ var resourceCatalogAdminRouter = router({
           metadata: { source: "admin_manual" }
         });
       } catch {
-        throw new TRPCError13({ code: "CONFLICT", message: "Bu isim ve yay\u0131nevi ile bir kaynak zaten kay\u0131tl\u0131 olabilir. Farkl\u0131 bir isim dener misin?" });
+        throw new TRPCError14({ code: "CONFLICT", message: "Bu isim ve yay\u0131nevi ile bir kaynak zaten kay\u0131tl\u0131 olabilir. Farkl\u0131 bir isim dener misin?" });
       }
     }
   }),
   update: adminProcedure.input(
-    z15.object({
-      bookId: z15.number().int(),
-      name: z15.string().trim().min(1).max(300).optional(),
-      publisherName: z15.string().trim().max(120).optional(),
-      isbn: z15.string().trim().max(32).optional(),
-      editionYear: z15.number().int().min(1990).max(2100).optional(),
-      description: z15.string().trim().max(2e3).optional(),
-      imageUrl: z15.string().trim().max(500).optional(),
+    z16.object({
+      bookId: z16.number().int(),
+      name: z16.string().trim().min(1).max(300).optional(),
+      publisherName: z16.string().trim().max(120).optional(),
+      isbn: z16.string().trim().max(32).optional(),
+      editionYear: z16.number().int().min(1990).max(2100).optional(),
+      description: z16.string().trim().max(2e3).optional(),
+      imageUrl: z16.string().trim().max(500).optional(),
       bookType: bookTypeEnum.optional(),
       examScope: examScopeEnum.optional(),
-      subject: z15.string().trim().max(80).optional()
+      subject: z16.string().trim().max(80).optional()
     })
   ).mutation(async ({ input }) => {
     const { bookId, publisherName, ...rest } = input;
@@ -13081,25 +13340,25 @@ var resourceCatalogAdminRouter = router({
       ...publisherId !== void 0 ? { publisherId } : {}
     });
   }),
-  setActive: adminProcedure.input(z15.object({ bookId: z15.number().int(), active: z15.boolean() })).mutation(({ input }) => setCatalogBookActive(input.bookId, input.active))
+  setActive: adminProcedure.input(z16.object({ bookId: z16.number().int(), active: z16.boolean() })).mutation(({ input }) => setCatalogBookActive(input.bookId, input.active))
 });
 
 // server/routers/resourceCatalog.ts
-var bookTypeEnum2 = z16.enum(["question_bank", "topic_explanation", "topic_explanation_question_bank", "mock_exam", "fasikul", "past_questions", "camp", "test_book", "reference", "other"]);
-var examScopeEnum2 = z16.enum(CATALOG_EXAM_SCOPES);
-var difficultyEnum = z16.enum(["easy", "medium", "hard"]);
-var listInput = z16.object({
-  page: z16.number().int().min(1).default(1),
-  pageSize: z16.number().int().min(1).max(60).default(24),
+var bookTypeEnum2 = z17.enum(["question_bank", "topic_explanation", "topic_explanation_question_bank", "mock_exam", "fasikul", "past_questions", "camp", "test_book", "reference", "other"]);
+var examScopeEnum2 = z17.enum(CATALOG_EXAM_SCOPES);
+var difficultyEnum = z17.enum(["easy", "medium", "hard"]);
+var listInput = z17.object({
+  page: z17.number().int().min(1).default(1),
+  pageSize: z17.number().int().min(1).max(60).default(24),
   exam: examScopeEnum2.optional(),
-  subject: z16.string().max(80).optional(),
-  publisherId: z16.number().int().optional(),
+  subject: z17.string().max(80).optional(),
+  publisherId: z17.number().int().optional(),
   bookType: bookTypeEnum2.optional(),
   difficulty: difficultyEnum.optional(),
-  minPrice: z16.number().min(0).optional(),
-  maxPrice: z16.number().min(0).optional(),
-  search: z16.string().max(120).optional(),
-  topic: z16.string().max(180).optional()
+  minPrice: z17.number().min(0).optional(),
+  maxPrice: z17.number().min(0).optional(),
+  search: z17.string().max(120).optional(),
+  topic: z17.string().max(180).optional()
 });
 var resourceCatalogRouter = router({
   list: publicProcedure.input(listInput).query(async ({ input }) => {
@@ -13107,15 +13366,15 @@ var resourceCatalogRouter = router({
     const { items, total } = await listCatalogBooks(filters, { page: page2, pageSize });
     return { items, total, page: page2, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
   }),
-  get: publicProcedure.input(z16.object({ slug: z16.string().min(1).max(320) })).query(async ({ input }) => {
+  get: publicProcedure.input(z17.object({ slug: z17.string().min(1).max(320) })).query(async ({ input }) => {
     const book = await getCatalogBookBySlug(input.slug);
-    if (!book) throw new TRPCError14({ code: "NOT_FOUND", message: "Kaynak bulunamad\u0131" });
+    if (!book) throw new TRPCError15({ code: "NOT_FOUND", message: "Kaynak bulunamad\u0131" });
     return book;
   }),
   publishers: publicProcedure.query(() => listPublishersForFilter()),
   /** "Seviyene Uygun Kaynaklar" — deterministic, explainable per-topic
    * recommendations built from the student's own topic progress (spec §21/§34). */
-  recommendations: protectedProcedure.input(z16.object({ subject: z16.string().max(80).optional(), limit: z16.number().int().min(1).max(30).default(12) })).query(async ({ ctx, input }) => {
+  recommendations: protectedProcedure.input(z17.object({ subject: z17.string().max(80).optional(), limit: z17.number().int().min(1).max(30).default(12) })).query(async ({ ctx, input }) => {
     const progress = await getUserTopicProgress(ctx.user.id);
     const allTopics = progress.map((p) => ({ subject: p.subject, topic: p.topic, exam: p.exam, accuracy: p.progress, status: p.status }));
     const topics = input.subject ? allTopics.filter((t2) => t2.subject === input.subject) : allTopics;
@@ -13132,8 +13391,8 @@ var resourceCatalogRouter = router({
 });
 
 // server/routers/onboarding.ts
-import { TRPCError as TRPCError15 } from "@trpc/server";
-import { z as z17 } from "zod";
+import { TRPCError as TRPCError16 } from "@trpc/server";
+import { z as z18 } from "zod";
 
 // shared/onboarding.ts
 var AVATAR_STYLES = ["girl", "boy"];
@@ -13233,13 +13492,13 @@ function validateOnboardingStep(step, draft) {
 }
 
 // server/tracks/trackDb.ts
-import { and as and24, asc as asc5, eq as eq27 } from "drizzle-orm";
+import { and as and26, asc as asc5, eq as eq29 } from "drizzle-orm";
 var TrackError = class extends Error {
 };
 var TRACK_FIELDS = ["gradeLevel", "examYear", "targetScoreType", "currentTytNet", "currentAytNet", "currentNet", "targetUniversity", "targetDepartment", "targetRanking", "targetGoal", "targetScore", "selectedSubjectsJson"];
 var pick2 = (row) => Object.fromEntries(TRACK_FIELDS.map((key) => [key, row[key] ?? null]));
 var emptyFields = () => Object.fromEntries(TRACK_FIELDS.map((key) => [key, null]));
-async function requireDb10() {
+async function requireDb11() {
   const db = await getDb();
   if (!db) throw new Error("Veritaban\u0131 ba\u011Flant\u0131s\u0131 yok.");
   return db;
@@ -13247,19 +13506,19 @@ async function requireDb10() {
 async function syncActiveTrack(userId) {
   const db = await getDb();
   if (!db) return;
-  const [profile] = await db.select().from(studentProfiles).where(eq27(studentProfiles.userId, userId)).limit(1);
+  const [profile] = await db.select().from(studentProfiles).where(eq29(studentProfiles.userId, userId)).limit(1);
   if (!profile) return;
   const fields2 = pick2(profile);
   await db.insert(studentExamTracks).values({ userId, track: profile.examTrack, ...fields2 }).onConflictDoUpdate({ target: [studentExamTracks.userId, studentExamTracks.track], set: fields2 });
 }
 async function listTracks(userId) {
-  const db = await requireDb10();
-  const [profile] = await db.select({ examTrack: studentProfiles.examTrack, onboardingCompleted: studentProfiles.onboardingCompleted }).from(studentProfiles).where(eq27(studentProfiles.userId, userId)).limit(1);
+  const db = await requireDb11();
+  const [profile] = await db.select({ examTrack: studentProfiles.examTrack, onboardingCompleted: studentProfiles.onboardingCompleted }).from(studentProfiles).where(eq29(studentProfiles.userId, userId)).limit(1);
   if (!profile) return [];
-  let rows = await db.select().from(studentExamTracks).where(eq27(studentExamTracks.userId, userId)).orderBy(asc5(studentExamTracks.createdAt));
+  let rows = await db.select().from(studentExamTracks).where(eq29(studentExamTracks.userId, userId)).orderBy(asc5(studentExamTracks.createdAt));
   if (!rows.some((row) => row.track === profile.examTrack) && profile.onboardingCompleted) {
     await syncActiveTrack(userId);
-    rows = await db.select().from(studentExamTracks).where(eq27(studentExamTracks.userId, userId)).orderBy(asc5(studentExamTracks.createdAt));
+    rows = await db.select().from(studentExamTracks).where(eq29(studentExamTracks.userId, userId)).orderBy(asc5(studentExamTracks.createdAt));
   }
   return rows.map((row) => ({ track: row.track, active: row.track === profile.examTrack, examYear: row.examYear, gradeLevel: row.gradeLevel, selectedSubjects: parseList(row.selectedSubjectsJson) })).sort((a, b) => Number(b.active) - Number(a.active));
 }
@@ -13273,30 +13532,30 @@ var parseList = (value) => {
   }
 };
 async function addTrack(userId, input) {
-  const db = await requireDb10();
+  const db = await requireDb11();
   const def = EXAM_TRACK_DEFS[input.track];
   if (!def.gradeLevels.includes(input.gradeLevel)) throw new TrackError("Bu s\u0131nav i\xE7in e\u011Fitim durumunu yeniden se\xE7.");
   const validSubjects = subjectNamesOf(defaultKindOf(input.track));
   const selected = (input.selectedSubjects ?? []).filter((subject2) => validSubjects.includes(subject2));
   if (def.chooseSubjects && selected.length === 0) throw new TrackError("Girece\u011Fin en az bir alan testini se\xE7.");
   await syncActiveTrack(userId);
-  const [existing] = await db.select({ id: studentExamTracks.id }).from(studentExamTracks).where(and24(eq27(studentExamTracks.userId, userId), eq27(studentExamTracks.track, input.track))).limit(1);
+  const [existing] = await db.select({ id: studentExamTracks.id }).from(studentExamTracks).where(and26(eq29(studentExamTracks.userId, userId), eq29(studentExamTracks.track, input.track))).limit(1);
   if (existing) throw new TrackError(`${def.label} zaten s\u0131navlar\u0131n aras\u0131nda.`);
   await db.insert(studentExamTracks).values({ userId, track: input.track, ...emptyFields(), gradeLevel: input.gradeLevel, examYear: input.examYear, selectedSubjectsJson: selected.length ? JSON.stringify(selected) : null });
   if (input.activate) await switchTrack(userId, input.track);
 }
 async function switchTrack(userId, track) {
-  const db = await requireDb10();
+  const db = await requireDb11();
   await syncActiveTrack(userId);
-  const [target] = await db.select().from(studentExamTracks).where(and24(eq27(studentExamTracks.userId, userId), eq27(studentExamTracks.track, track))).limit(1);
+  const [target] = await db.select().from(studentExamTracks).where(and26(eq29(studentExamTracks.userId, userId), eq29(studentExamTracks.track, track))).limit(1);
   if (!target) throw new TrackError("Bu s\u0131nav hen\xFCz eklenmemi\u015F.");
-  await db.update(studentProfiles).set({ examTrack: track, ...pick2(target) }).where(eq27(studentProfiles.userId, userId));
+  await db.update(studentProfiles).set({ examTrack: track, ...pick2(target) }).where(eq29(studentProfiles.userId, userId));
 }
 async function removeTrack(userId, track) {
-  const db = await requireDb10();
-  const [profile] = await db.select({ examTrack: studentProfiles.examTrack }).from(studentProfiles).where(eq27(studentProfiles.userId, userId)).limit(1);
+  const db = await requireDb11();
+  const [profile] = await db.select({ examTrack: studentProfiles.examTrack }).from(studentProfiles).where(eq29(studentProfiles.userId, userId)).limit(1);
   if (profile?.examTrack === track) throw new TrackError("Aktif s\u0131nav\u0131 \xE7\u0131karamazs\u0131n; \xF6nce ba\u015Fka bir s\u0131nava ge\xE7.");
-  await db.delete(studentExamTracks).where(and24(eq27(studentExamTracks.userId, userId), eq27(studentExamTracks.track, track)));
+  await db.delete(studentExamTracks).where(and26(eq29(studentExamTracks.userId, userId), eq29(studentExamTracks.track, track)));
 }
 
 // server/routers/onboarding.ts
@@ -13304,49 +13563,49 @@ var trackErrors = async (work) => {
   try {
     return await work();
   } catch (error) {
-    if (error instanceof TrackError) throw new TRPCError15({ code: "BAD_REQUEST", message: error.message });
+    if (error instanceof TrackError) throw new TRPCError16({ code: "BAD_REQUEST", message: error.message });
     throw error;
   }
 };
-var enumOrBlank = (values) => z17.union([z17.enum(values), z17.literal("")]);
-var draftSchema = z17.object({
-  preferredName: z17.string().trim().max(120).optional(),
+var enumOrBlank = (values) => z18.union([z18.enum(values), z18.literal("")]);
+var draftSchema = z18.object({
+  preferredName: z18.string().trim().max(120).optional(),
   avatarStyle: enumOrBlank(AVATAR_STYLES).optional(),
   examTrack: enumOrBlank(EXAM_TRACKS).optional(),
   gradeLevel: enumOrBlank(GRADE_LEVELS).optional(),
-  examYear: z17.string().max(4).optional(),
+  examYear: z18.string().max(4).optional(),
   targetScoreType: enumOrBlank(TARGET_SCORE_TYPES).optional(),
-  currentTytNet: z17.string().trim().max(40).optional(),
-  currentAytNet: z17.string().trim().max(40).optional(),
-  currentNet: z17.string().trim().max(40).optional(),
+  currentTytNet: z18.string().trim().max(40).optional(),
+  currentAytNet: z18.string().trim().max(40).optional(),
+  currentNet: z18.string().trim().max(40).optional(),
   mockExamFrequency: enumOrBlank(MOCK_EXAM_FREQUENCIES).optional(),
-  selectedSubjects: z17.array(z17.string().max(60)).max(15).optional(),
-  strongSubjects: z17.array(z17.string().max(40)).max(15).optional(),
-  weakSubjects: z17.array(z17.string().max(40)).max(15).optional(),
+  selectedSubjects: z18.array(z18.string().max(60)).max(15).optional(),
+  strongSubjects: z18.array(z18.string().max(40)).max(15).optional(),
+  weakSubjects: z18.array(z18.string().max(40)).max(15).optional(),
   hasPriorStudyPlan: enumOrBlank(["yes", "no"]).optional(),
-  targetUniversity: z17.string().trim().max(180).optional(),
-  targetDepartment: z17.string().trim().max(180).optional(),
-  targetRanking: z17.string().trim().max(60).optional(),
-  targetGoal: z17.string().trim().max(180).optional(),
-  targetScore: z17.string().trim().max(20).optional(),
-  mainGoal: z17.string().trim().max(500).optional(),
-  shortTermGoal: z17.string().trim().max(500).optional(),
-  longTermGoal: z17.string().trim().max(500).optional(),
-  dailyStudyDuration: z17.string().max(6).optional(),
-  preferredStudyStartTime: z17.string().max(5).optional(),
-  availableStudyDays: z17.array(z17.enum(STUDY_DAYS)).max(7).optional(),
-  preferredStudyTimes: z17.array(z17.enum(STUDY_TIMES)).max(4).optional(),
-  preferredStudyMethods: z17.array(z17.enum(STUDY_METHODS)).max(5).optional(),
-  studyObstacles: z17.string().trim().max(500).optional(),
-  coachingExpectations: z17.array(z17.enum(COACHING_EXPECTATIONS)).max(7).optional(),
+  targetUniversity: z18.string().trim().max(180).optional(),
+  targetDepartment: z18.string().trim().max(180).optional(),
+  targetRanking: z18.string().trim().max(60).optional(),
+  targetGoal: z18.string().trim().max(180).optional(),
+  targetScore: z18.string().trim().max(20).optional(),
+  mainGoal: z18.string().trim().max(500).optional(),
+  shortTermGoal: z18.string().trim().max(500).optional(),
+  longTermGoal: z18.string().trim().max(500).optional(),
+  dailyStudyDuration: z18.string().max(6).optional(),
+  preferredStudyStartTime: z18.string().max(5).optional(),
+  availableStudyDays: z18.array(z18.enum(STUDY_DAYS)).max(7).optional(),
+  preferredStudyTimes: z18.array(z18.enum(STUDY_TIMES)).max(4).optional(),
+  preferredStudyMethods: z18.array(z18.enum(STUDY_METHODS)).max(5).optional(),
+  studyObstacles: z18.string().trim().max(500).optional(),
+  coachingExpectations: z18.array(z18.enum(COACHING_EXPECTATIONS)).max(7).optional(),
   notificationPreference: enumOrBlank(NOTIFICATION_PREFERENCES).optional(),
   coachingStyle: enumOrBlank(COACHING_STYLES).optional(),
-  additionalNotes: z17.string().trim().max(1e3).optional()
+  additionalNotes: z18.string().trim().max(1e3).optional()
 });
-var saveStepInput = z17.object({
-  step: z17.number().int().min(0).max(TOTAL_ONBOARDING_STEPS - 1),
+var saveStepInput = z18.object({
+  step: z18.number().int().min(0).max(TOTAL_ONBOARDING_STEPS - 1),
   data: draftSchema,
-  complete: z17.boolean().optional()
+  complete: z18.boolean().optional()
 });
 function draftToPatch(data) {
   const patch = {};
@@ -13390,7 +13649,7 @@ var onboardingRouter = router({
     const draftForValidation = { ...emptyOnboardingDraft(), examTrack: "YKS", ...input.data };
     const errors = validateOnboardingStep(input.step, draftForValidation);
     if (Object.keys(errors).length > 0) {
-      throw new TRPCError15({ code: "BAD_REQUEST", message: Object.values(errors)[0] });
+      throw new TRPCError16({ code: "BAD_REQUEST", message: Object.values(errors)[0] });
     }
     const saved = await upsertStudentProfileStep(ctx.user.id, input.step, draftToPatch(input.data));
     if (input.complete) await completeOnboarding(ctx.user.id);
@@ -13404,27 +13663,27 @@ var onboardingRouter = router({
   }),
   // Birden çok sınav: liste, ekleme, aktif sınavı değiştirme, çıkarma (bkz. server/tracks/trackDb.ts).
   tracks: protectedProcedure.query(({ ctx }) => listTracks(ctx.user.id)),
-  addTrack: protectedProcedure.input(z17.object({ track: z17.enum(EXAM_TRACKS), gradeLevel: z17.enum(GRADE_LEVELS), examYear: z17.number().int().min(2020).max(2040), selectedSubjects: z17.array(z17.string().max(60)).max(15).optional(), activate: z17.boolean().optional() })).mutation(({ ctx, input }) => trackErrors(async () => {
+  addTrack: protectedProcedure.input(z18.object({ track: z18.enum(EXAM_TRACKS), gradeLevel: z18.enum(GRADE_LEVELS), examYear: z18.number().int().min(2020).max(2040), selectedSubjects: z18.array(z18.string().max(60)).max(15).optional(), activate: z18.boolean().optional() })).mutation(({ ctx, input }) => trackErrors(async () => {
     await addTrack(ctx.user.id, input);
     return listTracks(ctx.user.id);
   })),
-  switchTrack: protectedProcedure.input(z17.object({ track: z17.enum(EXAM_TRACKS) })).mutation(({ ctx, input }) => trackErrors(async () => {
+  switchTrack: protectedProcedure.input(z18.object({ track: z18.enum(EXAM_TRACKS) })).mutation(({ ctx, input }) => trackErrors(async () => {
     await switchTrack(ctx.user.id, input.track);
     return getStudentProfile(ctx.user.id);
   })),
-  removeTrack: protectedProcedure.input(z17.object({ track: z17.enum(EXAM_TRACKS) })).mutation(({ ctx, input }) => trackErrors(async () => {
+  removeTrack: protectedProcedure.input(z18.object({ track: z18.enum(EXAM_TRACKS) })).mutation(({ ctx, input }) => trackErrors(async () => {
     await removeTrack(ctx.user.id, input.track);
     return listTracks(ctx.user.id);
   })),
   // Genel Bakış'taki tek tıkla avatar seçimi (null = nötr tasarım).
-  setAvatar: protectedProcedure.input(z17.object({ avatarStyle: z17.enum(AVATAR_STYLES).nullable() })).mutation(({ ctx, input }) => setStudentAvatarStyle(ctx.user.id, input.avatarStyle)),
+  setAvatar: protectedProcedure.input(z18.object({ avatarStyle: z18.enum(AVATAR_STYLES).nullable() })).mutation(({ ctx, input }) => setStudentAvatarStyle(ctx.user.id, input.avatarStyle)),
   // Pazar akşamı giden haftalık ilerleme e-postası (profil menüsündeki seçenek).
   weeklyDigest: protectedProcedure.query(async ({ ctx }) => ({ enabled: await getWeeklyDigestEnabled(ctx.user.id) })),
-  setWeeklyDigest: protectedProcedure.input(z17.object({ enabled: z17.boolean() })).mutation(async ({ ctx, input }) => ({ enabled: await setWeeklyDigestEnabled(ctx.user.id, input.enabled) }))
+  setWeeklyDigest: protectedProcedure.input(z18.object({ enabled: z18.boolean() })).mutation(async ({ ctx, input }) => ({ enabled: await setWeeklyDigestEnabled(ctx.user.id, input.enabled) }))
 });
 
 // server/routers/subscription.ts
-import { z as z18 } from "zod";
+import { z as z19 } from "zod";
 
 // server/subscriptions/checkout.ts
 import { randomUUID as randomUUID3 } from "node:crypto";
@@ -13504,10 +13763,10 @@ async function completeMockCheckoutForUser(userId, items) {
 }
 
 // server/routers/subscription.ts
-import { TRPCError as TRPCError16 } from "@trpc/server";
-var trackInput = z18.object({ track: z18.enum(EXAM_TRACKS).optional() }).optional();
+import { TRPCError as TRPCError17 } from "@trpc/server";
+var trackInput = z19.object({ track: z19.enum(EXAM_TRACKS).optional() }).optional();
 var resolveTrack = async (userId, track) => track ?? await getStudentExamTrack(userId);
-var quoteItemsInput = z18.array(z18.object({ track: z18.enum(EXAM_TRACKS), tier: z18.enum(PAID_TIERS), period: z18.enum(["monthly", "yearly"]) })).min(1).max(EXAM_TRACKS.length);
+var quoteItemsInput = z19.array(z19.object({ track: z19.enum(EXAM_TRACKS), tier: z19.enum(PAID_TIERS), period: z19.enum(["monthly", "yearly"]) })).min(1).max(EXAM_TRACKS.length);
 var subscriptionRouter = router({
   getPlans: publicProcedure.query(() => listActivePlans()),
   // Client'ın useEntitlement() hook'unun okuduğu tek snapshot (spec §8) — bir sınavın aboneliği.
@@ -13521,15 +13780,15 @@ var subscriptionRouter = router({
     return Promise.all(tracks.map((track) => getEntitlements(ctx.user.id, track)));
   }),
   /** Sepet tutarı: paket (2+ sınav) ya da branş (KPSS aboneliği varken MEB-AGS / A grubu) indirimiyle. */
-  quote: protectedProcedure.input(z18.object({ items: quoteItemsInput })).query(async ({ ctx, input }) => {
+  quote: protectedProcedure.input(z19.object({ items: quoteItemsInput })).query(async ({ ctx, input }) => {
     try {
       return await quoteForUser(ctx.user.id, input.items);
     } catch (error) {
-      if (error instanceof QuoteError) throw new TRPCError16({ code: "BAD_REQUEST", message: error.message });
+      if (error instanceof QuoteError) throw new TRPCError17({ code: "BAD_REQUEST", message: error.message });
       throw error;
     }
   }),
-  cancel: protectedProcedure.input(z18.object({ immediate: z18.boolean().optional(), track: z18.enum(EXAM_TRACKS).optional() })).mutation(async ({ ctx, input }) => {
+  cancel: protectedProcedure.input(z19.object({ immediate: z19.boolean().optional(), track: z19.enum(EXAM_TRACKS).optional() })).mutation(async ({ ctx, input }) => {
     const track = await resolveTrack(ctx.user.id, input.track);
     const current = await getCurrentSubscription(ctx.user.id, track);
     const nextStatus = input.immediate ? "canceled" : current.status;
@@ -13547,7 +13806,7 @@ var subscriptionRouter = router({
     await writeAuditLog({ userId: ctx.user.id, action: "user_resumed", oldState: { status: current.status }, newState: { status: "active", track } });
     return getEntitlements(ctx.user.id, track);
   }),
-  restore: protectedProcedure.input(z18.object({ providerToken: z18.string().min(1) })).mutation(async ({ ctx, input }) => {
+  restore: protectedProcedure.input(z19.object({ providerToken: z19.string().min(1) })).mutation(async ({ ctx, input }) => {
     const provider = paymentProviderFactory();
     const result = await provider.restorePurchase({ userId: ctx.user.id, providerToken: input.providerToken });
     if (!result.valid) throw new Error(result.reason ?? "Sat\u0131n alma do\u011Frulanamad\u0131");
@@ -13557,10 +13816,10 @@ var subscriptionRouter = router({
 });
 
 // server/routers/payment.ts
-import { z as z19 } from "zod";
-import { TRPCError as TRPCError17 } from "@trpc/server";
+import { z as z20 } from "zod";
+import { TRPCError as TRPCError18 } from "@trpc/server";
 var paymentRouter = router({
-  createCheckout: protectedProcedure.input(z19.object({ planCode: z19.string().min(1), successUrl: z19.string().url(), cancelUrl: z19.string().url() })).mutation(async ({ ctx, input }) => {
+  createCheckout: protectedProcedure.input(z20.object({ planCode: z20.string().min(1), successUrl: z20.string().url(), cancelUrl: z20.string().url() })).mutation(async ({ ctx, input }) => {
     const plan = await getPlanByCode(input.planCode);
     if (!plan || !plan.isActive) throw new Error("Ge\xE7ersiz veya pasif plan.");
     const provider = paymentProviderFactory();
@@ -13580,7 +13839,7 @@ var paymentRouter = router({
    */
   // Sepet (`items`: bir ya da birden çok sınav) ya da eski istemciler için tek `planCode`.
   // Tutar sunucuda hesaplanır: paket (2+ sınav) ve branş indirimi (shared/checkoutQuote.ts).
-  completeMockCheckout: protectedProcedure.input(z19.object({ planCode: z19.string().min(1).optional(), items: quoteItemsInput.optional() })).mutation(async ({ ctx, input }) => {
+  completeMockCheckout: protectedProcedure.input(z20.object({ planCode: z20.string().min(1).optional(), items: quoteItemsInput.optional() })).mutation(async ({ ctx, input }) => {
     if (ENV.paymentProvider !== "mock") {
       throw new Error("Bu u\xE7 nokta yaln\u0131zca PAYMENT_PROVIDER=mock iken kullan\u0131labilir.");
     }
@@ -13590,14 +13849,14 @@ var paymentRouter = router({
       const { quote, checkoutId } = await completeMockCheckoutForUser(ctx.user.id, items);
       return { status: "processed", checkoutId, total: quote.total, lines: quote.lines };
     } catch (error) {
-      if (error instanceof QuoteError) throw new TRPCError17({ code: "BAD_REQUEST", message: error.message });
+      if (error instanceof QuoteError) throw new TRPCError18({ code: "BAD_REQUEST", message: error.message });
       throw error;
     }
   })
 });
 
 // server/admin/analyticsService.ts
-import { and as and25, count as count2, countDistinct, eq as eq28, gte as gte15, isNotNull as isNotNull7, lt as lt12, ne as ne4, sql as sql14 } from "drizzle-orm";
+import { and as and27, count as count2, countDistinct, eq as eq30, gte as gte15, isNotNull as isNotNull7, lt as lt12, ne as ne4, sql as sql16 } from "drizzle-orm";
 async function getAdminDashboardKpis() {
   const db = await getDb();
   const empty = {
@@ -13628,17 +13887,17 @@ async function getAdminDashboardKpis() {
   const [approvalCounts, accountStatusCounts, planStatusCounts, activeTodayRow, activeWeekRow, inactive7Row, inactive30Row, totalRow, trialStartedRow, stillTrialingRow, convertedRow, premiumUsersRow] = await Promise.all([
     db.select({ approvalStatus: users.approvalStatus, total: count2() }).from(users).groupBy(users.approvalStatus),
     db.select({ accountStatus: users.accountStatus, total: count2() }).from(users).groupBy(users.accountStatus),
-    db.select({ tier: subscriptionPlans.tier, billingPeriod: subscriptionPlans.billingPeriod, status: subscriptions.status, total: count2() }).from(subscriptions).innerJoin(subscriptionPlans, eq28(subscriptionPlans.id, subscriptions.planId)).groupBy(subscriptionPlans.tier, subscriptionPlans.billingPeriod, subscriptions.status),
+    db.select({ tier: subscriptionPlans.tier, billingPeriod: subscriptionPlans.billingPeriod, status: subscriptions.status, total: count2() }).from(subscriptions).innerJoin(subscriptionPlans, eq30(subscriptionPlans.id, subscriptions.planId)).groupBy(subscriptionPlans.tier, subscriptionPlans.billingPeriod, subscriptions.status),
     db.select({ total: count2() }).from(users).where(gte15(users.lastSignedIn, todayStart)),
     db.select({ total: count2() }).from(users).where(gte15(users.lastSignedIn, weekAgo)),
     db.select({ total: count2() }).from(users).where(lt12(users.lastSignedIn, weekAgo)),
     db.select({ total: count2() }).from(users).where(lt12(users.lastSignedIn, monthAgo)),
     db.select({ total: count2() }).from(users),
     db.select({ total: count2() }).from(subscriptions).where(isNotNull7(subscriptions.trialStartedAt)),
-    db.select({ total: count2() }).from(subscriptions).where(eq28(subscriptions.status, "trialing")),
-    db.select({ total: count2() }).from(subscriptions).where(and25(isNotNull7(subscriptions.trialStartedAt), sql14`${subscriptions.status} in ('active','past_due','grace_period')`)),
+    db.select({ total: count2() }).from(subscriptions).where(eq30(subscriptions.status, "trialing")),
+    db.select({ total: count2() }).from(subscriptions).where(and27(isNotNull7(subscriptions.trialStartedAt), sql16`${subscriptions.status} in ('active','past_due','grace_period')`)),
     // Üye sayıları kişi başına: her sınavın aboneliği ayrı satır, bir aday birden fazla sınava abone olabilir.
-    db.select({ total: countDistinct(subscriptions.userId) }).from(subscriptions).innerJoin(subscriptionPlans, eq28(subscriptionPlans.id, subscriptions.planId)).where(and25(ne4(subscriptionPlans.tier, "free"), sql14`${subscriptions.status} in ('active','trialing','grace_period')`))
+    db.select({ total: countDistinct(subscriptions.userId) }).from(subscriptions).innerJoin(subscriptionPlans, eq30(subscriptionPlans.id, subscriptions.planId)).where(and27(ne4(subscriptionPlans.tier, "free"), sql16`${subscriptions.status} in ('active','trialing','grace_period')`))
   ]);
   const kpis = { ...empty, totalUsers: totalRow[0]?.total ?? 0, activeToday: activeTodayRow[0]?.total ?? 0, activeThisWeek: activeWeekRow[0]?.total ?? 0, inactive7Plus: inactive7Row[0]?.total ?? 0, inactive30Plus: inactive30Row[0]?.total ?? 0 };
   for (const row of approvalCounts) {
@@ -13673,35 +13932,35 @@ var adminAnalyticsRouter = router({
 });
 
 // server/routers/admin/audit.ts
-import { z as z20 } from "zod";
+import { z as z21 } from "zod";
 var adminAuditRouter = router({
-  list: adminProcedure.input(z20.object({ userId: z20.number().int().optional(), limit: z20.number().int().min(1).max(500).default(100) })).query(({ input }) => input.userId ? listAuditLogsForUser(input.userId) : listAllAuditLogs(input.limit))
+  list: adminProcedure.input(z21.object({ userId: z21.number().int().optional(), limit: z21.number().int().min(1).max(500).default(100) })).query(({ input }) => input.userId ? listAuditLogsForUser(input.userId) : listAllAuditLogs(input.limit))
 });
 
 // server/routers/admin/errors.ts
-import { z as z21 } from "zod";
+import { z as z22 } from "zod";
 var adminErrorsRouter = router({
-  list: adminProcedure.input(z21.object({ status: z21.enum(["open", "resolved"]).default("open") })).query(({ input }) => listAppErrors(input.status)),
-  resolve: adminProcedure.input(z21.object({ id: z21.number().int().positive() })).mutation(({ input }) => resolveAppError(input.id))
+  list: adminProcedure.input(z22.object({ status: z22.enum(["open", "resolved"]).default("open") })).query(({ input }) => listAppErrors(input.status)),
+  resolve: adminProcedure.input(z22.object({ id: z22.number().int().positive() })).mutation(({ input }) => resolveAppError(input.id))
 });
 
 // server/routers/admin/payments.ts
-import { z as z22 } from "zod";
+import { z as z23 } from "zod";
 var maskId = (value) => !value ? value : value.length <= 8 ? `${value.slice(0, 2)}\u2022\u2022\u2022\u2022` : `${value.slice(0, 4)}\u2022\u2022\u2022\u2022${value.slice(-4)}`;
 var adminPaymentsRouter = router({
   // Kart numarası/CVV gibi bir alan şemada zaten hiç yok (spec §27/§37 — "ASLA saklanmamalı"); providerPaymentId yine de maskelenir.
-  list: adminProcedure.input(z22.object({ limit: z22.number().int().min(1).max(500).default(100) })).query(async ({ input }) => {
+  list: adminProcedure.input(z23.object({ limit: z23.number().int().min(1).max(500).default(100) })).query(async ({ input }) => {
     const rows = await listAllPaymentsForAdmin(input.limit);
     return rows.map((row) => ({ ...row, providerPaymentId: maskId(row.providerPaymentId) }));
   })
 });
 
 // server/routers/admin/subscriptions.ts
-import { z as z23 } from "zod";
-var trackField = z23.enum(EXAM_TRACKS).default("YKS");
+import { z as z24 } from "zod";
+var trackField = z24.enum(EXAM_TRACKS).default("YKS");
 var adminSubscriptionsRouter = router({
   list: adminProcedure.query(() => listAllSubscriptionsForAdmin()),
-  get: adminProcedure.input(z23.object({ userId: z23.number().int() })).query(async ({ input }) => {
+  get: adminProcedure.input(z24.object({ userId: z24.number().int() })).query(async ({ input }) => {
     const [subscriptions2, payments2, auditLogs] = await Promise.all([listSubscriptionsForUser(input.userId), listPaymentsForUser(input.userId), listAuditLogsForUser(input.userId)]);
     const subscription = subscriptions2.find((row) => row.track === "YKS") ?? subscriptions2[0];
     return { subscription, subscriptions: subscriptions2, payments: payments2, auditLogs };
@@ -13717,7 +13976,7 @@ var adminSubscriptionsRouter = router({
    * schema'yı yeniden tasarlama, duplicate logic oluşturma" ile tutarlı;
    * bkz. docs/admin/ADMIN-COMMAND-CENTER.md "Known limitations".)
    */
-  grant: adminProcedure.input(z23.object({ userId: z23.number().int(), planCode: z23.string().min(1), days: z23.number().int().min(1).max(3650), reason: z23.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
+  grant: adminProcedure.input(z24.object({ userId: z24.number().int(), planCode: z24.string().min(1), days: z24.number().int().min(1).max(3650), reason: z24.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
     const plan = await getPlanByCode(input.planCode);
     if (!plan) throw new Error(`Plan bulunamad\u0131: ${input.planCode}`);
     const track = plan.track ?? "YKS";
@@ -13730,7 +13989,7 @@ var adminSubscriptionsRouter = router({
     await writeAuditLog({ userId: input.userId, adminId: ctx.user.id, action: "manual_grant", oldState: existing ? { status: existing.status } : null, newState: { status: "active", planCode: plan.code, track, until: periodEnd.toISOString() }, reason: input.reason });
     return getSubscriptionByUserId(input.userId, track);
   }),
-  revoke: adminProcedure.input(z23.object({ userId: z23.number().int(), track: trackField, reason: z23.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
+  revoke: adminProcedure.input(z24.object({ userId: z24.number().int(), track: trackField, reason: z24.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
     const existing = await getSubscriptionByUserId(input.userId, input.track);
     if (!existing) throw new Error("Abonelik bulunamad\u0131");
     const freePlan = await getPlanByCode("FREE");
@@ -13740,7 +13999,7 @@ var adminSubscriptionsRouter = router({
     await writeAuditLog({ userId: input.userId, adminId: ctx.user.id, action: "manual_revoke", oldState: { status: existing.status }, newState: { status: "canceled", planCode: "FREE", track: input.track }, reason: input.reason });
     return getSubscriptionByUserId(input.userId, input.track);
   }),
-  cancel: adminProcedure.input(z23.object({ userId: z23.number().int(), track: trackField, reason: z23.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
+  cancel: adminProcedure.input(z24.object({ userId: z24.number().int(), track: trackField, reason: z24.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
     const existing = await getSubscriptionByUserId(input.userId, input.track);
     if (!existing) throw new Error("Abonelik bulunamad\u0131");
     assertValidSubscriptionTransition(existing.status, "canceled");
@@ -13748,7 +14007,7 @@ var adminSubscriptionsRouter = router({
     await writeAuditLog({ userId: input.userId, adminId: ctx.user.id, action: "admin_canceled", oldState: { status: existing.status }, newState: { status: "canceled", track: input.track }, reason: input.reason });
     return getSubscriptionByUserId(input.userId, input.track);
   }),
-  resume: adminProcedure.input(z23.object({ userId: z23.number().int(), track: trackField })).mutation(async ({ ctx, input }) => {
+  resume: adminProcedure.input(z24.object({ userId: z24.number().int(), track: trackField })).mutation(async ({ ctx, input }) => {
     const existing = await getSubscriptionByUserId(input.userId, input.track);
     if (!existing) throw new Error("Abonelik bulunamad\u0131");
     assertValidSubscriptionTransition(existing.status, "active");
@@ -13758,7 +14017,7 @@ var adminSubscriptionsRouter = router({
   }),
   // Fiyatlar: her sınavın planları (satışta olmayanlar dahil) ve fiyat/deneme/satış durumu düzenleme.
   plans: adminProcedure.query(() => listAllPlans()),
-  updatePlan: adminProcedure.input(z23.object({ planId: z23.number().int().positive(), price: z23.number().int().min(0).max(1e8).optional(), trialDays: z23.number().int().min(0).max(60).optional(), isActive: z23.boolean().optional() })).mutation(async ({ ctx, input }) => {
+  updatePlan: adminProcedure.input(z24.object({ planId: z24.number().int().positive(), price: z24.number().int().min(0).max(1e8).optional(), trialDays: z24.number().int().min(0).max(60).optional(), isActive: z24.boolean().optional() })).mutation(async ({ ctx, input }) => {
     const plan = await updatePlanPricing(input.planId, { price: input.price, trialDays: input.trialDays, isActive: input.isActive });
     if (!plan) throw new Error("Plan bulunamad\u0131");
     await writeAuditLog({ userId: ctx.user.id, adminId: ctx.user.id, action: "plan_pricing_updated", newState: { planCode: plan.code, price: plan.price, trialDays: plan.trialDays, isActive: plan.isActive } });
@@ -13836,19 +14095,19 @@ var adminSystemRouter = router({
 });
 
 // server/routers/admin/testimonials.ts
-import { z as z24 } from "zod";
+import { z as z25 } from "zod";
 
 // server/testimonials/testimonials.ts
-import { desc as desc17, eq as eq29 } from "drizzle-orm";
+import { desc as desc18, eq as eq31 } from "drizzle-orm";
 async function listPublishedTestimonials(limit = 9) {
   const db = await getDb();
   if (!db) return [];
-  return db.select({ id: testimonials.id, displayName: testimonials.displayName, detail: testimonials.detail, rating: testimonials.rating, body: testimonials.body }).from(testimonials).where(eq29(testimonials.status, "approved")).orderBy(desc17(testimonials.reviewedAt)).limit(limit);
+  return db.select({ id: testimonials.id, displayName: testimonials.displayName, detail: testimonials.detail, rating: testimonials.rating, body: testimonials.body }).from(testimonials).where(eq31(testimonials.status, "approved")).orderBy(desc18(testimonials.reviewedAt)).limit(limit);
 }
 async function getMyTestimonial(userId) {
   const db = await getDb();
   if (!db) return null;
-  const [row] = await db.select().from(testimonials).where(eq29(testimonials.userId, userId)).limit(1);
+  const [row] = await db.select().from(testimonials).where(eq31(testimonials.userId, userId)).limit(1);
   return row ?? null;
 }
 async function saveMyTestimonial(userId, input) {
@@ -13861,43 +14120,43 @@ async function saveMyTestimonial(userId, input) {
 async function deleteMyTestimonial(userId) {
   const db = await getDb();
   if (!db) return;
-  await db.delete(testimonials).where(eq29(testimonials.userId, userId));
+  await db.delete(testimonials).where(eq31(testimonials.userId, userId));
 }
 async function listTestimonialsForAdmin(status) {
   const db = await getDb();
   if (!db) return [];
-  return db.select({ id: testimonials.id, displayName: testimonials.displayName, detail: testimonials.detail, rating: testimonials.rating, body: testimonials.body, status: testimonials.status, updatedAt: testimonials.updatedAt, userId: testimonials.userId, userName: users.name, userEmail: users.email }).from(testimonials).leftJoin(users, eq29(users.id, testimonials.userId)).where(eq29(testimonials.status, status)).orderBy(desc17(testimonials.updatedAt)).limit(200);
+  return db.select({ id: testimonials.id, displayName: testimonials.displayName, detail: testimonials.detail, rating: testimonials.rating, body: testimonials.body, status: testimonials.status, updatedAt: testimonials.updatedAt, userId: testimonials.userId, userName: users.name, userEmail: users.email }).from(testimonials).leftJoin(users, eq31(users.id, testimonials.userId)).where(eq31(testimonials.status, status)).orderBy(desc18(testimonials.updatedAt)).limit(200);
 }
 async function reviewTestimonial(id8, status, reviewerId) {
   const db = await getDb();
   if (!db) return;
-  await db.update(testimonials).set({ status, reviewedAt: /* @__PURE__ */ new Date(), reviewedBy: reviewerId }).where(eq29(testimonials.id, id8));
+  await db.update(testimonials).set({ status, reviewedAt: /* @__PURE__ */ new Date(), reviewedBy: reviewerId }).where(eq31(testimonials.id, id8));
 }
 
 // server/routers/admin/testimonials.ts
 var adminTestimonialsRouter = router({
-  list: adminProcedure.input(z24.object({ status: z24.enum(["pending", "approved", "rejected"]).default("pending") })).query(({ input }) => listTestimonialsForAdmin(input.status)),
-  review: adminProcedure.input(z24.object({ id: z24.number().int().positive(), status: z24.enum(["approved", "rejected"]) })).mutation(async ({ ctx, input }) => {
+  list: adminProcedure.input(z25.object({ status: z25.enum(["pending", "approved", "rejected"]).default("pending") })).query(({ input }) => listTestimonialsForAdmin(input.status)),
+  review: adminProcedure.input(z25.object({ id: z25.number().int().positive(), status: z25.enum(["approved", "rejected"]) })).mutation(async ({ ctx, input }) => {
     await reviewTestimonial(input.id, input.status, ctx.user.id);
     return { ok: true };
   })
 });
 
 // server/routers/admin/usage.ts
-import { z as z25 } from "zod";
+import { z as z26 } from "zod";
 var adminUsageRouter = router({
-  get: adminProcedure.input(z25.object({ userId: z25.number().int(), track: z25.enum(EXAM_TRACKS).default("YKS") })).query(({ input }) => getUsageSummaryForUser(input.userId, input.track)),
-  reset: adminProcedure.input(z25.object({ userId: z25.number().int(), featureKey: z25.enum(FEATURE_KEYS) })).mutation(({ ctx, input }) => resetFeatureUsage(input.userId, input.featureKey, USAGE_WINDOW_DAYS, ctx.user.id))
+  get: adminProcedure.input(z26.object({ userId: z26.number().int(), track: z26.enum(EXAM_TRACKS).default("YKS") })).query(({ input }) => getUsageSummaryForUser(input.userId, input.track)),
+  reset: adminProcedure.input(z26.object({ userId: z26.number().int(), featureKey: z26.enum(FEATURE_KEYS) })).mutation(({ ctx, input }) => resetFeatureUsage(input.userId, input.featureKey, USAGE_WINDOW_DAYS, ctx.user.id))
 });
 
 // server/routers/admin/users.ts
-import { z as z26 } from "zod";
+import { z as z27 } from "zod";
 
 // server/admin/adminUserDb.ts
-import { and as and27, count as count3, desc as desc18, eq as eq31, gte as gte17, inArray as inArray13, isNull as isNull16, ilike as ilike5, lt as lt13, or as or7, sql as sql15 } from "drizzle-orm";
+import { and as and29, count as count3, desc as desc19, eq as eq33, gte as gte17, inArray as inArray13, isNull as isNull16, ilike as ilike5, lt as lt13, or as or7, sql as sql17 } from "drizzle-orm";
 
 // server/admin/progressService.ts
-import { and as and26, eq as eq30, gte as gte16 } from "drizzle-orm";
+import { and as and28, eq as eq32, gte as gte16 } from "drizzle-orm";
 
 // shared/progressScore.ts
 var PROGRESS_SCORE_CONFIG = {
@@ -13936,14 +14195,14 @@ async function getStudyProgressScore(userId) {
   const db = await getDb();
   const generatedAt = (/* @__PURE__ */ new Date()).toISOString();
   if (!db) return { overallScore: null, insufficientData: true, components: emptyComponents(), generatedAt };
-  const [userRow] = await db.select({ createdAt: users.createdAt }).from(users).where(eq30(users.id, userId)).limit(1);
+  const [userRow] = await db.select({ createdAt: users.createdAt }).from(users).where(eq32(users.id, userId)).limit(1);
   const accountAgeDays = userRow ? Math.max(0, Math.floor((Date.now() - userRow.createdAt.getTime()) / 864e5)) : 0;
   const windowStart = new Date(Date.now() - CONSISTENCY_WINDOW_DAYS * 864e5);
   const [recentLogs, allLogs, topicRows, examRows] = await Promise.all([
-    db.select({ studyDate: topicStudyLogs.studyDate }).from(topicStudyLogs).where(and26(eq30(topicStudyLogs.userId, userId), gte16(topicStudyLogs.studyDate, windowStart))),
-    db.select({ questions: topicStudyLogs.questions, correct: topicStudyLogs.correct }).from(topicStudyLogs).where(eq30(topicStudyLogs.userId, userId)),
-    db.select({ progress: topicProgress.progress }).from(topicProgress).where(eq30(topicProgress.userId, userId)),
-    db.select({ net: userMockExams.net }).from(userMockExams).where(eq30(userMockExams.userId, userId))
+    db.select({ studyDate: topicStudyLogs.studyDate }).from(topicStudyLogs).where(and28(eq32(topicStudyLogs.userId, userId), gte16(topicStudyLogs.studyDate, windowStart))),
+    db.select({ questions: topicStudyLogs.questions, correct: topicStudyLogs.correct }).from(topicStudyLogs).where(eq32(topicStudyLogs.userId, userId)),
+    db.select({ progress: topicProgress.progress }).from(topicProgress).where(eq32(topicProgress.userId, userId)),
+    db.select({ net: userMockExams.net }).from(userMockExams).where(eq32(userMockExams.userId, userId))
   ]);
   const activeDaysInWindow = new Set(recentLogs.map((row) => toLocalDateKey(row.studyDate))).size;
   const totalQuestions = allLogs.reduce((sum, row) => sum + row.questions, 0);
@@ -13995,16 +14254,16 @@ async function listUsersForAdminPaginated(filters) {
     const digits = filters.search.replace(/\D/g, "").replace(/^0/, "");
     conditions.push(or7(ilike5(users.name, term), ilike5(users.email, term), ...digits.length >= 4 ? [ilike5(users.openId, `dev_phone_%${digits}%`)] : []));
   }
-  if (filters.approvalStatus) conditions.push(eq31(users.approvalStatus, filters.approvalStatus));
-  if (filters.accountStatus) conditions.push(eq31(users.accountStatus, filters.accountStatus));
-  if (filters.planCode) conditions.push(eq31(subscriptionPlans.code, filters.planCode));
-  if (filters.subscriptionStatus) conditions.push(eq31(subscriptions.status, filters.subscriptionStatus));
+  if (filters.approvalStatus) conditions.push(eq33(users.approvalStatus, filters.approvalStatus));
+  if (filters.accountStatus) conditions.push(eq33(users.accountStatus, filters.accountStatus));
+  if (filters.planCode) conditions.push(eq33(subscriptionPlans.code, filters.planCode));
+  if (filters.subscriptionStatus) conditions.push(eq33(subscriptions.status, filters.subscriptionStatus));
   if (filters.activity === "today") conditions.push(gte17(users.lastSignedIn, startOfToday2()));
   else if (filters.activity === "week") conditions.push(gte17(users.lastSignedIn, daysAgo(7)));
   else if (filters.activity === "inactive") conditions.push(lt13(users.lastSignedIn, daysAgo(7)));
-  const whereClause = conditions.length ? and27(...conditions) : void 0;
-  const activeSubscription = and27(eq31(subscriptions.userId, users.id), eq31(subscriptions.track, sql15`coalesce((select sp."examTrack" from student_profiles sp where sp."userId" = ${users.id}), 'YKS')`));
-  const countQuery = db.select({ total: count3() }).from(users).leftJoin(subscriptions, activeSubscription).leftJoin(subscriptionPlans, eq31(subscriptionPlans.id, subscriptions.planId));
+  const whereClause = conditions.length ? and29(...conditions) : void 0;
+  const activeSubscription = and29(eq33(subscriptions.userId, users.id), eq33(subscriptions.track, sql17`coalesce((select sp."examTrack" from student_profiles sp where sp."userId" = ${users.id}), 'YKS')`));
+  const countQuery = db.select({ total: count3() }).from(users).leftJoin(subscriptions, activeSubscription).leftJoin(subscriptionPlans, eq33(subscriptionPlans.id, subscriptions.planId));
   const [{ total }] = await (whereClause ? countQuery.where(whereClause) : countQuery);
   const pageQuery = db.select({
     id: users.id,
@@ -14023,13 +14282,13 @@ async function listUsersForAdminPaginated(filters) {
     subscriptionStatus: subscriptions.status,
     trialEndsAt: subscriptions.trialEndsAt,
     currentPeriodEnd: subscriptions.currentPeriodEnd
-  }).from(users).leftJoin(subscriptions, activeSubscription).leftJoin(subscriptionPlans, eq31(subscriptionPlans.id, subscriptions.planId)).orderBy(desc18(users.createdAt)).limit(pageSize).offset((page2 - 1) * pageSize);
+  }).from(users).leftJoin(subscriptions, activeSubscription).leftJoin(subscriptionPlans, eq33(subscriptionPlans.id, subscriptions.planId)).orderBy(desc19(users.createdAt)).limit(pageSize).offset((page2 - 1) * pageSize);
   const pageRows = await (whereClause ? pageQuery.where(whereClause) : pageQuery);
   const ids = pageRows.map((row) => row.id);
   const [topicAgg, examAgg, studyAgg] = ids.length ? await Promise.all([
-    db.select({ userId: topicProgress.userId, avgProgress: sql15`avg(${topicProgress.progress})`, topicCount: sql15`count(*)::int` }).from(topicProgress).where(inArray13(topicProgress.userId, ids)).groupBy(topicProgress.userId),
-    db.select({ userId: userMockExams.userId, examCount: sql15`count(*)::int`, latestNet: sql15`max(${userMockExams.net})` }).from(userMockExams).where(inArray13(userMockExams.userId, ids)).groupBy(userMockExams.userId),
-    db.select({ userId: topicStudyLogs.userId, totalMinutes: sql15`sum(${topicStudyLogs.minutes})` }).from(topicStudyLogs).where(inArray13(topicStudyLogs.userId, ids)).groupBy(topicStudyLogs.userId)
+    db.select({ userId: topicProgress.userId, avgProgress: sql17`avg(${topicProgress.progress})`, topicCount: sql17`count(*)::int` }).from(topicProgress).where(inArray13(topicProgress.userId, ids)).groupBy(topicProgress.userId),
+    db.select({ userId: userMockExams.userId, examCount: sql17`count(*)::int`, latestNet: sql17`max(${userMockExams.net})` }).from(userMockExams).where(inArray13(userMockExams.userId, ids)).groupBy(userMockExams.userId),
+    db.select({ userId: topicStudyLogs.userId, totalMinutes: sql17`sum(${topicStudyLogs.minutes})` }).from(topicStudyLogs).where(inArray13(topicStudyLogs.userId, ids)).groupBy(topicStudyLogs.userId)
   ]) : [[], [], []];
   const topicMap = new Map(topicAgg.map((row) => [row.userId, row]));
   const examMap = new Map(examAgg.map((row) => [row.userId, row]));
@@ -14063,19 +14322,19 @@ var daysAgo = (days) => new Date(Date.now() - days * 24 * 60 * 60 * 1e3);
 async function suspendUser(userId, adminId, reason) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ accountStatus: "suspended" }).where(eq31(users.id, userId));
+  await db.update(users).set({ accountStatus: "suspended" }).where(eq33(users.id, userId));
   await writeAuditLog({ userId, adminId, action: "user_suspended", newState: { accountStatus: "suspended" }, reason });
 }
 async function reactivateUser(userId, adminId) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ accountStatus: "active" }).where(eq31(users.id, userId));
+  await db.update(users).set({ accountStatus: "active" }).where(eq33(users.id, userId));
   await writeAuditLog({ userId, adminId, action: "user_reactivated", newState: { accountStatus: "active" } });
 }
 async function verifyUserEmailManually(userId, adminId) {
   const db = await getDb();
   if (!db) return;
-  await db.update(users).set({ emailVerifiedAt: /* @__PURE__ */ new Date() }).where(and27(eq31(users.id, userId), isNull16(users.emailVerifiedAt)));
+  await db.update(users).set({ emailVerifiedAt: /* @__PURE__ */ new Date() }).where(and29(eq33(users.id, userId), isNull16(users.emailVerifiedAt)));
   await writeAuditLog({ userId, adminId, action: "email_verified_by_admin", newState: { emailVerified: true } });
 }
 function maskId2(value) {
@@ -14086,7 +14345,7 @@ function maskId2(value) {
 async function getUserDetailForAdmin(userId) {
   const db = await getDb();
   if (!db) return null;
-  const [userRow] = await db.select().from(users).where(eq31(users.id, userId)).limit(1);
+  const [userRow] = await db.select().from(users).where(eq33(users.id, userId)).limit(1);
   if (!userRow) return null;
   const activeTrack = await getStudentExamTrack(userId);
   const [entitlements, usage, progressScore, payments2, recentExams, topicRows, recentStudyLogs, auditLogs, profile, bookContentRows, notebook] = await Promise.all([
@@ -14094,12 +14353,12 @@ async function getUserDetailForAdmin(userId) {
     getUsageSummaryForUser(userId, activeTrack),
     getStudyProgressScore(userId),
     listPaymentsForUser(userId),
-    db.select().from(userMockExams).where(eq31(userMockExams.userId, userId)).orderBy(desc18(userMockExams.examDate)).limit(10),
-    db.select().from(topicProgress).where(eq31(topicProgress.userId, userId)),
-    db.select().from(topicStudyLogs).where(eq31(topicStudyLogs.userId, userId)).orderBy(desc18(topicStudyLogs.studyDate)).limit(20),
+    db.select().from(userMockExams).where(eq33(userMockExams.userId, userId)).orderBy(desc19(userMockExams.examDate)).limit(10),
+    db.select().from(topicProgress).where(eq33(topicProgress.userId, userId)),
+    db.select().from(topicStudyLogs).where(eq33(topicStudyLogs.userId, userId)).orderBy(desc19(topicStudyLogs.studyDate)).limit(20),
     listAuditLogsForUser(userId),
     getStudentProfile(userId),
-    db.select({ bookId: userBookContents.bookId, mappingStatus: userBookContents.mappingStatus, mappingMethod: userBookContents.mappingMethod, mappingConfidence: userBookContents.mappingConfidence, source: userBookContents.source, createdAt: userBookContents.createdAt }).from(userBookContents).where(eq31(userBookContents.userId, userId)),
+    db.select({ bookId: userBookContents.bookId, mappingStatus: userBookContents.mappingStatus, mappingMethod: userBookContents.mappingMethod, mappingConfidence: userBookContents.mappingConfidence, source: userBookContents.source, createdAt: userBookContents.createdAt }).from(userBookContents).where(eq33(userBookContents.userId, userId)),
     // Defter: yalnızca sayılar — öğrencinin not içeriği admin tarafından görülmez.
     getNoteStatsForAdmin(userId)
   ]);
@@ -14116,7 +14375,7 @@ async function getUserDetailForAdmin(userId) {
   const bookIds = bookContents.map((book) => book.bookId);
   const numericIds = bookIds.filter((id8) => /^\d+$/.test(id8)).map(Number);
   const [customTitles, catalogTitles] = bookIds.length ? await Promise.all([
-    db.select({ bookId: userResourceBooks.bookId, title: userResourceBooks.title }).from(userResourceBooks).where(and27(eq31(userResourceBooks.userId, userId), inArray13(userResourceBooks.bookId, bookIds))),
+    db.select({ bookId: userResourceBooks.bookId, title: userResourceBooks.title }).from(userResourceBooks).where(and29(eq33(userResourceBooks.userId, userId), inArray13(userResourceBooks.bookId, bookIds))),
     numericIds.length ? db.select({ id: catalogBooks.id, name: catalogBooks.name }).from(catalogBooks).where(inArray13(catalogBooks.id, numericIds)) : Promise.resolve([])
   ]) : [[], []];
   const titleById = new Map([...customTitles.map((row) => [row.bookId, row.title]), ...catalogTitles.map((row) => [String(row.id), row.name])]);
@@ -14148,38 +14407,38 @@ async function getUserDetailForAdmin(userId) {
 // server/routers/admin/users.ts
 var adminUsersRouter = router({
   list: adminProcedure.input(
-    z26.object({
-      search: z26.string().max(120).optional(),
-      approvalStatus: z26.enum(["pending", "approved", "rejected"]).optional(),
-      accountStatus: z26.enum(["active", "suspended", "deleted"]).optional(),
-      planCode: z26.string().max(40).optional(),
-      subscriptionStatus: z26.string().max(40).optional(),
-      activity: z26.enum(["today", "week", "inactive"]).optional(),
-      page: z26.number().int().min(1).default(1),
-      pageSize: z26.number().int().min(1).max(100).default(20)
+    z27.object({
+      search: z27.string().max(120).optional(),
+      approvalStatus: z27.enum(["pending", "approved", "rejected"]).optional(),
+      accountStatus: z27.enum(["active", "suspended", "deleted"]).optional(),
+      planCode: z27.string().max(40).optional(),
+      subscriptionStatus: z27.string().max(40).optional(),
+      activity: z27.enum(["today", "week", "inactive"]).optional(),
+      page: z27.number().int().min(1).default(1),
+      pageSize: z27.number().int().min(1).max(100).default(20)
     })
   ).query(({ input }) => listUsersForAdminPaginated(input)),
-  get: adminProcedure.input(z26.object({ userId: z26.number().int() })).query(({ input }) => getUserDetailForAdmin(input.userId)),
+  get: adminProcedure.input(z27.object({ userId: z27.number().int() })).query(({ input }) => getUserDetailForAdmin(input.userId)),
   listPending: adminProcedure.query(() => listPendingUsers()),
-  approve: adminProcedure.input(z26.object({ userId: z26.number().int() })).mutation(({ ctx, input }) => approveUser(input.userId, ctx.user.id)),
-  reject: adminProcedure.input(z26.object({ userId: z26.number().int(), reason: z26.string().max(300).optional() })).mutation(({ ctx, input }) => rejectUser(input.userId, ctx.user.id, input.reason)),
+  approve: adminProcedure.input(z27.object({ userId: z27.number().int() })).mutation(({ ctx, input }) => approveUser(input.userId, ctx.user.id)),
+  reject: adminProcedure.input(z27.object({ userId: z27.number().int(), reason: z27.string().max(300).optional() })).mutation(({ ctx, input }) => rejectUser(input.userId, ctx.user.id, input.reason)),
   // Hesap yaşam döngüsü — subscription iptaliyle KARIŞTIRILMAZ (spec §5/§23): bir kullanıcı aboneliğini iptal edince hesabı askıya alınmaz.
-  suspend: adminProcedure.input(z26.object({ userId: z26.number().int(), reason: z26.string().max(300).optional() })).mutation(({ ctx, input }) => suspendUser(input.userId, ctx.user.id, input.reason)),
-  reactivate: adminProcedure.input(z26.object({ userId: z26.number().int() })).mutation(({ ctx, input }) => reactivateUser(input.userId, ctx.user.id)),
-  verifyEmail: adminProcedure.input(z26.object({ userId: z26.number().int() })).mutation(({ ctx, input }) => verifyUserEmailManually(input.userId, ctx.user.id))
+  suspend: adminProcedure.input(z27.object({ userId: z27.number().int(), reason: z27.string().max(300).optional() })).mutation(({ ctx, input }) => suspendUser(input.userId, ctx.user.id, input.reason)),
+  reactivate: adminProcedure.input(z27.object({ userId: z27.number().int() })).mutation(({ ctx, input }) => reactivateUser(input.userId, ctx.user.id)),
+  verifyEmail: adminProcedure.input(z27.object({ userId: z27.number().int() })).mutation(({ ctx, input }) => verifyUserEmailManually(input.userId, ctx.user.id))
 });
 
 // server/routers/admin/quotes.ts
-import { TRPCError as TRPCError18 } from "@trpc/server";
-import { z as z28 } from "zod";
+import { TRPCError as TRPCError19 } from "@trpc/server";
+import { z as z29 } from "zod";
 
 // shared/orgQuote.ts
-import { z as z27 } from "zod";
+import { z as z28 } from "zod";
 var QUOTE_STATUSES = ["draft", "sent", "accepted", "rejected"];
-var quoteLineSchema = z27.object({
-  description: z27.string().trim().min(1).max(200),
-  quantity: z27.number().int().min(1).max(1e5),
-  unitPriceTry: z27.number().int().min(0).max(1e8)
+var quoteLineSchema = z28.object({
+  description: z28.string().trim().min(1).max(200),
+  quantity: z28.number().int().min(1).max(1e5),
+  unitPriceTry: z28.number().int().min(0).max(1e8)
 });
 function computeQuoteTotals(lines, discountPercent, vatRate) {
   const subtotal = lines.reduce((sum, line) => sum + line.quantity * line.unitPriceTry, 0);
@@ -14191,8 +14450,8 @@ function computeQuoteTotals(lines, discountPercent, vatRate) {
 var quoteNumber = (id8, createdAt) => `T-${new Date(createdAt).getFullYear()}-${String(id8).padStart(4, "0")}`;
 
 // server/org/quoteDb.ts
-import { desc as desc19, eq as eq32 } from "drizzle-orm";
-async function requireDb11() {
+import { desc as desc20, eq as eq34 } from "drizzle-orm";
+async function requireDb12() {
   const db = await getDb();
   if (!db) throw new Error("Veritaban\u0131na ula\u015F\u0131lamad\u0131.");
   return db;
@@ -14210,89 +14469,89 @@ var toRow = (input) => {
   return { ...rest, linesJson: JSON.stringify(lines), subtotalTry: totals.subtotal, totalTry: totals.total };
 };
 async function listQuotes() {
-  const db = await requireDb11();
-  return db.select({ id: orgQuotes.id, orgId: orgQuotes.orgId, orgName: organizations.name, customerName: orgQuotes.customerName, plan: orgQuotes.plan, months: orgQuotes.months, totalTry: orgQuotes.totalTry, status: orgQuotes.status, validUntil: orgQuotes.validUntil, appliedAt: orgQuotes.appliedAt, createdAt: orgQuotes.createdAt, updatedAt: orgQuotes.updatedAt }).from(orgQuotes).leftJoin(organizations, eq32(organizations.id, orgQuotes.orgId)).orderBy(desc19(orgQuotes.createdAt));
+  const db = await requireDb12();
+  return db.select({ id: orgQuotes.id, orgId: orgQuotes.orgId, orgName: organizations.name, customerName: orgQuotes.customerName, plan: orgQuotes.plan, months: orgQuotes.months, totalTry: orgQuotes.totalTry, status: orgQuotes.status, validUntil: orgQuotes.validUntil, appliedAt: orgQuotes.appliedAt, createdAt: orgQuotes.createdAt, updatedAt: orgQuotes.updatedAt }).from(orgQuotes).leftJoin(organizations, eq34(organizations.id, orgQuotes.orgId)).orderBy(desc20(orgQuotes.createdAt));
 }
 async function getQuote(id8) {
-  const db = await requireDb11();
-  const [row] = await db.select({ quote: orgQuotes, orgName: organizations.name, createdByName: users.name, createdByEmail: users.email }).from(orgQuotes).leftJoin(organizations, eq32(organizations.id, orgQuotes.orgId)).leftJoin(users, eq32(users.id, orgQuotes.createdByUserId)).where(eq32(orgQuotes.id, id8)).limit(1);
+  const db = await requireDb12();
+  const [row] = await db.select({ quote: orgQuotes, orgName: organizations.name, createdByName: users.name, createdByEmail: users.email }).from(orgQuotes).leftJoin(organizations, eq34(organizations.id, orgQuotes.orgId)).leftJoin(users, eq34(users.id, orgQuotes.createdByUserId)).where(eq34(orgQuotes.id, id8)).limit(1);
   if (!row) return null;
   const { linesJson, ...quote } = row.quote;
   const lines = parseLines(linesJson);
   return { ...quote, lines, totals: computeQuoteTotals(lines, quote.discountPercent, quote.vatRate), orgName: row.orgName, createdByName: row.createdByName, createdByEmail: row.createdByEmail };
 }
 async function createQuote(input, createdByUserId) {
-  const db = await requireDb11();
+  const db = await requireDb12();
   const [row] = await db.insert(orgQuotes).values({ ...toRow(input), createdByUserId }).returning({ id: orgQuotes.id });
   return row.id;
 }
 async function updateQuote(id8, input) {
-  const db = await requireDb11();
-  await db.update(orgQuotes).set(toRow(input)).where(eq32(orgQuotes.id, id8));
+  const db = await requireDb12();
+  await db.update(orgQuotes).set(toRow(input)).where(eq34(orgQuotes.id, id8));
 }
 async function setQuoteStatus(id8, status) {
-  const db = await requireDb11();
-  await db.update(orgQuotes).set({ status }).where(eq32(orgQuotes.id, id8));
+  const db = await requireDb12();
+  await db.update(orgQuotes).set({ status }).where(eq34(orgQuotes.id, id8));
 }
 async function markQuoteApplied(id8) {
-  const db = await requireDb11();
-  await db.update(orgQuotes).set({ appliedAt: /* @__PURE__ */ new Date() }).where(eq32(orgQuotes.id, id8));
+  const db = await requireDb12();
+  await db.update(orgQuotes).set({ appliedAt: /* @__PURE__ */ new Date() }).where(eq34(orgQuotes.id, id8));
 }
 async function deleteQuote(id8) {
-  const db = await requireDb11();
-  await db.delete(orgQuotes).where(eq32(orgQuotes.id, id8));
+  const db = await requireDb12();
+  await db.delete(orgQuotes).where(eq34(orgQuotes.id, id8));
 }
 
 // server/routers/admin/quotes.ts
-var id6 = z28.number().int().positive();
-var day = z28.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-var quoteInput = z28.object({
+var id6 = z29.number().int().positive();
+var day = z29.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+var quoteInput = z29.object({
   orgId: id6.nullable(),
-  customerName: z28.string().trim().min(2).max(160),
-  contactName: z28.string().trim().max(120).nullable(),
-  contactEmail: z28.string().trim().email().max(160).nullable(),
-  plan: z28.enum(ORG_PLANS),
-  months: z28.number().int().min(1).max(60),
-  studentCount: z28.number().int().min(1).max(1e5).nullable(),
-  lines: z28.array(quoteLineSchema).min(1).max(30),
-  discountPercent: z28.number().int().min(0).max(100),
-  vatRate: z28.number().int().min(0).max(30),
+  customerName: z29.string().trim().min(2).max(160),
+  contactName: z29.string().trim().max(120).nullable(),
+  contactEmail: z29.string().trim().email().max(160).nullable(),
+  plan: z29.enum(ORG_PLANS),
+  months: z29.number().int().min(1).max(60),
+  studentCount: z29.number().int().min(1).max(1e5).nullable(),
+  lines: z29.array(quoteLineSchema).min(1).max(30),
+  discountPercent: z29.number().int().min(0).max(100),
+  vatRate: z29.number().int().min(0).max(30),
   validUntil: day.nullable(),
-  note: z28.string().trim().max(2e3).nullable()
+  note: z29.string().trim().max(2e3).nullable()
 });
 async function requireQuote(quoteId) {
   const quote = await getQuote(quoteId);
-  if (!quote) throw new TRPCError18({ code: "NOT_FOUND", message: "Teklif bulunamad\u0131." });
+  if (!quote) throw new TRPCError19({ code: "NOT_FOUND", message: "Teklif bulunamad\u0131." });
   return quote;
 }
 var adminQuotesRouter = router({
   list: adminProcedure.query(() => listQuotes()),
-  get: adminProcedure.input(z28.object({ id: id6 })).query(({ input }) => requireQuote(input.id)),
+  get: adminProcedure.input(z29.object({ id: id6 })).query(({ input }) => requireQuote(input.id)),
   save: adminProcedure.input(quoteInput.extend({ id: id6.optional() })).mutation(async ({ ctx, input }) => {
-    if (input.orgId && !await getOrganization(input.orgId)) throw new TRPCError18({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+    if (input.orgId && !await getOrganization(input.orgId)) throw new TRPCError19({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
     const { id: quoteId, validUntil, ...rest } = input;
     const values = { ...rest, contactName: rest.contactName || null, contactEmail: rest.contactEmail || null, note: rest.note || null, validUntil: validUntil ? /* @__PURE__ */ new Date(`${validUntil}T23:59:59`) : null };
     if (!quoteId) return { id: await createQuote(values, ctx.user.id) };
     const current = await requireQuote(quoteId);
-    if (current.status === "accepted" || current.status === "rejected") throw new TRPCError18({ code: "BAD_REQUEST", message: "Sonu\xE7lanm\u0131\u015F teklif de\u011Fi\u015Ftirilemez; kopyalay\u0131p yenisini haz\u0131rla." });
+    if (current.status === "accepted" || current.status === "rejected") throw new TRPCError19({ code: "BAD_REQUEST", message: "Sonu\xE7lanm\u0131\u015F teklif de\u011Fi\u015Ftirilemez; kopyalay\u0131p yenisini haz\u0131rla." });
     await updateQuote(quoteId, values);
     return { id: quoteId };
   }),
-  setStatus: adminProcedure.input(z28.object({ id: id6, status: z28.enum(QUOTE_STATUSES) })).mutation(async ({ ctx, input }) => {
+  setStatus: adminProcedure.input(z29.object({ id: id6, status: z29.enum(QUOTE_STATUSES) })).mutation(async ({ ctx, input }) => {
     const quote = await requireQuote(input.id);
-    if (quote.appliedAt) throw new TRPCError18({ code: "BAD_REQUEST", message: "Kuruma uygulanm\u0131\u015F teklifin durumu de\u011Fi\u015Fmez." });
+    if (quote.appliedAt) throw new TRPCError19({ code: "BAD_REQUEST", message: "Kuruma uygulanm\u0131\u015F teklifin durumu de\u011Fi\u015Fmez." });
     await setQuoteStatus(input.id, input.status);
     if (quote.orgId) await writeAudit({ orgId: quote.orgId, actorUserId: ctx.user.id, action: "platform.quote_status", targetType: "quote", targetId: input.id, metadata: { status: input.status, number: quoteNumber(quote.id, quote.createdAt) } });
     return { ok: true };
   }),
   /** Kabul edilen teklifi bağlı kurumun üyeliğine uygular (bir kez). */
-  applyToOrg: adminProcedure.input(z28.object({ id: id6 })).mutation(async ({ ctx, input }) => {
+  applyToOrg: adminProcedure.input(z29.object({ id: id6 })).mutation(async ({ ctx, input }) => {
     const quote = await requireQuote(input.id);
-    if (quote.status !== "accepted") throw new TRPCError18({ code: "BAD_REQUEST", message: "\xD6nce teklifi kabul edildi olarak i\u015Faretle." });
-    if (quote.appliedAt) throw new TRPCError18({ code: "CONFLICT", message: "Bu teklif kuruma zaten uyguland\u0131." });
-    if (!quote.orgId) throw new TRPCError18({ code: "BAD_REQUEST", message: "Teklif bir kuruma ba\u011Fl\u0131 de\u011Fil; \xF6nce kurumu olu\u015Fturup teklife ba\u011Fla." });
+    if (quote.status !== "accepted") throw new TRPCError19({ code: "BAD_REQUEST", message: "\xD6nce teklifi kabul edildi olarak i\u015Faretle." });
+    if (quote.appliedAt) throw new TRPCError19({ code: "CONFLICT", message: "Bu teklif kuruma zaten uyguland\u0131." });
+    if (!quote.orgId) throw new TRPCError19({ code: "BAD_REQUEST", message: "Teklif bir kuruma ba\u011Fl\u0131 de\u011Fil; \xF6nce kurumu olu\u015Fturup teklife ba\u011Fla." });
     const org = await getOrganization(quote.orgId);
-    if (!org) throw new TRPCError18({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
+    if (!org) throw new TRPCError19({ code: "NOT_FOUND", message: "Kurum bulunamad\u0131." });
     const now = /* @__PURE__ */ new Date();
     const expired = membershipState(org, now) !== "active";
     await updateOrgMembership(org.id, { plan: quote.plan, membershipStartsAt: expired || !org.membershipStartsAt ? now : org.membershipStartsAt, membershipEndsAt: renewedMembershipEnd(expired ? null : org.membershipEndsAt, now, quote.months), aiCreditsMonthly: Math.max(org.aiCreditsMonthly, ORG_PLAN_DEFAULT_CREDITS[quote.plan]) });
@@ -14300,47 +14559,47 @@ var adminQuotesRouter = router({
     await writeAudit({ orgId: org.id, actorUserId: ctx.user.id, action: "platform.quote_applied", targetType: "quote", targetId: quote.id, metadata: { plan: ORG_PLAN_LABELS[quote.plan], months: quote.months, number: quoteNumber(quote.id, quote.createdAt) } });
     return { ok: true };
   }),
-  delete: adminProcedure.input(z28.object({ id: id6 })).mutation(async ({ input }) => {
+  delete: adminProcedure.input(z29.object({ id: id6 })).mutation(async ({ input }) => {
     const quote = await requireQuote(input.id);
-    if (quote.status !== "draft") throw new TRPCError18({ code: "BAD_REQUEST", message: "Yaln\u0131zca taslak teklif silinebilir." });
+    if (quote.status !== "draft") throw new TRPCError19({ code: "BAD_REQUEST", message: "Yaln\u0131zca taslak teklif silinebilir." });
     await deleteQuote(input.id);
     return { ok: true };
   })
 });
 
 // server/routers/admin/settings.ts
-import { eq as eq34 } from "drizzle-orm";
-import { z as z30 } from "zod";
+import { eq as eq36 } from "drizzle-orm";
+import { z as z31 } from "zod";
 
 // shared/platformCompany.ts
-import { z as z29 } from "zod";
-var text3 = (max) => z29.string().trim().max(max).default("");
-var companyInfoSchema = z29.object({
+import { z as z30 } from "zod";
+var text3 = (max) => z30.string().trim().max(max).default("");
+var companyInfoSchema = z30.object({
   brandName: text3(80),
   legalName: text3(200),
   taxOffice: text3(80),
-  taxNumber: z29.string().trim().regex(/^(\d{10,11})?$/, "Vergi / TC kimlik numaras\u0131 10 ya da 11 haneli olmal\u0131.").default(""),
-  mersisNo: z29.string().trim().regex(/^(\d{16})?$/, "MERS\u0130S numaras\u0131 16 haneli olmal\u0131.").default(""),
+  taxNumber: z30.string().trim().regex(/^(\d{10,11})?$/, "Vergi / TC kimlik numaras\u0131 10 ya da 11 haneli olmal\u0131.").default(""),
+  mersisNo: z30.string().trim().regex(/^(\d{16})?$/, "MERS\u0130S numaras\u0131 16 haneli olmal\u0131.").default(""),
   address: text3(300),
   phone: text3(40),
-  email: z29.union([z29.literal(""), z29.string().trim().email("Ge\xE7erli bir e-posta yaz.").max(160)]).default(""),
+  email: z30.union([z30.literal(""), z30.string().trim().email("Ge\xE7erli bir e-posta yaz.").max(160)]).default(""),
   website: text3(160),
   bankName: text3(80),
-  iban: z29.string().trim().transform((value) => value.replace(/\s+/g, "").toUpperCase()).pipe(z29.string().regex(/^(TR\d{24})?$/, "IBAN TR ile ba\u015Flayan 26 karakter olmal\u0131.")).default(""),
+  iban: z30.string().trim().transform((value) => value.replace(/\s+/g, "").toUpperCase()).pipe(z30.string().regex(/^(TR\d{24})?$/, "IBAN TR ile ba\u015Flayan 26 karakter olmal\u0131.")).default(""),
   quoteTerms: text3(2e3)
 });
 var EMPTY_COMPANY = companyInfoSchema.parse({});
 
 // server/admin/platformSettings.ts
-import { eq as eq33 } from "drizzle-orm";
-async function requireDb12() {
+import { eq as eq35 } from "drizzle-orm";
+async function requireDb13() {
   const db = await getDb();
   if (!db) throw new Error("Veritaban\u0131na ula\u015F\u0131lamad\u0131.");
   return db;
 }
 async function getCompanyInfo() {
-  const db = await requireDb12();
-  const [row] = await db.select({ valueJson: platformSettings.valueJson }).from(platformSettings).where(eq33(platformSettings.key, "company")).limit(1);
+  const db = await requireDb13();
+  const [row] = await db.select({ valueJson: platformSettings.valueJson }).from(platformSettings).where(eq35(platformSettings.key, "company")).limit(1);
   if (!row) return EMPTY_COMPANY;
   try {
     return companyInfoSchema.parse(JSON.parse(row.valueJson));
@@ -14349,7 +14608,7 @@ async function getCompanyInfo() {
   }
 }
 async function saveCompanyInfo(info, updatedByUserId) {
-  const db = await requireDb12();
+  const db = await requireDb13();
   const values = { valueJson: JSON.stringify(info), updatedByUserId };
   await db.insert(platformSettings).values({ key: "company", ...values }).onConflictDoUpdate({ target: platformSettings.key, set: values });
 }
@@ -14362,23 +14621,23 @@ var adminSettingsRouter = router({
     await writeAuditLog({ userId: ctx.user.id, adminId: ctx.user.id, action: "company_info_updated", newState: { legalName: input.legalName, taxNumber: input.taxNumber } });
     return { ok: true };
   }),
-  updateMyName: adminProcedure.input(z30.object({ name: z30.string().trim().min(2).max(120) })).mutation(async ({ ctx, input }) => {
+  updateMyName: adminProcedure.input(z31.object({ name: z31.string().trim().min(2).max(120) })).mutation(async ({ ctx, input }) => {
     const db = await getDb();
     if (!db) throw new Error("Veritaban\u0131na ula\u015F\u0131lamad\u0131.");
-    await db.update(users).set({ name: input.name }).where(eq34(users.id, ctx.user.id));
+    await db.update(users).set({ name: input.name }).where(eq36(users.id, ctx.user.id));
     return { ok: true };
   })
 });
 
 // server/routers/admin/topics.ts
-import { TRPCError as TRPCError19 } from "@trpc/server";
-import { z as z31 } from "zod";
+import { TRPCError as TRPCError20 } from "@trpc/server";
+import { z as z32 } from "zod";
 
 // server/admin/topicAdmin.ts
-import { and as and28, eq as eq35, inArray as inArray14, sql as sql16 } from "drizzle-orm";
+import { and as and30, eq as eq37, inArray as inArray14, sql as sql18 } from "drizzle-orm";
 var TopicAdminError = class extends Error {
 };
-async function requireDb13() {
+async function requireDb14() {
   const db = await getDb();
   if (!db) throw new Error("Veritaban\u0131na ula\u015F\u0131lamad\u0131.");
   return db;
@@ -14396,9 +14655,9 @@ var parseNames = (json) => {
 var CURRICULUM_RANK = new Map(CURRICULUM.map((def, index2) => [def.slug, index2]));
 async function listTopicsForAdmin(exam) {
   await ensureTopicCatalogSeeded();
-  const db = await requireDb13();
-  const rows = await db.select().from(yksTopics).where(eq35(yksTopics.exam, exam));
-  const counts = rows.length ? await db.select({ topicId: topicProgress.topicId, count: sql16`COUNT(DISTINCT ${topicProgress.userId})::int` }).from(topicProgress).where(inArray14(topicProgress.topicId, rows.map((row) => row.id))).groupBy(topicProgress.topicId) : [];
+  const db = await requireDb14();
+  const rows = await db.select().from(yksTopics).where(eq37(yksTopics.exam, exam));
+  const counts = rows.length ? await db.select({ topicId: topicProgress.topicId, count: sql18`COUNT(DISTINCT ${topicProgress.userId})::int` }).from(topicProgress).where(inArray14(topicProgress.topicId, rows.map((row) => row.id))).groupBy(topicProgress.topicId) : [];
   const countById = new Map(counts.map((row) => [row.topicId, Number(row.count)]));
   const order = subjectNamesOf(exam);
   const subjects = Array.from(/* @__PURE__ */ new Set([...order, ...rows.map((row) => row.subject)]));
@@ -14407,36 +14666,36 @@ async function listTopicsForAdmin(exam) {
   return { subjects, topics };
 }
 async function findDuplicate(exam, subject2, topic, exceptId) {
-  const db = await requireDb13();
-  const rows = await db.select({ id: yksTopics.id, topic: yksTopics.topic, hidden: yksTopics.hidden }).from(yksTopics).where(and28(eq35(yksTopics.exam, exam), eq35(yksTopics.subject, subject2)));
+  const db = await requireDb14();
+  const rows = await db.select({ id: yksTopics.id, topic: yksTopics.topic, hidden: yksTopics.hidden }).from(yksTopics).where(and30(eq37(yksTopics.exam, exam), eq37(yksTopics.subject, subject2)));
   return rows.find((row) => row.id !== exceptId && sameName(row.topic, topic)) ?? null;
 }
 async function addTopic(input) {
-  const db = await requireDb13();
+  const db = await requireDb14();
   const { subjects } = await listTopicsForAdmin(input.exam);
   if (!subjects.includes(input.subject)) throw new TopicAdminError("Bu ders bu s\u0131navda yok.");
   const duplicate = await findDuplicate(input.exam, input.subject, input.topic);
   if (duplicate) throw new TopicAdminError(duplicate.hidden ? "Bu konu zaten var ama gizli; listede 'G\xF6ster' ile geri a\xE7abilirsin." : "Bu derste ayn\u0131 adl\u0131 bir konu zaten var.");
   const base = `${ADMIN_TOPIC_SLUG_PREFIX}${input.exam.toLowerCase()}-${slugify3(input.subject)}-${slugify3(input.topic)}`.slice(0, 110);
-  const taken = new Set((await db.select({ slug: yksTopics.slug }).from(yksTopics).where(sql16`${yksTopics.slug} LIKE ${`${base}%`}`)).map((row2) => row2.slug));
+  const taken = new Set((await db.select({ slug: yksTopics.slug }).from(yksTopics).where(sql18`${yksTopics.slug} LIKE ${`${base}%`}`)).map((row2) => row2.slug));
   let slug = base;
   for (let n = 2; taken.has(slug); n += 1) slug = `${base}-${n}`;
   const [row] = await db.insert(yksTopics).values({ slug, exam: input.exam, subject: input.subject, unit: input.unit, topic: input.topic }).returning({ id: yksTopics.id });
   return row.id;
 }
 async function updateTopic(input) {
-  const db = await requireDb13();
-  const [row] = await db.select().from(yksTopics).where(eq35(yksTopics.id, input.id)).limit(1);
+  const db = await requireDb14();
+  const [row] = await db.select().from(yksTopics).where(eq37(yksTopics.id, input.id)).limit(1);
   if (!row) throw new TopicAdminError("Konu bulunamad\u0131.");
   if (await findDuplicate(row.exam, row.subject, input.topic, row.id)) throw new TopicAdminError("Bu derste ayn\u0131 adl\u0131 bir konu zaten var.");
   const names = parseNames(row.previousNames);
   if (!sameName(row.topic, input.topic) && !names.includes(row.topic)) names.push(row.topic);
-  await db.update(yksTopics).set({ topic: input.topic, unit: input.unit, previousNames: JSON.stringify(names.filter((name2) => !sameName(name2, input.topic))) }).where(eq35(yksTopics.id, row.id));
+  await db.update(yksTopics).set({ topic: input.topic, unit: input.unit, previousNames: JSON.stringify(names.filter((name2) => !sameName(name2, input.topic))) }).where(eq37(yksTopics.id, row.id));
   return { exam: row.exam, from: row.topic };
 }
 async function renameUnit(input) {
-  const db = await requireDb13();
-  const updated = await db.update(yksTopics).set({ unit: input.to }).where(and28(eq35(yksTopics.exam, input.exam), eq35(yksTopics.subject, input.subject), eq35(yksTopics.unit, input.from))).returning({ id: yksTopics.id });
+  const db = await requireDb14();
+  const updated = await db.update(yksTopics).set({ unit: input.to }).where(and30(eq37(yksTopics.exam, input.exam), eq37(yksTopics.subject, input.subject), eq37(yksTopics.unit, input.from))).returning({ id: yksTopics.id });
   if (!updated.length) throw new TopicAdminError("\xDCnite bulunamad\u0131.");
   return updated.length;
 }
@@ -14516,51 +14775,51 @@ async function applyTopicImport(exam, rows) {
   return plan;
 }
 async function setTopicHidden(id8, hidden) {
-  const db = await requireDb13();
-  const updated = await db.update(yksTopics).set({ hidden: hidden ? 1 : 0 }).where(eq35(yksTopics.id, id8)).returning({ id: yksTopics.id });
+  const db = await requireDb14();
+  const updated = await db.update(yksTopics).set({ hidden: hidden ? 1 : 0 }).where(eq37(yksTopics.id, id8)).returning({ id: yksTopics.id });
   if (!updated.length) throw new TopicAdminError("Konu bulunamad\u0131.");
 }
 
 // server/routers/admin/topics.ts
-var id7 = z31.number().int().positive();
-var name = (max) => z31.string().trim().min(2).max(max);
-var importInput = z31.object({
-  exam: z31.enum(EXAM_KINDS),
-  rows: z31.array(z31.object({ line: z31.number().int().min(1), id: id7.nullable().optional(), subject: z31.string().max(200), unit: z31.string().max(300), topic: z31.string().max(300), hidden: z31.boolean().nullable().optional() })).min(1).max(3e3)
+var id7 = z32.number().int().positive();
+var name = (max) => z32.string().trim().min(2).max(max);
+var importInput = z32.object({
+  exam: z32.enum(EXAM_KINDS),
+  rows: z32.array(z32.object({ line: z32.number().int().min(1), id: id7.nullable().optional(), subject: z32.string().max(200), unit: z32.string().max(300), topic: z32.string().max(300), hidden: z32.boolean().nullable().optional() })).min(1).max(3e3)
 });
-async function userFacing6(run) {
+async function userFacing7(run) {
   try {
     return await run();
   } catch (error) {
-    if (error instanceof TopicAdminError) throw new TRPCError19({ code: "BAD_REQUEST", message: error.message });
+    if (error instanceof TopicAdminError) throw new TRPCError20({ code: "BAD_REQUEST", message: error.message });
     throw error;
   }
 }
 var adminTopicsRouter = router({
-  list: adminProcedure.input(z31.object({ exam: z31.enum(EXAM_KINDS) })).query(({ input }) => listTopicsForAdmin(input.exam)),
-  add: adminProcedure.input(z31.object({ exam: z31.enum(EXAM_KINDS), subject: name(80), unit: name(120), topic: name(180) })).mutation(({ ctx, input }) => userFacing6(async () => {
+  list: adminProcedure.input(z32.object({ exam: z32.enum(EXAM_KINDS) })).query(({ input }) => listTopicsForAdmin(input.exam)),
+  add: adminProcedure.input(z32.object({ exam: z32.enum(EXAM_KINDS), subject: name(80), unit: name(120), topic: name(180) })).mutation(({ ctx, input }) => userFacing7(async () => {
     const topicId = await addTopic(input);
     await writeAuditLog({ userId: ctx.user.id, adminId: ctx.user.id, action: "topic_added", newState: input });
     return { id: topicId };
   })),
-  update: adminProcedure.input(z31.object({ id: id7, topic: name(180), unit: name(120) })).mutation(({ ctx, input }) => userFacing6(async () => {
+  update: adminProcedure.input(z32.object({ id: id7, topic: name(180), unit: name(120) })).mutation(({ ctx, input }) => userFacing7(async () => {
     const result = await updateTopic(input);
     await writeAuditLog({ userId: ctx.user.id, adminId: ctx.user.id, action: "topic_updated", oldState: { topic: result.from }, newState: input });
     return { ok: true };
   })),
-  renameUnit: adminProcedure.input(z31.object({ exam: z31.enum(EXAM_KINDS), subject: name(80), from: z31.string().trim().min(1).max(120), to: name(120) })).mutation(({ ctx, input }) => userFacing6(async () => {
+  renameUnit: adminProcedure.input(z32.object({ exam: z32.enum(EXAM_KINDS), subject: name(80), from: z32.string().trim().min(1).max(120), to: name(120) })).mutation(({ ctx, input }) => userFacing7(async () => {
     const count4 = await renameUnit(input);
     await writeAuditLog({ userId: ctx.user.id, adminId: ctx.user.id, action: "topic_unit_renamed", newState: input });
     return { count: count4 };
   })),
   /** Excel'den toplu aktarım: önce `importPreview` (yazmaz), onaylanınca `importApply`. */
-  importPreview: adminProcedure.input(importInput).mutation(({ input }) => userFacing6(() => planTopicImport(input.exam, input.rows))),
-  importApply: adminProcedure.input(importInput).mutation(({ ctx, input }) => userFacing6(async () => {
+  importPreview: adminProcedure.input(importInput).mutation(({ input }) => userFacing7(() => planTopicImport(input.exam, input.rows))),
+  importApply: adminProcedure.input(importInput).mutation(({ ctx, input }) => userFacing7(async () => {
     const plan = await applyTopicImport(input.exam, input.rows);
     await writeAuditLog({ userId: ctx.user.id, adminId: ctx.user.id, action: "topic_import", newState: { exam: input.exam, added: plan.add.length, updated: plan.update.length, skipped: plan.skipped.length } });
     return plan;
   })),
-  setHidden: adminProcedure.input(z31.object({ id: id7, hidden: z31.boolean() })).mutation(({ ctx, input }) => userFacing6(async () => {
+  setHidden: adminProcedure.input(z32.object({ id: id7, hidden: z32.boolean() })).mutation(({ ctx, input }) => userFacing7(async () => {
     await setTopicHidden(input.id, input.hidden);
     await writeAuditLog({ userId: ctx.user.id, adminId: ctx.user.id, action: input.hidden ? "topic_hidden" : "topic_shown", newState: input });
     return { ok: true };
@@ -14585,17 +14844,17 @@ var adminRouter = router({
 });
 
 // server/routers/testimonials.ts
-import { z as z32 } from "zod";
+import { z as z33 } from "zod";
 
 // shared/testimonials.ts
 var TESTIMONIAL_LIMITS = { displayName: 60, detail: 80, bodyMin: 20, body: 600 };
 
 // server/routers/testimonials.ts
-var testimonialInput = z32.object({
-  displayName: z32.string().trim().min(2, "G\xF6r\xFCnecek ad\u0131n\u0131 yaz.").max(TESTIMONIAL_LIMITS.displayName),
-  detail: z32.string().trim().max(TESTIMONIAL_LIMITS.detail).optional(),
-  rating: z32.number().int().min(1).max(5),
-  body: z32.string().trim().min(TESTIMONIAL_LIMITS.bodyMin, `Yorumun en az ${TESTIMONIAL_LIMITS.bodyMin} karakter olmal\u0131.`).max(TESTIMONIAL_LIMITS.body)
+var testimonialInput = z33.object({
+  displayName: z33.string().trim().min(2, "G\xF6r\xFCnecek ad\u0131n\u0131 yaz.").max(TESTIMONIAL_LIMITS.displayName),
+  detail: z33.string().trim().max(TESTIMONIAL_LIMITS.detail).optional(),
+  rating: z33.number().int().min(1).max(5),
+  body: z33.string().trim().min(TESTIMONIAL_LIMITS.bodyMin, `Yorumun en az ${TESTIMONIAL_LIMITS.bodyMin} karakter olmal\u0131.`).max(TESTIMONIAL_LIMITS.body)
 });
 var testimonialsRouter = router({
   published: publicProcedure.query(() => listPublishedTestimonials()),
@@ -14608,73 +14867,73 @@ var testimonialsRouter = router({
 });
 
 // server/routers.ts
-var planInput2 = z33.object({
-  topics: z33.array(z33.object({
-    topic: z33.string(),
-    subject: z33.string(),
-    exam: z33.enum(EXAM_KINDS),
-    progress: z33.number(),
-    status: z33.enum(["Zay\u0131f", "Orta", "\u0130yi"])
+var planInput2 = z34.object({
+  topics: z34.array(z34.object({
+    topic: z34.string(),
+    subject: z34.string(),
+    exam: z34.enum(EXAM_KINDS),
+    progress: z34.number(),
+    status: z34.enum(["Zay\u0131f", "Orta", "\u0130yi"])
   })).max(50),
-  exams: z33.array(z33.object({
-    title: z33.string(),
-    date: z33.string(),
-    net: z33.number(),
-    subjects: z33.record(z33.string(), z33.number()),
-    topicDetails: z33.array(z33.object({
-      subject: z33.string(),
-      topic: z33.string(),
-      questionCount: z33.number(),
-      correct: z33.number(),
-      wrong: z33.number(),
-      blank: z33.number(),
-      accuracy: z33.number(),
-      net: z33.number()
+  exams: z34.array(z34.object({
+    title: z34.string(),
+    date: z34.string(),
+    net: z34.number(),
+    subjects: z34.record(z34.string(), z34.number()),
+    topicDetails: z34.array(z34.object({
+      subject: z34.string(),
+      topic: z34.string(),
+      questionCount: z34.number(),
+      correct: z34.number(),
+      wrong: z34.number(),
+      blank: z34.number(),
+      accuracy: z34.number(),
+      net: z34.number()
     })).optional()
   })).max(10),
-  books: z33.array(z33.object({
-    id: z33.string(),
-    title: z33.string(),
-    subject: z33.string(),
-    exam: z33.enum(EXAM_KINDS),
-    level: z33.enum(["Kolay", "Orta", "Zor"]),
-    pageCount: z33.number().optional(),
-    totalQuestions: z33.number().optional(),
-    accuracy: z33.number().optional(),
-    activeDays: z33.number().optional(),
-    mappings: z33.array(z33.object({ topic: z33.string(), pageStart: z33.number().optional(), pageEnd: z33.number().optional(), testStart: z33.number().optional(), testEnd: z33.number().optional() })).max(50).optional()
+  books: z34.array(z34.object({
+    id: z34.string(),
+    title: z34.string(),
+    subject: z34.string(),
+    exam: z34.enum(EXAM_KINDS),
+    level: z34.enum(["Kolay", "Orta", "Zor"]),
+    pageCount: z34.number().optional(),
+    totalQuestions: z34.number().optional(),
+    accuracy: z34.number().optional(),
+    activeDays: z34.number().optional(),
+    mappings: z34.array(z34.object({ topic: z34.string(), pageStart: z34.number().optional(), pageEnd: z34.number().optional(), testStart: z34.number().optional(), testEnd: z34.number().optional() })).max(50).optional()
   })).max(30).default([]),
-  availableMinutes: z33.number().min(120).max(2400).default(600),
+  availableMinutes: z34.number().min(120).max(2400).default(600),
   // Öğrencinin yerel "bugün"ü (YYYY-MM-DD): plan bugünden başlayan 7 günü kapsar.
-  startDate: z33.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  goal: z33.string().max(120).default("YKS 2027"),
+  startDate: z34.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  goal: z34.string().max(120).default("YKS 2027"),
   // Onboarding'den gelen koçluk bağlamı — tamamen isteğe bağlı, eski
   // istemciler (veya onboarding'i henüz tamamlamamış kullanıcılar) bu alanı
   // hiç göndermeyebilir.
-  studentProfile: z33.object({
+  studentProfile: z34.object({
     // Hedef bilgileri — onboarding'in "Kullanıcı tanımlama" ve "Hedefler"
     // adımlarından. AI planı önceliklendirirken (örn. hedef net/sıralamaya
     // göre tempo) ve dilini kişiselleştirirken kullanır.
-    targetScoreType: z33.string().max(20).optional(),
-    examYear: z33.number().int().optional(),
-    targetUniversity: z33.string().max(180).optional(),
-    targetDepartment: z33.string().max(180).optional(),
-    targetRanking: z33.string().max(60).optional(),
-    dailyStudyDuration: z33.number().int().min(0).max(960).optional(),
-    preferredStudyMethods: z33.array(z33.string().max(40)).max(5).optional(),
-    studyObstacles: z33.string().max(500).optional(),
-    coachingStyle: z33.string().max(40).optional(),
-    mainGoal: z33.string().max(500).optional()
+    targetScoreType: z34.string().max(20).optional(),
+    examYear: z34.number().int().optional(),
+    targetUniversity: z34.string().max(180).optional(),
+    targetDepartment: z34.string().max(180).optional(),
+    targetRanking: z34.string().max(60).optional(),
+    dailyStudyDuration: z34.number().int().min(0).max(960).optional(),
+    preferredStudyMethods: z34.array(z34.string().max(40)).max(5).optional(),
+    studyObstacles: z34.string().max(500).optional(),
+    coachingStyle: z34.string().max(40).optional(),
+    mainGoal: z34.string().max(500).optional()
   }).optional()
 });
-var documentExtractionInput = z33.object({
-  dataUrl: z33.string().min(20).max(12e6),
-  mimeType: z33.enum(["application/pdf", "image/png", "image/jpeg", "image/webp"]),
-  fileName: z33.string().max(180).optional()
+var documentExtractionInput = z34.object({
+  dataUrl: z34.string().min(20).max(12e6),
+  mimeType: z34.enum(["application/pdf", "image/png", "image/jpeg", "image/webp"]),
+  fileName: z34.string().max(180).optional()
 });
-var bookPhotoInput = z33.object({
-  dataUrl: z33.string().min(20).max(12e6),
-  mimeType: z33.enum(["image/png", "image/jpeg", "image/webp"])
+var bookPhotoInput = z34.object({
+  dataUrl: z34.string().min(20).max(12e6),
+  mimeType: z34.enum(["image/png", "image/jpeg", "image/webp"])
 });
 var bookPhotoSchema = {
   type: "object",
@@ -14700,18 +14959,18 @@ var bookPhotoSchema = {
   additionalProperties: false
 };
 var clamp013 = (value) => typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
-var userExamInput = z33.object({
-  title: z33.string().min(1).max(180),
-  exam: z33.enum(EXAM_KINDS),
-  date: z33.string().min(8).max(30),
-  net: z33.number().min(-100).max(200),
-  delta: z33.number().min(-200).max(200),
-  subjects: z33.record(z33.string(), z33.number().min(-50).max(100)),
-  timeSpent: z33.record(z33.string(), z33.number().int().min(0).max(1e3)),
-  topicNets: z33.record(z33.string(), z33.number().min(-50).max(100)),
-  topicDetails: z33.array(z33.object({ subject: z33.string(), topic: z33.string(), questionCount: z33.number().int().min(0), correct: z33.number().int().min(0), wrong: z33.number().int().min(0), blank: z33.number().int().min(0), accuracy: z33.number().min(0).max(100), net: z33.number().min(-50).max(100) })).max(300),
-  importedFrom: z33.enum(["manual", "ocr", "pdf", "csv", "xlsx"]),
-  notes: z33.string().max(5e3).optional()
+var userExamInput = z34.object({
+  title: z34.string().min(1).max(180),
+  exam: z34.enum(EXAM_KINDS),
+  date: z34.string().min(8).max(30),
+  net: z34.number().min(-100).max(200),
+  delta: z34.number().min(-200).max(200),
+  subjects: z34.record(z34.string(), z34.number().min(-50).max(100)),
+  timeSpent: z34.record(z34.string(), z34.number().int().min(0).max(1e3)),
+  topicNets: z34.record(z34.string(), z34.number().min(-50).max(100)),
+  topicDetails: z34.array(z34.object({ subject: z34.string(), topic: z34.string(), questionCount: z34.number().int().min(0), correct: z34.number().int().min(0), wrong: z34.number().int().min(0), blank: z34.number().int().min(0), accuracy: z34.number().min(0).max(100), net: z34.number().min(-50).max(100) })).max(300),
+  importedFrom: z34.enum(["manual", "ocr", "pdf", "csv", "xlsx"]),
+  notes: z34.string().max(5e3).optional()
 });
 var documentExtractionSchema = {
   type: "object",
@@ -14777,17 +15036,17 @@ var appRouter = router({
     }),
     // Profil menüsündeki "Şifre değiştir". Tahmin denemelerine karşı kullanıcı
     // başına 15 dakikada 5 deneme.
-    changePassword: protectedProcedure.input(z33.object({ currentPassword: z33.string().min(1).max(200), newPassword: z33.string().min(1).max(200) })).mutation(async ({ ctx, input }) => {
+    changePassword: protectedProcedure.input(z34.object({ currentPassword: z34.string().min(1).max(200), newPassword: z34.string().min(1).max(200) })).mutation(async ({ ctx, input }) => {
       try {
         checkRateLimit(`change-password:${ctx.user.id}`, 5, 15 * 6e4);
       } catch {
-        throw new TRPCError20({ code: "TOO_MANY_REQUESTS", message: "\xC7ok fazla deneme yapt\u0131n. 15 dakika sonra tekrar dener misin?" });
+        throw new TRPCError21({ code: "TOO_MANY_REQUESTS", message: "\xC7ok fazla deneme yapt\u0131n. 15 dakika sonra tekrar dener misin?" });
       }
       try {
         await changeLocalPassword(ctx.user.id, input.currentPassword, input.newPassword);
         return { success: true };
       } catch (error) {
-        if (error instanceof PasswordChangeError) throw new TRPCError20({ code: "BAD_REQUEST", message: error.message });
+        if (error instanceof PasswordChangeError) throw new TRPCError21({ code: "BAD_REQUEST", message: error.message });
         throw error;
       }
     }),
@@ -14798,7 +15057,7 @@ var appRouter = router({
         return await sendVerificationEmail(ctx.user, ctx.req);
       } catch (error) {
         console.error("[EmailVerification] resend failed:", error instanceof Error ? error.message : error);
-        throw new TRPCError20({ code: "INTERNAL_SERVER_ERROR", message: "Do\u011Frulama maili \u015Fu an g\xF6nderilemedi. Birka\xE7 dakika sonra tekrar dener misin?" });
+        throw new TRPCError21({ code: "INTERNAL_SERVER_ERROR", message: "Do\u011Frulama maili \u015Fu an g\xF6nderilemedi. Birka\xE7 dakika sonra tekrar dener misin?" });
       }
     })
   }),
@@ -14813,20 +15072,20 @@ var appRouter = router({
       ]);
       return { inventory, logs, mappings, switches, customBooks };
     }),
-    addBook: protectedProcedure.input(z33.object({ bookId: z33.string().max(120) })).mutation(({ ctx, input }) => addBookToInventory(ctx.user.id, input.bookId)),
-    removeBook: protectedProcedure.input(z33.object({ bookId: z33.string().max(120) })).mutation(({ ctx, input }) => removeBookFromInventory(ctx.user.id, input.bookId)),
-    addLog: protectedProcedure.input(z33.object({ bookId: z33.string().max(120), topic: z33.string().max(180).optional(), sessionDate: z33.string(), minutes: z33.number().int().min(0).max(1440), questions: z33.number().int().min(0).max(2e3), correct: z33.number().int().min(0).max(2e3), wrong: z33.number().int().min(0).max(2e3), blank: z33.number().int().min(0).max(2e3), pageStart: z33.number().int().min(0).optional(), pageEnd: z33.number().int().min(0).optional(), testStart: z33.number().int().min(0).optional(), testEnd: z33.number().int().min(0).optional() })).mutation(({ ctx, input }) => addBookStudyLog(ctx.user.id, { ...input, sessionDate: new Date(input.sessionDate) })),
-    upsertMapping: protectedProcedure.input(z33.object({ bookId: z33.string().max(120), topic: z33.string().max(180), subject: z33.string().max(80), pageStart: z33.number().int().min(0).optional(), pageEnd: z33.number().int().min(0).optional(), testStart: z33.number().int().min(0).optional(), testEnd: z33.number().int().min(0).optional() })).mutation(({ ctx, input }) => upsertBookTopicMapping(ctx.user.id, input)),
-    addSwitch: protectedProcedure.input(z33.object({ fromBookId: z33.string().max(120).optional(), toBookId: z33.string().max(120), reason: z33.string().max(300) })).mutation(({ ctx, input }) => addSourceSwitch(ctx.user.id, { ...input, switchedAt: /* @__PURE__ */ new Date() })),
-    importBooks: protectedProcedure.input(z33.object({ books: z33.array(z33.object({ id: z33.string().max(120), title: z33.string().min(1).max(180), publisher: z33.string().max(120), subject: z33.string().max(80), exam: z33.enum(EXAM_KINDS), level: z33.enum(["Kolay", "Orta", "Zor"]), format: z33.string().max(120), reason: z33.string().max(1e3), sourceUrl: z33.string().max(500).optional(), pageCount: z33.number().int().min(0).optional(), tone: z33.string().max(20), authors: z33.string().max(300).optional(), isbn: z33.string().max(32).optional() })).min(1).max(500) })).mutation(({ ctx, input }) => addUserResourceBooks(ctx.user.id, input.books)),
+    addBook: protectedProcedure.input(z34.object({ bookId: z34.string().max(120) })).mutation(({ ctx, input }) => addBookToInventory(ctx.user.id, input.bookId)),
+    removeBook: protectedProcedure.input(z34.object({ bookId: z34.string().max(120) })).mutation(({ ctx, input }) => removeBookFromInventory(ctx.user.id, input.bookId)),
+    addLog: protectedProcedure.input(z34.object({ bookId: z34.string().max(120), topic: z34.string().max(180).optional(), sessionDate: z34.string(), minutes: z34.number().int().min(0).max(1440), questions: z34.number().int().min(0).max(2e3), correct: z34.number().int().min(0).max(2e3), wrong: z34.number().int().min(0).max(2e3), blank: z34.number().int().min(0).max(2e3), pageStart: z34.number().int().min(0).optional(), pageEnd: z34.number().int().min(0).optional(), testStart: z34.number().int().min(0).optional(), testEnd: z34.number().int().min(0).optional() })).mutation(({ ctx, input }) => addBookStudyLog(ctx.user.id, { ...input, sessionDate: new Date(input.sessionDate) })),
+    upsertMapping: protectedProcedure.input(z34.object({ bookId: z34.string().max(120), topic: z34.string().max(180), subject: z34.string().max(80), pageStart: z34.number().int().min(0).optional(), pageEnd: z34.number().int().min(0).optional(), testStart: z34.number().int().min(0).optional(), testEnd: z34.number().int().min(0).optional() })).mutation(({ ctx, input }) => upsertBookTopicMapping(ctx.user.id, input)),
+    addSwitch: protectedProcedure.input(z34.object({ fromBookId: z34.string().max(120).optional(), toBookId: z34.string().max(120), reason: z34.string().max(300) })).mutation(({ ctx, input }) => addSourceSwitch(ctx.user.id, { ...input, switchedAt: /* @__PURE__ */ new Date() })),
+    importBooks: protectedProcedure.input(z34.object({ books: z34.array(z34.object({ id: z34.string().max(120), title: z34.string().min(1).max(180), publisher: z34.string().max(120), subject: z34.string().max(80), exam: z34.enum(EXAM_KINDS), level: z34.enum(["Kolay", "Orta", "Zor"]), format: z34.string().max(120), reason: z34.string().max(1e3), sourceUrl: z34.string().max(500).optional(), pageCount: z34.number().int().min(0).optional(), tone: z34.string().max(20), authors: z34.string().max(300).optional(), isbn: z34.string().max(32).optional() })).min(1).max(500) })).mutation(({ ctx, input }) => addUserResourceBooks(ctx.user.id, input.books)),
     // Ortak kitap kaydında ad/yayınevi/ISBN ile arama: kitap kayıtlıysa kapak fotoğrafı (OCR) gerekmez.
-    searchSharedBooks: protectedProcedure.input(z33.object({ q: z33.string().trim().min(2).max(120) })).query(({ input }) => searchSharedBooks(input.q)),
+    searchSharedBooks: protectedProcedure.input(z34.object({ q: z34.string().trim().min(2).max(120) })).query(({ input }) => searchSharedBooks(input.q)),
     // Kitabı kütüphaneye ekler ve ortak kayda bağlar; öğrenci "Bu kitap" dediyse (sharedBookId)
     // onaylanmış içindekiler de kopyalanır, içindekiler fotoğrafı okunmaz.
-    addBookFromCover: protectedProcedure.input(z33.object({
-      sharedBookId: z33.number().int().positive().nullable(),
-      useSharedContents: z33.boolean(),
-      draft: z33.object({ title: z33.string().trim().min(1).max(180), publisher: z33.string().max(120), subject: z33.string().max(80), exam: z33.enum(EXAM_KINDS), level: z33.enum(["Kolay", "Orta", "Zor"]), authors: z33.string().max(300).optional(), isbn: z33.string().max(32).optional(), edition: z33.string().max(120).optional() })
+    addBookFromCover: protectedProcedure.input(z34.object({
+      sharedBookId: z34.number().int().positive().nullable(),
+      useSharedContents: z34.boolean(),
+      draft: z34.object({ title: z34.string().trim().min(1).max(180), publisher: z34.string().max(120), subject: z34.string().max(80), exam: z34.enum(EXAM_KINDS), level: z34.enum(["Kolay", "Orta", "Zor"]), authors: z34.string().max(300).optional(), isbn: z34.string().max(32).optional(), edition: z34.string().max(120).optional() })
     })).mutation(({ ctx, input }) => addBookToLibrary(ctx.user.id, input)),
     // Öğrenci elindeki fiziksel kitabın kapak fotoğrafını çeker (telefon
     // kamerası); LLM görselden kitap adı/yayınevi/ders tahmini çıkarır.
@@ -14871,23 +15130,23 @@ var appRouter = router({
   }),
   exams: router({
     snapshot: protectedProcedure.query(({ ctx }) => getUserMockExams(ctx.user.id)),
-    importMany: protectedProcedure.input(z33.object({ exams: z33.array(userExamInput).min(1).max(200) })).mutation(({ ctx, input }) => addUserMockExams(ctx.user.id, input.exams.map((exam) => ({ ...exam, examDate: new Date(exam.date) }))))
+    importMany: protectedProcedure.input(z34.object({ exams: z34.array(userExamInput).min(1).max(200) })).mutation(({ ctx, input }) => addUserMockExams(ctx.user.id, input.exams.map((exam) => ({ ...exam, examDate: new Date(exam.date) }))))
   }),
   calendar: router({
     snapshot: protectedProcedure.query(({ ctx }) => getStudyCalendar(ctx.user.id)),
-    savePlan: protectedProcedure.input(z33.object({ title: z33.string().max(180), weekStart: z33.string(), weekEnd: z33.string(), summary: z33.string().max(2e3), source: z33.enum(["ai", "manual"]).optional(), replacePrevious: z33.boolean().optional(), sessions: z33.array(z33.object({ sessionDate: z33.string(), title: z33.string().max(180), subject: z33.string().max(80), topic: z33.string().max(180), kind: z33.string().max(40), plannedMinutes: z33.number().int().min(0).max(1440), targetQuestions: z33.number().int().min(0).optional(), targetPages: z33.string().max(80).nullable().optional(), targetTests: z33.string().max(80).nullable().optional() })).max(100) })).mutation(({ ctx, input }) => saveStudyPlan(ctx.user.id, { ...input, weekStart: new Date(input.weekStart), weekEnd: new Date(input.weekEnd), sessions: input.sessions.map((session) => ({ ...session, sessionDate: new Date(session.sessionDate) })) })),
-    completeSession: protectedProcedure.input(z33.object({ sessionId: z33.number().int(), actualMinutes: z33.number().int().min(0).max(1440), actualQuestions: z33.number().int().min(0).max(5e3), correct: z33.number().int().min(0).max(5e3), wrong: z33.number().int().min(0).max(5e3), blank: z33.number().int().min(0).max(5e3), actualPages: z33.number().int().min(0).max(5e3).optional(), note: z33.string().max(1e3).optional() })).mutation(({ ctx, input }) => completeStudySession(ctx.user.id, input)),
-    coachSnapshot: protectedProcedure.input(z33.object({ periodStart: z33.string(), periodEnd: z33.string() })).query(async ({ ctx, input }) => {
+    savePlan: protectedProcedure.input(z34.object({ title: z34.string().max(180), weekStart: z34.string(), weekEnd: z34.string(), summary: z34.string().max(2e3), source: z34.enum(["ai", "manual"]).optional(), replacePrevious: z34.boolean().optional(), sessions: z34.array(z34.object({ sessionDate: z34.string(), title: z34.string().max(180), subject: z34.string().max(80), topic: z34.string().max(180), kind: z34.string().max(40), plannedMinutes: z34.number().int().min(0).max(1440), targetQuestions: z34.number().int().min(0).optional(), targetPages: z34.string().max(80).nullable().optional(), targetTests: z34.string().max(80).nullable().optional() })).max(100) })).mutation(({ ctx, input }) => saveStudyPlan(ctx.user.id, { ...input, weekStart: new Date(input.weekStart), weekEnd: new Date(input.weekEnd), sessions: input.sessions.map((session) => ({ ...session, sessionDate: new Date(session.sessionDate) })) })),
+    completeSession: protectedProcedure.input(z34.object({ sessionId: z34.number().int(), actualMinutes: z34.number().int().min(0).max(1440), actualQuestions: z34.number().int().min(0).max(5e3), correct: z34.number().int().min(0).max(5e3), wrong: z34.number().int().min(0).max(5e3), blank: z34.number().int().min(0).max(5e3), actualPages: z34.number().int().min(0).max(5e3).optional(), note: z34.string().max(1e3).optional() })).mutation(({ ctx, input }) => completeStudySession(ctx.user.id, input)),
+    coachSnapshot: protectedProcedure.input(z34.object({ periodStart: z34.string(), periodEnd: z34.string() })).query(async ({ ctx, input }) => {
       const { sessions, averageAccuracy } = await getPlanAdherenceInputs(ctx.user.id, new Date(input.periodStart), new Date(input.periodEnd));
       return { ...calculatePlanAdherence(sessions, averageAccuracy), averageAccuracy, alerts: await getCoachAlerts(ctx.user.id) };
     }),
-    refreshCoach: protectedProcedure.input(z33.object({ periodStart: z33.string(), periodEnd: z33.string() })).mutation(({ ctx, input }) => savePlanAdherence(ctx.user.id, new Date(input.periodStart), new Date(input.periodEnd))),
+    refreshCoach: protectedProcedure.input(z34.object({ periodStart: z34.string(), periodEnd: z34.string() })).mutation(({ ctx, input }) => savePlanAdherence(ctx.user.id, new Date(input.periodStart), new Date(input.periodEnd))),
     // Üst çubuktaki bildirim zili: okunmamış koç uyarıları (yalnızca okuma; uyarıları refreshCoach üretir).
     alerts: protectedProcedure.query(({ ctx }) => getCoachAlerts(ctx.user.id)),
-    readCoachAlert: protectedProcedure.input(z33.object({ alertId: z33.number().int() })).mutation(({ ctx, input }) => markCoachAlertRead(ctx.user.id, input.alertId)),
-    addFocusLog: protectedProcedure.input(z33.object({ subject: z33.string().max(80), topic: z33.string().max(180), studyDate: z33.string(), minutes: z33.number().int().min(1).max(1440), questions: z33.number().int().min(0).max(5e3), correct: z33.number().int().min(0).max(5e3), wrong: z33.number().int().min(0).max(5e3), blank: z33.number().int().min(0).max(5e3), note: z33.string().max(1e3).optional() })).mutation(({ ctx, input }) => addTopicStudyLog(ctx.user.id, { ...input, studyDate: new Date(input.studyDate), note: input.note ?? null, sessionId: null })),
+    readCoachAlert: protectedProcedure.input(z34.object({ alertId: z34.number().int() })).mutation(({ ctx, input }) => markCoachAlertRead(ctx.user.id, input.alertId)),
+    addFocusLog: protectedProcedure.input(z34.object({ subject: z34.string().max(80), topic: z34.string().max(180), studyDate: z34.string(), minutes: z34.number().int().min(1).max(1440), questions: z34.number().int().min(0).max(5e3), correct: z34.number().int().min(0).max(5e3), wrong: z34.number().int().min(0).max(5e3), blank: z34.number().int().min(0).max(5e3), note: z34.string().max(1e3).optional() })).mutation(({ ctx, input }) => addTopicStudyLog(ctx.user.id, { ...input, studyDate: new Date(input.studyDate), note: input.note ?? null, sessionId: null })),
     // Paragraf pratiği / gece okuması gibi "şimdi yaptım" alışkanlık kayıtları.
-    logRoutine: protectedProcedure.input(z33.object({ title: z33.string().max(180), subject: z33.string().max(80), topic: z33.string().max(180), kind: z33.string().max(40), plannedMinutes: z33.number().int().min(0).max(1440), actualMinutes: z33.number().int().min(0).max(1440), actualPages: z33.number().int().min(0).max(5e3).optional(), note: z33.string().max(1e3).optional(), readingBookId: z33.number().int().positive().optional() })).mutation(async ({ ctx, input }) => {
+    logRoutine: protectedProcedure.input(z34.object({ title: z34.string().max(180), subject: z34.string().max(80), topic: z34.string().max(180), kind: z34.string().max(40), plannedMinutes: z34.number().int().min(0).max(1440), actualMinutes: z34.number().int().min(0).max(1440), actualPages: z34.number().int().min(0).max(5e3).optional(), note: z34.string().max(1e3).optional(), readingBookId: z34.number().int().positive().optional() })).mutation(async ({ ctx, input }) => {
       const { readingBookId, ...routine } = input;
       const calendar = await logCompletedRoutineSession(ctx.user.id, routine);
       const readingBook = readingBookId && input.actualPages ? await recordReadingPages(ctx.user.id, readingBookId, input.actualPages) : null;
@@ -14980,14 +15239,14 @@ ${JSON.stringify(input.books)}${targetContext}${chosenSubjectsContext}${coaching
         const normalized = normalizeAiPlan(parsed, fallbackPlan);
         if (normalized === fallbackPlan) {
           console.warn("[AI Plan] Unusable AI response; keys:", parsed && typeof parsed === "object" ? Object.keys(parsed).join(",") : typeof parsed);
-          throw new TRPCError20({ code: "INTERNAL_SERVER_ERROR", message: "AI plan\u0131 okunamad\u0131. Tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi." });
+          throw new TRPCError21({ code: "INTERNAL_SERVER_ERROR", message: "AI plan\u0131 okunamad\u0131. Tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi." });
         }
         return normalized;
       } catch (error) {
-        if (error instanceof TRPCError20) throw error;
+        if (error instanceof TRPCError21) throw error;
         console.warn("[AI Plan] LLM failed:", error);
         const quota = error instanceof LlmUnavailableError && error.reason === "quota";
-        throw new TRPCError20({
+        throw new TRPCError21({
           code: quota ? "TOO_MANY_REQUESTS" : "INTERNAL_SERVER_ERROR",
           message: quota ? "Yapay zek\xE2 servisinin kotas\u0131 \u015Fu an dolu; AI plan\u0131n\u0131 birka\xE7 saat sonra tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi." : "AI plan\u0131 \u015Fu an haz\u0131rlanamad\u0131; biraz sonra tekrar dener misin? Bu deneme hakk\u0131ndan d\xFC\u015Fmedi."
         });
@@ -15029,6 +15288,8 @@ ${JSON.stringify(input.books)}${targetContext}${chosenSubjectsContext}${coaching
   bookContent: bookContentRouter,
   notes: notesRouter,
   wall: wallRouter,
+  jar: jarRouter,
+  garden: gardenRouter,
   studyTasks: studyTasksRouter,
   questions: questionsRouter,
   classSchedule: classScheduleRouter,

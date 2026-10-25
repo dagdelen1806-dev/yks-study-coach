@@ -709,6 +709,60 @@ export const orgPlanPrices = pgTable("org_plan_prices", {
   updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => new Date()).notNull(),
 });
 
+// ---------------------------------------------------------------------------
+// Niyet Kavanozum (kişisel, yalnızca öğrencinin kendisi görür; hiçbir kurum/veli/koç sorgusuna girmez).
+// Öğrenci kendine olumlu bir söz yazar ya da hazır sözlerden seçer; her akşam tekrarladığında kavanoza
+// bir pirinç tanesi düşer. Günde en fazla bir tane; taneler hiç silinmez, ritüel atlanınca ceza yok.
+
+/** Öğrencinin sözleri. Aynı anda tek aktif söz (kısmi tekil indeks); değiştirilen söz arşivlenir, silinmez. */
+export const intentionAffirmations = pgTable("intention_affirmations", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
+  text: varchar("text", { length: 200 }).notNull(),
+  /** Hazır sözden seçildiyse anahtarı (shared/intentionJar.ts PRESET_AFFIRMATIONS); kendi sözüyse boş. */
+  presetKey: varchar("presetKey", { length: 40 }),
+  isActive: integer("isActive").default(1).notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+  archivedAt: timestamp("archivedAt", { withTimezone: true }),
+}, (table) => ({
+  userIdx: index("intention_affirmations_user_idx").on(table.userId),
+  oneActive: uniqueIndex("intention_affirmations_one_active").on(table.userId).where(sql`"isActive" = 1`),
+}));
+
+/** Kavanozdaki her pirinç tanesi: o günün tarihi ve o günkü sözün kopyası. (userId, dayKey) tekil: eşzamanlı iki istek ikinci taneyi yazamaz. */
+export const intentionGrains = pgTable("intention_grains", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  userId: integer("userId").notNull(),
+  /** Türkiye saatine göre takvim günü (YYYY-AA-GG). */
+  dayKey: varchar("dayKey", { length: 10 }).notNull(),
+  affirmationId: integer("affirmationId"),
+  affirmationText: varchar("affirmationText", { length: 200 }).notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  userDayUnique: uniqueIndex("intention_grains_user_day_unique").on(table.userId, table.dayKey),
+}));
+
+/** Kavanoz sayacı: toplam tane yalnızca artar (tane eklendiği işlemde +1). */
+export const intentionJars = pgTable("intention_jars", {
+  userId: integer("userId").primaryKey(),
+  totalGrains: integer("totalGrains").default(0).notNull(),
+  firstGrainAt: timestamp("firstGrainAt", { withTimezone: true }),
+  lastGrainAt: timestamp("lastGrainAt", { withTimezone: true }),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => new Date()).notNull(),
+});
+
+/**
+ * Emek Bahçem: bahçe mevcut çalışma kayıtlarından (gece okuması, paragraf, konu çalışma kayıtları) hesaplanır;
+ * burada yalnızca ulaşılan en yüksek aşama tutulur ki çalışma dursa ya da bir kayıt silinse de bahçe geri gitmesin.
+ */
+export const gardenProgress = pgTable("garden_progress", {
+  userId: integer("userId").primaryKey(),
+  highestStage: integer("highestStage").default(1).notNull(),
+  /** JSON: { "2": "2026-10-25T…", … } — her aşamaya ilk ulaşma anı. */
+  stageReachedJson: text("stageReachedJson").default("{}").notNull(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().$onUpdate(() => new Date()).notNull(),
+});
+
 /** Platform ayarları (Yönetim Paneli → Ayarlar): anahtar başına bir JSON değer (ör. "company" = şirket bilgileri). */
 export const platformSettings = pgTable("platform_settings", {
   key: varchar("key", { length: 60 }).primaryKey(),

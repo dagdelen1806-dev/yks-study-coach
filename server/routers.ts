@@ -18,6 +18,7 @@ import { bookContentRouter } from "./routers/bookContent";
 import { addBookToLibrary, findSharedBookMatches, searchSharedBooks } from "./bookContent/sharedBooks";
 import { notesRouter } from "./routers/notes";
 import { wallRouter } from "./routers/wall";
+import { gardenRouter, jarRouter } from "./routers/personal";
 import { studyTasksRouter } from "./routers/orgCases";
 import { questionsRouter } from "./routers/questions";
 import { getNotebookPlanSignal } from "./notes/questionsDb";
@@ -467,6 +468,8 @@ export const appRouter = router({
   bookContent: bookContentRouter,
   notes: notesRouter,
   wall: wallRouter,
+  jar: jarRouter,
+  garden: gardenRouter,
   studyTasks: studyTasksRouter,
   questions: questionsRouter,
   classSchedule: classScheduleRouter,

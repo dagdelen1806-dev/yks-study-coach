@@ -14,6 +14,8 @@ export const SECTION_PATHS: Record<DashboardSection, string> = {
   calendar: "/takvim",
   notebook: "/defter",
   wall: "/duvarim",
+  jar: "/niyet-kavanozum",
+  garden: "/emek-bahcem",
   premium: "/premium",
   admin: "/yonetim",
 };

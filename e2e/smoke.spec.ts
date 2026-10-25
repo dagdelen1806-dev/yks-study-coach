@@ -578,6 +578,49 @@ test("Yönetim Paneli Konular: Excel'e aktarılan dosyaya satır eklenip geri y�
   await expect(page.getByText("Konu gizlendi.")).toBeVisible();
 });
 
+test("Niyet Kavanozum: öğrenci söz seçer, akşam tekrarıyla bir pirinç kazanır, aynı gün ikinci tane düşmez; başka öğrenci görmez", async ({ page, browser }) => {
+  await signIn(page, "ogrenci5@test.local");
+  await page.goto("/niyet-kavanozum");
+  await expect(page.locator("main h1").first()).toHaveText("Niyet Kavanozum");
+  const editor = page.getByRole("radiogroup", { name: "Hazır sözler" });
+  if (await editor.isVisible()) {
+    await editor.getByRole("radio").first().click();
+    await page.getByRole("button", { name: "Sözümü kaydet" }).click();
+    await expect(page.getByText("Sözün kaydedildi.")).toBeVisible();
+  }
+  const ritualBox = page.getByLabel("Sözünü kendi cümlenle yeniden yaz");
+  if (await ritualBox.isVisible()) {
+    const affirmation = (await page.locator("blockquote").first().innerText()).replace(/[“”]/g, "");
+    await ritualBox.fill("bugün bir şey yazdım");
+    await expect(page.getByRole("button", { name: "Sözümü tekrarladım" })).toBeDisabled();
+    await ritualBox.fill(affirmation.toUpperCase());
+    await page.getByRole("button", { name: "Sözümü tekrarladım" }).click();
+    await expect(page.getByText("Bugünün tanesi kavanozda. Sözünü hatırladığın")).toBeVisible();
+  }
+  await expect(page.getByText("Bugün sözünü tekrarladın.")).toBeVisible();
+  await expect(page.getByRole("img", { name: /Kavanozda [1-9]\d* pirinç tanesi/ })).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("kavanoz-masaustu.png"), fullPage: true });
+
+  const other = await browser.newPage({ baseURL: test.info().project.use.baseURL, viewport: { width: 390, height: 844 } });
+  await signIn(other, "ogrenci6@test.local");
+  await other.goto("/niyet-kavanozum");
+  await expect(other.getByRole("radiogroup", { name: "Hazır sözler" })).toBeVisible();
+  await other.screenshot({ path: test.info().outputPath("kavanoz-telefon.png"), fullPage: true });
+  await other.close();
+});
+
+test("Emek Bahçem: öğrencinin mevcut çalışma kayıtlarından bahçe, aşama ve sayılar görünür", async ({ page }) => {
+  await signIn(page, STUDENT);
+  await page.goto("/emek-bahcem");
+  await expect(page.locator("main h1").first()).toHaveText("Emek Bahçem");
+  await expect(page.getByRole("img", { name: /Emek bahçem: aşama [1-6]/ })).toBeVisible();
+  await expect(page.getByText(/Aşama [1-6] \/ 6/)).toBeVisible();
+  await expect(page.getByText("Bahçen nasıl büyür?")).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("bahce-masaustu.png"), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: test.info().outputPath("bahce-telefon.png"), fullPage: true });
+});
+
 test("Yönetim Paneli Ayarlar: yönetici şifresini değiştirir, yeni şifreyle girer", async ({ page }) => {
   await signIn(page, "platform.admin@test.local");
   await page.goto("/yonetim/ayarlar");
