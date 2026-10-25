@@ -77,6 +77,74 @@ export async function renameUnit(input: { exam: ExamKind; subject: string; from:
   return updated.length;
 }
 
+// --- Excel'den toplu aktarım ------------------------------------------------
+
+export type TopicImportRow = { line: number; id?: number | null; subject: string; unit: string; topic: string; hidden?: boolean | null };
+export type TopicImportPlan = {
+  add: Array<{ line: number; subject: string; unit: string; topic: string; hidden: boolean }>;
+  update: Array<{ line: number; id: number; subject: string; from: { topic: string; unit: string; hidden: boolean }; to: { topic: string; unit: string; hidden: boolean } }>;
+  unchanged: number;
+  skipped: Array<{ line: number; reason: string; topic: string }>;
+};
+
+/**
+ * Excel satırlarını mevcut kataloğa karşı planlar (yazmaz). Kimlik sütunu dolu satır o konuyu günceller (ad, ünite,
+ * gizli); boşsa aynı derste aynı adlı konu varsa ona eşlenir, yoksa yeni konu olur. Ders değiştirilemez; aynı ad
+ * dosyada ya da derste iki kez olamaz.
+ */
+export async function planTopicImport(exam: ExamKind, rows: TopicImportRow[]): Promise<TopicImportPlan> {
+  const { subjects, topics } = await listTopicsForAdmin(exam);
+  const plan: TopicImportPlan = { add: [], update: [], unchanged: 0, skipped: [] };
+  const byId = new Map(topics.map((row) => [row.id, row]));
+  // Ders başına sonuçta kullanılacak adlar (çakışma denetimi): mevcut adlar, güncellemeler ve eklemelerle değişir.
+  const finalName = new Map(topics.map((row) => [row.id, row.topic]));
+  const claimed = new Set<string>();
+  const key = (subject: string, topic: string) => `${subject}\u0000${topic.trim().toLocaleLowerCase("tr")}`;
+  const nameTaken = (subject: string, topic: string, exceptId?: number) => claimed.has(key(subject, topic)) || topics.some((row) => row.id !== exceptId && row.subject === subject && sameName(finalName.get(row.id) ?? row.topic, topic));
+
+  for (const raw of rows) {
+    const subject = raw.subject.trim();
+    const unit = raw.unit.trim();
+    const topic = raw.topic.trim();
+    const skip = (reason: string) => plan.skipped.push({ line: raw.line, reason, topic: topic || "(boş)" });
+    if (!subject || !unit || !topic) { skip("Ders, ünite ve konu dolu olmalı."); continue; }
+    if (topic.length < 2 || topic.length > 180 || unit.length < 2 || unit.length > 120) { skip("Konu 2–180, ünite 2–120 karakter olmalı."); continue; }
+    if (!subjects.includes(subject)) { skip(`"${subject}" bu sınavın dersi değil.`); continue; }
+    const existing = raw.id ? byId.get(raw.id) : topics.find((row) => row.subject === subject && (sameName(row.topic, topic) || row.previousNames.some((name) => sameName(name, topic))));
+    if (raw.id && !existing) { skip(`Kimlik ${raw.id} bu sınavda yok.`); continue; }
+    if (existing) {
+      if (existing.subject !== subject) { skip("Konunun dersi değiştirilemez; yeni satır olarak (kimliksiz) ekle."); continue; }
+      const nextTopic = raw.id ? topic : existing.topic;
+      const hidden = raw.hidden ?? existing.hidden;
+      if (!sameName(nextTopic, existing.topic) && nameTaken(subject, nextTopic, existing.id)) { skip("Bu derste aynı adlı başka bir konu var."); continue; }
+      if (claimed.has(key(subject, nextTopic))) { skip("Dosyada aynı konu iki kez geçiyor."); continue; }
+      claimed.add(key(subject, nextTopic));
+      if (nextTopic === existing.topic && unit === existing.unit && hidden === existing.hidden) { plan.unchanged += 1; continue; }
+      finalName.set(existing.id, nextTopic);
+      plan.update.push({ line: raw.line, id: existing.id, subject, from: { topic: existing.topic, unit: existing.unit, hidden: existing.hidden }, to: { topic: nextTopic, unit, hidden } });
+      continue;
+    }
+    if (nameTaken(subject, topic)) { skip("Dosyada aynı konu iki kez geçiyor."); continue; }
+    claimed.add(key(subject, topic));
+    plan.add.push({ line: raw.line, subject, unit, topic, hidden: raw.hidden ?? false });
+  }
+  return plan;
+}
+
+/** Planı uygular (önce yeniden planlar: önizlemeden bu yana değişen katalogla çelişmesin). */
+export async function applyTopicImport(exam: ExamKind, rows: TopicImportRow[]): Promise<TopicImportPlan> {
+  const plan = await planTopicImport(exam, rows);
+  for (const item of plan.update) {
+    if (item.to.topic !== item.from.topic || item.to.unit !== item.from.unit) await updateTopic({ id: item.id, topic: item.to.topic, unit: item.to.unit });
+    if (item.to.hidden !== item.from.hidden) await setTopicHidden(item.id, item.to.hidden);
+  }
+  for (const item of plan.add) {
+    const id = await addTopic({ exam, subject: item.subject, unit: item.unit, topic: item.topic });
+    if (item.hidden) await setTopicHidden(id, true);
+  }
+  return plan;
+}
+
 export async function setTopicHidden(id: number, hidden: boolean): Promise<void> {
   const db = await requireDb();
   const updated = await db.update(yksTopics).set({ hidden: hidden ? 1 : 0 }).where(eq(yksTopics.id, id)).returning({ id: yksTopics.id });

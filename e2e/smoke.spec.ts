@@ -544,6 +544,39 @@ test("Yönetim Paneli Konular: yönetici LGS Matematik'e konu ekler, LGS öğren
   await expect(page.getByText(topic)).toHaveCount(0);
 });
 
+test("Yönetim Paneli Konular: Excel'e aktarılan dosyaya satır eklenip geri yüklenir; önizleme sonrası uygulanır", async ({ page }) => {
+  const XLSX = await import("xlsx");
+  const topic = `E2E Excel Konu ${Date.now()}`;
+  await signIn(page, "platform.admin@test.local");
+  await page.goto("/yonetim/konular");
+  await page.getByLabel("Sınav").selectOption("DGS");
+  const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Excel'e aktar" }).click()]);
+  expect(download.suggestedFilename()).toMatch(/^konular-DGS-\d{4}-\d{2}-\d{2}\.xlsx$/);
+  const { readFile } = await import("node:fs/promises");
+  const workbook = XLSX.read(await readFile(await download.path()), { type: "buffer" });
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
+  expect(rows[0]).toEqual(["Kimlik", "Sınav", "Ders", "Ünite", "Konu", "Gizli", "Kaynak", "Öğrenci sayısı", "Eski adlar"]);
+  const subject = String(rows[1][2]);
+  rows.push(["", "DGS", subject, "E2E Excel Ünitesi", topic, "Hayır"]);
+  const file = test.info().outputPath("konular.xlsx");
+  const edited = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(edited, XLSX.utils.aoa_to_sheet(rows), "Konular");
+  XLSX.writeFile(edited, file);
+
+  await page.getByLabel("Konu Excel dosyası").setInputFiles(file);
+  const dialog = page.getByRole("dialog", { name: "Excel aktarım önizlemesi" });
+  await expect(dialog.getByText(topic)).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Uygula (1)" })).toBeVisible();
+  await dialog.getByRole("button", { name: "Uygula (1)" }).click();
+  await expect(page.getByText("1 konu eklendi, 0 konu güncellendi.")).toBeVisible();
+  await page.getByRole("tab", { name: new RegExp(`^${subject}`) }).click();
+  await expect(page.getByText(topic)).toBeVisible();
+  // Temizlik: eklenen konuyu gizle.
+  page.once("dialog", (confirm) => void confirm.accept());
+  await page.getByRole("button", { name: `${topic} gizle` }).click();
+  await expect(page.getByText("Konu gizlendi.")).toBeVisible();
+});
+
 test("Yönetim Paneli Ayarlar: yönetici şifresini değiştirir, yeni şifreyle girer", async ({ page }) => {
   await signIn(page, "platform.admin@test.local");
   await page.goto("/yonetim/ayarlar");

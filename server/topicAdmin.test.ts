@@ -76,6 +76,35 @@ describe.skipIf(!hasDb)("sınav konuları yönetimi (router + veritabanı)", () 
     expect((await caller(ids.student).topics.curriculum()).some((row) => row.exam === "LGS" && row.topic === lgsDef.topic)).toBe(true);
   });
 
+  it("Excel aktarımı: önizleme yazmaz; uygulama ekler, kimlikle yeniden adlandırır/gizler, hatalı satırları nedeniyle atlar", async () => {
+    const renameTarget = created[0];
+    const rows = [
+      { line: 2, id: null, subject: "Matematik", unit: `Excel Ünitesi ${stamp}`, topic: `Excel Konu ${stamp}`, hidden: null },
+      { line: 3, id: renameTarget, subject: "Matematik", unit: lgsDef.unit, topic: `Excel Yeni Ad ${stamp}`, hidden: true },
+      { line: 4, id: null, subject: "Matematik", unit: "X", topic: `excel konu ${stamp}`, hidden: null },
+      { line: 5, id: null, subject: "Kimya", unit: "X", topic: "Mol", hidden: null },
+      { line: 6, id: 999_999_999, subject: "Matematik", unit: "X", topic: "Yok", hidden: null },
+      { line: 7, id: null, subject: "Matematik", unit: lgsDef.unit, topic: lgsDef.topic, hidden: null },
+    ];
+    await expect(caller(ids.student).admin.topics.importPreview({ exam: "LGS", rows })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const preview = await admin().admin.topics.importPreview({ exam: "LGS", rows });
+    expect(preview.add.map((item) => item.line)).toEqual([2]);
+    expect(preview.update).toEqual([expect.objectContaining({ line: 3, id: renameTarget, to: { topic: `Excel Yeni Ad ${stamp}`, unit: lgsDef.unit, hidden: true } })]);
+    expect(preview.unchanged).toBe(1);
+    expect(preview.skipped.map((item) => item.line)).toEqual([4, 5, 6]);
+    expect((await admin().admin.topics.list({ exam: "LGS" })).topics.some((row) => row.topic === `Excel Konu ${stamp}`)).toBe(false);
+
+    await admin().admin.topics.importApply({ exam: "LGS", rows });
+    const after = (await admin().admin.topics.list({ exam: "LGS" })).topics;
+    const added = after.find((row) => row.topic === `Excel Konu ${stamp}`);
+    expect(added).toMatchObject({ origin: "admin", unit: `Excel Ünitesi ${stamp}`, hidden: false });
+    created.push(added!.id);
+    expect(after.find((row) => row.id === renameTarget)).toMatchObject({ topic: `Excel Yeni Ad ${stamp}`, hidden: true });
+    // Aynı dosya ikinci kez yüklenince değişiklik yok.
+    const again = await admin().admin.topics.importPreview({ exam: "LGS", rows });
+    expect([again.add.length, again.update.length]).toEqual([0, 0]);
+  });
+
   it("ünite adı dersteki tüm konularında değişir", async () => {
     const { id } = await admin().admin.topics.add({ exam: "LGS", subject: "Matematik", unit: `Geçici Ünite ${stamp}`, topic: `Ünite Konusu ${stamp}` });
     created.push(id);

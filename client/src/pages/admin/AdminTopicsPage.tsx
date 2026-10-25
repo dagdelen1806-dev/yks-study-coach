@@ -1,10 +1,73 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Eye, EyeOff, Loader2, Pencil, Plus, Search } from "lucide-react";
+import { Download, Eye, EyeOff, Loader2, Pencil, Plus, Search, Upload, X } from "lucide-react";
+import type { inferRouterOutputs } from "@trpc/server";
+import type { AppRouter } from "../../../../server/routers";
 import { trpc } from "@/lib/trpc";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { EXAM_KINDS, EXAM_KIND_DEFS, type ExamKind } from "@shared/exams";
+import { TOPIC_SHEET_COLUMNS, parseTopicSheet, type TopicSheetRow } from "@shared/topicSheet";
+
+type RouterOutputs = inferRouterOutputs<AppRouter>;
+type AdminTopic = RouterOutputs["admin"]["topics"]["list"]["topics"][number];
+type ImportPlan = RouterOutputs["admin"]["topics"]["importPreview"];
+type ImportState = { fileName: string; rows: TopicSheetRow[]; otherExamLines: number[]; plan: ImportPlan };
+
+/** Sınavın tüm konuları (gizliler dahil) tek sayfalık Excel'e; aynı dosya içe aktarma şablonudur. */
+async function exportTopics(exam: ExamKind, topics: AdminTopic[]) {
+  const XLSX = await import("xlsx");
+  const rows = topics.map((row) => [row.id, EXAM_KIND_DEFS[exam].label, row.subject, row.unit, row.topic, row.hidden ? "Evet" : "Hayır", ORIGIN_LABELS[row.origin], row.studentCount, row.previousNames.join(", ")]);
+  const sheet = XLSX.utils.aoa_to_sheet([[...TOPIC_SHEET_COLUMNS], ...rows]);
+  sheet["!cols"] = [{ wch: 8 }, { wch: 12 }, { wch: 18 }, { wch: 34 }, { wch: 48 }, { wch: 7 }, { wch: 20 }, { wch: 14 }, { wch: 30 }];
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, "Konular");
+  XLSX.writeFile(workbook, `konular-${exam}-${new Date().toLocaleDateString("sv-SE")}.xlsx`);
+}
+
+function ImportPreview({ exam, state, applying, onApply, onClose }: { exam: ExamKind; state: ImportState; applying: boolean; onApply: () => void; onClose: () => void }) {
+  const { plan } = state;
+  const changes = plan.add.length + plan.update.length;
+  const describe = (item: ImportPlan["update"][number]) => [
+    item.to.topic !== item.from.topic && `ad: ${item.from.topic} → ${item.to.topic}`,
+    item.to.unit !== item.from.unit && `ünite: ${item.from.unit} → ${item.to.unit}`,
+    item.to.hidden !== item.from.hidden && (item.to.hidden ? "gizlenecek" : "gösterilecek"),
+  ].filter(Boolean).join(" · ");
+  return (
+    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !applying && onClose()}>
+      <div className="modal-card max-w-[860px]!" role="dialog" aria-label="Excel aktarım önizlemesi">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="eyebrow mb-2">{EXAM_KIND_DEFS[exam].label} · {state.fileName}</div>
+            <h2 className="text-[22px] font-semibold text-ink font-display">Excel aktarım önizlemesi</h2>
+            <p className="mt-1 text-[13px] text-ink-3">Henüz hiçbir şey kaydedilmedi. Değişiklikleri kontrol edip "Uygula"ya bas.</p>
+          </div>
+          <button onClick={onClose} disabled={applying} className="rounded-lg p-2 text-ink-3 hover:bg-paper" aria-label="Kapat"><X size={16} /></button>
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {[["Eklenecek", plan.add.length, "bg-success-soft text-success"], ["Güncellenecek", plan.update.length, "bg-brand-soft text-brand"], ["Değişmeyen", plan.unchanged, "bg-paper text-ink-3"], ["Atlanacak", plan.skipped.length + state.otherExamLines.length, "bg-warn-soft text-warn"]].map(([label, value, tone]) => (
+            <div key={label as string} className={`rounded-xl p-3 ${tone}`}><div className="text-[12px] font-medium opacity-80">{label}</div><div className="text-[22px] font-semibold">{value}</div></div>
+          ))}
+        </div>
+        <div className="mt-4 max-h-[44vh] space-y-4 overflow-auto text-[13px]">
+          {plan.add.length > 0 && <section><h3 className="font-bold text-ink">Eklenecek konular</h3><ul className="mt-1 space-y-0.5">{plan.add.slice(0, 300).map((item) => <li key={item.line} className="text-ink-2"><span className="text-ink-4">{item.line}.</span> {item.subject} › {item.unit} › <strong>{item.topic}</strong>{item.hidden ? " (gizli)" : ""}</li>)}</ul></section>}
+          {plan.update.length > 0 && <section><h3 className="font-bold text-ink">Güncellenecek konular</h3><ul className="mt-1 space-y-0.5">{plan.update.slice(0, 300).map((item) => <li key={item.line} className="text-ink-2"><span className="text-ink-4">{item.line}.</span> {item.subject} › {describe(item)}</li>)}</ul></section>}
+          {(plan.skipped.length > 0 || state.otherExamLines.length > 0) && (
+            <section><h3 className="font-bold text-warn">Atlanacak satırlar</h3><ul className="mt-1 space-y-0.5">
+              {state.otherExamLines.length > 0 && <li className="text-ink-2">Satır {state.otherExamLines.slice(0, 20).join(", ")}{state.otherExamLines.length > 20 ? "…" : ""}: başka sınava ait.</li>}
+              {plan.skipped.slice(0, 300).map((item) => <li key={item.line} className="text-ink-2"><span className="text-ink-4">{item.line}.</span> {item.topic}: {item.reason}</li>)}
+            </ul></section>
+          )}
+          {(plan.add.length > 300 || plan.update.length > 300 || plan.skipped.length > 300) && <p className="text-[12px] text-ink-4">Listeler ilk 300 satırla sınırlı gösteriliyor; uygulama tüm satırları kapsar.</p>}
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose} disabled={applying}>Vazgeç</Button>
+          <Button onClick={onApply} disabled={applying || changes === 0}>{applying ? <Loader2 size={14} className="animate-spin" /> : changes === 0 ? "Değişiklik yok" : `Uygula (${changes})`}</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const ORIGIN_LABELS = { curriculum: "Müfredat", admin: "Yönetici ekledi", other: "Eski / öğrenci kaydı" } as const;
 const FORM_NOTES: Record<"dershaneTemplate" | "curriculum" | "studentTopics", string> = {
@@ -31,6 +94,32 @@ export default function AdminTopicsPage() {
   const update = trpc.admin.topics.update.useMutation({ onSuccess: () => { toast.success("Konu güncellendi."); setEditing(null); refresh(); }, onError });
   const renameUnit = trpc.admin.topics.renameUnit.useMutation({ onSuccess: (result) => { toast.success(`Ünite adı ${result.count} konuda güncellendi.`); setEditingUnit(null); refresh(); }, onError });
   const setHidden = trpc.admin.topics.setHidden.useMutation({ onSuccess: (_, input) => { toast.success(input.hidden ? "Konu gizlendi." : "Konu yeniden gösteriliyor."); refresh(); }, onError });
+
+  // Excel'den yükleme: dosya tarayıcıda okunur, sunucu planlar (önizleme), onaylanınca uygular.
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [importState, setImportState] = useState<ImportState | null>(null);
+  const preview = trpc.admin.topics.importPreview.useMutation({ onError });
+  const apply = trpc.admin.topics.importApply.useMutation({
+    onSuccess: (plan) => { toast.success(`${plan.add.length} konu eklendi, ${plan.update.length} konu güncellendi.`); setImportState(null); refresh(); },
+    onError,
+  });
+  const readFile = async (file?: File) => {
+    if (!file) return;
+    if (!/\.(xlsx|xls|csv)$/i.test(file.name)) { toast.error("Excel (.xlsx, .xls) ya da CSV dosyası seç."); return; }
+    try {
+      const XLSX = await import("xlsx");
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const parsed = parseTopicSheet(XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "", raw: false }), exam);
+      if (parsed.missingColumns.length) { toast.error(`Dosyada şu sütun(lar) yok: ${parsed.missingColumns.join(", ")}. "Excel'e aktar" ile şablonu indirip onu doldur.`); return; }
+      if (!parsed.rows.length) { toast.error(parsed.otherExamLines.length ? `Dosyadaki satırlar ${EXAM_KIND_DEFS[exam].label} sınavına ait değil; önce sınavı seç.` : "Dosyada konu satırı yok."); return; }
+      if (parsed.rows.length > 3000) { toast.error("Tek seferde en fazla 3000 satır yüklenebilir."); return; }
+      const plan = await preview.mutateAsync({ exam, rows: parsed.rows });
+      setImportState({ fileName: file.name, rows: parsed.rows, otherExamLines: parsed.otherExamLines, plan });
+    } catch (error) {
+      if (!(error instanceof Error && /TRPC/.test(error.name))) toast.error("Dosya okunamadı. Excel dosyasının bozuk olmadığından emin ol.");
+    }
+  };
 
   const [newUnit, setNewUnit] = useState("");
   const [newTopic, setNewTopic] = useState("");
@@ -65,7 +154,15 @@ export default function AdminTopicsPage() {
           </div>
         </div>
         <p className="mt-3 rounded-xl bg-paper px-3 py-2 text-[12px] text-ink-3">{FORM_NOTES[EXAM_KIND_DEFS[exam].formRows]}</p>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" disabled={!list.data} onClick={() => list.data && void exportTopics(exam, list.data.topics)}><Download size={14} /> Excel'e aktar</Button>
+          <Button variant="outline" size="sm" disabled={preview.isPending} onClick={() => fileRef.current?.click()}>{preview.isPending ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} Excel'den yükle</Button>
+          <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" aria-label="Konu Excel dosyası" onChange={(event) => { void readFile(event.target.files?.[0]); event.currentTarget.value = ""; }} />
+          <span className="text-[12px] text-ink-4">Aktarılan dosya şablondur: Kimlik dolu satır o konuyu günceller, boş satır yeni konu ekler. Gizli: Evet / Hayır.</span>
+        </div>
       </Card>
+
+      {importState && <ImportPreview exam={exam} state={importState} applying={apply.isPending} onApply={() => apply.mutate({ exam, rows: importState.rows })} onClose={() => setImportState(null)} />}
 
       {subject && (
         <Card className="p-5">

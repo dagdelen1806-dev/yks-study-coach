@@ -14440,6 +14440,81 @@ async function renameUnit(input) {
   if (!updated.length) throw new TopicAdminError("\xDCnite bulunamad\u0131.");
   return updated.length;
 }
+async function planTopicImport(exam, rows) {
+  const { subjects, topics } = await listTopicsForAdmin(exam);
+  const plan = { add: [], update: [], unchanged: 0, skipped: [] };
+  const byId = new Map(topics.map((row) => [row.id, row]));
+  const finalName = new Map(topics.map((row) => [row.id, row.topic]));
+  const claimed = /* @__PURE__ */ new Set();
+  const key = (subject2, topic) => `${subject2}\0${topic.trim().toLocaleLowerCase("tr")}`;
+  const nameTaken = (subject2, topic, exceptId) => claimed.has(key(subject2, topic)) || topics.some((row) => row.id !== exceptId && row.subject === subject2 && sameName(finalName.get(row.id) ?? row.topic, topic));
+  for (const raw of rows) {
+    const subject2 = raw.subject.trim();
+    const unit = raw.unit.trim();
+    const topic = raw.topic.trim();
+    const skip = (reason) => plan.skipped.push({ line: raw.line, reason, topic: topic || "(bo\u015F)" });
+    if (!subject2 || !unit || !topic) {
+      skip("Ders, \xFCnite ve konu dolu olmal\u0131.");
+      continue;
+    }
+    if (topic.length < 2 || topic.length > 180 || unit.length < 2 || unit.length > 120) {
+      skip("Konu 2\u2013180, \xFCnite 2\u2013120 karakter olmal\u0131.");
+      continue;
+    }
+    if (!subjects.includes(subject2)) {
+      skip(`"${subject2}" bu s\u0131nav\u0131n dersi de\u011Fil.`);
+      continue;
+    }
+    const existing = raw.id ? byId.get(raw.id) : topics.find((row) => row.subject === subject2 && (sameName(row.topic, topic) || row.previousNames.some((name2) => sameName(name2, topic))));
+    if (raw.id && !existing) {
+      skip(`Kimlik ${raw.id} bu s\u0131navda yok.`);
+      continue;
+    }
+    if (existing) {
+      if (existing.subject !== subject2) {
+        skip("Konunun dersi de\u011Fi\u015Ftirilemez; yeni sat\u0131r olarak (kimliksiz) ekle.");
+        continue;
+      }
+      const nextTopic = raw.id ? topic : existing.topic;
+      const hidden = raw.hidden ?? existing.hidden;
+      if (!sameName(nextTopic, existing.topic) && nameTaken(subject2, nextTopic, existing.id)) {
+        skip("Bu derste ayn\u0131 adl\u0131 ba\u015Fka bir konu var.");
+        continue;
+      }
+      if (claimed.has(key(subject2, nextTopic))) {
+        skip("Dosyada ayn\u0131 konu iki kez ge\xE7iyor.");
+        continue;
+      }
+      claimed.add(key(subject2, nextTopic));
+      if (nextTopic === existing.topic && unit === existing.unit && hidden === existing.hidden) {
+        plan.unchanged += 1;
+        continue;
+      }
+      finalName.set(existing.id, nextTopic);
+      plan.update.push({ line: raw.line, id: existing.id, subject: subject2, from: { topic: existing.topic, unit: existing.unit, hidden: existing.hidden }, to: { topic: nextTopic, unit, hidden } });
+      continue;
+    }
+    if (nameTaken(subject2, topic)) {
+      skip("Dosyada ayn\u0131 konu iki kez ge\xE7iyor.");
+      continue;
+    }
+    claimed.add(key(subject2, topic));
+    plan.add.push({ line: raw.line, subject: subject2, unit, topic, hidden: raw.hidden ?? false });
+  }
+  return plan;
+}
+async function applyTopicImport(exam, rows) {
+  const plan = await planTopicImport(exam, rows);
+  for (const item of plan.update) {
+    if (item.to.topic !== item.from.topic || item.to.unit !== item.from.unit) await updateTopic({ id: item.id, topic: item.to.topic, unit: item.to.unit });
+    if (item.to.hidden !== item.from.hidden) await setTopicHidden(item.id, item.to.hidden);
+  }
+  for (const item of plan.add) {
+    const id8 = await addTopic({ exam, subject: item.subject, unit: item.unit, topic: item.topic });
+    if (item.hidden) await setTopicHidden(id8, true);
+  }
+  return plan;
+}
 async function setTopicHidden(id8, hidden) {
   const db = await requireDb13();
   const updated = await db.update(yksTopics).set({ hidden: hidden ? 1 : 0 }).where(eq35(yksTopics.id, id8)).returning({ id: yksTopics.id });
@@ -14449,6 +14524,10 @@ async function setTopicHidden(id8, hidden) {
 // server/routers/admin/topics.ts
 var id7 = z31.number().int().positive();
 var name = (max) => z31.string().trim().min(2).max(max);
+var importInput = z31.object({
+  exam: z31.enum(EXAM_KINDS),
+  rows: z31.array(z31.object({ line: z31.number().int().min(1), id: id7.nullable().optional(), subject: z31.string().max(200), unit: z31.string().max(300), topic: z31.string().max(300), hidden: z31.boolean().nullable().optional() })).min(1).max(3e3)
+});
 async function userFacing6(run) {
   try {
     return await run();
@@ -14473,6 +14552,13 @@ var adminTopicsRouter = router({
     const count4 = await renameUnit(input);
     await writeAuditLog({ userId: ctx.user.id, adminId: ctx.user.id, action: "topic_unit_renamed", newState: input });
     return { count: count4 };
+  })),
+  /** Excel'den toplu aktarım: önce `importPreview` (yazmaz), onaylanınca `importApply`. */
+  importPreview: adminProcedure.input(importInput).mutation(({ input }) => userFacing6(() => planTopicImport(input.exam, input.rows))),
+  importApply: adminProcedure.input(importInput).mutation(({ ctx, input }) => userFacing6(async () => {
+    const plan = await applyTopicImport(input.exam, input.rows);
+    await writeAuditLog({ userId: ctx.user.id, adminId: ctx.user.id, action: "topic_import", newState: { exam: input.exam, added: plan.add.length, updated: plan.update.length, skipped: plan.skipped.length } });
+    return plan;
   })),
   setHidden: adminProcedure.input(z31.object({ id: id7, hidden: z31.boolean() })).mutation(({ ctx, input }) => userFacing6(async () => {
     await setTopicHidden(input.id, input.hidden);
