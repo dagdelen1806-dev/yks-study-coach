@@ -561,7 +561,8 @@ test("Yönetim Paneli Konular: Excel'e aktarılan dosyaya satır eklenip geri y�
   const file = test.info().outputPath("konular.xlsx");
   const edited = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(edited, XLSX.utils.aoa_to_sheet(rows), "Konular");
-  XLSX.writeFile(edited, file);
+  // xlsx 0.20'nin ESM sürümü Node'da dosya sistemine kendisi yazmaz: tampon üretip fs ile yazılır.
+  await import("node:fs/promises").then((fs) => fs.writeFile(file, XLSX.write(edited, { type: "buffer", bookType: "xlsx" })));
 
   await page.getByLabel("Konu Excel dosyası").setInputFiles(file);
   const dialog = page.getByRole("dialog", { name: "Excel aktarım önizlemesi" });
